@@ -60,7 +60,15 @@ describe('v2 reseller family', () => {
     const html = renderV2WhmResellers(t, props(), authority)
     expect(html).toContain('Sign-in state not read')
     expect(html).toContain('Suspend reseller</button>')
+    expect(html).not.toContain('>Suspended<')
+    expect(html).toContain('<dt>Contact</dt><dd>Not set</dd>')
     expect(html).toMatch(/data-reseller-suspended="false"[^>]*>Suspend reseller<\/button>/)
+  })
+  it('shows the stored suspension and contact address of a reseller record', () => {
+    const html = renderV2WhmResellers(t, props({ resellers: [{ ...reseller, suspended: true, contactEmail: 'ops@provider.example.test' }] }), authority)
+    expect([...html.matchAll(/>Suspended</g)]).toHaveLength(2)
+    expect(html).toContain('<th scope="col">Status</th>')
+    expect(html).toContain('<dt>Contact</dt><dd><bdi class="v2-mono v2-num" dir="ltr">ops@provider.example.test</bdi></dd>')
   })
   it('supports the privileges document with the same real controls and escaped stored values', () => {
     const html = renderV2WhmResellers(t, props({ activeRoute: '/whm/resellers/privileges', resellers: [{ ...reseller, username: '<script>bad()</script>' }] }), authority)
@@ -80,7 +88,7 @@ describe('v2 reseller family', () => {
   })
   it('shows measured reseller usage and Email All Resellers on the more tools document', () => {
     const html = renderV2WhmResellerRecords(t, props({ activeRoute: '/whm/resellers/more', resellerUsage: { [reseller.id]: { accounts: 1, disk: { state: 'read', bytes: 1048576, observedAt: '2026-11-07T10:00:00.000Z', unmeasured: 0 }, traffic: { state: 'unavailable', bytes: null, observedAt: null, unmeasured: 1, month: '2026-11' } } } }), authority)!
-    expect(html).toContain('1.0 MiB, observed 2026-11-07 10:00 UTC')
+    expect(html).toContain('1.00\u00a0MiB\u2069, observed \u20662026-11-07 10:00 UTC\u2069')
     expect(html).toContain('Unavailable on this host')
     expect(html).toContain('data-reseller-email-form')
     expect(renderV2WhmResellerRecords(t, props({ activeRoute: '/whm/resellers/more' }), { ...authority, canManage: false })).toContain('data-network-editable="false"')

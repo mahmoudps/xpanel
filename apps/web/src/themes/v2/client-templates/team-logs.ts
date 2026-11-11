@@ -3,10 +3,10 @@ import { escapeHtml } from '../html.ts'
 const tpl = (name: string, body: string): string => `<template data-xp-template="${name}">${body}</template>`
 export function teamClientTemplates(): string {
   return [
-    tpl('acct-team-member', '<tr><td><bdi dir="ltr" class="v2-mono" data-xp-slot="username"></bdi></td><td data-xp-slot="roles"></td><td><bdi dir="ltr" data-xp-slot="email"></bdi></td><td><span data-xp-slot="phase" data-state-chip></span> <bdi dir="auto" data-xp-slot="reason"></bdi></td><td data-xp-slot="signin"></td><td><bdi dir="ltr" class="v2-mono" data-xp-slot="expires"></bdi></td><td><div class="v2-panel-settings__actions" data-xp-slot="actions"></div></td></tr>'),
-    tpl('acct-team-empty', '<tr><td colspan="7" data-xp-slot="message"></td></tr>'),
-    tpl('acct-team-signin', '<div class="v2-team-signin" style="display:flex;flex-direction:column;gap:8px"><span data-xp-slot="password"></span><div data-xp-slot="times" style="display:flex;flex-direction:column;gap:8px"></div></div>'),
-    tpl('acct-team-signin-time', '<span style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px"><span data-xp-slot="label"></span><bdi dir="ltr" class="v2-mono" data-xp-slot="stamp"></bdi></span>'),
+    tpl('acct-team-member', '<tr><td><span class="v2-team-person"><bdi dir="ltr" class="v2-mono" data-xp-slot="username"></bdi><bdi dir="ltr" class="v2-muted" data-xp-slot="email"></bdi></span></td><td data-xp-slot="roles"></td><td><span data-xp-slot="phase" data-state-chip></span> <bdi dir="auto" data-xp-slot="reason"></bdi></td><td data-xp-slot="signin"></td><td><bdi dir="ltr" class="v2-mono" data-xp-slot="expires"></bdi></td><td><div class="v2-panel-settings__actions" data-xp-slot="actions"></div></td></tr>'),
+    tpl('acct-team-empty', '<tr><td colspan="6" data-xp-slot="message"></td></tr>'),
+    tpl('acct-team-signin', '<div class="v2-team-signin"><span data-xp-slot="password"></span><div class="v2-team-signin__times" data-xp-slot="times"></div></div>'),
+    tpl('acct-team-signin-time', '<span class="v2-team-signin__time"><span data-xp-slot="label"></span><bdi dir="ltr" class="v2-mono" data-xp-slot="stamp"></bdi></span>'),
     tpl('acct-team-value', '<bdi dir="ltr" class="v2-mono" data-xp-slot="value"></bdi>'),
     tpl('acct-team-action', '<button type="button" class="v2-btn" data-xp-slot="label" disabled></button>'),
     tpl('acct-team-delete', '<button type="button" class="v2-btn v2-btn--danger" data-xp-slot="label" disabled></button>'),

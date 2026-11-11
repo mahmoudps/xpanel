@@ -1,6 +1,6 @@
 import { teamClientTemplates } from '../../../client-templates/team-logs.ts'
 import type { PanelSurfaceProps } from '../../../../contract.ts'
-import { actions, button, deniedPage, esc, facts, field, fields, input, note, page, section, settingsContext, split, status, table, unreadRow, NO_SETTINGS_AUTHORITY, type PanelSettingsAuthority } from './common.ts'
+import { actions, button, deniedPage, esc, facts, field, fields, input, note, page, section, settingsContext, status, table, unreadRow, NO_SETTINGS_AUTHORITY, type PanelSettingsAuthority } from './common.ts'
 
 const ROLES = [
   ['administrator', msgid('Administrator'), msgid('Every account tool except calendars and contacts, service users, the owner preferences and sign-in security, API tokens and this team page.')],
@@ -13,7 +13,7 @@ export function renderV2AccountTeamPage(props: PanelSurfaceProps, authority: Pan
   const list = section('v2-team-list', t(msgid('Team members')), status(t(msgid('The team has not been read.')), { 'data-acct-team-status': true })
     + `<div class="v2-panel-settings__loading" data-acct-team-loading aria-busy="true" aria-label="${esc(t(msgid('Loading team members')))}" hidden><span>${esc(t(msgid('Loading')))}</span></div>`
     + facts([{ label: t(msgid('Members holding a role')), valueHtml: `<bdi dir="ltr" data-acct-team-usage>—</bdi>` }])
-    + table('v2-team-members', t(msgid('Team members and their roles')), [t(msgid('Username')), t(msgid('Roles')), t(msgid('Contact email')), t(msgid('State')), t(msgid('Sign-in')), t(msgid('Expires (UTC)')), t(msgid('Actions'))], unreadRow(7, t(msgid('Not read'))), { 'data-acct-team-rows': true })
+    + table('v2-team-members', t(msgid('Team members and their roles')), [t(msgid('Username')), t(msgid('Roles')), t(msgid('State')), t(msgid('Sign-in')), t(msgid('Expires (UTC)')), t(msgid('Actions'))], unreadRow(6, t(msgid('Not read'))), { 'data-acct-team-rows': true })
     + `<div class="v2-panel-settings__groups" data-acct-team-empty hidden><h3>${esc(t(msgid('No team members yet')))}</h3><p>${esc(t(msgid('Add one below to record who works on this account and with which roles.')))}</p></div>`
     + note(t(msgid('Up to 7 members can hold a role. Members without a role are not limited and can sign in but reach no account tools. A suspended member still counts toward the limit.')))
     + actions(button(t(msgid('Refresh')), { 'data-acct-team-refresh': true }, !c.editable))
@@ -23,7 +23,7 @@ export function renderV2AccountTeamPage(props: PanelSurfaceProps, authority: Pan
   const editor = `<section class="v2-card" aria-labelledby="v2-team-editor-heading"><div class="v2-card__head"><h2 id="v2-team-editor-heading" data-acct-team-editor-heading>${esc(t(msgid('Add team member')))}</h2></div><div class="v2-card__body"><form data-acct-team-form novalidate${!c.editable ? ' data-readonly="true"' : ''}>${fields(f('username', t(msgid('Username')), `<span class="v2-panel-settings__actions">${input('v2-team-username', '', 'text', ' dir="ltr" maxlength="32" autocomplete="off" spellcheck="false" data-acct-team-input="username"', !c.editable)}<bdi dir="ltr" data-acct-team-domain></bdi></span>`, t(msgid('Lowercase letters, digits, dots, hyphens and underscores. It cannot be changed later.'))) + f('contact', t(msgid('Contact email')), input('v2-team-contact', '', 'email', ' dir="ltr" maxlength="254" autocomplete="off" data-acct-team-input="contactEmail"', !c.editable)))}
     <fieldset${!c.editable ? ' disabled' : ''}><legend>${esc(t(msgid('Roles')))}</legend>${ROLES.map(([key, label, help]) => `<div class="v2-panel-settings__role"><input type="checkbox" id="v2-team-role-${key}" value="${key}" data-acct-team-role aria-describedby="v2-team-role-${key}-help"${!c.editable ? ' disabled' : ''}><label for="v2-team-role-${key}">${esc(t(label))}</label><p class="v2-muted" id="v2-team-role-${key}-help">${esc(t(help))}</p></div>`).join('')}</fieldset>
     ${fields(f('notes', t(msgid('Notes')), input('v2-team-notes', '', 'text', ' maxlength="100" autocomplete="off" dir="auto" data-acct-team-input="notes"', !c.editable), t(msgid('Up to 100 characters.')))
-      + f('expires', t(msgid('Expires (UTC)')), input('v2-team-expires', '', 'datetime-local', ' dir="ltr" data-acct-team-input="expiresAt"', !c.editable), t(msgid('Empty never expires.')))
+      + f('expires', t(msgid('Expires (UTC)')), input('v2-team-expires', '', 'text', ' pattern="[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}(:[0-9]{2})?" placeholder="YYYY-MM-DDTHH:mm" maxlength="19" autocomplete="off" spellcheck="false" dir="ltr" data-acct-team-input="expiresAt"', !c.editable), t(msgid('Empty never expires.')))
       + f('reason', t(msgid('Expiry reason')), input('v2-team-reason', '', 'text', ' maxlength="100" autocomplete="off" dir="auto" data-acct-team-input="expiryReason"', !c.editable)))}
     ${actions(`<button type="submit" class="v2-btn v2-btn--primary" data-acct-team-save${!c.editable ? ' disabled' : ''}>${esc(t(msgid('Add team member')))}</button><button type="button" class="v2-btn" data-acct-team-cancel hidden${!c.editable ? ' disabled' : ''}>${esc(t(msgid('Cancel editing')))}</button>`)}<p role="status" data-acct-team-save-status hidden></p></form></div></section>`
   const help = section('v2-team-help', t(msgctxt('theme:v2', 'How team access works')), facts([
@@ -33,6 +33,6 @@ export function renderV2AccountTeamPage(props: PanelSurfaceProps, authority: Pan
     { label: t(msgctxt('theme:v2', 'No role')), valueHtml: esc(t(msgctxt('theme:v2', 'Can sign in when team sign-in is enabled, but cannot use account tools.'))) },
     { label: t(msgctxt('theme:v2', 'Sign-out')), valueHtml: esc(t(msgctxt('theme:v2', 'Suspending or deleting a member, or removing a role, signs that member out.'))) },
     { label: t(msgctxt('theme:v2', 'Owner only')), valueHtml: esc(t(msgctxt('theme:v2', 'Only the signed-in account owner can manage the team, and the plan must include it.'))) },
-  ]))
-  return page(props, authority, '/preferences/team', title, description, signin + list + split(editor, help) + teamClientTemplates(), { 'data-acct-team-workspace': true, 'data-team-can-read': String(c.editable), 'data-team-can-manage': String(c.editable), 'data-capability-state': c.editable ? 'authorized' : 'unavailable' })
+  ], { 'data-cols': '3' }))
+  return page(props, authority, '/preferences/team', title, description, signin + list + editor + help + teamClientTemplates(), { 'data-acct-team-workspace': true, 'data-team-can-read': String(c.editable), 'data-team-can-manage': String(c.editable), 'data-capability-state': c.editable ? 'authorized' : 'unavailable' })
 }

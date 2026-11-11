@@ -198,7 +198,7 @@ function bindAccountReverseProxy(askDialog: ((options: Record<string, unknown>) 
       confirming = true; lock()
       let approved = false
       try { approved = await askDialog({ title: t('Change how this domain is served?'), danger: false, confirm: t('Save'),
-        body: target.name + '\n' + MODES[siteType] + (address ? ': ' + address : '') + '\n' + (options ? (options.websocket ? t('WebSocket connections are relayed.') : t('WebSocket connections are not relayed.')) + ' ' + t('Extra headers: {count}', { count: options.headers.length }) + '\n' : '') + (siteType === 'proxy' ? t('Its document root and PHP settings are kept but not used while proxied.') : t('Files are served from the saved document root again.')) }) === true }
+        code: target.name, body: MODES[siteType] + (address ? ': ' + address : '') + '\n' + (options ? (options.websocket ? t('WebSocket connections are relayed.') : t('WebSocket connections are not relayed.')) + ' ' + t('Extra headers: {count}', { count: options.headers.length }) + '\n' : '') + (siteType === 'proxy' ? t('Its document root and PHP settings are kept but not used while proxied.') : t('Files are served from the saved document root again.')) }) === true }
       catch { approved = false } finally { confirming = false; lock() }
       if (!approved || view !== before || !eligible()) return
       busy = true; lock(); note('saving', t('Checking the saved configuration, then saving…'))

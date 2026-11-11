@@ -25,6 +25,21 @@ describe('v2 server overview observations', () => {
     expect(html).toContain('&lt;bad&gt;')
     expect(html).toContain('>Stopped<')
     expect(html).toContain('>Not checked<')
+    expect(renderV2WhmOverview(t, { ...base, hostSample: { hostname: 'h', uptimeSeconds: 90_000 } })).toContain('1 d 1 h')
+  })
+
+  it('draws stored performance history and leaves out intervals without a sample', () => {
+    const html = renderV2WhmOverview(t, { ...base, hostSample: { hostname: 'host.example.test', memory: { totalBytes: 2 * 1024 ** 3, availableBytes: 1024 ** 3 } },
+      performanceHistory: { from: '2026-01-01T00:00:00.000Z', to: '2026-01-02T00:00:00.000Z', cpuPercent: [10, null, 40, 20], memoryMb: [512, null, 1024, 768] } })
+    expect(html).toContain('<figure class="v2-chart">')
+    expect(html).toContain('CPU, peak 40%')
+    expect(html).toContain('Memory, peak 50%')
+    expect(html).toContain('3 of 4 intervals have samples.')
+    expect(html).not.toContain('Performance history has not been read.')
+    // Memory needs the host total to become a percentage; without it only CPU is drawn.
+    const cpuOnly = renderV2WhmOverview(t, { ...base, performanceHistory: { from: '2026-01-01T00:00:00.000Z', to: '2026-01-02T00:00:00.000Z', cpuPercent: [10, 40], memoryMb: [512, 1024] } })
+    expect(cpuOnly).toContain('CPU, peak 40%')
+    expect(cpuOnly).not.toContain('Memory, peak')
   })
 
   it('does not expose a server overview to an account principal', () => {

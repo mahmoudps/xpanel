@@ -24,8 +24,8 @@ export function renderV2PanelLogs(props: PanelSurfaceProps, authority?: PanelObs
   const rawAccess = !!account && authority?.canRead === true && authority.presentation !== 'read-only' && authority.qualifiedTools?.has('raw-access') === true
   const archives = section('v2-site-log-archives', t(msgid('Raw access archives')),
     `<p>${esc(t(msgid('Each site access log is rotated once per UTC day after its traffic is counted. With archiving on it is kept in ~/logs as a gzip file named after the site and day; otherwise it is deleted.')))}</p>`
-    + `<div class="v2-panel-extra__groups" data-raw-access-form>${check('account-raw-access-archive', t(msgid('Archive logs in ~/logs after their traffic is counted')), { 'data-raw-access': 'archive' }, !rawAccess)}`
-    + check('account-raw-access-previous', t(msgid("Remove the previous month's archives when a new UTC month starts")), { 'data-raw-access': 'removePreviousMonthArchive' }, !rawAccess)
+    + `<div class="v2-panel-extra__groups" data-raw-access-form>${fields(check('account-raw-access-archive', t(msgid('Archive logs in ~/logs after their traffic is counted')), { 'data-raw-access': 'archive' }, !rawAccess)
+      + check('account-raw-access-previous', t(msgid("Remove the previous month's archives when a new UTC month starts")), { 'data-raw-access': 'removePreviousMonthArchive' }, !rawAccess))}`
     + fields(field('account-raw-access-days', t(msgid('Keep archives (days)')), input('account-raw-access-days', { 'data-raw-access': 'retentionDays' }, ` type="text" inputmode="numeric" dir="ltr" autocomplete="off" placeholder="${esc(t(msgid('Until removed')))}"`, !rawAccess)))
     + `<p data-raw-access-source>${esc(t(msgid('Settings have not been read.')))}</p>`
     + actions(button(t(msgid('Save settings')), { 'data-raw-access-save': true }, !rawAccess, true) + button(t(msgid('Use server defaults')), { 'data-raw-access-defaults': true }, !rawAccess))

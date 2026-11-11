@@ -139,8 +139,10 @@ describe('explicit synthetic component documents', () => {
 
   it('preserves actual product-route admission when a component document is configured', async () => {
     for (const qualifiedCatalog of [true, false]) {
-      const plain = await openFixture({ qualifiedCatalog })
-      const component = await openFixture({ qualifiedCatalog, componentDocument: { path: '/__visual-components/htaccess', render: () => componentHtml } })
+      // The workspace markers below are the classic ones.
+      const transformState = ({ state }: { state: object }) => ({ ...state, uiTheme: 'classic' })
+      const plain = await openFixture({ qualifiedCatalog, transformState })
+      const component = await openFixture({ qualifiedCatalog, transformState, componentDocument: { path: '/__visual-components/htaccess', render: () => componentHtml } })
       for (const path of ['/software/htaccess', '/domains/site-settings']) {
         const original = await read(plain, path), scoped = await read(component, path)
         expect(original.status).toBe(200)

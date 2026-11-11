@@ -46,7 +46,7 @@ describe('v2 account database family', () => {
       expect(html).toContain('data-capability-unavailable="true"')
       expect(html).not.toContain('alice_shop')
       expect(html).not.toContain(account.id)
-      expect(nodes.filter(node => node.tag === 'button').every(node => node.attrs.has('disabled'))).toBe(true)
+      expect(nodes.filter(node => node.tag === 'button' && node.attrs.get('role') !== 'tab').every(node => node.attrs.has('disabled'))).toBe(true)
     }
     const main = renderV2MariaDbPage({}, write)
     for (const title of ['Create a database', 'Database users', 'Privileges', 'Remote access']) expect(main).toContain(title)
@@ -367,6 +367,37 @@ describe('v2 account database family', () => {
     expect(by(parseMarkup(allowed), 'data-db-action', 'refresh')?.attrs.has('disabled')).toBe(true)
     expect(renderV2PostgreSqlPage(props, { ...facts, authorizedTools: new Set(['mysql-databases']) })).not.toContain('alice_saved_pg')
     expect(by(parseMarkup(allowed), 'data-db-pg-form', 'database')?.tag).toBe('div')
+  })
+
+  it('shows the MariaDB sections as 4 presentation tabs and keeps every panel in the document', () => {
+    const nodes = parseMarkup(renderV2MariaDbPage({ account }, read))
+    const tabs = nodes.filter(node => node.attrs.has('data-presentation-tab'))
+    const panels = nodes.filter(node => node.attrs.get('role') === 'tabpanel')
+    expect(nodes.filter(node => node.attrs.get('data-presentation-tabs') === 'panels')).toHaveLength(1)
+    expect(tabs.map(node => node.attrs.get('data-presentation-tab'))).toEqual(['databases', 'users', 'privileges', 'remote'])
+    expect(panels.map(node => node.attrs.has('hidden'))).toEqual([false, true, true, true])
+    for (const [index, tab] of tabs.entries()) {
+      expect(tab.attrs.get('aria-controls')).toBe(panels[index]!.attrs.get('id'))
+      expect(panels[index]!.attrs.get('aria-labelledby')).toBe(tab.attrs.get('id'))
+    }
+    for (const hook of ['data-dbu-create', 'data-db-grant-form', 'data-db-remote-access', 'data-db-trash']) expect(nodes.some(node => node.attrs.has(hook)), hook).toBe(true)
+  })
+
+  it('puts the sign-on setup of both admin pages in a strip above the launch card', () => {
+    for (const html of [renderV2PhpMyAdminPage({ account }, read), renderV2PhpPgAdminPage({ account }, read)]) expect(html).toContain('class="v2-db-columns v2-db-columns--strip"')
+  })
+
+
+  it('names every database fact on a phone, in server rows and in the rows the controller rebuilds', () => {
+    const html = renderV2MariaDbPage({ account, databases: [database] }, write)
+    expect(html).toContain('<td data-label="Size"><span data-xp-slot="size">')
+    expect(html).toContain('<td data-label="Users with access"><bdi dir="ltr" class="v2-mono" data-xp-slot="users">')
+    expect(html).toContain('alice_shop</bdi></td><td data-label="Size">')
+    expect(html).not.toContain('" data-label="Database"')
+    expect(html).not.toMatch(/<td colspan="[0-9]+" data-label/)
+    expect(renderV2DatabaseInsightsPage({ account }, read)).toContain('<td data-label="Free space">')
+    expect(renderV2DatabaseRemotePage({ account }, read)).toContain('<td data-label="Firewall">')
+    expect(PANEL_DATABASES_CSS).toContain('td[data-label]::before{content:attr(data-label)')
   })
 
 })

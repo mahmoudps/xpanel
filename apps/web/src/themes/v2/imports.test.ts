@@ -11,10 +11,12 @@ const CORE_MODULES = new Set(['read-only-frame.ts',
   'models/ftp-removal.ts', 'models/account-list.ts', 'models/db-services.ts', 'models/plan-fields.ts', 'models/whm-account-access.ts', 'models/website-analytics.ts', 'models/mail.ts',
   'models/action-state.ts', 'models/status-page.ts', 'models/svc-panels.ts', 'models/web-stats.ts', 'models/dnssec.ts', 'models/reseller-allocation.ts', 'models/reseller-usage.ts', 'models/theme-surface.ts', 'models/dav-client-guide.ts', 'display-name.ts', 'account-notices.ts', 'mail-home-groups.ts',
   // Theme-agnostic self-hosted font faces: both themes load the same IBM Plex stylesheet.
-  'vendor/plex.ts'
+  'vendor/plex.ts',
+  // Theme-agnostic compose behaviour: every theme emits the same script and the copy it reads.
+  'mail-compose-editor-client.ts'
 ])
 const TYPE_ONLY_CORE_MODULES = new Set(['themes/contract.ts'])
-const TEST_CORE_MODULES = new Set(['themes/markup.ts', 'read-only-frame.ts', '../../../tests/fixtures/web-stats-view.ts'])
+const TEST_CORE_MODULES = new Set(['themes/markup.ts', 'read-only-frame.ts', 'list-filter-client.ts', '../../../tests/fixtures/web-stats-view.ts'])
 const PACKAGES = /^@xpanel\/(?:catalog|core)$/
 const TEST_ONLY = /^(?:vitest|node:(?:fs|path|url|zlib|crypto))$/
 const RUNTIME_BUILTINS = new Set(['node:crypto'])

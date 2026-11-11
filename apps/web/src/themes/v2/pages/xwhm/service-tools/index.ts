@@ -5,6 +5,7 @@ import { renderV2WhmNginxProxy } from './nginx-proxy.ts'
 import { renderV2WhmWebServer } from './web.ts'
 
 export const WHM_SERVICE_TOOLS_CSS = WHM_DATA_COMMON_CSS
+export { WHM_SERVICE_TOOLS_PAGE_CSS } from './style.ts'
 export const V2_WHM_SERVICE_TOOL_ROUTES = Object.freeze(['/whm/services/web', '/whm/services/health', '/whm/services/ftp', '/whm/services/dns', '/whm/services/certificates', '/whm/services/ftp-log-analysis', '/whm/services/default-index', '/whm/services/nginx-proxy'] as const)
 export function renderV2WhmServiceToolPage(input: WhmDataPageInput): string | undefined {
   switch (input.activeRoute) {

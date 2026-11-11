@@ -6,6 +6,9 @@ import { fileURLToPath } from 'node:url'
 import playwright from '../../node_modules/@playwright/test/index.js'
 import { renderCompose, xmailComposeFromProps } from '../../apps/web/src/board-port/xmail-compose.ts'
 import { inlinePageScripts } from '../../apps/web/src/page-scripts.ts'
+import { v2Messages } from '../../apps/web/src/themes/v2/messages.ts'
+import { renderV2MailCompose } from '../../apps/web/src/themes/v2/pages/xmail/compose.ts'
+import { V2_MAIL_CSS } from '../../apps/web/src/themes/v2/pages/xmail/styles.ts'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const sourcePath = 'apps/web/src/board-port/xmail-compose.ts'
@@ -28,9 +31,19 @@ try {
   page.on('pageerror', error => pageErrors.push(error.message))
   await page.route('**/*', route => { requests.push(route.request().url()); return route.abort() })
 
+  const renderV2 = (body) => renderV2MailCompose(v2Messages.translator('en'), {
+    kind: 'compose', route: '/mail/compose', title: 'Compose', mailbox: 'owner@example.test',
+    canCompose: true, canSend: true, canSaveDraft: true, canUseAttachments: true, canManageVacation: true, canManageFilters: true,
+    folders: [], customFolders: [], quota: { text: '160 / 1024 MiB', percent: 16 },
+    draft: { to: '', cc: '', bcc: '', subject: '', body },
+    identity: { dkim: null, spf: null, size: null }, rules: null,
+  })
+  let currentTheme = 'classic'
   const reset = async (body = 'Alpha beta gamma') => {
-    const html = inlinePageScripts(renderCompose(xmailComposeFromProps({ mailbox: 'owner@example.test', draft: { body } })))
-    await page.setContent(`<!doctype html><html lang="en"><head><meta charset="utf-8"></head><body><p id="outside-editor">Outside text</p>${html}</body></html>`, { waitUntil: 'domcontentloaded' })
+    const html = inlinePageScripts(currentTheme === 'v2'
+      ? renderV2(body)
+      : renderCompose(xmailComposeFromProps({ mailbox: 'owner@example.test', draft: { body } })))
+    await page.setContent(`<!doctype html><html lang="en"${currentTheme === 'v2' ? ' data-ui-theme="v2"' : ''}><head><meta charset="utf-8">${currentTheme === 'v2' ? `<style>${V2_MAIL_CSS}</style>` : ''}</head><body><p id="outside-editor">Outside text</p>${html}</body></html>`, { waitUntil: 'domcontentloaded' })
     assert.equal(await page.locator('#compose-body[contenteditable="true"]').count(), 1)
   }
   const select = async (text, scope = 'editor') => page.evaluate(({ text, scope }) => {
@@ -55,8 +68,11 @@ try {
   }, { text, scope })
   const click = key => page.locator(`[data-mail-format="${key}"]`).click()
   const check = async (name, body) => {
-    try { records.push({ name, status: 'passed', observation: await body() }) }
-    catch (error) { records.push({ name, status: 'failed', error: error instanceof Error ? error.message : String(error) }) }
+    for (const theme of ['classic', 'v2']) {
+      currentTheme = theme
+      try { records.push({ name: `${theme}: ${name}`, status: 'passed', observation: await body() }) }
+      catch (error) { records.push({ name: `${theme}: ${name}`, status: 'failed', error: error instanceof Error ? error.message : String(error) }) }
+    }
   }
 
   await check('bold changes editor DOM and keeps editor focus', async () => {

@@ -221,7 +221,7 @@ describe('WHM PHP inventory reader', () => {
     document.documentElement.lang = locale; document.documentElement.dir = locale === 'ar' ? 'rtl' : 'ltr'
     boot(send); await tick()
     document.documentElement.lang = 'en'; document.documentElement.dir = 'ltr'
-    expect(document.querySelector('[data-whm-php-binary-status]')!.textContent).toBe(locale === 'ar' ? 'قُرئ ملف CLI التنفيذي دون php.ini: 8.3.12. لا يثبت هذا تفعيل امتدادات FPM أو التحقق من طلب للتطبيق.' : 'CLI binary read without php.ini: 8.3.12. This is not FPM extension enablement or application request verification.')
+    expect(document.querySelector('[data-whm-php-binary-status]')!.textContent).toBe(locale === 'ar' ? 'قُرئ ملف CLI التنفيذي دون php.ini: \u20668.3.12\u2069. لا يثبت هذا تفعيل امتدادات FPM أو التحقق من طلب للتطبيق.' : 'CLI binary read without php.ini: 8.3.12. This is not FPM extension enablement or application request verification.')
     const shown = document.querySelector<HTMLElement>('[data-whm-php-observed-at]')!
     expect(shown.textContent).toBe(expected)
     expect(shown.tagName).toBe('BDI'); expect(shown.dir).toBe('ltr')

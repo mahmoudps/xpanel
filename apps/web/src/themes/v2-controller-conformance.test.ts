@@ -7,7 +7,6 @@ import { renderWebApp } from '../app.ts'
 import { createInitialLiveEventState } from '../ws-client.ts'
 import { parseMarkup, registeredThemeDocuments } from './contract.ts'
 import { checkV2Conformance, v2RouteContracts } from './v2-semantics.ts'
-import { v2ConformanceCopy } from './v2/conformance-copy.ts'
 import { isHtmlElement } from './markup.ts'
 
 
@@ -294,7 +293,7 @@ describe('candidate V2 full-document controller conformance', () => {
     // Mirror the authorized domain filter passed to renderAccountForwarders by account-pages.ts.
     const accountDomains = (identity.panel?.domains ?? []).filter(domain => domain.accountId === identity.panel?.account.id)
     const domainFact: 'present' | 'absent' = accountDomains.length ? 'present' : 'absent'
-    const issues = checkV2Conformance(html, { ...contract, context: { ...contract.context, facts: { 'account-domains': domainFact } } }, v2ConformanceCopy)
+    const issues = checkV2Conformance(html, { ...contract, context: { ...contract.context, facts: { 'account-domains': domainFact } } })
     expect(issues, 'CONFORMANCE_JSON=' + JSON.stringify({ route: document.route, locale, issues }) + '\n').toEqual([])
   })
 

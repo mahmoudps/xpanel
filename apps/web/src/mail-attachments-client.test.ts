@@ -42,7 +42,7 @@ describe('attachment browser binding', () => {
     expect(send).toHaveBeenCalledWith('GET', '/api/webmail/attachment-workspace?uid=17&folder=INBOX')
     const link = root().querySelector<HTMLAnchorElement>('[data-attachment-download]')!
     expect(link.getAttribute('href')).toBe(reference); expect(link.getAttribute('aria-label')).toBe('Download invoice.pdf'); expect(link.target).toBe('_blank'); expect(link.rel).toContain('noopener')
-    expect(status().dataset.state).toBe('read'); expect(root().textContent).toContain('invoice.pdf'); expect(root().textContent).toContain('6 B')
+    expect(status().dataset.state).toBe('read'); expect(root().textContent).toContain('invoice.pdf'); expect(root().textContent).toContain('\u20666\u00a0B\u2069')
   })
   it('passes an observed selected-message validity and refuses a different readback', async () => {
     root().dataset.uidValidity = '800'

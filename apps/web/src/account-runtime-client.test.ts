@@ -106,7 +106,7 @@ describe('account runtime client', () => {
     click(document.querySelector('[data-runtime-action="cache-save"]'))
     await tick()
     expect(send).not.toHaveBeenCalledWith('POST', expect.anything(), expect.anything())
-    expect(document.querySelector('[data-runtime-status]')!.textContent).toContain('8 to 256 MB')
+    expect(document.querySelector('[data-runtime-status]')!.textContent).toContain('8 to 256 MiB')
   })
 
   it('reports the missing container prerequisite and keeps running disabled', async () => {

@@ -23,7 +23,7 @@ export function renderMailDiskUsage(input: { locale: Locale; mailbox: string; ca
       <div class="xp-mail-usage__fields">
         <div class="xp-field"><label for="mail-usage-folder">${t('Folder')}</label><select id="mail-usage-folder" name="folder" class="xp-select" disabled></select></div>
         <div class="xp-field"><label for="mail-usage-age">${t('Older than (days)')}</label><input id="mail-usage-age" name="olderThanDays" type="number" inputmode="numeric" min="1" max="36500" step="1" class="xp-input" dir="ltr" disabled></div>
-        <div class="xp-field"><label for="mail-usage-size">${t('Larger than (MB)')}</label><input id="mail-usage-size" name="largerThanMb" type="number" inputmode="numeric" min="1" max="10240" step="1" class="xp-input" dir="ltr" disabled></div>
+        <div class="xp-field"><label for="mail-usage-size">${t('Larger than (MiB)')}</label><input id="mail-usage-size" name="largerThanMb" type="number" inputmode="numeric" min="1" max="10240" step="1" class="xp-input" dir="ltr" disabled></div>
       </div>
       <label class="xp-mail-usage__check"><input type="checkbox" name="seen" disabled><span>${t('Only messages already read')}</span></label>
       <div class="xp-mail-usage__actions"><button type="submit" class="xp-btn xp-btn--primary" data-mail-usage-preview-submit disabled>${t('Preview cleanup')}</button></div>

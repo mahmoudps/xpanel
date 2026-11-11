@@ -3,7 +3,7 @@ import { isPrivateAddress } from '@xpanel/core'
 import type { AdminView } from './common.ts'
 
 /** Root IP tools of /whm/server/ips, bound by the network client (whm-network-client.ts). */
-export function renderV2WhmIpTools(h: AdminView, props: WhmSurfaceProps): string {
+export function renderV2WhmIpTools(h: AdminView, props: WhmSurfaceProps, related = ''): string {
   const pool = h.canRead ? props.ipPool ?? [] : [], accounts = h.canRead ? props.accounts ?? [] : [], resellers = h.canRead ? props.resellers ?? [] : [], ranges = h.canRead ? props.ipv6Ranges ?? [] : []
   const off = !h.canManage
   const accountChoices: [string, string][] = [['', h.t(msgid('Choose an account'))], ...accounts.filter(a => a.status !== 'terminating').map(a => [a.id, `${a.username} (${a.ipv4}${a.ipv6 ? ', ' + a.ipv6 : ''})`] as [string, string])]
@@ -54,5 +54,5 @@ export function renderV2WhmIpTools(h: AdminView, props: WhmSurfaceProps): string
   const migrate = h.section('v2-ip-migrate', msgid('IP migration wizard'), h.form({ 'data-ip-migrate-form': true }, h.field('ip-migrate-pairs', msgid('Old and new address, one pair per line'), h.area('ip-migrate-pairs', { name: 'mappings', dir: 'ltr', rows: 4, placeholder: '192.0.2.10 198.51.100.10', disabled: off }),
     msgid('Each new address must already be in the pool and unused. It takes over the old address role, owner and default flag; every account, zone, mail and reseller reference moves with it.'))
     + h.status(msgid('Not sent'), { 'data-ip-migrate-status': true }, true) + h.actions(h.button(msgid('Review and migrate'), undefined, { type: 'submit', disabled: off }))))
-  return `<div class="v2-admin-stack" data-whm-ip-tools data-network-can-read="${h.canManage}" data-network-editable="${h.canManage}">${h.status(msgid('IP tools are ready.'), { 'data-ip-tools-status': true }, true)}<div class="v2-admin-columns"><div class="v2-admin-stack">${change}${many}${reserved}${usage}</div><aside class="v2-admin-stack">${rebuild}${migrate}${remoteCard}</aside></div>${ipv6}</div>`
+  return `<div class="v2-admin-stack" data-whm-ip-tools data-network-can-read="${h.canManage}" data-network-editable="${h.canManage}">${h.status(msgid('IP tools are ready.'), { 'data-ip-tools-status': true }, true)}<div class="v2-admin-columns"><div class="v2-admin-stack">${change}${many}</div><aside class="v2-admin-stack">${rebuild}${migrate}${remoteCard}${related}</aside></div>${reserved}${usage}${ipv6}</div>`
 }

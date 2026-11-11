@@ -15,8 +15,8 @@ describe('account resources presentation', () => {
     const html = renderResourcesBoard({ context: input, reading: reading() })
     assert.match(metric(html, 'disk'), /data-resource-state="measured"/)
     assert.match(metric(html, 'disk'), />Unlimited</)
-    assert.match(metric(html, 'disk'), />0 MiB</)
-    assert.match(metric(html, 'memory'), />1 MiB</)
+    assert.match(metric(html, 'disk'), />0\u00a0B</)
+    assert.match(metric(html, 'memory'), />1\.00\u00a0MiB</)
     assert.match(metric(html, 'processes'), /<bdi[^>]*>0<\/bdi>/)
     assert.match(metric(html, 'bandwidth'), /Not measured/)
     assert.match(metric(html, 'io-await'), /data-resource-state="unmeasured"/)
@@ -28,7 +28,7 @@ describe('account resources presentation', () => {
     if (metered.available !== true) throw new Error('fixture')
     const html = renderResourcesBoard({ context, reading: { ...metered, snapshot: { ...metered.snapshot, bandwidthMonth: { month: '2026-10', totalBytes: 3 * 1024 * 1024, limitBytes: 1024 * 1024, usedPercent: 300, enforced: true, limited: true } } } })
     assert.match(metric(html, 'bandwidth'), /data-resource-state="measured"/)
-    assert.match(metric(html, 'bandwidth'), /3 MiB · Limit page served/)
+    assert.match(metric(html, 'bandwidth'), /3\.00\u00a0MiB · Limit page served/)
   })
   it('does not convert unread, null, negative or nonfinite observations to zero', () => {
     const unread = renderResourcesBoard({ context })
@@ -43,7 +43,7 @@ describe('account resources presentation', () => {
     }
     const small = reading()
     if (small.available) small.snapshot.diskBytes = 1
-    assert.match(metric(renderResourcesBoard({ context, reading: small }), 'disk'), />1 B</)
+    assert.match(metric(renderResourcesBoard({ context, reading: small }), 'disk'), />1\u00a0B</)
   })
   it('keeps canonical unavailable reasons and original observation time without rendering field keys', () => {
     const unavailable: ResourcesBoardReading = { accountId: account.id, available: false, snapshot: null, reason: 'incomplete', fieldReasons: { awaitMs: 'unsupported', 'accounts.other-owner.cpuPercent': 'private-synthetic-detail' }, observedAt: '2026-10-24T00:00:00.000Z' }
@@ -72,7 +72,7 @@ describe('account resources presentation', () => {
   it('keeps Arabic labels human, values isolated beneath labels and all digits ASCII', () => {
     const html = renderResourcesBoard({ context: { ...context, locale: 'ar' }, reading: reading() })
     assert.match(html, /lang="ar" dir="rtl"/)
-    assert.match(metric(html, 'memory'), /<dt>القراءة الحالية<\/dt><dd data-resource-value><bdi dir="ltr" class="xp-mono">1 MiB<\/bdi>/)
+    assert.match(metric(html, 'memory'), /<dt>القراءة الحالية<\/dt><dd data-resource-value><bdi dir="ltr" class="xp-mono">1\.00\u00a0MiB<\/bdi>/)
     assert.match(metric(html, 'bandwidth'), /غير مقاس/)
     assert.doesNotMatch(html, /[\u0660-\u0669\u06f0-\u06f9]/)
     assert.doesNotMatch(html, /<form|<script|fetch\(|\son(?:click|toggle)=/)

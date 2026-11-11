@@ -50,7 +50,7 @@ describe('neutral mailbox projection', () => {
   it('preserves actual unread-body and attachment measurements without inventing authentication', () => {
     const view = projectMailView(props({ messages: [message({ body: '', bodyPending: true, dkimPass: false, attachments: [{ name: 'invoice.txt', sizeBytes: 25 }, { name: ' ', sizeBytes: 5 }] })] }))
     if (view?.kind !== 'inbox') throw new Error('Expected an inbox projection')
-    expect(view.messages[0]).toMatchObject({ bodyPending: true, body: '', attachments: [{ name: 'invoice.txt', size: '25 B' }] })
+    expect(view.messages[0]).toMatchObject({ bodyPending: true, body: '', attachments: [{ name: 'invoice.txt', size: '25\u00a0B' }] })
     expect(view.messages[0]?.authentication).toBe('DKIM: fail · SPF: not checked · DMARC: not checked')
   })
 
@@ -69,8 +69,8 @@ describe('neutral mailbox projection', () => {
 
   it('keeps unknown quota and saved unlimited policy separate from measured zero usage', () => {
     expect(formatMailboxQuota(undefined, 'unlimited', 'en')).toEqual({ text: '— / unlimited', percent: null })
-    expect(formatMailboxQuota(0, 100, 'en')).toEqual({ text: '0 / 100 MiB', percent: 0 })
-    expect(formatMailboxQuota(undefined, 100, 'en', 500)).toEqual({ text: '500 B / 100 MiB', percent: 0 })
+    expect(formatMailboxQuota(0, 100, 'en')).toEqual({ text: '0\u00a0B / 100\u00a0MiB', percent: 0 })
+    expect(formatMailboxQuota(undefined, 100, 'en', 500)).toEqual({ text: '500\u00a0B / 100\u00a0MiB', percent: 0 })
   })
 })
 
@@ -83,7 +83,7 @@ describe('neutral mail formatting and recipients', () => {
 
   it('keeps external date headers verbatim and byte counts consistent', () => {
     expect(formatMailStamp('Original Date header')).toEqual({ time: 'Original Date header', full: 'Original Date header', datetime: 'Original Date header' })
-    expect(formatAttachmentBytes(25)).toBe('25 B')
+    expect(formatAttachmentBytes(25)).toBe('25\u00a0B')
     expect(formatAttachmentBytes(10_000)).toBe(formatAsciiBytes(10_000))
     expect(formatAttachmentBytes(-1)).toBe('—')
   })

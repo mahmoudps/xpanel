@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { tools } from '@xpanel/catalog'
-import type { HostPageProps } from './common.ts'
+import { HOST_PAGES_CSS, type HostPageProps } from './common.ts'
 import { renderV2WhmServices, renderV2WhmServiceManager } from './services.ts'
 import { renderV2WhmFirewall } from './firewall.ts'
 import { renderV2WhmPhp } from './php.ts'
@@ -83,11 +83,64 @@ describe('v2 host page authorization and observations', () => {
     expect(html).not.toContain('Until 2027-12-31')
   })
 
+  it('builds the defaults card from saved facts and states the unsourced pool settings as not read, without controls', () => {
+    const saved = renderV2WhmPhp({ ...root, serverSettings: { defaultPhpVersion: '8.4' } as HostPageProps['serverSettings'], domains: [{ php: { handler: 'cgi' } }, { php: { handler: 'fpm' } }] as unknown as HostPageProps['domains'] })
+    expect(saved).toContain('data-php-default-saved="saved"'); expect(saved).toContain('1 of 2 saved domains use CGI.')
+    const unread = renderV2WhmPhp(root)
+    expect(unread).toContain('data-php-default-saved="unread"')
+    const pool = unread.slice(unread.indexOf('id="v2-host-php-pool-heading"'), unread.indexOf('v2-php-configure-heading'))
+    expect(pool).not.toMatch(/<input|<button|<select/)
+    expect(pool).toContain('<dt>Process manager</dt><dd>Not read</dd>')
+    expect(pool.match(/<dt>pm\.[a-z_]+<\/dt><dd>Not read<\/dd>/g)).toHaveLength(6)
+    expect(pool.match(/class="v2-php-mode"/g)).toHaveLength(3)
+  })
+
   it('retains qualified capability-unavailable layouts without leaking observations', () => {
     const html = renderV2WhmPhp({ ...root, capabilityUnavailable: true, hostname: 'hidden.example.test', serverSettings: { defaultPhpVersion: '8.4' } as HostPageProps['serverSettings'] })
     expect(html).toContain('data-capability-state="unavailable"')
     expect(html).toContain('data-php-can-read="false"')
     expect(html).not.toContain('hidden.example.test')
     expect(html).not.toContain('>8.4<')
+  })
+
+  it('lays the firewall out as the board: guard notice, switch beside the ruleset, counted tabs and a review state', () => {
+    const rule = { id: 'r1', kind: 'port' as const, action: 'accept' as const, protocol: 'tcp' as const, port: '8443', source: null, forwardTo: null, list: null, comment: '', enabled: true }
+    const html = renderV2WhmFirewall({ ...root, firewallRules: [rule] })
+    expect(html).toMatch(/class="v2-notice v2-notice--info"[^>]*>[\s\S]*trusted session address/)
+    expect(html).toContain('<div class="v2-host__power" data-whm-firewall-policy')
+    expect(html).toMatch(/data-whm-firewall-tab="port" disabled>Ports<span class="v2-count v2-num">1<\/span>/)
+    expect(html).toMatch(/data-whm-firewall-tab="banned" disabled>Temporary blocks<\/button>/)
+    expect(html).toContain('href="#v2-host-firewall-create-heading"')
+    expect(html).toContain('id="v2-host-firewall-create-heading"')
+    // Without a qualified read no count is shown on any tab and the review stays unread.
+    const unread = renderV2WhmFirewall({ ...root, catalog: [], firewallRules: [rule] })
+    expect(unread).not.toContain('v2-count')
+    expect(unread).toMatch(/Review pending changes<\/h2><\/div><div class="v2-card__actions"><span class="v2-pill[^"]*"[^>]*>(?:<[^>]+>)*Not read/)
+  })
+
+  it('fills the ruleset tiles from supplied props only and leaves enforcement unread', () => {
+    const rule = { id: 'r1', kind: 'port' as const, action: 'accept' as const, protocol: 'tcp' as const, port: '8443', source: null, forwardTo: null, list: null, comment: '', enabled: true }
+    const html = renderV2WhmFirewall({ ...root, firewallRules: [rule], generationId: 7, generationActivatedAt: '2026-10-22T11:45:00Z', adminSessionIp: '192.0.2.3', serverSettings: { panelPort: 2087, sshPort: 2222, backendPort: 8080 } as HostPageProps['serverSettings'] })
+    const tile = (label: string): string => html.match(new RegExp(`<div class="v2-host__tile"><dt>${label}</dt>(.*?)</div>`))![1]!
+    expect(tile('Generation')).toContain('Applied at <bdi class="v2-num" dir="ltr">2026-10-22 11:45 UTC</bdi>')
+    expect(tile('Management ports')).toMatch(/2087<\/bdi> xWHM.*2222<\/bdi> SSH/)
+    expect(tile('Saved rules')).toContain('>1</bdi>')
+    for (const label of ['Enforcement', 'Input policy', 'Temporary blocks']) expect(tile(label)).toBe('<dd class="v2-num">Not read</dd>')
+    const bare = renderV2WhmFirewall(root)
+    expect(bare).not.toContain('v2-host__tile-note')
+    expect(bare.match(/<div class="v2-host__tile"><dt>Management ports<\/dt>(.*?)<\/div>/)![1]).toBe('<dd class="v2-num">Not read</dd>')
+  })
+
+  it('names every rule value for phone rows, in saved rows and in the rows the controller clones', () => {
+    const rule = { id: 'r1', kind: 'port' as const, action: 'accept' as const, protocol: 'tcp' as const, port: '8443', source: null, forwardTo: null, list: null, comment: '', enabled: true }
+    const html = renderV2WhmFirewall({ ...root, firewallRules: [rule] })
+    expect(html).toContain('<td><span data-phone-label="Port"><bdi class="v2-mono" dir="ltr">8443</bdi></span></td>')
+    const row = html.match(/<template data-xp-template="firewall-port-row"><tr data-list-row>(.*?)<\/tr>/)![1]!
+    expect(row.match(/<td/g)).toHaveLength(9)
+    for (const label of ['Position', 'Action', 'Protocol', 'Port', 'Source', 'Purpose', 'Origin', 'Note']) expect(row).toContain(`data-phone-label="${label}"`)
+    expect(row).toContain('<td data-phone-label="Purpose" data-xp-slot="purpose"></td><td data-phone-label="Origin" data-xp-slot="origin"></td>')
+    expect(HOST_PAGES_CSS).toMatch(/@media\(max-width:600px\)\{[^@]*\[data-phone-label\]\)::before\{content:attr\(data-phone-label\)/)
+    // A tab count is hidden once the controller has painted rows, so a count never outlives the rows it described.
+    expect(HOST_PAGES_CSS).toContain('[data-whm-firewall-tabs]:has(tbody [data-xp-slot]) [data-whm-firewall-tab] .v2-count{display:none}')
   })
 })

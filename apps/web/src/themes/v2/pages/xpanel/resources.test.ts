@@ -30,9 +30,9 @@ describe('v2 account resources', () => {
 
   it('separates plan values, applied readback and measured values', () => {
     const html = renderV2PanelResources(props({ usage: { phpVersion: '8.3', diskBytes: 1048576, memoryBytes: 0, processCount: 0, bandwidth: 'unmeasured', ioEnforced: true } }))
-    expect(html).toContain('5120 MiB')
-    expect(html).toContain('<bdi dir="ltr" data-resource-value>1 MiB</bdi>')
-    expect(html).toContain('<bdi dir="ltr" data-resource-value>0 MiB</bdi>')
+    expect(html).toContain('5.00 GiB')
+    expect(html).toContain('<bdi dir="ltr" data-resource-value>1.00 MiB</bdi>')
+    expect(html).toContain('<bdi dir="ltr" data-resource-value>0 B</bdi>')
     expect(html).toContain('Applied values need host readback.')
     expect(html).toContain('Verified for this sample')
     expect(html).not.toContain('Filesystem quota enforced')
@@ -50,8 +50,8 @@ describe('v2 account resources', () => {
   it('keeps unlimited and zero limits distinct and does not apply a foreign plan', () => {
     const html = renderV2PanelResources(props({ plan: { ...plan, resources: { ...plan.resources, diskMb: 'unlimited', memoryMb: 0 } } }))
     expect(html).toContain('Unlimited')
-    expect(html).toContain('<bdi dir="ltr">0 MiB</bdi>')
-    expect(renderV2PanelResources(props({ plan: { ...plan, id: 'foreign' } }))).not.toContain('5120 MiB')
+    expect(html).toContain('<bdi dir="ltr">0 B</bdi>')
+    expect(renderV2PanelResources(props({ plan: { ...plan, id: 'foreign' } }))).not.toContain('5.00 GiB')
   })
 
   it('does not expose refresh as an executable action without a real reader', () => {

@@ -23,6 +23,7 @@ import type { UiPreferencesView } from './ui-preferences.ts'
 import * as uiPreferenceReads from './ui-preferences.ts'
 import * as mailDocuments from './mail/document.ts'
 import { parseMarkup } from '../../web/src/themes/markup.ts'
+import { serveWebUi } from '../../web/src/index.ts'
 import { roleLabel } from '../../web/src/chrome.ts'
 import { registeredThemeDocuments } from '../../web/src/themes/contract.ts'
 import { canonicalNavigationRoute, registeredDocumentAliases } from '@xpanel/catalog'
@@ -237,7 +238,7 @@ describe('personal UI preference request integration', () => {
     const application = app(db, state, 'xwhm'), auth = await session(db, root, 'xwhm')
     expect((await request(application, 'xwhm', null)).status).toBe(401)
     const view = await read(application, 'xwhm', auth)
-    expect(view).toMatchObject({ state: 'default', uiTheme: 'classic', choices: ['classic', 'v2'] })
+    expect(view).toMatchObject({ state: 'default', uiTheme: 'v2', choices: ['classic', 'v2'] })
     expect(view.choices).not.toContain('unregistered-test-theme')
     const body = { uiTheme: 'classic', expectedRevision: view.revision }
     expect((await request(application, 'xwhm', auth, { method: 'PUT', body, csrf: 'wrong' })).status).toBe(403)
@@ -598,7 +599,9 @@ describe('normal saved V2 owner Resources without host qualification', () => {
       // Only the stored addon-domain count is known; no slice usage is measured without a reader.
       expect(readings.filter(node => node.attrs.get('data-resource-state') === 'measured')).toHaveLength(1)
       expect(owned.filter(node => node.attrs.has('data-resource-observation')).every(node => node.attrs.get('data-resource-observation') === 'unread')).toBe(true)
-      expect(body).toContain(String(storedPlan.resources.diskMb) + ' MiB')
+      // The stored 1024 MiB disk limit is shown in the product's binary byte format.
+      expect(storedPlan.resources.diskMb).toBe(1024)
+      expect(body).toContain('1.00 GiB')
       expect(body).not.toContain(account.contactEmail)
       expect(documentFlow.observations).toHaveLength(1)
       expect(documentFlow.observations[0]).toMatchObject({ uiTheme: 'v2', qualified: false })
@@ -926,5 +929,77 @@ describe('normal registered operator and mailbox documents with stored identity 
     expect(response.status).toBe(303)
     expect(response.headers.get('location')).toBe('/login')
     expect(await response.text()).toBe('')
+  }))
+
+  it('renders the v2 unavailable page over HTTP when an admitted caller opens an unqualified route without panel facts', { tags: ['feature'] }, () => withFixture(async ({ db, state }) => {
+    const baselineWorkspace = await state.store.readAccountWorkspace(account.id, { username: owner.username })
+    if (!baselineWorkspace?.account || !baselineWorkspace.plan || !baselineWorkspace.featureList) throw new Error('missing workspace fixture')
+    const mismatchedWorkspace = {
+      account: baselineWorkspace.account,
+      plan: { ...baselineWorkspace.plan, id: randomUUID() },
+      featureList: baselineWorkspace.featureList,
+    }
+    const splitRenderer = await createDefaultWebRenderer({ db, store: state.store, serverSecret: SECRET, entryPoint: 'xpanel', publicOrigin: ORIGIN.xpanel })
+    const splitApp = app(db, state, 'xpanel', { webRenderer: splitRenderer })
+    const ownerAuth = await session(db, owner, 'xpanel')
+
+    const spy = vi.spyOn(state.store, 'readAccountWorkspace')
+    try {
+      spy.mockResolvedValueOnce(mismatchedWorkspace)
+      const produced = await (await request(splitApp, 'xpanel', ownerAuth, { path: '/resources?lang=en' })).json()
+      expect(produced).not.toHaveProperty('panel')
+      expect(produced.workspaceSummary).toMatchObject({ account: { id: account.id, status: 'active' } })
+
+      documentFlow.real = true
+      for (const locale of ['en', 'ar'] as const) {
+        spy.mockResolvedValueOnce(mismatchedWorkspace)
+        const mismatchRes = await request(splitApp, 'xpanel', ownerAuth, { path: `/resources?lang=${locale}` })
+        const mismatchHtml = await mismatchRes.text()
+        expect(mismatchRes.status).toBe(200)
+        expectDocumentPolicy(mismatchRes, mismatchHtml, '/resources')
+        expect(mismatchHtml).toContain('data-ui-theme="v2"')
+        expect(mismatchHtml).toContain('data-tool-availability="unverified"')
+        expect(mismatchHtml).toContain('data-workspace-field="status"')
+        expect(mismatchHtml).not.toContain('data-readonly="true"')
+      }
+    } finally {
+      documentFlow.real = false
+      documentFlow.observations.length = 0
+      spy.mockRestore()
+    }
+
+    await state.store.suspendAccount(account.id, 'Suspended fixture')
+    const summaryApp = app(db, state, 'xpanel', {
+      webRenderer: req => serveWebUi(req, async url => ({
+        surface: 'xpanel',
+        activeRoute: '/resources',
+        ...(url.searchParams.get('lang') === 'ar' ? { locale: 'ar' as const } : { locale: 'en' as const }),
+        visibility: { principal: { kind: 'user', id: owner.id, username: owner.username, accountId: account.id }, disabledFeatures: new Set() },
+        workspaceSummary: {
+          account: { id: account.id, ownerId: account.ownerId, username: account.username, primaryDomain: account.primaryDomain, status: 'suspended', planId: account.planId },
+        },
+      })),
+    })
+    documentFlow.real = true
+    try {
+      const deniedSuspended = await request(splitApp, 'xpanel', ownerAuth, { path: '/resources?lang=en' })
+      const deniedHtml = await deniedSuspended.text()
+      expect(deniedSuspended.status).toBe(403)
+      expectDocumentPolicy(deniedSuspended, deniedHtml, '/resources')
+      expect(deniedHtml).toContain('data-ui-theme="v2"')
+
+      for (const locale of ['en', 'ar'] as const) {
+        const summaryRes = await request(summaryApp, 'xpanel', ownerAuth, { path: `/resources?lang=${locale}` })
+        const summaryHtml = await summaryRes.text()
+        expect(summaryRes.status).toBe(200)
+        expectDocumentPolicy(summaryRes, summaryHtml, '/resources')
+        expect(summaryHtml).toContain('data-ui-theme="v2"')
+        expect(summaryHtml).toContain('data-tool-availability="unverified"')
+        expect(summaryHtml).toContain('data-workspace-field="status"')
+        expect(summaryHtml).not.toContain('data-readonly="true"')
+        if (locale === 'en') expect(summaryHtml).toContain('Suspended')
+        else expect(summaryHtml).toContain('dir="rtl"')
+      }
+    } finally { documentFlow.real = false; documentFlow.observations.length = 0 }
   }))
 })

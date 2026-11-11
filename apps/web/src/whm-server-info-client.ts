@@ -2,6 +2,9 @@
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
 import { xwhmPageAdapters } from './pages/xwhm-adapters.ts'
+import { ASCII_BYTES_BINDING, formatIsolatedBytes as canonicalFormatClientBytes } from './display-format.ts'
+// Module-local alias: the binding source defines it again from ASCII_BYTES_BINDING.
+const formatClientBytes = canonicalFormatClientBytes
 
 export interface WhmServerInfoView { load: [number, number, number]; memory: { availableBytes: number; totalBytes: number }; disk: { availableBytes: number; totalBytes: number } }
 
@@ -27,7 +30,7 @@ function bindWhmServerInfo(path: string): void {
     const request = (window as Window & { xpanelSessionRequest?: (method: string, path: string) => Promise<unknown> }).xpanelSessionRequest
     const note = (state: string, message: string): void => { if (!status) return; status.hidden = !message; status.dataset.state = state; status.setAttribute('role', state === 'failed' ? 'alert' : 'status'); status.textContent = message }
     const show = (key: keyof typeof values, text: string, technical: boolean): void => { const node = values[key]; if (!node) return; node.textContent = text; if (technical) node.dir = 'ltr'; else node.removeAttribute('dir') }
-    const megabytes = (count: number): string => String(Math.round(count / 1048576)) + ' MB'
+    const megabytes = (count: number): string => formatClientBytes(count)
     const failed = (message: string): void => { for (const key of ['load', 'memory', 'disk'] as const) show(key, t('Unavailable'), false); note('failed', message) }
     if (typeof request !== 'function') { failed(t('Server information is unavailable here. Nothing was read.')); return }
     root.setAttribute('aria-busy', 'true')
@@ -43,4 +46,4 @@ function bindWhmServerInfo(path: string): void {
   })
 }
 
-export const WHM_SERVER_INFO_CLIENT_BINDING = `(()=>{const readWhmServerInfo=${readWhmServerInfo.toString()};const bind=${bindWhmServerInfo.toString()};return ()=>bind(${JSON.stringify(xwhmPageAdapters.serverInfo.read.path)});})()`
+export const WHM_SERVER_INFO_CLIENT_BINDING = `(()=>{const formatClientBytes=${ASCII_BYTES_BINDING};const readWhmServerInfo=${readWhmServerInfo.toString()};const bind=${bindWhmServerInfo.toString()};return ()=>bind(${JSON.stringify(xwhmPageAdapters.serverInfo.read.path)});})()`

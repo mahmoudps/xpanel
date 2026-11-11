@@ -43,4 +43,22 @@ describe('workspace-owned client templates', () => {
     expect(clientTemplateSlot(clone, 'label', 'button')).toBe(clone)
     expect(() => clientTemplateSlot(clone, 'label', 'time')).toThrow('client_template_slot_unavailable')
   })
+  it('gives the popover of each cloned row its own id and keeps its trigger pointed at it', () => {
+    document.body.innerHTML = '<section><template data-xp-template="row"><tr id="keep"><td data-xp-slot="name"></td><td><button type="button" popovertarget="row-menu" aria-controls="row-menu" aria-haspopup="menu">More</button><ul id="row-menu" role="menu" popover><li role="none"><button type="button" role="menuitem" aria-controls="other">Edit</button></li></ul></td></tr></template>'
+      + '<template data-xp-template="plain"><tr id="plain-row"><td data-xp-slot="name" id="plain-cell"></td></tr></template></section>'
+    const section = document.querySelector('section')!
+    const rows = [1, 2].map(() => cloneClientTemplate(clientTemplate(section, 'row'), 'tr', ['name']))
+    const ids = rows.map(row => row.querySelector('[popover]')!.id)
+    expect(new Set(ids).size).toBe(2)
+    expect(ids.every(id => /^row-menu-\d+$/.test(id))).toBe(true)
+    rows.forEach((row, index) => {
+      const trigger = row.querySelector('[popovertarget]')!
+      expect([trigger.getAttribute('popovertarget'), trigger.getAttribute('aria-controls')]).toEqual([ids[index], ids[index]])
+      expect(row.querySelector('[role="menuitem"]')!.getAttribute('aria-controls')).toBe('other')
+      expect(row.id).toBe('keep')
+    })
+    expect(clientTemplate(section, 'row').content.querySelector('[popover]')!.id).toBe('row-menu')
+    const plain = cloneClientTemplate(clientTemplate(section, 'plain'), 'tr', ['name'])
+    expect([plain.id, plain.querySelector('td')!.id]).toEqual(['plain-row', 'plain-cell'])
+  })
 })

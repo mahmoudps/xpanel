@@ -6,5 +6,5 @@ export function mailxArchiveClientTemplates(): string { return `
 export function mailxCollectionsClientTemplates(): string { return `
 <template data-xp-template="mailx-collection-row"><tr><td><input type="text" class="v2-input" maxlength="200" data-item-name data-xp-slot="name" disabled></td><td><input type="text" class="v2-input" maxlength="500" data-item-description data-xp-slot="description" disabled></td><td><input type="radio" data-item-default data-xp-slot="default" disabled></td><td><button type="button" class="v2-btn" data-xp-slot="remove" disabled></button></td></tr></template>
 <template data-xp-template="mailx-collection-empty"><tr><td colspan="4" data-xp-slot="message"></td></tr></template>
-<template data-xp-template="mailx-calendar-description"><div class="v2-panel-extra__field" style="display:flex;flex-direction:column;gap:8px;min-inline-size:0"><label data-xp-slot="label"></label><textarea class="v2-input" rows="2" maxlength="500" data-xp-slot="description" disabled></textarea></div></template>
+<template data-xp-template="mailx-calendar-description"><div class="v2-panel-extra__field"><label data-xp-slot="label"></label><textarea class="v2-input" rows="2" maxlength="500" data-xp-slot="description" disabled></textarea></div></template>
 <template data-xp-template="mailx-calendar-empty"><p data-xp-slot="message"></p></template>` }

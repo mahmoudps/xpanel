@@ -7,6 +7,8 @@ import { card } from '../../../components/card.ts'
 import { dataTable } from '../../../components/data-table.ts'
 
 const technical = (value: string | number) => `<bdi class="v2-mono v2-num" dir="ltr">${escapeHtml(value)}</bdi>`
+/** A phone row has no column header, so the cell carries its own label there. */
+export const phoneCell = (label: string, html: string): string => `<span class="v2-reseller-cell" data-phone-label="${escapeHtml(label)}"><span>${html}</span></span>`
 const button = (label: string, editable: boolean, attrs = '', type: 'button' | 'submit' = 'button', danger = false) => `<button class="v2-btn${type === 'submit' ? ' v2-btn--primary' : ''}${danger ? ' v2-btn--danger' : ''}" type="${type}"${attrs}${editable ? '' : ' disabled'}>${escapeHtml(label)}</button>`
 const status = (hook: string) => `<p ${hook} role="status" hidden></p>`
 
@@ -17,7 +19,8 @@ export function renderV2ResellerAclLists(t: Translate, props: WhmSurfaceProps, e
   const table = dataTable(t, { id: 'v2-acl-lists', caption: t('Saved privilege lists'), columns: [t('List'), t('Privileges'), t('Actions')].map(label => ({ label })), rows, emptyText: t('No privilege lists are saved.') })
   const save = `<form class="v2-reseller-stack" data-acl-list-form novalidate><div class="v2-reseller-field"><label for="v2-acl-list-name">${escapeHtml(t('List name'))}</label><input id="v2-acl-list-name" name="name" dir="ltr" maxlength="64" autocomplete="off"${off}></div><fieldset><legend>${escapeHtml(t('Privileges'))}</legend><div class="v2-reseller-checks">${acls.map(([key, label]) => `<label class="v2-reseller-choice"><input type="checkbox" name="acl" value="${key}"${off}><span>${escapeHtml(t(label))}</span></label>`).join('')}</div></fieldset><div class="v2-reseller-actions">${button(t('Save list'), editable, '', 'submit')}</div></form>`
   const apply = `<form class="v2-reseller-stack" data-acl-list-apply-form novalidate><div class="v2-reseller-field"><label for="v2-acl-list-apply">${escapeHtml(t('Privilege list'))}</label><select id="v2-acl-list-apply" name="list"${off}><option value="">${escapeHtml(t('Choose a list'))}</option>${lists.map(list => `<option value="${escapeHtml(list.name)}">${escapeHtml(list.name)}</option>`).join('')}</select></div><fieldset><legend>${escapeHtml(t('Resellers'))}</legend><div class="v2-reseller-checks">${resellers.map(reseller => `<label class="v2-reseller-choice"><input type="checkbox" name="resellerId" value="${escapeHtml(reseller.id)}"${off}><span>${technical(reseller.username)}</span></label>`).join('') || `<p>${escapeHtml(t('No resellers were returned.'))}</p>`}</div></fieldset><p>${escapeHtml(t('Each chosen reseller takes exactly the privileges of the list; privileges outside it are removed.'))}</p><div class="v2-reseller-actions">${button(t('Reset resellers'), editable, '', 'submit')}</div></form>`
-  return `<div class="v2-reseller-columns" data-whm-reseller-lists data-network-editable="${editable}"><div class="v2-reseller-stack">${card({ title: t('Saved privilege lists'), titleId: 'v2-acl-lists-heading', bodyHtml: table + save })}</div><aside class="v2-reseller-stack">${card({ title: t('Reset resellers'), titleId: 'v2-acl-apply-heading', bodyHtml: apply })}${status('data-acl-list-status')}</aside></div>`
+  // The long list form takes the full width so its checks run in four columns; the short apply form follows as its own strip.
+  return `<div class="v2-reseller-stack" data-whm-reseller-lists data-network-editable="${editable}">${card({ title: t('Saved privilege lists'), titleId: 'v2-acl-lists-heading', bodyHtml: table + save })}${card({ title: t('Reset resellers'), titleId: 'v2-acl-apply-heading', bodyHtml: apply })}${status('data-acl-list-status')}</div>`
 }
 
 /** Email All Resellers: one message to each reseller contact address. */
@@ -30,7 +33,7 @@ export function renderV2ResellerEmail(t: Translate, props: WhmSurfaceProps, edit
 export function renderV2ResellerUsage(t: Translate, props: WhmSurfaceProps): string {
   const rows = (props.resellers ?? []).map(reseller => {
     const usage = props.resellerUsage?.[reseller.id]
-    return { cellsHtml: [technical(reseller.username), usage ? technical(usage.accounts) : escapeHtml(t('Not read')), escapeHtml(measuredTotalText(t, usage?.disk)), escapeHtml(measuredTotalText(t, usage?.traffic))] }
+    return { cellsHtml: [technical(reseller.username), usage ? technical(usage.accounts) : escapeHtml(t('Not read')), phoneCell(t('Disk use'), escapeHtml(measuredTotalText(t, usage?.disk))), phoneCell(t('Traffic this month'), escapeHtml(measuredTotalText(t, usage?.traffic)))] }
   })
   return card({ title: t('Reseller usage'), titleId: 'v2-reseller-usage-heading', bodyHtml: dataTable(t, { id: 'v2-reseller-usage', caption: t('Reseller usage'), columns: [t('Reseller'), t('Accounts'), t('Disk use'), t('Traffic this month')].map(label => ({ label })), rows, emptyText: t('No resellers were returned.') }) + `<p>${escapeHtml(t('Disk use is the user quota report of the home filesystem; traffic is the bandwidth meter of this UTC month.'))}</p>` })
 }

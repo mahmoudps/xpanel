@@ -174,7 +174,7 @@ const summaryOwner: Principal = { kind: 'user', id: 'private-principal-id', user
 describe('verified production availability', () => {
   it.each(composedRouteSpecs.filter(row => !nativeComposedRoutePaths.has(row.route)))('retains an inert composed layout without provider reads on $route', spec => {
     for (const locale of ['en', 'ar'] as const) {
-      const html = renderWebApp({
+      const html = renderWebApp({ uiTheme: 'classic',
         surface: spec.surface, activeRoute: spec.route, locale, catalog: [],
         visibility: { principal: spec.surface === 'xwhm' ? { kind: 'root', id: 'root', username: 'administrator7' } : summaryOwner },
         panel: { account: summaryAccount, get domains() { return unavailableProviderRead() }, get serviceUsers() { return unavailableProviderRead() } },
@@ -201,7 +201,7 @@ describe('verified production availability', () => {
     '/whm/software/site-software', '/whm/software/store', '/whm/software/store/extensions', '/whm/software/store/activity',
   ])('retains disabled store components without unqualified provider data on %s', route => {
     const root = route.startsWith('/whm/')
-    const html = renderWebApp({
+    const html = renderWebApp({ uiTheme: 'classic',
       surface: root ? 'xwhm' : 'xpanel', activeRoute: route, catalog: [],
       visibility: { principal: root ? { kind: 'root', id: 'root', username: 'administrator7' } : summaryOwner },
       panel: { account: summaryAccount, domains: [{ accountId: summaryAccount.id, name: 'private-store-domain-marker' } as never] },
@@ -216,7 +216,7 @@ describe('verified production availability', () => {
   })
 
   it.each(['foreign', 'suspended', 'missing'] as const)('does not expose an unavailable store layout for a %s account', kind => {
-    const html = renderWebApp({
+    const html = renderWebApp({ uiTheme: 'classic',
       surface: 'xpanel', activeRoute: '/software/installer', catalog: [], visibility: { principal: summaryOwner },
       ...(kind === 'missing' ? {} : { panel: { account: { ...summaryAccount, ...(kind === 'foreign' ? { id: 'foreign-account' } : { status: 'suspended' as const }) } } }),
     })
@@ -225,7 +225,7 @@ describe('verified production availability', () => {
   })
 
   it.each(['xwhm', 'xpanel', 'xmail'] as const)('keeps an anonymous %s workspace unavailable without admitting registered navigation', surface => {
-    const html = renderWebApp({
+    const html = renderWebApp({ uiTheme: 'classic',
       surface, locale: 'en',
       whm: { accounts: [summaryAccount] },
       panel: { account: summaryAccount, plan: summaryPlan },
@@ -254,7 +254,7 @@ describe('verified production availability', () => {
     { surface: 'xpanel', route: '/resources', navigation: '/resources', forbidden: ['/whm/accounts', '/whm/server/setup'], principal: summaryOwner },
     { surface: 'xmail', route: '/mail/inbox', navigation: '/mail/compose', forbidden: ['/whm/accounts', '/whm/server/setup', '/home'], principal: summaryOwner },
   ] as const)('shows only role-admitted unqualified navigation and minimal identity on $surface', row => {
-    const html = renderWebApp({
+    const html = renderWebApp({ uiTheme: 'classic',
       surface: row.surface, locale: 'en', activeRoute: row.route, catalog: [],
       visibility: { principal: row.principal, disabledFeatures: new Set() },
       whm: { accounts: [summaryAccount] },
@@ -283,7 +283,7 @@ describe('verified production availability', () => {
   })
 
   it('does not publish provider payloads just because a principal is authenticated', () => {
-    const html = renderWebApp({
+    const html = renderWebApp({ uiTheme: 'classic',
       surface: 'xmail', visibility: { principal: { kind: 'user', id: 'u1', username: 'owner', accountId: 'a1' } },
       mail: { mailbox: 'private-marker@example.test', messages: [{
         uid: 17, folder: 'INBOX', from: 'private-sender-marker@example.test', to: 'private-marker@example.test',
@@ -299,7 +299,7 @@ describe('verified production availability', () => {
   })
 
   it.each(['en', 'ar'] as const)('renders the home port for a resolved account in %s and keeps other secrets out', locale => {
-    const html = renderWebApp({ surface: 'xpanel', locale, visibility: { principal: summaryOwner }, panel: { account: summaryAccount, plan: summaryPlan } })
+    const html = renderWebApp({ uiTheme: 'classic', surface: 'xpanel', locale, visibility: { principal: summaryOwner }, panel: { account: summaryAccount, plan: summaryPlan } })
     for (const value of ['owner7', 'owner7.example.test', 'Configured plan7', '/private-home-marker', '192.0.2.199']) expect(html).toContain(value)
     expect(html).toContain('data-board-port="xpanel-home"')
     expect(html).toContain('data-action="logout"')
@@ -316,7 +316,7 @@ describe('verified production availability', () => {
     { kind: 'root', id: 'private-root', username: 'administrator7' },
     { kind: 'reseller', id: summaryAccount.ownerId!, username: 'reseller7' },
   ] satisfies Principal[])('allows the account summary for its authorized $kind principal', principal => {
-    const html = renderWebApp({ surface: 'xpanel', visibility: { principal }, panel: { account: summaryAccount, plan: summaryPlan } })
+    const html = renderWebApp({ uiTheme: 'classic', surface: 'xpanel', visibility: { principal }, panel: { account: summaryAccount, plan: summaryPlan } })
     expect(html).toContain('owner7.example.test')
     expect(html).toContain(principal.username)
     expect(html.match(/data-workspace-field=/g)).toHaveLength(6)
@@ -327,7 +327,7 @@ describe('verified production availability', () => {
     { kind: 'user', id: 'other-user-id', username: 'other-owner', accountId: 'other-account-id' },
     { kind: 'reseller', id: 'other-reseller-id', username: 'other-reseller' },
   ] satisfies Principal[])('does not disclose another account to $kind', principal => {
-    const html = renderWebApp({ surface: 'xpanel', visibility: { principal }, panel: { account: summaryAccount, plan: summaryPlan } })
+    const html = renderWebApp({ uiTheme: 'classic', surface: 'xpanel', visibility: { principal }, panel: { account: summaryAccount, plan: summaryPlan } })
     expect(html).toContain('data-workspace-account-empty="true"')
     expect(html).not.toContain('owner7.example.test')
     expect(html).not.toContain('Configured plan7')
@@ -338,7 +338,7 @@ describe('verified production availability', () => {
     ['terminating', 'Terminating', 'قيد الإنهاء'],
   ] as const)('localizes a non-active account status %s on the summary', (status, en, ar) => {
     for (const locale of ['en', 'ar'] as const) {
-      const html = renderWebApp({ surface: 'xpanel', locale, visibility: { principal: summaryOwner }, panel: { account: { ...summaryAccount, status }, plan: summaryPlan } })
+      const html = renderWebApp({ uiTheme: 'classic', surface: 'xpanel', locale, visibility: { principal: summaryOwner }, panel: { account: { ...summaryAccount, status }, plan: summaryPlan } })
       expect(html).toContain(locale === 'ar' ? ar : en)
       expect(html).not.toContain('data-service-row=')
       expect(html).toContain('data-tool-availability="unverified"')
@@ -346,7 +346,7 @@ describe('verified production availability', () => {
   })
 
   it.each(['xwhm', 'xmail'] as const)('shows identity without account state on %s', surface => {
-    const html = renderWebApp({ surface, visibility: { principal: summaryOwner }, panel: { account: summaryAccount, plan: summaryPlan } })
+    const html = renderWebApp({ uiTheme: 'classic', surface, visibility: { principal: summaryOwner }, panel: { account: summaryAccount, plan: summaryPlan } })
     expect(html).toContain('data-workspace-identity="true"')
     expect(html).not.toContain('data-workspace-account-overview=')
     expect(html).not.toContain(summaryAccount.primaryDomain)
@@ -354,17 +354,17 @@ describe('verified production availability', () => {
   })
 
   it('ignores account and plan payloads without a signed-in principal', () => {
-    const html = renderWebApp({ surface: 'xpanel', panel: { account: summaryAccount, plan: summaryPlan } })
+    const html = renderWebApp({ uiTheme: 'classic', surface: 'xpanel', panel: { account: summaryAccount, plan: summaryPlan } })
     expect(html).not.toContain('data-workspace-identity=')
     expect(html).not.toContain('data-workspace-account-overview=')
     expect(html).not.toContain('owner7.example.test')
   })
 
   it('uses clear unavailable fields for missing accounts and mismatched plans', () => {
-    const missing = renderWebApp({ surface: 'xpanel', visibility: { principal: summaryOwner } })
+    const missing = renderWebApp({ uiTheme: 'classic', surface: 'xpanel', visibility: { principal: summaryOwner } })
     expect(missing).toContain('No authorized account is available to display.')
     for (const plan of [undefined, { ...summaryPlan, id: 'unrelated-plan-id', name: 'Hidden unrelated plan' }]) {
-      const html = renderWebApp({ surface: 'xpanel', visibility: { principal: summaryOwner }, panel: { account: summaryAccount, ...(plan ? { plan } : {}) } })
+      const html = renderWebApp({ uiTheme: 'classic', surface: 'xpanel', visibility: { principal: summaryOwner }, panel: { account: summaryAccount, ...(plan ? { plan } : {}) } })
       expect(html).toContain('data-board-port="xpanel-home"')
       expect(html).not.toContain('Hidden unrelated plan')
       expect(html).not.toContain('Configured plan7')
@@ -372,7 +372,7 @@ describe('verified production availability', () => {
   })
 
   it('escapes all externally supplied summary labels and values', () => {
-    const html = renderWebApp({ surface: 'xpanel', visibility: { principal: { ...summaryOwner, username: '<script>identity-marker</script>' } }, panel: { account: { ...summaryAccount, username: '<img src=x onerror=account-marker>', primaryDomain: '<script>domain-marker</script>' }, plan: { ...summaryPlan, name: '<svg onload=plan-marker>' } } })
+    const html = renderWebApp({ uiTheme: 'classic', surface: 'xpanel', visibility: { principal: { ...summaryOwner, username: '<script>identity-marker</script>' } }, panel: { account: { ...summaryAccount, username: '<img src=x onerror=account-marker>', primaryDomain: '<script>domain-marker</script>' }, plan: { ...summaryPlan, name: '<svg onload=plan-marker>' } } })
     expect(html).toContain('data-board-port="xpanel-home"')
     expect(html).toContain('&lt;img src=x onerror=account-marker&gt;')
     expect(html).toContain('&lt;script&gt;domain-marker&lt;/script&gt;')
@@ -381,14 +381,14 @@ describe('verified production availability', () => {
   })
 
   it('keeps login reachable and gives the command palette no privileged static routes', () => {
-    const html = renderWebApp({ surface: 'login' })
+    const html = renderWebApp({ uiTheme: 'classic', surface: 'login' })
     expect(html).toMatch(/<form\b/)
     expect(html).not.toContain('data-tool-availability="unverified"')
     expect(html).not.toContain('data-cmdk-item="')
   })
 
   it('renders an Arabic unavailable state with Latin digits', () => {
-    const html = renderWebApp({ surface: 'xpanel', locale: 'ar' })
+    const html = renderWebApp({ uiTheme: 'classic', surface: 'xpanel', locale: 'ar' })
     expect(html).toContain('قيد التفعيل')
     expect(html).toContain('<h1 class="xp-page-title">الرئيسية</h1>')
     expect(html).toContain('<title>الرئيسية — xPanel</title>')
@@ -400,11 +400,11 @@ describe('verified production availability', () => {
   })
 
   it('uses the real page heading and keeps security free of the unavailable-tools card', () => {
-    const home = renderWebApp({ surface: 'xwhm', locale: 'en', visibility: { principal: { kind: 'root', id: 'root', username: 'root' } } })
+    const home = renderWebApp({ uiTheme: 'classic', surface: 'xwhm', locale: 'en', visibility: { principal: { kind: 'root', id: 'root', username: 'root' } } })
     expect(home).toContain('<h1 class="xp-page-title">Server dashboard</h1>')
     expect(home).toContain('<title>Server dashboard — xWHM</title>')
     expect(home).not.toContain('>Workspace<')
-    const security = renderWebApp({
+    const security = renderWebApp({ uiTheme: 'classic',
       surface: 'xwhm', locale: 'en', activeRoute: '/whm/security/sign-in',
       visibility: { principal: { kind: 'root', id: 'root', username: 'root' } },
       security: { totpEnabled: false },
@@ -434,7 +434,7 @@ describe('verified production availability', () => {
     const principal = surface === 'xwhm'
       ? { kind: 'root' as const, id: 'synthetic-root', username: 'synthetic-root' }
       : { kind: 'user' as const, id: 'synthetic-owner', username: 'synthetic-owner', accountId: 'synthetic-account' }
-    const html = renderWebApp({ surface, activeRoute: '/synthetic-unregistered-route', visibility: { principal, disabledFeatures: new Set() } })
+    const html = renderWebApp({ uiTheme: 'classic', surface, activeRoute: '/synthetic-unregistered-route', visibility: { principal, disabledFeatures: new Set() } })
     expect(html).toContain('data-tool-availability="unverified"')
     expectDocumentForms(html, 'signed-in')
     expect(html).not.toMatch(/data-cmdk-item="/)
@@ -445,7 +445,7 @@ describe('verified production availability', () => {
 describe('parsed native form admission', () => {
   it.each(['extra hidden form', 'preference owner loss', 'unknown inert form', 'own account ID text'] as const)('rejects %s in the document boundary', kind => {
     const home = kind === 'preference owner loss' || kind === 'own account ID text'
-    const html = renderWebApp({
+    const html = renderWebApp({ uiTheme: 'classic',
       surface: 'xpanel', activeRoute: home ? '/home' : '/resources',
       ...(kind === 'own account ID text' ? { accountId: summaryAccount.id } : {}),
       visibility: { principal: summaryOwner },
@@ -493,7 +493,7 @@ describe('emitted browser JavaScript syntax', () => {
   it('parses the complete emitted script rather than the TypeScript template source', async () => {
     expect(() => new Script(BROWSER_REALTIME_SCRIPT, { filename: 'xpanel-realtime-client.js' })).not.toThrow()
     expect(() => new Script(LOGIN_CLIENT_SCRIPT, { filename: 'xpanel-login-client.js' })).not.toThrow()
-    const html = renderWebApp({ surface: 'login' })
+    const html = renderWebApp({ uiTheme: 'classic', surface: 'login' })
     const src = /<script id="xpanel-login-client" src="([^"]+)"><\/script>/.exec(html)?.[1]
     expect(src).toMatch(/^\/assets\/login-client\.js\?v=[0-9a-f]{16}$/)
     const emitted = await serveStaticAsset(new URL(src!, 'https://panel.example.test').pathname)!.text()
@@ -513,7 +513,7 @@ describe('bounded workspace summary DTO', () => {
   const plan = { id: summaryPlan.id, name: summaryPlan.name }
 
   it.each(['en', 'ar'] as const)('renders a minimal DTO in %s without service-state fields', locale => {
-    const html = renderWebApp({ surface: 'xpanel', locale, visibility: { principal: summaryOwner }, workspaceSummary: { account, plan } })
+    const html = renderWebApp({ uiTheme: 'classic', surface: 'xpanel', locale, visibility: { principal: summaryOwner }, workspaceSummary: { account, plan } })
     expect(html).toContain('owner7.example.test')
     expect(html).toContain('Configured plan7')
     expect(html.match(/data-workspace-field=/g)).toHaveLength(5)
@@ -521,7 +521,7 @@ describe('bounded workspace summary DTO', () => {
   })
 
   it('does not fall back to a larger provider payload when the explicit DTO is empty and the account is not active', () => {
-    const html = renderWebApp({ surface: 'xpanel', visibility: { principal: summaryOwner }, workspaceSummary: {}, panel: { account: { ...summaryAccount, status: 'suspended' }, plan: summaryPlan } })
+    const html = renderWebApp({ uiTheme: 'classic', surface: 'xpanel', visibility: { principal: summaryOwner }, workspaceSummary: {}, panel: { account: { ...summaryAccount, status: 'suspended' }, plan: summaryPlan } })
     expect(html).toContain('data-workspace-account-empty="true"')
     expect(html).not.toContain(summaryAccount.primaryDomain)
     expect(html).not.toContain(summaryPlan.name)
@@ -531,20 +531,20 @@ describe('bounded workspace summary DTO', () => {
     { kind: 'user', id: 'foreign-principal', username: 'foreign7', accountId: 'foreign-account' },
     { kind: 'reseller', id: 'foreign-reseller', username: 'foreign7' },
   ] satisfies Principal[])('refuses a foreign DTO for $kind without relying on its provider', principal => {
-    const html = renderWebApp({ surface: 'xpanel', visibility: { principal }, workspaceSummary: { account, plan } })
+    const html = renderWebApp({ uiTheme: 'classic', surface: 'xpanel', visibility: { principal }, workspaceSummary: { account, plan } })
     expect(html).toContain('data-workspace-account-empty="true"')
     expect(html).not.toContain(account.primaryDomain)
     expect(html).not.toContain(plan.name)
   })
 
   it('does not label an account with a different plan ID', () => {
-    const html = renderWebApp({ surface: 'xpanel', visibility: { principal: summaryOwner }, workspaceSummary: { account, plan: { id: 'wrong-plan', name: 'Foreign plan marker' } } })
+    const html = renderWebApp({ uiTheme: 'classic', surface: 'xpanel', visibility: { principal: summaryOwner }, workspaceSummary: { account, plan: { id: 'wrong-plan', name: 'Foreign plan marker' } } })
     expect(html).not.toContain('Foreign plan marker')
     expect(html).toContain('Unavailable')
   })
 
   it('escapes account and plan text in the minimal DTO', () => {
-    const html = renderWebApp({ surface: 'xpanel', visibility: { principal: summaryOwner }, workspaceSummary: { account: { ...account, primaryDomain: '<img src=x onerror=alert(1)>' }, plan: { ...plan, name: '<script>marker</script>' } } })
+    const html = renderWebApp({ uiTheme: 'classic', surface: 'xpanel', visibility: { principal: summaryOwner }, workspaceSummary: { account: { ...account, primaryDomain: '<img src=x onerror=alert(1)>' }, plan: { ...plan, name: '<script>marker</script>' } } })
     expect(html).toContain('&lt;img src=x onerror=alert(1)&gt;')
     expect(html).toContain('&lt;script&gt;marker&lt;/script&gt;')
     expect(html).not.toContain('<img src=x')

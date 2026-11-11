@@ -1,7 +1,7 @@
 import { DNSSEC_ALGORITHM_CHOICES, DNSSEC_KEY_TYPE_CHOICES, DNSSEC_LAYOUT_CHOICES, DNSSEC_NSEC_CHOICES } from '../../../../../models/dnssec.ts'
 import { card } from '../../../components/index.ts'
 import { escapeHtml } from '../../../html.ts'
-import { serviceButton, serviceFacts, serviceField } from './common.ts'
+import { phoneLabels, serviceButton, serviceFacts, serviceField } from './common.ts'
 
 type Translate = (message: string) => string
 
@@ -19,7 +19,7 @@ export function renderV2DnssecCard(t: Translate, input: { zones: readonly string
   const options = (items: readonly (readonly [string, string])[]) => items.map(([key, label]) => `<option value="${key}">${escapeHtml(t(label))}</option>`).join('')
   const select = (id: string, label: string, hook: string, html: string) => serviceField(id, t(label), `<select id="${id}" ${hook}${off ? ' disabled' : ''}>${html}</select>`)
   const zones = input.zones.map(zone => `<option value="${escapeHtml(zone)}"${zone === input.selected ? ' selected' : ''}>${escapeHtml(zone)}</option>`).join('') || `<option value="">${escapeHtml(t('No account domain is available'))}</option>`
-  const table = (label: string, heads: readonly string[], hook: string) => `<div class="v2-panel-service__table" tabindex="0" role="region" aria-label="${escapeHtml(t(label))}"><table class="v2-table"><thead><tr>${heads.map(head => `<th scope="col">${escapeHtml(t(head))}</th>`).join('')}</tr></thead><tbody ${hook}></tbody></table></div>`
+  const table = (label: string, heads: readonly string[], hook: string) => `<div class="v2-panel-service__table" tabindex="0" role="region" aria-label="${escapeHtml(t(label))}"><table class="v2-table"${phoneLabels(heads.map(head => t(head)))}><thead><tr>${heads.map(head => `<th scope="col">${escapeHtml(t(head))}</th>`).join('')}</tr></thead><tbody ${hook}></tbody></table></div>`
   const notRead = escapeHtml(t('Not read'))
   return card({
     title: t('DNSSEC'), titleId: 'v2-dnssec-heading',
@@ -33,7 +33,7 @@ export function renderV2DnssecCard(t: Translate, input: { zones: readonly string
       ])
       + `<p data-dnssec-status role="status">${escapeHtml(t(input.connected ? 'Reading DNSSEC keys…' : 'DNSSEC is unavailable here. No keys were read or changed.'))}</p>`
       + table('DNSSEC keys', ['ID', 'Type', 'Algorithm', 'Key tag', 'State', 'Actions'], 'data-dnssec-keys')
-      + `<h3>${escapeHtml(t('DS records for the registrar'))}</h3><pre class="v2-mono" dir="ltr" tabindex="0" style="overflow-x:auto;white-space:pre" data-dnssec-ds>${escapeHtml(t('No DS record is published yet.'))}</pre>`
+      + `<h3>${escapeHtml(t('DS records for the registrar'))}</h3><pre class="v2-mono v2-panel-service__scroll" dir="auto" tabindex="0" data-dnssec-ds>${escapeHtml(t('No DS record is published yet.'))}</pre>`
       + `<div class="v2-panel-service__fields">${select('v2-dnssec-algorithm', 'Algorithm', 'data-dnssec-algorithm', options(DNSSEC_ALGORITHM_CHOICES))}${select('v2-dnssec-layout', 'Key layout', 'data-dnssec-layout', options(DNSSEC_LAYOUT_CHOICES))}${select('v2-dnssec-add-type', 'New key type', 'data-dnssec-add-type', options(DNSSEC_KEY_TYPE_CHOICES))}${select('v2-dnssec-nsec-mode', 'Denial of existence', 'data-dnssec-nsec-mode', options(DNSSEC_NSEC_CHOICES))}</div>`
       + `<div class="v2-panel-service__actions">${serviceButton(t('Enable DNSSEC'), { 'data-dnssec-enable': true }, off, true)}${serviceButton(t('Add inactive key'), { 'data-dnssec-add-key': true }, off)}${serviceButton(t('Save denial of existence'), { 'data-dnssec-nsec-save': true }, off)}</div>`
       + `<h3>${escapeHtml(t('Key rollovers'))}</h3>` + table('Key rollovers', ['Keys', 'Type', 'Not before (UTC)', 'Action'], 'data-dnssec-rollovers')

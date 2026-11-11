@@ -100,6 +100,7 @@ describe('v2 account email tool family', () => {
     for (const hook of ['data-mailing-lists', 'data-mailing-lists-rows', 'data-mailing-list-status', 'data-ml-name', 'data-ml-domain', 'data-ml-members', 'data-ml-moderation', 'data-ml-archive', 'data-ml-create', 'data-mailx-lists-refresh', 'data-mailx-lists-rows', 'data-mailx-lists-status', 'data-mailx-lists-apply']) expect(by(html, hook), hook).toBeDefined()
     expect(by(html, 'data-mailx-tools')?.attrs.get('data-mailx-tools-section')).toBe('lists')
     expect(html).toContain('Posting moderation')
+    expect(html).not.toContain('<style')
     expect(by(html, 'data-mailx-lists-apply')?.attrs.has('disabled')).toBe(true)
   })
 
@@ -121,6 +122,10 @@ describe('v2 account email tool family', () => {
     expect(by(html, 'data-mailx-tools')?.attrs.get('data-mailx-tools-section')).toBe('spam')
     expect(html).toContain('Mailbox spam state has not been read.')
     expect(by(html, 'data-boxtrapper')?.attrs.get('data-boxtrapper-scope')).toBe('owner')
+    // The held-mail read failures have their own line beside the table; the fragment carries no style block.
+    expect(by(html, 'data-boxtrapper-queue-status')?.attrs.has('hidden')).toBe(true)
+    expect(html.indexOf('data-boxtrapper-queue-status')).toBeGreaterThan(html.indexOf('data-boxtrapper-queue>'))
+    expect(html).not.toContain('<style')
     expect(by(html, 'data-mailx-tools-apply')?.attrs.has('disabled')).toBe(true)
   })
 
@@ -183,6 +188,7 @@ describe('v2 account email tool family', () => {
       expect(by(renderV2PanelMailingLists(state, auth), 'data-ml-create')?.attrs.has('disabled')).toBe(true)
       expect(by(renderV2PanelSpamFilters(state, auth), 'data-spam-save')?.attrs.has('disabled')).toBe(true)
       expect(by(renderV2PanelEmailFilters(state, auth), 'data-filter-new')?.attrs.has('disabled')).toBe(true)
+      expect(by(renderV2PanelEmailFilters(state, auth), 'data-filter-editor')).toBeUndefined()
       expect(renderV2PanelCalendarsContacts(state, auth)).toContain('Collection settings')
     }
   })

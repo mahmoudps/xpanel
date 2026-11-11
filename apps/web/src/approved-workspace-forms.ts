@@ -226,6 +226,8 @@ function bindApprovedWorkspaceForms(confirmDelete?: ConfirmDelete): void {
           if (!Object.hasOwn(PHP_FIELD_TYPES, control.name)) return
           const [parent, child] = control.name.split('.')
           const value = child && workspaceRecord(php[parent!]) ? (php[parent!] as JsonRecord)[child] : php[parent!]
+          // A radio group keeps each choice's own value: the saved value picks the checked one.
+          if (control instanceof HTMLInputElement && control.type === 'radio') { control.checked = control.value === (value === null || value === undefined ? '' : String(value)); control.defaultChecked = control.checked; return }
           control.value = value === null || value === undefined ? '' : String(value)
           if (control instanceof HTMLInputElement) control.defaultValue = control.value
           else Array.from(control.options).forEach(option => { option.defaultSelected = option.selected })

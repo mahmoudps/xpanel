@@ -135,6 +135,20 @@ describe('v2 xWHM mail documents', () => {
     expect(node(items, 'data-mail-log-detail-body').attrs.has('hidden')).toBe(true)
   })
 
+  it('gives the monitor the timeline template its controller requires, and lays the selected delivery under the results', () => {
+    for (const route of ['/whm/email/monitor', '/whm/email/delivery']) {
+      const items = nodes(route), root = items.findIndex(item => item.attrs.has('data-whm-mail-log'))
+      const template = items.findIndex(item => item.tag === 'template' && item.attrs.get('data-xp-template') === 'whm-mail-timeline-button')
+      expect(template, route).toBeGreaterThan(root)
+      let at = template
+      while (at >= 0 && at !== root) at = items[at]!.parent
+      expect(at, route).toBe(root)
+    }
+    const delivery = nodes('/whm/email/delivery')
+    expect(delivery.some(item => item.tag === 'aside')).toBe(false)
+    expect(delivery.findIndex(item => item.attrs.has('data-mail-log-detail'))).toBeGreaterThan(delivery.findIndex(item => item.attrs.has('data-mail-log-rows')))
+  })
+
   it('keeps observed mail-flow counters unknown and all three real rankings', () => {
     const html = render('/whm/email/monitor'), items = parseMarkup(html)
     expect(items.filter(item => item.attrs.has('data-mail-monitor-count'))).toHaveLength(6)

@@ -83,11 +83,37 @@ function bindWhmDomains(askDialog: ((options: Record<string, unknown>) => Promis
       const page = root.closest('[data-whm-detail-route="/whm/domains"]')
       const body = page?.querySelector<HTMLTableSectionElement>('[data-whm-filter-table] tbody')
       if (!body || !view || !account) return
+      // A theme may own the row: its whm-domain-row template is filled by slot name. Without one the cells below are built.
+      const model = page!.querySelector<HTMLTemplateElement>('template[data-xp-template="whm-domain-row"]')?.content.firstElementChild
+      const themed = model instanceof HTMLTableRowElement && model.querySelector('[data-whm-filter-row]') ? model : null
       for (const row of Array.from(body.rows)) {
         const record = row.querySelector<HTMLElement>('[data-whm-filter-row]')
         if (!record || record.dataset.account === account.username) row.remove()
       }
       for (const row of view.domains) {
+        // Same state the server-rendered row shows: suspension first, then a passed expiry.
+        const state = row.suspended ? t('Suspended') : row.expiresAt !== null && Date.parse(row.expiresAt) <= Date.now() ? t('Expired') : t('Active desired state')
+        const select = (box: HTMLInputElement): void => { box.type = 'checkbox'; box.dataset.domainSelect = row.id; box.dataset.domainName = row.name; box.setAttribute('aria-label', t('Select {name}', { name: row.name })) }
+        if (themed) {
+          const tr = themed.cloneNode(true) as HTMLTableRowElement, name = tr.querySelector<HTMLElement>('[data-whm-filter-row]')!
+          name.dataset.kind = row.kind; name.dataset.account = account.username
+          name.dataset.ssl = row.certificateId ? 'assigned' : 'unassigned'; name.dataset.php = row.php.version
+          name.dataset.status = row.suspended ? 'suspended' : 'active'; name.dataset.search = row.name + ' ' + account.username
+          const values: Record<string, string> = {
+            name: row.name, docroot: row.docRoot, kind: row.kind, wildcard: row.wildcard ? t('Yes') : t('No'), account: account.username,
+            ssl: row.certificateId ? t('Assigned') : t('Unassigned'), php: domainPhpLabel(row), 'php-version': row.php.version, 'php-handler': row.php.handler,
+            status: state, 'site-type': row.siteType,
+          }
+          tr.querySelectorAll<HTMLElement>('[data-xp-slot]').forEach(slot => { const value = values[slot.dataset.xpSlot ?? '']; if (value !== undefined) slot.textContent = value })
+          const open = tr.querySelector<HTMLElement>('[data-xp-action="open"]')
+          if (open) { open.dataset.whmDomainOpen = row.id; open.dataset.accountId = account.id; if (open instanceof HTMLButtonElement) open.disabled = false }
+          const box = tr.querySelector<HTMLInputElement>('input[data-xp-action="select"]')
+          if (!page!.querySelector('[data-domain-bulk]')) box?.remove()
+          else if (box) select(box)
+          else { const made = document.createElement('input'); select(made); tr.cells[0]?.prepend(made, ' ') }
+          body.append(tr)
+          continue
+        }
         const tr = document.createElement('tr'), name = document.createElement('span'), isolated = document.createElement('bdi')
         name.dataset.whmFilterRow = ''; name.dataset.kind = row.kind; name.dataset.account = account.username
         name.dataset.ssl = row.certificateId ? 'assigned' : 'unassigned'; name.dataset.php = row.php.version
@@ -95,11 +121,11 @@ function bindWhmDomains(askDialog: ((options: Record<string, unknown>) => Promis
         isolated.dir = 'ltr'; isolated.textContent = row.name; name.append(isolated)
         const nameCell = document.createElement('td'); nameCell.append(name); tr.append(nameCell)
         if (page!.querySelector('[data-domain-bulk]')) { const box = document.createElement('input'); box.type = 'checkbox'; box.dataset.domainSelect = row.id; box.dataset.domainName = row.name; box.setAttribute('aria-label', t('Select {name}', { name: row.name })); nameCell.prepend(box, ' ') }
-        const values: [string, boolean][] = [[account.username, false], [row.kind, false], [row.siteType, false], [row.docRoot, true], [domainPhpLabel(row), row.siteType === 'php'], [row.wildcard ? t('Yes') : t('No'), false], [row.certificateId ? t('Assigned') : t('Unassigned'), false], [row.suspended ? t('Suspended') : t('Active desired state'), false]]
+        const values: [string, boolean][] = [[account.username, false], [row.kind, false], [row.siteType, false], [row.docRoot, true], [domainPhpLabel(row), row.siteType === 'php'], [row.wildcard ? t('Yes') : t('No'), false], [row.certificateId ? t('Assigned') : t('Unassigned'), false], [state, false]]
         for (const [value, technical] of values) { const td = document.createElement('td'); if (technical) { const bdi = document.createElement('bdi'); bdi.dir = 'ltr'; bdi.textContent = value; td.append(bdi) } else td.textContent = value; tr.append(td) }
         body.append(tr)
       }
-      if (!body.rows.length) { const tr = document.createElement('tr'), td = document.createElement('td'); td.colSpan = 9; td.textContent = t('No loaded domain rows.'); tr.append(td); body.append(tr) }
+      if (!body.rows.length) { const tr = document.createElement('tr'), td = document.createElement('td'); td.colSpan = themed?.cells.length ?? 9; td.textContent = t('No loaded domain rows.'); tr.append(td); body.append(tr) }
       page!.dispatchEvent(new CustomEvent('xpanel:whm-domain-rows-changed', { bubbles: true }))
     }
     const paint = (state: DomainWorkspaceState): void => {
@@ -205,6 +231,19 @@ function bindWhmDomains(askDialog: ((options: Record<string, unknown>) => Promis
     rootInput.addEventListener('input', () => { if (manageable() && !rootInput.disabled) workspace?.editRoot(rootInput.value) })
     settingsForm.addEventListener('submit', event => { event.preventDefault(); if (manageable() && settingsForm instanceof HTMLFormElement && settingsForm.reportValidity()) void reviewMutation('root') })
     accountSelect.addEventListener('change', () => { void switchAccount() })
+    // A row opener selects its domain in this card, switching to the row's account first when it differs.
+    root.closest('[data-whm-detail-route="/whm/domains"]')?.addEventListener('click', event => {
+      const opener = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-whm-domain-open]') : null
+      if (!opener || blocked() || confirming) return
+      void (async () => {
+        const owner = opener.dataset.accountId
+        if (owner && owner !== account?.id) { accountSelect.value = owner; if (accountSelect.value !== owner) { if (account) accountSelect.value = account.id; return } await switchAccount() }
+        const id = opener.dataset.whmDomainOpen
+        if (owner && owner !== account?.id || !id || !workspace?.state.observed?.domains.some(row => row.id === id)) return
+        await workspace.select(id, discard)
+        domainSelect.focus()
+      })()
+    })
     domainSelect.addEventListener('change', () => { const id = domainSelect.value; domainSelect.value = workspace?.state.selected?.id ?? ''; if (blocked() || !id || confirming) return; void workspace?.select(id, discard) })
     button('refresh').addEventListener('click', () => { if (!blocked() && !confirming) void workspace?.refresh() })
     button('reload').addEventListener('click', () => { if (!blocked() && !confirming) void workspace?.reload(discard) })

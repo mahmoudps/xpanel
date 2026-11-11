@@ -12425,9 +12425,9 @@ export const AUTHORITATIVE_CONTROLLER_DECLARATIONS: readonly ControllerDeclarati
             ],
             "occurrence": "first",
             "attributes": {
-              "type": "datetime-local",
+              "type": "text",
               "dir": "ltr",
-              "step": "60"
+              "pattern": "\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}( UTC)?"
             }
           },
           {
@@ -12437,9 +12437,9 @@ export const AUTHORITATIVE_CONTROLLER_DECLARATIONS: readonly ControllerDeclarati
             ],
             "occurrence": "first",
             "attributes": {
-              "type": "datetime-local",
+              "type": "text",
               "dir": "ltr",
-              "step": "60"
+              "pattern": "\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}( UTC)?"
             }
           },
           {

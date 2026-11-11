@@ -7,6 +7,9 @@ import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as canonicalFormatDispl
 import type { MessageValues, Locale } from './i18n.ts'
 import './i18n.ts'
 import { frameAccess as canonicalFrameAccess, withFrameRequest } from './read-only-frame.ts'
+import { ASCII_BYTES_BINDING, formatIsolatedBytes as canonicalFormatClientBytes } from './display-format.ts'
+// Module-local alias: the binding source defines it again from ASCII_BYTES_BINDING.
+const formatClientBytes = canonicalFormatClientBytes
 const formatDisplayDateTime = canonicalFormatDisplayDateTime
 const frameAccess = canonicalFrameAccess
 
@@ -94,7 +97,7 @@ function bindAccountSitePublisher(askDialog: ((options: Record<string, unknown>)
       if (!view) { const row = cloneClientTemplate(emptyTemplate, 'tr', ['message']); clientTemplateSlot(row, 'message', 'td').textContent = t('The current index files have not been read.'); files.append(row) }
       for (const file of view?.files ?? []) {
         const row = cloneClientTemplate(rowTemplate, 'tr', ['name', 'state', 'size'])
-        for (const [slot, text] of [['name', file.name], ['state', file.exists ? t('Present') : t('Absent')], ['size', String(file.sizeBytes)]] as const) clientTemplateSlot(row, slot).textContent = text
+        for (const [slot, text] of [['name', file.name], ['state', file.exists ? t('Present') : t('Absent')], ['size', formatClientBytes(file.sizeBytes)]] as const) clientTemplateSlot(row, slot).textContent = text
         files.append(row)
       }
       if (view && !view.capabilities.canPublish && status.dataset.state === 'read') note('read', t('A previous operation stopped. Restore its backup before publishing again.'))
@@ -151,4 +154,4 @@ function bindAccountSitePublisher(askDialog: ((options: Record<string, unknown>)
   })
 }
 
-export const ACCOUNT_SITE_PUBLISHER_CLIENT_BINDING = withFrameRequest(`(()=>{${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const SITEPUB_ID=${SITEPUB_ID.toString()};const SITEPUB_HASH=${SITEPUB_HASH.toString()};const SITEPUB_NAMES=${JSON.stringify(SITEPUB_NAMES)};const sitepubObject=${sitepubObject.toString()};const sitepubExact=${sitepubExact.toString()};const sitepubText=${sitepubText.toString()};const sitepubTime=${sitepubTime.toString()};const readSitePublisherView=${readSitePublisherView.toString()};const readSitePublisherPreview=${readSitePublisherPreview.toString()};const sitePublisherUncertain=${sitePublisherUncertain.toString()};return ${bindAccountSitePublisher.toString()};})()`)
+export const ACCOUNT_SITE_PUBLISHER_CLIENT_BINDING = withFrameRequest(`(()=>{const formatClientBytes=${ASCII_BYTES_BINDING};${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const SITEPUB_ID=${SITEPUB_ID.toString()};const SITEPUB_HASH=${SITEPUB_HASH.toString()};const SITEPUB_NAMES=${JSON.stringify(SITEPUB_NAMES)};const sitepubObject=${sitepubObject.toString()};const sitepubExact=${sitepubExact.toString()};const sitepubText=${sitepubText.toString()};const sitepubTime=${sitepubTime.toString()};const readSitePublisherView=${readSitePublisherView.toString()};const readSitePublisherPreview=${readSitePublisherPreview.toString()};const sitePublisherUncertain=${sitePublisherUncertain.toString()};return ${bindAccountSitePublisher.toString()};})()`)

@@ -158,7 +158,6 @@ export const EDITOR_LAYOUT_CSS = `.v2-editor{display:flex;background:var(--code)
 .v2-editor__gutter{flex:none;display:flex;flex-direction:column;align-items:flex-end;min-inline-size:56px;padding:var(--space-2) 12px;border-inline-end:1px solid var(--nav-line);font:13px/22px var(--font-mono);color:var(--code-muted);user-select:none}
 .v2-editor>.v2-editor__input{flex:1 1 auto;min-width:0;min-height:0;padding:var(--space-2);border:0;border-radius:0;background:transparent;color:var(--code-text);font:13px/22px var(--font-mono);white-space:pre;overflow-x:auto;resize:vertical}
 .v2-editor>.v2-editor__input:focus-visible{outline-color:var(--nav-focus);outline-offset:-2px}
-.v2-card--flush>.v2-card__body>.v2-tabs{padding-inline:var(--space-3)}
 .v2-tabpanel:has(>:is(.v2-editor,.v2-diff)){padding-top:0}
 .v2-diff{background:var(--code);color:var(--code-text)}
 .v2-diff__lines{display:grid;grid-template-columns:auto 1fr;min-inline-size:100%;margin:0;padding:var(--space-2) 0;overflow-x:auto;font:13px/22px var(--font-mono);color:var(--code-text)}

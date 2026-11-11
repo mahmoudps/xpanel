@@ -68,6 +68,17 @@ const corruptSecurityTemplates: readonly (readonly [string, (template: HTMLTempl
 ]
 
 describe('security facts from the selected theme', () => {
+  it.each(['classic', 'v2'] as const)('writes the %s finding totals as text into the count slots a theme provides', async theme => {
+    mountSecurity(theme)
+    const current = payload(); current.checks[0] = { ...current.checks[0]!, state: 'observed-ok', value: 'active' }; current.checks[1] = { ...current.checks[1]!, state: 'attention', value: 'no' }
+    const slots = () => Object.fromEntries([...document.querySelectorAll<HTMLElement>('[data-whm-security-count]')].map(slot => [slot.dataset.whmSecurityCount, slot.textContent]))
+    if (theme === 'v2') expect(slots()).toEqual({ all: '—', 'observed-ok': '—', attention: '—', unavailable: '—' })
+    boot(vi.fn(async () => current))
+    await vi.waitFor(() => expect(status().dataset.state).toBe('read'))
+    expect(slots()).toEqual(theme === 'v2' ? { all: '5', 'observed-ok': '1', attention: '1', unavailable: '3' } : {})
+    const tiles = [...document.querySelectorAll<HTMLElement>('[data-whm-security-count]')].map(slot => slot.closest('.v2-kpi')!)
+    expect(tiles.filter(tile => tile.querySelector('.v2-kpi__note, .v2-kpi__value--text'))).toEqual([])
+  })
   it.each(['classic', 'v2'] as const)('uses the real %s renderer and emitted binding for technical facts and unknown text in both locales', async theme => {
     for (const locale of ['en', 'ar'] as const) {
       const root = mountSecurity(theme, locale), current = payload(); current.configuration.engine = '<img src=x>'

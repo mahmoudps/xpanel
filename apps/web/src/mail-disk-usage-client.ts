@@ -2,6 +2,9 @@ import type { MessageValues } from './i18n.ts'
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
 import { frameAccess as canonicalFrameAccess, withFrameRequest } from './read-only-frame.ts'
+import { ASCII_BYTES_BINDING, formatIsolatedBytes as canonicalFormatClientBytes } from './display-format.ts'
+// Module-local alias: the binding source defines it again from ASCII_BYTES_BINDING.
+const formatClientBytes = canonicalFormatClientBytes
 const frameAccess = canonicalFrameAccess
 
 const formatMailDateTime = formatDisplayDateTime
@@ -79,7 +82,7 @@ export function readCleanupResult(value: unknown, folder: string, requested: num
 
 function bindMailDiskUsage(): void {
   const t = (message: string, values?: MessageValues): string => xpT(message, values)
-  const bytes = (value: number): string => value < 1024 ? value + ' B' : value < 1048576 ? (value / 1024).toFixed(1) + ' KiB' : value < 1073741824 ? (value / 1048576).toFixed(1) + ' MiB' : (value / 1073741824).toFixed(2) + ' GiB'
+  const bytes = (value: number): string => formatClientBytes(value)
   const bdi = (value: string, dir = 'ltr'): HTMLElement => { const item = document.createElement('bdi'); item.dir = dir; item.textContent = value; return item }
   const notMeasured: Record<string, string> = { 'too-many-messages': t('Not measured: more than 50000 messages'), changed: t('Not measured: the folder changed while it was read'), unavailable: t('Not measured: the server did not answer') }
   document.querySelectorAll<HTMLElement>('[data-mail-disk-usage]').forEach(root => {
@@ -237,4 +240,4 @@ function bindMailDiskUsage(): void {
   })
 }
 
-export const MAIL_DISK_USAGE_CLIENT_BINDING = withFrameRequest(`(()=>{const formatMailDateTime=${DISPLAY_DATETIME_BINDING};const usageCount=${usageCount.toString()};const usageWire=${usageWire.toString()};const readMailboxUsage=${readMailboxUsage.toString()};const readCleanupPreview=${readCleanupPreview.toString()};const readCleanupResult=${readCleanupResult.toString()};return ${bindMailDiskUsage.toString()};})()`)
+export const MAIL_DISK_USAGE_CLIENT_BINDING = withFrameRequest(`(()=>{const formatClientBytes=${ASCII_BYTES_BINDING};const formatMailDateTime=${DISPLAY_DATETIME_BINDING};const usageCount=${usageCount.toString()};const usageWire=${usageWire.toString()};const readMailboxUsage=${readMailboxUsage.toString()};const readCleanupPreview=${readCleanupPreview.toString()};const readCleanupResult=${readCleanupResult.toString()};return ${bindMailDiskUsage.toString()};})()`)

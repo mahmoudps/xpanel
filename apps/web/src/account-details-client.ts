@@ -4,7 +4,8 @@
 export function bindAccountDetails(): () => void {
   const rootSelector = '[data-account-detail-workspace]'
   type DetailRoot = HTMLElement & { __xpAccountDetailsCleanup?: () => void }
-  type Entry = { key: string; opener: HTMLButtonElement; row: HTMLElement; panel: HTMLElement }
+  // opener is the first opener of the row and the focus-return target; others open the same panel.
+  type Entry = { key: string; opener: HTMLButtonElement; others: HTMLButtonElement[]; row: HTMLElement; panel: HTMLElement }
   const roots = [...document.querySelectorAll<DetailRoot>(rootSelector)]
   if (roots.length !== 1) return () => {}
   const root = roots[0]!
@@ -20,16 +21,15 @@ export function bindAccountDetails(): () => void {
   const rows = own('[data-account-row]')
   if (!idIsUnique() || !aside.hidden || closes.length !== 1 || !(closes[0] instanceof HTMLButtonElement)
     || closes[0].type !== 'button' || closes[0].disabled || !aside.contains(closes[0])
-    || openers.length !== panels.length || rows.length !== openers.length || typeof MutationObserver !== 'function') return () => {}
+    || rows.length !== panels.length || typeof MutationObserver !== 'function') return () => {}
   const closeButton = closes[0]
-  const keys = new Set<string>()
   const entries: Entry[] = []
   for (const candidate of openers) {
     const key = candidate.getAttribute('data-account-detail-open') ?? ''
     const matchingPanels = panels.filter(panel => panel.getAttribute('data-account-detail-for') === key)
     const matchingRows = rows.filter(row => row.getAttribute('data-account-row') === key)
     if (!(candidate instanceof HTMLButtonElement) || candidate.type !== 'button'
-      || !/^[a-z][a-z0-9]{0,15}$/.test(key) || keys.has(key)
+      || !/^[a-z][a-z0-9]{0,15}$/.test(key)
       || candidate.getAttribute('aria-controls') !== aside.id || candidate.getAttribute('aria-expanded') !== 'false'
       || candidate.hasAttribute('data-action') || candidate.hasAttribute('data-handoff')
       || matchingPanels.length !== 1 || matchingRows.length !== 1) return () => {}
@@ -37,9 +37,11 @@ export function bindAccountDetails(): () => void {
     if (panel.tagName !== 'SECTION' || !panel.hidden || !aside.contains(panel)
       || row.tagName !== 'TR' || candidate.closest('[data-account-row]') !== row || aside.contains(row)
       || panels.some(other => other !== panel && other.contains(panel))) return () => {}
-    keys.add(key)
-    entries.push({ key, opener: candidate, row, panel })
+    const known = entries.find(entry => entry.key === key)
+    if (known) known.others.push(candidate)
+    else entries.push({ key, opener: candidate, others: [], row, panel })
   }
+  if (entries.length !== panels.length) return () => {}
   let active: Entry | undefined
   let disposed = false
   const visible = (node: HTMLElement): boolean => node.isConnected && !node.closest('[hidden], [inert], [aria-hidden="true"]')
@@ -53,7 +55,7 @@ export function bindAccountDetails(): () => void {
     && entry.opener.getAttribute('data-account-detail-open') === entry.key
     && entry.opener.getAttribute('aria-controls') === aside.id && entry.panel.getAttribute('data-account-detail-for') === entry.key
     && own('[data-account-row]').filter(node => node.getAttribute('data-account-row') === entry.key).length === 1
-    && own('[data-account-detail-open]').filter(node => node.getAttribute('data-account-detail-open') === entry.key).length === 1
+    && own('[data-account-detail-open]').find(node => node.getAttribute('data-account-detail-open') === entry.key) === entry.opener
     && own('[data-account-detail-for]').filter(node => node.getAttribute('data-account-detail-for') === entry.key).length === 1
   const close = (returnFocus: boolean): void => {
     const previous = active
@@ -62,7 +64,7 @@ export function bindAccountDetails(): () => void {
     root.removeAttribute('data-account-detail-selected')
     for (const entry of entries) {
       entry.panel.hidden = true
-      entry.opener.setAttribute('aria-expanded', 'false')
+      for (const opener of [entry.opener, ...entry.others]) opener.setAttribute('aria-expanded', 'false')
     }
     if (!returnFocus || !previous) return
     if (owned(previous) && visible(previous.opener) && !previous.opener.disabled) previous.opener.focus()
@@ -72,21 +74,27 @@ export function bindAccountDetails(): () => void {
       else if (root.isConnected) root.focus()
     }
   }
-  const handlers = entries.map(entry => {
+  const handlers = entries.flatMap(entry => [entry.opener, ...entry.others].map(opener => {
     const open = (): void => {
-      if (disposed || !owned(entry) || !visible(entry.row) || !visible(entry.opener) || entry.opener.disabled) return
+      if (disposed || !owned(entry) || !visible(entry.row) || !visible(entry.opener) || entry.opener.disabled || opener.disabled || !opener.isConnected) return
       for (const item of entries) {
         item.panel.hidden = item !== entry
-        item.opener.setAttribute('aria-expanded', item === entry ? 'true' : 'false')
+        for (const other of [item.opener, ...item.others]) other.setAttribute('aria-expanded', item === entry ? 'true' : 'false')
       }
       active = entry
       aside.hidden = false
       root.setAttribute('data-account-detail-selected', entry.key)
       closeButton.focus()
+      // An opener may name the part of the panel it is about; that part is brought into view.
+      const wanted = opener.getAttribute('data-account-detail-section')
+      const part = wanted ? [...entry.panel.querySelectorAll<HTMLElement>('[data-account-detail-section]')].find(node => node.getAttribute('data-account-detail-section') === wanted) : undefined
+      // A folded part, or one inside a fold, opens first so the scroll lands on its content.
+      for (let node: HTMLElement | null = part ?? null; node && node !== entry.panel; node = node.parentElement) if (node instanceof HTMLDetailsElement) node.open = true
+      if (part && typeof part.scrollIntoView === 'function') part.scrollIntoView({ block: 'start' })
     }
-    entry.opener.addEventListener('click', open)
-    return { opener: entry.opener, open }
-  })
+    opener.addEventListener('click', open)
+    return { opener, open }
+  }))
   const dismiss = (): void => { close(true) }
   const leave = (event: PageTransitionEvent): void => { if (!event.persisted) dispose() }
   const escape = (event: KeyboardEvent): void => {

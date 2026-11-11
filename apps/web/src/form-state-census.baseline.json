@@ -51,15 +51,7 @@
     "panel-detail-remote-database-access-1 c",
     "panel-detail-remote-database-remove-0 c",
     "v2-db-create-name vV",
-    "v2-db-grant-database vV",
-    "v2-db-grant-user vV",
-    "v2-db-overview-database vV",
-    "v2-db-remote-comment vV",
-    "v2-db-remote-host vV",
-    "v2-db-wizard-name vV",
-    "v2-dbu-create-name vV",
-    "v2-dbu-initial-database vV",
-    "v2-dbu-reset-user vV"
+    "v2-db-wizard-name vV"
   ],
   "/databases/postgresql": [
     "db-wizard-name C"
@@ -225,8 +217,6 @@
     "panel-detail-backup-wizard-1 cC",
     "v2-account-backup-confirmation vV",
     "v2-account-backup-selected vV",
-    "v2-website-domain vV",
-    "v2-website-notify vV",
     "website-domain C",
     "website-notify C"
   ],
@@ -408,14 +398,7 @@
     "panel-detail-php-ini-2 c",
     "panel-detail-php-ini-3 c",
     "panel-detail-php-pool-0 c",
-    "panel-detail-php-save-target-0 cC",
-    "v2-php-display-errors vV",
-    "v2-php-ini-max_execution_time vV",
-    "v2-php-ini-memory_limit vV",
-    "v2-php-ini-post_max_size vV",
-    "v2-php-ini-upload_max_filesize vV",
-    "v2-php-max-input vV",
-    "v2-php-timezone vV"
+    "panel-detail-php-save-target-0 cC"
   ],
   "/software/store": [
     "v2-store-category V"
@@ -690,13 +673,11 @@
     "whm-reseller-detail-0-pkg-census-plan cC"
   ],
   "/whm/security": [
-    "v2-security-allowlist vV",
     "v2-security-body vV",
     "v2-security-burst vV",
     "v2-security-denied-addresses vV",
     "v2-security-denied-agents vV",
     "v2-security-denied-paths vV",
-    "v2-security-entrance vV",
     "v2-security-rate vV",
     "v2-security-token-addresses vV",
     "v2-security-token-expiry vV",
@@ -810,12 +791,6 @@
     "v2-php-post_max_size vV",
     "v2-php-selected-version vV",
     "v2-php-upload_max_filesize vV",
-    "v2-php-v2-php-pool-idle vV",
-    "v2-php-v2-php-pool-max-children vV",
-    "v2-php-v2-php-pool-max-requests vV",
-    "v2-php-v2-php-pool-max-spare vV",
-    "v2-php-v2-php-pool-min-spare vV",
-    "v2-php-v2-php-pool-start vV",
     "v2-php-version vV",
     "whm-detail-max_execution_time cC",
     "whm-detail-max_input_vars cC",

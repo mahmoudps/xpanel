@@ -82,7 +82,7 @@ describe('approved account list components', () => {
       expect(cells).toHaveLength(1)
       return cells[0]![1]!
     }
-    for (const [cap, expected] of [[2_000_000, '2.00 MB/s'], [0, '0 B/s'], ['unlimited', translate('Unlimited')]] as const) {
+    for (const [cap, expected] of [[2_000_000, '1.91\u00a0MiB/s'], [0, '0\u00a0B/s'], ['unlimited', translate('Unlimited')]] as const) {
       const html = renderApprovedWhmAccountTableCells({ ...base(), locale, plans: [{ ...plan, resources: { ...plan.resources, ioWriteBps: cap } }] }, account.username)
       const cell = ioCell(html)
       expect(text(cell)).toContain(expected)
@@ -101,11 +101,11 @@ describe('approved account list components', () => {
     const scoped: WhmSurfaceProps = { ...base(), principal: { kind: 'reseller', id: reseller.id, username: reseller.username }, activeReseller: reseller }
     const cell = (props: WhmSurfaceProps, username = account.username) => renderApprovedWhmAccountTableCells(props, username).match(/<td data-account-table-value="io-write">([\s\S]*?)<\/td>/)?.[1] ?? ''
     for (const ownerId of [null, reseller.id]) {
-      expect(text(cell({ ...scoped, plans: [{ ...plan, ownerId, resources: { ...plan.resources, ioWriteBps: 2_000_000 } }] }))).toBe('IO write cap2.00 MB/s')
+      expect(text(cell({ ...scoped, plans: [{ ...plan, ownerId, resources: { ...plan.resources, ioWriteBps: 2_000_000 } }] }))).toBe('IO write cap1.91\u00a0MiB/s')
     }
     const foreignPlan = { ...plan, ownerId: foreign.id, resources: { ...plan.resources, ioWriteBps: 9_000_000 } }
     expect(text(cell({ ...scoped, plans: [foreignPlan] }))).toBe('IO write capNot read')
-    expect(cell({ ...scoped, accounts: [{ ...account, ownerId: foreign.id }], plans: [foreignPlan] })).not.toContain('MB/s')
+    expect(cell({ ...scoped, accounts: [{ ...account, ownerId: foreign.id }], plans: [foreignPlan] })).not.toContain('MiB/s')
   })
 
   it.each(['en', 'ar'] as const)('aligns the %s IO cap header, cells and empty account-table span', locale => {

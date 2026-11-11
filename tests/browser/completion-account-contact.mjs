@@ -9,7 +9,7 @@ import { createVisualFixture } from './visual-fixture.mjs'
 process.env.PLAYWRIGHT_BROWSERS_PATH ||= resolve('.tools/playwright-browsers')
 const { chromium } = await import('@playwright/test')
 const output = resolve(process.env.XPANEL_ACCOUNT_CONTACT_OUTPUT || 'test-results/completion-account-contact')
-const sourcePaths = ['apps/web/src/account-contact-client.ts','apps/web/src/board-port/extensions/account-contact.ts','apps/web/src/board-port/extensions/account-pages.ts','apps/web/src/surfaces/xpanel.ts','apps/web/src/ws-client.ts','apps/web/src/login-client.ts','apps/web/src/board-port/extensions/shared.ts','tests/browser/visual-fixture.mjs','tests/browser/completion-account-contact.mjs']
+const sourcePaths = ['apps/web/src/account-contact-client.ts','apps/web/src/board-port/extensions/account-contact.ts','apps/web/src/board-port/extensions/account-pages.ts','apps/web/src/surfaces/xpanel.ts','apps/web/src/ws-client.ts','apps/web/src/login-client.ts','apps/web/src/board-port/extensions/shared.ts','apps/web/src/themes/v2/pages/xpanel/settings/preferences.ts','apps/web/src/themes/v2/pages/xpanel/settings/common.ts','tests/browser/visual-fixture.mjs','tests/browser/completion-account-contact.mjs']
 const snapshot = () => sourcePaths.map(path => ({ path, sha256:createHash('sha256').update(readFileSync(path)).digest('hex') }))
 const copy = value => JSON.parse(JSON.stringify(value))
 const apiPath = '/api/account/preferences'
@@ -133,11 +133,11 @@ async function geometry(page) {
     const text=range.getBoundingClientRect(),bounds=rect(control),style=getComputedStyle(control),rtl=getComputedStyle(root).direction==='rtl'
     const anchor=style.textAlign==='start'?(style.direction==='rtl'?'right':'left'):style.textAlign==='end'?(style.direction==='rtl'?'left':'right'):style.textAlign
     const edge=anchor==='right'?bounds.right-parseFloat(style.paddingRight)-parseFloat(style.borderRightWidth):bounds.left+parseFloat(style.paddingLeft)+parseFloat(style.borderLeftWidth)
-    const card=root.closest('.xp-extension__card'),cardNodes=[...card.children].filter(visible),first=rect(cardNodes[0]),last=rect(cardNodes.at(-1)),cardRect=rect(card),cardStyle=getComputedStyle(card)
+    const card=root.closest('.v2-card, .xp-extension__card'),cardNodes=[...card.children].filter(visible),first=rect(cardNodes[0]),last=rect(cardNodes.at(-1)),cardRect=rect(card),cardStyle=getComputedStyle(card)
     const padding={left:first.left-cardRect.left-parseFloat(cardStyle.borderLeftWidth),right:cardRect.right-first.right-parseFloat(cardStyle.borderRightWidth),top:first.top-cardRect.top-parseFloat(cardStyle.borderTopWidth),bottom:cardRect.bottom-last.bottom-parseFloat(cardStyle.borderBottomWidth)}
     const groups=gap([...root.children].filter(node=>node.tagName!=='STYLE'&&visible(node)))
     const formGroups=gap([...root.querySelector('[data-contact-form]').children].filter(visible))
-    const frame=root.closest('.xp-extension'),sections=gap([...frame.children].filter(node=>node.tagName!=='STYLE'&&visible(node)))
+    const frame=root.closest('.v2-tabpanel--sections, .xp-extension'),sections=gap([...frame.children].filter(node=>node.tagName!=='STYLE'&&visible(node)))
     const targets=[...root.querySelectorAll('button,input')].filter(visible).map(node=>{
       const words=[]
       if(node.tagName==='BUTTON'){const walker=document.createTreeWalker(node,NodeFilter.SHOW_TEXT);let text;while((text=walker.nextNode()))for(const match of text.textContent.matchAll(/\S+/gu)){const range=document.createRange();range.setStart(text,match.index);range.setEnd(text,match.index+match[0].length);const tops=[...range.getClientRects()].map(r=>r.top).sort((a,b)=>a-b),threshold=Math.max(8,(parseFloat(getComputedStyle(node).lineHeight)||22)/2);let lines=0,last=-Infinity;for(const top of tops)if(top-last>threshold){lines++;last=top}words.push({text:match[0],lines})}}

@@ -213,7 +213,7 @@ describe('authenticated factor-only document descriptors', () => {
   })
 })
 
-describe('invalid supplied native facts retain their rejection', () => {
+describe('invalid or absent realm facts fall back to the unavailable page without enriching read-only facts', () => {
   it.each(factorDocuments)('does not enrich explicit null native facts for $surface factor settings', { tags: ['feature'] }, entry => {
     const state = factorDocumentState(entry, 'en', false)
     const field = entry.surface === 'xpanel' ? 'panel' : entry.surface === 'xwhm' ? 'whm' : 'mail'
@@ -221,7 +221,16 @@ describe('invalid supplied native facts retain their rejection', () => {
     Object.defineProperty(state, field, { value: null })
     const descriptor = unavailableView(state, 'en', 'light', 'comfortable', entry.route)
     expect(descriptor.readOnlyFacts).toBeUndefined()
-    expect(() => renderWebApp(state)).toThrow('v2_readonly_facts_missing')
+    expect(() => renderV2ReadOnlyPage(descriptor)).toThrow('v2_readonly_facts_missing')
+    const html = renderWebApp(state)
+    expect(html).toContain('data-tool-availability="unverified"')
+    expect(html).toContain('data-account-security="two-factor"')
+    expect(html).not.toContain('data-qualified="false"')
+    expect(html).not.toContain('data-v2-settings-route=')
+    expect(html).not.toContain('id="v2-security-new-password"')
+    const mainMatch = /<main\b[\s\S]*?<\/main>/.exec(html)
+    if (!mainMatch) throw new Error('Missing main landmark')
+    nativeControlsStayBlocked(mainMatch[0])
   })
 
   it('does not enrich explicit null native facts on another hosting route', { tags: ['feature'] }, () => {
@@ -231,6 +240,28 @@ describe('invalid supplied native facts retain their rejection', () => {
     Object.defineProperty(state, 'panel', { value: null })
     const descriptor = unavailableView(state, 'en', 'light', 'comfortable', '/resources')
     expect(descriptor.readOnlyFacts).toBeUndefined()
-    expect(() => renderWebApp(state)).toThrow('v2_readonly_facts_missing')
+    expect(() => renderV2ReadOnlyPage(descriptor)).toThrow('v2_readonly_facts_missing')
+    const html = renderWebApp(state)
+    expect(html).toContain('data-tool-availability="unverified"')
+    expect(html).not.toContain('data-readonly="true"')
+  })
+
+  it.each(['en', 'ar'] as const)('renders the unavailable summary page for a suspended owner without panel facts in %s', { tags: ['feature'] }, locale => {
+    const state: WebAppRenderState = {
+      surface: 'xpanel', activeRoute: '/resources', locale, uiTheme: 'v2', theme: 'light',
+      visibility, catalog,
+      workspaceSummary: {
+        account: { id: account.id, ownerId: account.ownerId, username: account.username, primaryDomain: account.primaryDomain, status: 'suspended', planId: account.planId },
+        plan: { id: account.planId, name: 'Saved plan' },
+      },
+    }
+    const descriptor = unavailableView(state, locale, 'light', 'comfortable', '/resources')
+    expect(descriptor.admitted).toBe(true)
+    expect(descriptor.readOnlyFacts).toBeUndefined()
+    const html = renderWebApp(state)
+    expect(html).toContain('data-ui-theme="v2"')
+    expect(html).toContain('data-tool-availability="unverified"')
+    expect(html).toContain('data-workspace-field="status"')
+    expect(html).not.toContain('data-readonly="true"')
   })
 })

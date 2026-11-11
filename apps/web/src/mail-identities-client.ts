@@ -198,6 +198,8 @@ function bindMailIdentities(askDialog: ((options: Record<string, unknown>) => Pr
     const load = async (): Promise<void> => {
       identities = readMailIdentities(await request('GET', '/api/webmail/identities'), mailbox)
       paint()
+      // A page that opens with an "unread" line must not keep it once the identities are read.
+      if (status.dataset.state === 'unread') setStatus('', 'read')
     }
     const save = async (): Promise<void> => {
       if (!eligible() || busy || uncertain) return

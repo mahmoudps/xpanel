@@ -34,7 +34,7 @@ export function card(props: CardProps): string {
 
 export const CARD_CSS = `.v2-card{display:flex;flex-direction:column;gap:var(--space-2);padding:var(--v2-panel-padding);border-radius:var(--radius-card);background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow);min-width:0}
 .v2-card__head{display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:var(--space-1) var(--space-2)}
-.v2-card__title{display:flex;flex-direction:column;gap:4px;min-width:0}
+.v2-card__title{flex:1 1 200px;display:flex;flex-direction:column;gap:4px;min-width:0}
 .v2-card__title p{font-size:13px;color:var(--muted)}
 .v2-card__actions{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-1)}
 .v2-card__body{display:flex;flex-direction:column;gap:var(--space-2);min-width:0}

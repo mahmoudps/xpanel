@@ -3,6 +3,9 @@ import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as canonicalFormatDispl
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
 import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
+import { ASCII_BYTES_BINDING, formatIsolatedBytes as canonicalFormatClientBytes } from './display-format.ts'
+// Module-local alias: the binding source defines it again from ASCII_BYTES_BINDING.
+const formatClientBytes = canonicalFormatClientBytes
 const clientTemplate = canonicalClientTemplate
 const clientTemplateSlot = canonicalClientTemplateSlot
 const cloneClientTemplate = canonicalCloneClientTemplate
@@ -297,7 +300,7 @@ function bindFileWorkspace(askDialog?:WorkspaceConfirm):void{
     try{templates=fileWorkspaceTemplates(root,false)}catch{root.querySelectorAll<HTMLButtonElement|HTMLInputElement|HTMLTextAreaElement>('button,input,textarea').forEach(node=>{node.disabled=true});status.hidden=false;status.dataset.state='unavailable';status.textContent=copy('File operations are unavailable.');return}
     const send:WorkspaceSend=body=>{if(!eligible())return Promise.reject(Object.assign(new Error('workspace_context_changed'),{stateChanged:false}));return transport('POST','/api/accounts/'+encodeURIComponent(username)+'/files',body)}
     let renderedEntries:WorkspaceEntry[]|null=null,renderedRead=false
-    const size=(bytes:number)=>{const units=['B','KiB','MiB','GiB','TiB'];let amount=bytes,index=0;while(amount>=1024&&index<units.length-1){amount/=1024;index++}return amount.toFixed(index===0?0:amount>=10?1:2)+' '+units[index]}
+    const size=(bytes:number)=> formatClientBytes(bytes)
     const when=(value:string)=>formatDisplayDateTime(value)
     // The approved design places Copy, Move, Compress and Extract in a selection toolbar, which a theme may render beside this root; one browse root owns them.
     const relocators=document.querySelectorAll('[data-file-manager="browse"]').length===1?[...document.querySelectorAll<HTMLButtonElement>('[data-file-selection-action]')].filter(button=>button.type==='button'&&['copy','move','compress','extract'].includes(button.dataset.fileSelectionAction??'')):[]
@@ -324,9 +327,9 @@ function bindFileWorkspace(askDialog?:WorkspaceConfirm):void{
           actionButton(actions,copy('Permissions'),'chmod',entry.path,()=>{void (async()=>{
             if(controller.state.busy||controller.state.uncertain||!eligible())return
             const ceiling=entry.kind==='directory'?0o750:0o640
-            const policy=root.querySelector<HTMLInputElement>('#chmod-octal-input')
-            const suggestion=policy&&/^0[0-7]{3}$/.test(policy.value.trim())?policy.value.trim():entry.mode.toString(8).padStart(4,'0')
-            const raw=await askDialog?.({title:copy('Change permissions'),body:entry.path+' — '+copy('Maximum 0640 for files and 0750 for folders; world-writable modes are refused.'),input:true,label:copy('Permissions (octal)'),value:suggestion,preserveWhitespace:true,confirm:copy('Apply permissions')})
+            // The entry's own mode, not the page default: a 0750 folder is offered 0750.
+            const suggestion=entry.mode.toString(8).padStart(4,'0')
+            const raw=await askDialog?.({title:copy('Change permissions'),body:copy('Maximum 0640 for files and 0750 for folders; world-writable modes are refused.'),code:entry.path,input:true,label:copy('Permissions (octal)'),value:suggestion,preserveWhitespace:true,confirm:copy('Apply permissions')})
             if(typeof raw!=='string')return
             let mode:number
             try{mode=workspaceMode(raw,ceiling)}catch{status.hidden=false;status.dataset.state='failed';status.setAttribute('role','alert');status.textContent=copy('Use an octal mode within the allowed ceiling (0640 file / 0750 folder); no change was made.');return}
@@ -465,7 +468,7 @@ function bindTrashWorkspace(askDialog?:WorkspaceConfirm):void{
     const table=tbody.closest<HTMLElement>('[data-file-table-wrap]')
     try{if(!table||!root.contains(table))throw new Error('file_table_unavailable');templates=fileWorkspaceTemplates(root,true)}catch{disable();status.hidden=false;status.dataset.state='unavailable';status.textContent=copy('Trash operations are unavailable.');return}
     const send:WorkspaceSend=body=>{if(!eligible())return Promise.reject(Object.assign(new Error('workspace_context_changed'),{stateChanged:false}));return transport('POST','/api/accounts/'+encodeURIComponent(username)+'/files',body)}
-    const size=(bytes:number)=>{const units=['B','KiB','MiB','GiB','TiB'];let amount=bytes,index=0;while(amount>=1024&&index<units.length-1){amount/=1024;index++}return amount.toFixed(index===0?0:amount>=10?1:2)+' '+units[index]}
+    const size=(bytes:number)=> formatClientBytes(bytes)
     const when=(value:string)=>formatDisplayDateTime(value)
     try{presentation=createFilePresentation(root,copy,size,when)}catch{disable();status.hidden=false;status.dataset.state='unavailable';status.textContent=copy('Trash operations are unavailable.');return}
     let busy=false,uncertain=false
@@ -551,4 +554,4 @@ function bindTrashWorkspace(askDialog?:WorkspaceConfirm):void{
   })
 }
 
-export const FILE_WORKSPACE_CLIENT_BINDING = `(function(askDialog) { const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const WORKSPACE_EDIT_BYTES=${WORKSPACE_EDIT_BYTES};const WORKSPACE_BINARY_BYTES=${WORKSPACE_BINARY_BYTES};${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};${createFilePresentation.toString()};${fileWorkspaceTemplates.toString()};${workspaceObject.toString()};${workspacePath.toString()};${workspaceLeaf.toString()};${workspaceMode.toString()};${workspaceTextBytes.toString()};${workspaceTime.toString()};${workspaceEntry.toString()};${workspaceListing.toString()};${workspaceText.toString()};${workspaceBinary.toString()};${workspaceCharsetLimit.toString()};${workspaceDecoded.toString()};${workspaceWriteUncertain.toString()};${createFileWorkspace.toString()};${workspaceTrash.toString()};${workspaceTrashList.toString()};${workspaceRelocateRefusal.toString()};${workspaceArchiveRefusal.toString()};(${bindFileWorkspace.toString()})(askDialog);(${bindTrashWorkspace.toString()})(askDialog); })`
+export const FILE_WORKSPACE_CLIENT_BINDING = `(function(askDialog) { const formatClientBytes=${ASCII_BYTES_BINDING};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const WORKSPACE_EDIT_BYTES=${WORKSPACE_EDIT_BYTES};const WORKSPACE_BINARY_BYTES=${WORKSPACE_BINARY_BYTES};${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};${createFilePresentation.toString()};${fileWorkspaceTemplates.toString()};${workspaceObject.toString()};${workspacePath.toString()};${workspaceLeaf.toString()};${workspaceMode.toString()};${workspaceTextBytes.toString()};${workspaceTime.toString()};${workspaceEntry.toString()};${workspaceListing.toString()};${workspaceText.toString()};${workspaceBinary.toString()};${workspaceCharsetLimit.toString()};${workspaceDecoded.toString()};${workspaceWriteUncertain.toString()};${createFileWorkspace.toString()};${workspaceTrash.toString()};${workspaceTrashList.toString()};${workspaceRelocateRefusal.toString()};${workspaceArchiveRefusal.toString()};(${bindFileWorkspace.toString()})(askDialog);(${bindTrashWorkspace.toString()})(askDialog); })`

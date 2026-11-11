@@ -8,9 +8,10 @@ export function v2PanelAccessSections(t: Translate, canRead: boolean, canManage:
   const input = (key: string, label: string, extra = ' dir="ltr" autocomplete="off" spellcheck="false"', type = 'text', note?: string): string => field(t, `sec-${key}`, label, inputControl(`sec-${key}`, { 'data-sec-input': key }, false, extra, type), note)
   const checks = (prefix: string, rows: readonly (readonly [string, string])[]): string => fields(rows.map(([name, label]) => check(t, label, { 'data-sec-input': `${prefix}-${name}` })).join(''))
   const act = (key: string, label: string, primary = false): string => button(t, label, { 'data-sec-action': key }, false, primary)
-  const body = status(t, canRead ? msgid('Nothing has been read yet.') : msgid('This page requires an authorized administrator. Nothing was read or changed.'), { 'data-sec-status': true }, canRead ? 'unread' : 'unavailable')
+  const state = status(t, canRead ? msgid('Nothing has been read yet.') : msgid('This page requires an authorized administrator. Nothing was read or changed.'), { 'data-sec-status': true }, canRead ? 'unread' : 'unavailable')
     + status(t, '', { 'data-sec-result': true }, 'unread', true)
-    + section(t, 'access-address', msgid('Panel address'), help(t, msgid('Each entry point has its own port and host name. The new port opens in the firewall before the switch; the old port stays open until you keep the new address.'))
+  // The read state and the gate save share one bar, so no status line floats between cards.
+  const body = section(t, 'access-address', msgid('Panel address'), help(t, msgid('Each entry point has its own port and host name. The new port opens in the firewall before the switch; the old port stays open until you keep the new address.'))
       + facts(t, [['pa-origin-xpanel', msgid('xPanel address')], ['pa-origin-xwhm', msgid('xWHM address')], ['pa-origin-xmail', msgid('xMail address')], ['pa-trial', msgid('Waiting change')], ['pa-lifecycle', msgid('Last change')]], 'data-sec-field')
       + fields(ENTRY.map(([name, label]) => input(`pa-port-${name}`, t(msgid('{name} port'), { name: t(label) }), ' dir="ltr" inputmode="numeric" min="1" max="65535" step="1"', 'number')).join(''))
       + fields(ENTRY.map(([name, label]) => input(`pa-host-${name}`, t(msgid('{name} host name'), { name: t(label) }), undefined, 'text', msgid('Empty uses the server host name.'))).join(''))
@@ -31,7 +32,7 @@ export function v2PanelAccessSections(t: Translate, canRead: boolean, canManage:
       + facts(t, [['pa-cert-names', msgid('Certificate names')], ['pa-cert-issuer', msgid('Issuer')], ['pa-cert-until', msgid('Valid until (UTC)')], ['pa-cert-fingerprint', msgid('Fingerprint')]], 'data-sec-field')
       + `<details><summary>${esc(t(msgid('Certificate content')))}</summary><pre dir="ltr" class="v2-mono v2-panel-access__code"><bdi dir="ltr" data-sec-field="pa-cert-pem"></bdi></pre></details>`
       + actions(act('pa-reload', msgid('Reload the web server')) + act('pa-restart', msgid('Restart the panel'))))
-    + `<div class="v2-observation__actions">${button(t, msgid('Save access rules'), { 'data-sec-action': 'pa-gate-save' }, false, true)}${button(t, msgid('Refresh'), { 'data-sec-action': 'pa-refresh' }, canRead)}</div>`
+    + `<div class="v2-observation__savebar">${state}<div class="v2-observation__actions">${button(t, msgid('Refresh'), { 'data-sec-action': 'pa-refresh' }, canRead)}${button(t, msgid('Save access rules'), { 'data-sec-action': 'pa-gate-save' }, false, true)}</div></div>`
     + section(t, 'access-temporary', msgid('Temporary sign-in links'), help(t, msgid('A link opens one read-only xWHM session for a helper. It cannot change anything or reach these settings, and each link has its own activity log.'))
       + facts(t, [['pa-updated', msgid('Last saved (UTC)')], ['pa-temp-url', msgid('New link')]], 'data-sec-field')
       + fields(input('pa-temp-lifetime', msgid('Lifetime, minutes'), ' dir="ltr" inputmode="numeric" min="5" max="1440" step="1" value="60"', 'number') + input('pa-temp-note', msgid('Note'), ' maxlength="128" autocomplete="off"'))

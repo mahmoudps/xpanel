@@ -104,22 +104,23 @@ async function geometry(page){
   await page.evaluate(()=>document.fonts.ready)
   return page.locator(rootSelector).evaluate(root=>{
     const rect=node=>{const r=node.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height}}
-    const visible=node=>{const r=rect(node);return r.width>0&&r.height>0&&!node.closest('[hidden]')&&!node.classList.contains('xp-sr-only')}
+    const visible=node=>{const r=rect(node);return r.width>0&&r.height>0&&!node.closest('[hidden]')&&!node.classList.contains('xp-sr-only')&&!node.classList.contains('v2-sr')}
     const fields=[...root.querySelectorAll('label[for]')].filter(visible).map(label=>{
       const control=document.getElementById(label.htmlFor);if(!control||!visible(control)||['checkbox','radio'].includes(control.type))return null
       const range=document.createRange();range.selectNodeContents(label);const text=range.getBoundingClientRect(),box=rect(control),style=getComputedStyle(control),rtl=getComputedStyle(root).direction==='rtl'
-      const anchor=style.textAlign==='start'?(style.direction==='rtl'?'right':'left'):style.textAlign==='end'?(style.direction==='rtl'?'left':'right'):style.textAlign
+      const anchor=['match-parent','-webkit-match-parent'].includes(style.textAlign)?(rtl?'right':'left'):style.textAlign==='start'?(style.direction==='rtl'?'right':'left'):style.textAlign==='end'?(style.direction==='rtl'?'left':'right'):style.textAlign
       const edge=anchor==='right'?box.right-parseFloat(style.paddingRight)-parseFloat(style.borderRightWidth):anchor==='left'?box.left+parseFloat(style.paddingLeft)+parseFloat(style.borderLeftWidth):(box.left+box.right)/2
       return {label:label.textContent.trim(),code:control.id==='jailed-code-editor',gap:box.top-text.bottom,alignment:Math.abs((rtl?text.right:text.left)-edge),height:box.height,direction:style.direction,textAlign:style.textAlign,resolvedAnchor:anchor,whiteSpace:style.whiteSpace,wrap:control.getAttribute('wrap')}
     }).filter(Boolean)
-    const cards=[root,...root.querySelectorAll('.xp-card')].filter(visible).map(card=>{
-      const nodes=[...card.children].filter(node=>node.tagName!=='STYLE'&&visible(node)),first=rect(nodes[0]),last=rect(nodes.at(-1)),bounds=rect(card),style=getComputedStyle(card)
+    const cards=[...(root.classList.contains('xp-card')?[root]:[]),...root.querySelectorAll('.xp-card,.v2-file-controls,.v2-card:not(.v2-card--flush):not(.v2-file-tree-disclosure > .v2-card),.v2-file-view-details,.v2-file-view-uploads')].filter(visible).map(card=>{
+      const nodes=[...card.children].filter(node=>node.tagName!=='STYLE'&&node.tagName!=='TEMPLATE'&&visible(node)),first=rect(nodes[0]),last=rect(nodes.at(-1)),bounds=rect(card),style=getComputedStyle(card)
       return {left:first.left-bounds.left-parseFloat(style.borderLeftWidth),right:bounds.right-first.right-parseFloat(style.borderRightWidth),top:first.top-bounds.top-parseFloat(style.borderTopWidth),bottom:bounds.bottom-last.bottom-parseFloat(style.borderBottomWidth)}
     })
     const gap=nodes=>nodes.slice(1).map((node,index)=>rect(node).top-rect(nodes[index]).bottom)
-    const editorGroups=gap([...root.querySelector('.xp-file-editor-body').children].filter(visible))
-    const fieldSiblings=[...root.querySelectorAll('.xp-form-group')].flatMap(group=>gap([...group.children].filter(node=>node.classList.contains('xp-field')&&visible(node))))
-    const main=root.closest('.xp-panel-detail__main'),sections=main?gap([...main.children].filter(visible)):[]
+    const editorBody=root.querySelector('[data-in-browser-editor],.xp-file-editor-body')
+    const editorGroups=editorBody?gap([...editorBody.children].filter(visible)):[]
+    const fieldSiblings=[...root.querySelectorAll('.v2-file-fields,.xp-form-group')].flatMap(group=>gap([...group.children].filter(node=>node.matches('.v2-field,.xp-field')&&visible(node))))
+    const main=root.closest('.xp-panel-detail__main')||root,sections=gap([...main.children].filter(node=>node.tagName!=='STYLE'&&node.tagName!=='TEMPLATE'&&visible(node)))
     const table=root.querySelector('[data-file-manager-table]'),wrap=table.parentElement
     const technical=[...table.querySelectorAll('tbody bdi')].filter(visible).map(node=>{const range=document.createRange();range.selectNodeContents(node);return {lines:new Set([...range.getClientRects()].map(r=>Math.round(r.y))).size,direction:getComputedStyle(node).direction,isolation:getComputedStyle(node).unicodeBidi}})
     const targets=[...root.querySelectorAll('button,input:not([type=file]),textarea')].filter(visible).map(node=>{
@@ -130,7 +131,7 @@ async function geometry(page){
       return {type:node.type,box:rect(hit),words}
     })
     const paths=[...root.querySelectorAll('[data-file-current-path],[data-file-selected-path]')].map(node=>({direction:getComputedStyle(node).direction,isolation:getComputedStyle(node).unicodeBidi}))
-    const prefix=[...root.querySelectorAll('.xp-breadcrumb bdi')].find(node=>node.textContent===root.dataset.accountHome),relative=root.querySelector('[data-file-current-path]')
+    const prefix=root.querySelector('[data-file-home-path]')||[...root.querySelectorAll('.xp-breadcrumb bdi')].find(node=>node.textContent===root.dataset.accountHome),relative=root.querySelector('[data-file-current-path]')
     const breadcrumb=prefix&&relative?{prefix:rect(prefix),current:rect(relative)}:null
     return {width:innerWidth,scrollWidth:document.documentElement.scrollWidth,direction:getComputedStyle(root).direction,fields,cards,editorGroups,fieldSiblings,sections,table:{width:rect(table).width,wrap:rect(wrap).width,scrollWidth:wrap.scrollWidth,technical},targets,paths,breadcrumb,fonts:{status:document.fonts.status,faces:[...document.fonts].map(face=>({family:face.family,status:face.status}))}}
   })

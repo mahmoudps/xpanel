@@ -3,7 +3,7 @@ import { LOCALES, SOURCE_LOCALE, alternateLocales, localeDirection, localeInfo, 
 import { ARABIC_TYPE_CSS } from '../arabic-type.ts'
 import { isolateLtrRuns, metaPieces } from '../bidi-runs.ts'
 import { formatDisplayName } from '../display-name.ts'
-import { escapeHtml, formatAsciiBytes, formatUtcClock } from '../tokens.ts'
+import { escapeHtml, formatAsciiBytes, formatAsciiRate, formatUtcClock } from '../tokens.ts'
 import { renderLiveUpdatesIndicator, renderPageSearchButton } from '../shell.ts'
 import { HOME_TOOL_MATCHING_FUNCTIONS } from '../home-tools-client.ts'
 import { pageScript, pageScriptTag } from '../page-scripts.ts'
@@ -537,7 +537,7 @@ const signInEmpty = (rtl: boolean): string => rtl
 
 const finite = (value: number | 'unlimited' | undefined): number | null => typeof value === 'number' ? value : null
 
-const storage = (mb: number): string => mb % 1024 === 0 ? `${mb / 1024} GB` : `${mb} MB`
+const storage = (mb: number): string => formatAsciiBytes(mb * 1024 * 1024)
 
 const ratio = (count: number, cap: number | null): string => cap === null ? String(count) : `${count} / ${cap}`
 
@@ -826,7 +826,7 @@ const factsFromProps = (props: XpanelHomeProps): LiveFacts => {
     bandwidthLimited: props.usage?.bandwidthMonth?.limited === true,
     memoryLimit: memoryMb === null ? null : formatAsciiBytes(memoryMb * 1024 * 1024),
     processLimit: finite(resources?.maxProcesses) === null ? null : String(finite(resources?.maxProcesses)),
-    ioLimit: io === null ? null : `${formatAsciiBytes(io)}/s`,
+    ioLimit: io === null ? null : formatAsciiRate(io),
     ioEnforced: typeof props.usage?.ioEnforced === 'boolean' ? props.usage.ioEnforced : null,
     sampled: props.usage !== undefined,
     diskBytes: props.usage?.diskBytes ?? null,

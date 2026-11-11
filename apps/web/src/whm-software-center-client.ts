@@ -7,6 +7,9 @@ import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as canonicalFormatDispl
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
 import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+import { ASCII_BYTES_BINDING, formatIsolatedBytes as canonicalFormatClientBytes } from './display-format.ts'
+// Module-local alias: the binding source defines it again from ASCII_BYTES_BINDING.
+const formatClientBytes = canonicalFormatClientBytes
 const frameRequest = canonicalFrameRequest
 const formatDisplayDateTime = canonicalFormatDisplayDateTime
 
@@ -134,7 +137,7 @@ function bindWhmSoftwareCenter(askDialog: ((options: Record<string, unknown>) =>
       const badge = stateBadge(item), state = clientTemplateSlot(tr, 'state'); state.textContent = badge; state.dataset.state = item.needsReview ? 'critical' : item.state
       set('installed', item.installed.length ? item.installed.map((entry: any) => entry.name + ' ' + entry.versions.join(', ')).join(' · ') : t(msgctxt('whm-software-center-client', 'Not installed')))
       clientTemplateSlot(tr, 'candidate').replaceChildren(...(view.candidates === 'read' && item.candidates ? mixed(item.candidates.flatMap((entry: any, index: number): [string, boolean][] => [...(index ? [[' · ', false] as [string, boolean]] : []), ...(entry.version === null ? filled(t('{name} not in repositories'), { '{name}': entry.name }) : [[entry.name + ' ' + entry.version, true] as [string, boolean]])])) : el('td', view.candidates === 'not-read' ? t('Read by the change preview') : t('Repository versions are unavailable'))).childNodes)
-      clientTemplateSlot(tr, 'estimate').replaceChildren(...mixed(filled(t('Estimate: memory {memory} · disk {disk}'), { '{memory}': item.estimate.memoryMb + ' MB', '{disk}': item.estimate.diskMb + ' MB' })).childNodes)
+      clientTemplateSlot(tr, 'estimate').replaceChildren(...mixed(filled(t('Estimate: memory {memory} · disk {disk}'), { '{memory}': formatClientBytes(item.estimate.memoryMb * 1048576), '{disk}': formatClientBytes(item.estimate.diskMb * 1048576) })).childNodes)
       set('relations', relations(item))
       for (const action of ['install', 'remove'] as const) {
         const button = clientTemplateSlot(tr, action, 'button') as HTMLButtonElement
@@ -206,8 +209,8 @@ function bindWhmSoftwareCenter(askDialog: ((options: Record<string, unknown>) =>
           : pulled ? t('Remove {names} (also required: {pulled}). Simulated by the package manager; nothing has changed yet.', parts) : t('Remove {names}. Simulated by the package manager; nothing has changed yet.', parts)
         :reasonText(preview.reason) + (preview.blockers.length ? ' ' + preview.blockers.join(', ') : '')
       const memory = q<HTMLElement>('[data-sc-preview-memory]'), disk = q<HTMLElement>('[data-sc-preview-disk]'), download = q<HTMLElement>('[data-sc-preview-download]'), delta = q<HTMLElement>('[data-sc-preview-size]')
-      if (memory) memory.textContent = preview.estimate.memoryMb + ' MB'
-      if (disk) disk.textContent = preview.estimate.diskMb + ' MB'
+      if (memory) memory.textContent = formatClientBytes(preview.estimate.memoryMb * 1048576)
+      if (disk) disk.textContent = formatClientBytes(preview.estimate.diskMb * 1048576)
       for (const [node, value] of [[download, preview.observed.downloadBytes], [delta, preview.observed.sizeDeltaBytes]] as const) if (node) { node.textContent = ''; node.append(value === null ? document.createTextNode(mb(null)) : el('span', mb(value), true)) }
       const changes = (items: any[]): string[] => items.map(change => change.name + (change.from && change.to ? ' ' + change.from + ' > ' + change.to : change.to ? ' ' + change.to : change.from ? ' ' + change.from : ''))
       fill('[data-sc-preview-install]', changes(preview.packages.install), t('None'))
@@ -277,4 +280,4 @@ function bindWhmSoftwareCenter(askDialog: ((options: Record<string, unknown>) =>
   })
 }
 
-export const WHM_SOFTWARE_CENTER_CLIENT_BINDING = withFrameRequest(`(()=>{const clientTemplate=${clientTemplate.toString()};const clientTemplateSlot=${clientTemplateSlot.toString()};const cloneClientTemplate=${cloneClientTemplate.toString()};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const parseSoftwareCenterResponse=${parseSoftwareCenterResponse.toString()};return ${bindWhmSoftwareCenter.toString()};})()`)
+export const WHM_SOFTWARE_CENTER_CLIENT_BINDING = withFrameRequest(`(()=>{const formatClientBytes=${ASCII_BYTES_BINDING};const clientTemplate=${clientTemplate.toString()};const clientTemplateSlot=${clientTemplateSlot.toString()};const cloneClientTemplate=${cloneClientTemplate.toString()};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const parseSoftwareCenterResponse=${parseSoftwareCenterResponse.toString()};return ${bindWhmSoftwareCenter.toString()};})()`)

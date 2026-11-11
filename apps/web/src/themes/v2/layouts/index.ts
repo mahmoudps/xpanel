@@ -18,4 +18,11 @@ export { matrixPage, matrixTable, type MatrixChannel, type MatrixEvent, type Mat
 export { settingsPage, settingsSection, type SettingsCommit, type SettingsField, type SettingsPageProps, type SettingsSection } from './settings-page.ts'
 export { wizardPage, type WizardPageProps, type WizardStep } from './wizard-page.ts'
 
-export const LAYOUTS_CSS = [COMMON_LAYOUT_CSS, DASHBOARD_LAYOUT_CSS, WIZARD_LAYOUT_CSS, LOG_LAYOUT_CSS, EDITOR_LAYOUT_CSS, MATRIX_LAYOUT_CSS].map(source => source.trim()).join('\n')
+/** The layout rules every document loads. */
+export const LAYOUTS_CSS = COMMON_LAYOUT_CSS.trim()
+/**
+ * Rules of the template families (status list, wizard, log, editor, matrix) that no route renders yet. They stay
+ * out of the foundation every document loads: a route that adopts a family adds this to its own page stylesheet
+ * in route-assets.ts, as it does for FILTER_BAR_CSS and BULK_BAR_CSS.
+ */
+export const LAYOUT_FAMILIES_CSS = [DASHBOARD_LAYOUT_CSS, WIZARD_LAYOUT_CSS, LOG_LAYOUT_CSS, EDITOR_LAYOUT_CSS, MATRIX_LAYOUT_CSS].map(source => source.trim()).join('\n')

@@ -61,7 +61,7 @@ describe('mailbox maintenance client binding', () => {
     search.value = ''; search.dispatchEvent(new Event('input'))
     $<HTMLButtonElement>('[data-whm-mailbox-maintenance-inspect="info@alice.example"]').click(); await tick()
     expect(send).toHaveBeenLastCalledWith('GET', '/api/server/mail-maintenance?mailbox=info%40alice.example')
-    expect($('[data-whm-mailbox-maintenance-fact="storage"]').textContent).toBe('2.0 MB / 10.0 MB')
+    expect($('[data-whm-mailbox-maintenance-fact="storage"]').textContent).toBe('\u20662.00\u00a0MiB\u2069 / \u206610.0\u00a0MiB\u2069')
     expect($('[data-whm-mailbox-maintenance-fact="messages"]').textContent).toBe('12')
     expect(rows('folders')).toHaveLength(2)
     expect(rows('mailboxes')).toHaveLength(2)

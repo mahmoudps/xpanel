@@ -166,7 +166,7 @@ describe('quarantine readable metadata preserves canonical content', () => {
     const absent = lang === 'ar' ? 'لم يُزوّد' : 'Not supplied'
     expect(document.querySelector('[data-quarantine-received]')!.textContent).toBe(absent)
     expect(document.querySelector('[data-quarantine-held]')!.textContent).toBe(absent)
-    expect(document.querySelector('[data-quarantine-inspect]')!.getAttribute('aria-label')).toBe((lang === 'ar' ? 'مراجعة الرسالة: ' : 'Review message: ') + message().subject)
+    expect(document.querySelector('[data-quarantine-inspect]')!.getAttribute('aria-label')).toBe(lang === 'ar' ? 'مراجعة الرسالة: \u2066' + message().subject + '\u2069' : 'Review message: ' + message().subject)
     expect(status().dataset.state).toBe('read')
     expect(f.writes()).toHaveLength(0)
   })
