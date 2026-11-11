@@ -139,7 +139,7 @@ describe('@xpanel/web — Login, xWHM, xPanel, and xMail Surfaces (EN/AR + Dark/
     for (const surface of surfaces) {
       for (const locale of locales) {
         for (const theme of themes) {
-          const html = renderWebApp({ surface, locale, theme })
+          const html = renderWebApp({ uiTheme: 'classic', surface, locale, theme })
           const expectedDir = locale === 'ar' ? 'rtl' : 'ltr'
           assert.match(html, /^<!doctype html>/i)
           assert.match(

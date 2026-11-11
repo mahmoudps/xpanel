@@ -1,5 +1,11 @@
 import type { PanelSurfaceProps } from '../../../../contract.ts'
-import { actions, area, button, check, deniedPage, esc, facts, field, fields, input, link, note, page, section, select, settingsContext, split, status, table, technical, unreadRow, NO_SETTINGS_AUTHORITY, type PanelSettingsAuthority } from '../settings/common.ts'
+import { tabPanel, tabs } from '../../../components/tabs.ts'
+import { domainKindLabel, siteTypeLabel } from './common.ts'
+import { actions, area, button, check, deniedPage, esc, facts, field, fields, groups, input, link, note, page, section, select, settingsContext, status, table, technical, unreadRow, NO_SETTINGS_AUTHORITY, type PanelSettingsAuthority } from '../settings/common.ts'
+
+// Field pairs inside a half-width card, and cards side by side at their own height (rules in PANEL_SETTINGS_CSS).
+const pair = (body: string): string => `<div class="v2-panel-settings__fields v2-panel-settings__fields--tight">${body}</div>`
+const columns = (...cards: string[]): string => `<div class="v2-panel-settings__columns">${cards.join('')}</div>`
 
 /** The site editor: lifecycle, directory, limits and configuration save here; names, redirects, logs and folder protection live on their own pages. */
 export function renderV2SiteSettingsPage(props: PanelSurfaceProps, authority: PanelSettingsAuthority = NO_SETTINGS_AUTHORITY): string {
@@ -9,12 +15,12 @@ export function renderV2SiteSettingsPage(props: PanelSurfaceProps, authority: Pa
   const config = chosen && props.customConfig?.accountId === c.account!.id && props.customConfig.domainId === chosen.id ? props.customConfig : undefined
   const text = (key: string, label: string, hook: string, type = 'text', help?: string) => field(`v2-site-${key}`, label, input(`v2-site-${key}`, '', type, ` dir="ltr" ${hook}`), help)
   const go = (route: string, label: string) => authority.relatedRoutes?.has(route) ? link(label, route) : ''
-  const selectSite = section('v2-site-selector', t(msgid('Site')), field('v2-site-selected', t(msgid('Site')), select('v2-site-selected', '', (c.domains ?? []).map(domain => [domain.id, domain.name]), ' data-site-selector', (c.domains ?? []).length < 2, chosen?.id)))
-  const names = section('v2-site-bindings', t(msgid('Names bound to this site')), table('v2-site-bound-names', t(msgid('Names bound to this site')), [t(msgid('Name')), t(msgid('Type')), t(msgid('Document root'))], c.domains?.map(domain => `<tr><td>${technical(domain.name)}</td><td>${technical(domain.kind)}</td><td>${technical(domain.docRoot)}</td></tr>`).join('') || unreadRow(3, c.domains ? t(msgid('The read returned no domains.')) : t(msgid('Not read')))), go('/domains', t(msgid('Manage domains'))) ? actions(go('/domains', t(msgid('Manage domains')))) : undefined)
+  const selectSite = field('v2-site-selected', t(msgid('Site')), select('v2-site-selected', '', (c.domains ?? []).map(domain => [domain.id, domain.name]), ' data-site-selector', (c.domains ?? []).length < 2, chosen?.id))
+  const names = section('v2-site-bindings', t(msgid('Names bound to this site')), table('v2-site-bound-names', t(msgid('Names bound to this site')), [t(msgid('Name')), t(msgid('Type')), t(msgid('Document root'))], c.domains?.map(domain => `<tr><td>${technical(domain.name)}</td><td>${esc(domainKindLabel(t, domain.kind))}</td><td>${technical(domain.docRoot)}</td></tr>`).join('') || unreadRow(3, c.domains ? t(msgid('The read returned no domains.')) : t(msgid('Not read')))), go('/domains', t(msgid('Manage domains'))) ? actions(go('/domains', t(msgid('Manage domains')))) : undefined)
   const headers = section('v2-site-headers', t(msgid('Template and headers')), table('v2-site-header-table', t(msgid('Custom headers')), [t(msgid('Name')), t(msgid('Value'))], config ? Object.entries(config.customHeaders).map(([key, value]) => `<tr><td>${technical(key)}</td><td>${technical(value)}</td></tr>`).join('') || unreadRow(2, t(msgctxt('theme:v2', 'No custom headers were returned.'))) : unreadRow(2, t(msgid('Not read'))))
     + note(t(msgid('Change response headers in the configuration editor on this page.'))))
-  const runtime = section('v2-site-runtime', t(msgid('Runtime and document root')), facts([{ label: t(msgid('Site type')), valueHtml: chosen ? technical(chosen.siteType) : esc(t(msgid('Not read'))) }, { label: t(msgid('Forward every request to')), valueHtml: chosen?.upstream ? technical(chosen.upstream) : esc(t(msgid('Not used'))) }])
-    + fields(text('docroot', t(msgid('Document root')), 'data-site-docroot') + text('run-directory', t(msgid('Run directory')), 'data-site-run-directory maxlength="128" spellcheck="false" autocomplete="off"', 'text', t(msgid('A subfolder that already exists, such as public. Empty serves the document root.'))))
+  const runtime = section('v2-site-runtime', t(msgid('Runtime and document root')), facts([{ label: t(msgid('Site type')), valueHtml: chosen ? esc(siteTypeLabel(t, chosen.siteType)) : esc(t(msgid('Not read'))) }, { label: t(msgid('Forward every request to')), valueHtml: chosen?.upstream ? technical(chosen.upstream) : esc(t(msgid('Not used'))) }])
+    + pair(text('docroot', t(msgid('Document root')), 'data-site-docroot') + text('run-directory', t(msgid('Run directory')), 'data-site-run-directory maxlength="128" spellcheck="false" autocomplete="off"', 'text', t(msgid('A subfolder that already exists, such as public. Empty serves the document root.'))))
     + check('v2-site-isolated', t(msgid('Isolate this site: PHP reaches only this document root and the account tmp folder')), { 'data-site-isolated': true })
     + check('v2-site-visitor-log', t(msgid('Record visitor details in the access log')), { 'data-site-visitor-log': true })
     + note(t(msgid('Isolation writes .user.ini in the served folder and can take up to 5 minutes to reach running PHP. With visitor details off, requests still count toward bandwidth, without addresses or URLs.'))), go('/files/directory-privacy', t(msgid('Password-protect this site'))) ? actions(go('/files/directory-privacy', t(msgid('Password-protect this site')))) : undefined)
@@ -28,12 +34,12 @@ export function renderV2SiteSettingsPage(props: PanelSurfaceProps, authority: Pa
   const logs = section('v2-site-logs', t(msgid('Runtime logs')), note(t(msgid('Access and error logs are read on the Logs page.'))), go('/metrics/logs', t(msgid('Logs'))) ? actions(go('/metrics/logs', t(msgid('Logs')))) : undefined)
   const lifecycle = section('v2-site-lifecycle', t(msgid('Stop, expiry and path quota')), facts([{ label: t(msgid('Status')), valueHtml: esc(t(msgid('Not read'))), hooks: { 'data-site-state': true } }])
     + field('v2-site-stopped-message', t(msgid('Message on the stopped page')), area('v2-site-stopped-message', '', ' rows="4" dir="auto" maxlength="1000" data-site-stopped-message'))
-    + fields(text('expiry', t(msgid('Stop the site on')), 'data-site-expiry', 'date') + text('quota', t(msgid('Path quota (MB)')), 'data-site-quota min="1"', 'number')
+    + pair(text('expiry', t(msgid('Stop the site on')), 'data-site-expiry pattern="[0-9]{4}-[0-9]{2}-[0-9]{2}" placeholder="YYYY-MM-DD" maxlength="10" autocomplete="off" spellcheck="false"') + text('quota', t(msgid('Path quota (MiB)')), 'data-site-quota min="1"', 'number')
       + text('reminder-address', t(msgid('Expiry reminder address')), 'data-site-reminder-address', 'email') + text('reminder-days', t(msgid('Reminder days before expiry')), 'data-site-reminder-days min="1" max="90"', 'number'))
-    + check('v2-site-quota-unlimited', t(msgid('Unlimited path quota')), { 'data-site-quota-unlimited': true }) + check('v2-site-no-expiry', t(msgid('No expiry')), { 'data-site-no-expiry': true })
+    + pair(check('v2-site-quota-unlimited', t(msgid('Unlimited path quota')), { 'data-site-quota-unlimited': true }) + check('v2-site-no-expiry', t(msgid('No expiry')), { 'data-site-no-expiry': true }))
     + `<p class="v2-muted" data-site-quota-state>${esc(t(msgid('Path quota support has not been read.')))}</p>`, actions(button(t(msgid('Stop site')), { 'data-site-stop': true }) + button(t(msgid('Start site')), { 'data-site-start': true })))
   const traffic = section('v2-site-traffic', t(msgid('Traffic control')), check('v2-site-traffic-enabled', t(msgid('Limit traffic to this site')), { 'data-site-traffic-enabled': true })
-    + fields(field('v2-site-traffic-preset', t(msgid('Preset')), select('v2-site-traffic-preset', '', [['custom', t(msgid('Custom'))], ['blog', t(msgid('Forum or blog'))], ['images', t(msgid('Image site'))], ['downloads', t(msgid('Download site'))]], ' data-site-traffic-preset'))
+    + pair(field('v2-site-traffic-preset', t(msgid('Preset')), select('v2-site-traffic-preset', '', [['custom', t(msgid('Custom'))], ['blog', t(msgid('Forum or blog'))], ['images', t(msgid('Image site'))], ['downloads', t(msgid('Download site'))]], ' data-site-traffic-preset'))
       + text('traffic-site', t(msgid('Connections to this site')), 'data-site-traffic-site min="1"', 'number') + text('traffic-ip', t(msgid('Connections per visitor address')), 'data-site-traffic-ip min="1"', 'number') + text('traffic-rate', t(msgid('Speed per connection (KB/s)')), 'data-site-traffic-rate min="1"', 'number'))
     + note(t(msgid('A visitor over a connection limit gets a 503 response.'))))
   const deny = section('v2-site-deny', t(msgid('Deny access')), table('v2-site-deny-table', t(msgid('Deny rules')), [t(msgid('Name')), t(msgid('Directory')), t(msgid('File extensions')), t(msgid('Action'))], unreadRow(4, t(msgid('Not read'))), { 'data-site-deny-rows': true })
@@ -48,14 +54,24 @@ export function renderV2SiteSettingsPage(props: PanelSurfaceProps, authority: Pa
     + check('v2-site-review-ack', t(msgctxt('theme:v2', 'I reviewed the proposed site changes.')), { 'data-site-review-ack': true }), actions(button(t(msgid('Reset')), { 'data-site-reset': true }) + button(t(msgid('Save site settings')), { 'data-site-save': true }, true, true)))
   const editor = config && manage ? section('v2-site-config', t(msgid('Configuration editor')), `<form class="v2-panel-settings__groups" data-userdata-form="true" data-domain-custom-config="${esc(config.domainId)}" data-userdata-baseline="${esc(JSON.stringify({ nginxInclude: config.nginxInclude, apacheInclude: config.apacheInclude, userIni: config.userIni, customHeaders: config.customHeaders, cacheBypassPaths: config.cacheBypassPaths }))}">
 ${note(t(msgid('Privilege and isolation directives are blocked: user, pid, root, alias, include, SuexecUserGroup, AssignUserId, LoadModule, Listen. Failed checks keep the previous configuration active.')))}
-${fields(field('v2-site-nginx-include', t(msgid('Custom Nginx server directives')), area('v2-site-nginx-include', 'nginxInclude', ' rows="6" dir="ltr" spellcheck="false"', true, config.nginxInclude))
+${columns(field('v2-site-nginx-include', t(msgid('Custom Nginx server directives')), area('v2-site-nginx-include', 'nginxInclude', ' rows="6" dir="ltr" spellcheck="false"', true, config.nginxInclude))
   + field('v2-site-apache-include', t(msgid('Custom Apache directives')), area('v2-site-apache-include', 'apacheInclude', ' rows="6" dir="ltr" spellcheck="false"', true, config.apacheInclude))
   + field('v2-site-user-ini', t(msgid('PHP .user.ini overrides')), area('v2-site-user-ini', 'userIni', ' rows="4" dir="ltr" spellcheck="false"', true, Object.entries(config.userIni).map(([key, value]) => `${key} = ${value}`).join('\n')))
   + field('v2-site-custom-headers', t(msgid('Response headers and cache bypass paths')), area('v2-site-custom-headers', 'customHeaders', ' rows="4" dir="ltr" spellcheck="false"', true, Object.entries(config.customHeaders).map(([key, value]) => `${key}: ${value}`).join('\n') + `\nBypass: ${config.cacheBypassPaths.join(', ')}`)))}
 <p data-userdata-status role="status" aria-live="polite" hidden></p>
 ${actions(button(t(msgid('Test and apply configuration')), { 'data-action': 'apply-userdata' }, true, true))}</form>`) : ''
-  const summary = section('v2-site-summary', t(msgid('Site binding')), facts([{ label: t(msgid('Name')), valueHtml: chosen ? technical(chosen.name) : esc(t(msgid('Not read'))) }, { label: t(msgid('Runtime')), valueHtml: chosen ? technical(chosen.siteType) : esc(t(msgid('Not read'))) }, { label: 'PHP', valueHtml: chosen ? technical(chosen.php.version) : esc(t(msgid('Not read'))) }])
+  const summary = section('v2-site-summary', t(msgid('Site binding')), `<div class="v2-panel-settings__lead"><div>${selectSite}</div><div>${facts([{ label: t(msgid('Name')), valueHtml: chosen ? technical(chosen.name) : esc(t(msgid('Not read'))) }, { label: t(msgid('Runtime')), valueHtml: chosen ? esc(siteTypeLabel(t, chosen.siteType)) : esc(t(msgid('Not read'))) }, { label: 'PHP', valueHtml: chosen ? technical(chosen.php.version) : esc(t(msgid('Not read'))) }])}</div></div>`
     + note(t(msgid('Each save runs the web server configuration test before anything reloads.'))))
-  return page(props, authority, '/domains/site-settings', title, description, selectSite + split(lifecycle + runtime + traffic + deny + review + editor + names + headers + php + rewrite + redirects + proxy + logs + privacy + blocked + hotlink, summary),
+  // The board's six tabs: every section stays in the document for the site controller; only its panel is shown.
+  const panels: readonly (readonly [string, string, string])[] = [
+    ['general', t(msgid('General')), columns(lifecycle, runtime) + traffic + names + editor + headers],
+    ['php', 'PHP', columns(php, rewrite)],
+    ['redirects', t(msgid('Redirects')), redirects],
+    ['proxy', t(msgid('Proxy')), proxy],
+    ['logs', t(msgid('Logs')), logs],
+    ['protection', t(msgid('Security')), columns(deny, groups(privacy + blocked + hotlink))],
+  ]
+  const nav = tabs({ label: title, tabs: panels.map(([key, label], index) => ({ id: `v2-site-tab-${key}`, label, panelId: `v2-site-panel-${key}`, selected: index === 0, hooks: { 'data-presentation-tab': key } })) })
+  return page(props, authority, '/domains/site-settings', title, description, summary + (`<div class="v2-panel-settings__groups" data-presentation-tabs="panels">${nav}${panels.map(([key, , body], index) => tabPanel({ id: `v2-site-panel-${key}`, tabId: `v2-site-tab-${key}`, hidden: index > 0, sectionSpacing: true, bodyHtml: body })).join('')}</div>` + review),
     { 'data-site-settings': true, 'data-site-account': c.account!.id, 'data-site-home': c.account!.home, 'data-site-domain': chosen?.id ?? '', 'data-site-can-read': String(manage), 'data-site-manage': String(manage) })
 }

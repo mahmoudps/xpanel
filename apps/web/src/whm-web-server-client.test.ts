@@ -70,6 +70,21 @@ describe('WHM web server readback and guarded rollback controller', () => {
     expect(document.querySelector<HTMLButtonElement>('[data-whm-detail-section="web-pending"] button')!.disabled).toBe(false)
     expect(f.send.mock.calls.every(call => call[0] === 'GET')).toBe(true)
   })
+  it('reads and writes a radio group as one setting, naming it by its legend', async () => {
+    document.body.innerHTML = render(false).replace(/<label for="engine">Engine<\/label><select id="engine" name="engine">.*?<\/select>/, '<fieldset><legend>Engine</legend><input type="radio" name="engine" value="apache" checked><input type="radio" name="engine" value="openlitespeed"></fieldset>')
+    const radios = Array.from(document.querySelectorAll<HTMLInputElement>('input[name="engine"]'))
+    expect(radios).toHaveLength(2)
+    const f = model(); f.boot(); await tick()
+    const pending = () => document.querySelector('[data-whm-detail-section="web-pending"] tbody')!.textContent
+    expect(pending()).not.toContain('openlitespeed')
+    radios[1]!.checked = true; radios[1]!.dispatchEvent(new Event('change', { bubbles: true }))
+    expect(pending()).toContain('Engine'); expect(pending()).toContain('apache'); expect(pending()).toContain('openlitespeed')
+    f.ask.mockResolvedValueOnce(true)
+    document.querySelector<HTMLButtonElement>('[data-whm-detail-section="web-pending"] button')!.click(); await tick(); await tick()
+    expect(radios.map(item => [item.value, item.checked])).toEqual([['apache', true], ['openlitespeed', false]])
+    expect(pending()).not.toContain('openlitespeed')
+    expect(f.send.mock.calls.every(call => call[0] === 'GET')).toBe(true)
+  })
   it.each(['missing-state', 'pending-state', 'missing-admission', 'denied-admission', 'missing-target-admission', 'denied-target-admission'])('keeps restore disabled for %s even when the page can read', async mode => {
     document.body.innerHTML = render(true)
     const f = model()

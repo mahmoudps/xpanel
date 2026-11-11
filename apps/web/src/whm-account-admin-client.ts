@@ -2,6 +2,9 @@
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
 import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
+import { ASCII_BYTES_BINDING, formatIsolatedBytes as canonicalFormatClientBytes } from './display-format.ts'
+// Module-local alias: the binding source defines it again from ASCII_BYTES_BINDING.
+const formatClientBytes = canonicalFormatClientBytes
 const clientTemplate = canonicalClientTemplate
 const clientTemplateSlot = canonicalClientTemplateSlot
 const cloneClientTemplate = canonicalCloneClientTemplate
@@ -168,7 +171,7 @@ function bindWhmAccountAdmin(askDialog: Ask | undefined): void {
     const paint = (next: AccountAdminView): void => {
       view = next
       options(account, view.accounts.filter(row => !row.homeMove).map(row => [row.id, `${row.username} (${row.home})`]))
-      options(target, (view.homeRoots ?? []).map(item => [item.path, item.availableKb === null ? item.path : t('{path} ({gb} GB free)', { path: item.path, gb: Math.floor(item.availableKb / 1048576) })]))
+      options(target, (view.homeRoots ?? []).map(item => [item.path, item.availableKb === null ? item.path : t('{path} ({size} free)', { path: item.path, size: formatClientBytes(item.availableKb * 1024) })]))
       if (submit) submit.disabled = !editable(root) || !view.homeRoots?.length
       const moving = root.querySelector<HTMLButtonElement>('[data-rearrange-recover]'); if (moving) moving.hidden = !view.accounts.some(row => row.homeMove)
       note(status, view.homeRoots ? 'read' : 'unavailable', view.homeRoots ? t('{count, plural, one {{count} home root found.} other {{count} home roots found.}}', { count: view.homeRoots.length }) : t('The home roots of this server could not be read. Nothing was changed.'))
@@ -393,4 +396,4 @@ function bindWhmAccountAdmin(askDialog: Ask | undefined): void {
   })
 }
 
-export const WHM_ACCOUNT_ADMIN_CLIENT_BINDING = `(()=>{${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const readAccountAdminView=${readAccountAdminView.toString()};return ${bindWhmAccountAdmin.toString()};})()`
+export const WHM_ACCOUNT_ADMIN_CLIENT_BINDING = `(()=>{const formatClientBytes=${ASCII_BYTES_BINDING};${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const readAccountAdminView=${readAccountAdminView.toString()};return ${bindWhmAccountAdmin.toString()};})()`

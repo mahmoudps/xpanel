@@ -95,6 +95,20 @@ describe('mail identities browser binding', () => {
     expect(status().dataset.state).toBe('saved')
     expect(document.querySelectorAll('[data-identity-id]')).toHaveLength(3)
   })
+  it('clears an opening "not read" line after a successful read and leaves a status without one alone', async () => {
+    const transport = () => vi.fn(async () => ({ identities: stored() }))
+    boot(transport()); await tick()
+    expect([status().hidden, status().textContent, status().dataset.state]).toEqual([true, '', undefined])
+    document.body.innerHTML = renderMailIdentitiesWorkspace({ locale: 'en', mailbox, canManage: true })
+    status().hidden = false; status().dataset.state = 'unread'; status().textContent = 'Saved sender identities have not been read.'
+    boot(transport()); await tick()
+    expect([status().hidden, status().textContent, status().dataset.state]).toEqual([true, '', 'read'])
+    document.body.innerHTML = renderMailIdentitiesWorkspace({ locale: 'en', mailbox, canManage: true })
+    status().hidden = false; status().dataset.state = 'unread'; status().textContent = 'Saved sender identities have not been read.'
+    boot(vi.fn(async () => { throw new Error('unread') })); await tick()
+    expect(status().dataset.state).toBe('failed')
+    expect(status().textContent).toContain('could not be read')
+  })
   it('sets the default identity exclusively and reports stale/refused states truthfully', async () => {
     let identities = stored()
     const transport = vi.fn(async (method: string, path: string, body?: unknown) => {
@@ -200,7 +214,7 @@ describe('identity metadata field grouping', () => {
       }
       expect(document.querySelector('[data-mail-identities]')!.getAttribute('dir')).toBe(locale === 'ar' ? 'rtl' : 'ltr')
       cards[0]!.querySelector<HTMLButtonElement>('[data-identities-action="edit"]')!.click()
-      expect(document.querySelector('[data-identities-form-title]')!.textContent).toBe(locale === 'ar' ? 'تحرير الهوية: Primary' : 'Edit identity: Primary')
+      expect(document.querySelector('[data-identities-form-title]')!.textContent).toBe(locale === 'ar' ? 'تحرير الهوية: \u2066Primary\u2069' : 'Edit identity: Primary')
       expect(field('[data-identities-reply-to]').value).toBe(replyTo)
       expect(field('[data-identities-text-signature]').value).toBe(signature)
       expect(field('[data-identities-html-signature]').value).toBe(identities[0]!.htmlSignature)

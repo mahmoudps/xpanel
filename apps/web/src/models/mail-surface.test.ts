@@ -65,7 +65,7 @@ describe('complete neutral mailbox surface projection', () => {
   it('preserves actual quota/folder observations and action outcomes without synthesizing workspace records', () => {
     const actionState = { state: 'conflict' as const, preserveDraft: true, errorCode: 'STALE_REVISION' }
     const view = projectMailSurfaceView(props({ activeRoute: '/mail/overview', activeFolder: 'Orders', quotaUsedMb: 0, quotaLimitMb: 100, folderCounts: [{ folder: 'INBOX', total: 5, unread: 0 }], actionState }))
-    expect(view).toMatchObject({ kind: 'workspace', activeFolder: 'Orders', quota: { text: '0 / 100 MiB', percent: 0 }, quotaUsedMb: 0, quotaLimitMb: 100 })
+    expect(view).toMatchObject({ kind: 'workspace', activeFolder: 'Orders', quota: { text: '0\u00a0B / 100\u00a0MiB', percent: 0 }, quotaUsedMb: 0, quotaLimitMb: 100 })
     expect(view?.actionState).toBe(actionState)
     expect(view?.folders.find(folder => folder.id === 'INBOX')).toMatchObject({ count: 0, current: false })
     expect(view?.customFolders).toEqual([{ id: 'Orders', label: 'Orders', current: false, href: '/mail/inbox?folder=Orders' }])

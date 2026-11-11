@@ -6,6 +6,7 @@ import { parseWebsiteAnalyticsSnapshot } from '../../../../models/website-analyt
 import type { PanelSurfaceProps, ThemeViewProps } from '../../../contract.ts'
 import { card, dataTable, emptyState, errorState, kpiCard, meter, notice, pageHeader, rowMenu, statusPill, type MeterProps } from '../../components/index.ts'
 import { escapeHtml, type Tone } from '../../html.ts'
+import { formatAsciiBytes, formatAsciiRate } from '../../../../display-format.ts'
 import { icon, type IconName } from '../../icons.ts'
 import { renderV2AccountAnnouncementsBanner, V2_HOME_ANNOUNCEMENTS_CSS } from '../../components/account-announcements.ts'
 import { renderV2AccountPlugins, V2_HOME_PLUGINS_CSS } from '../../components/account-plugins.ts'
@@ -45,10 +46,9 @@ export const selectedPanelPlan = (props: PanelPageProps): Plan | undefined =>
 export const panelCount = (value: unknown): number | undefined =>
   typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined
 
-export function panelBytes(value: number): string {
-  if (value < 1024 * 1024 && value > 0) return `${value} B`
-  return `${Number((value / (1024 * 1024)).toFixed(2))} MiB`
-}
+/** A stored limit in MiB, or a byte rate, read like a measured size. */
+export const panelMib = (value: Limit | undefined, t: Translate): string => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? formatAsciiBytes(value * 1024 * 1024) : panelLimit(value, t)
+export const panelRate = (value: Limit | undefined, t: Translate): string => typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? formatAsciiRate(value) : panelLimit(value, t, 'B/s')
 
 export const panelLimit = (value: Limit | undefined, t: Translate, unit = ''): string =>
   value === 'unlimited' ? t('Unlimited') : typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > Number.MAX_SAFE_INTEGER
@@ -61,12 +61,14 @@ const bytesCap = (value: Limit | undefined): Limit | undefined => typeof value =
 
 function quantity(t: Translate, label: string, used: number | undefined, limit: Limit | undefined, bytes = false): MeterProps {
   const resolved = resolveResourceUsage(used, limit)
-  const usedText = used === undefined ? t('Unavailable') : bytes ? panelBytes(used) : String(used)
-  const limitText = typeof limit === 'number' && bytes ? panelBytes(limit) : panelLimit(limit, t)
+  const usedText = used === undefined ? t('Unavailable') : bytes ? formatAsciiBytes(used) : String(used)
+  const limitText = typeof limit === 'number' && bytes ? formatAsciiBytes(limit) : panelLimit(limit, t)
   const tone: Tone = resolved.kind === 'bounded' ? resolved.threshold === 'critical' ? 'bad' : resolved.threshold
     : resolved.kind === 'zero-limit' && resolved.exceeded ? 'bad' : 'neutral'
   return {
-    label, valueText: `${usedText} / ${limitText}`, tone,
+    // A numeric limit after an Arabic word is isolated left-to-right, so its unit stays after its number; two numbers are
+    // isolated together, so an Arabic page still reads used before limit.
+    label, valueText: used === undefined && typeof limit === 'number' ? `${usedText} / ⁦${limitText}⁩` : used !== undefined && typeof limit === 'number' ? `⁦${usedText} / ${limitText}⁩` : `${usedText} / ${limitText}`, tone,
     ...(resolved.kind === 'bounded' ? { percent: resolved.fillPercent } : {}),
     ...(resolved.kind === 'zero-limit' ? { note: t(msgctxt('theme:v2', 'Stored limit is 0.')) }
       : used === undefined ? { note: t('Not reported by the agent') } : {}),
@@ -83,7 +85,7 @@ export function panelHomeMeters(props: PanelPageProps, t: Translate): MeterProps
   return [
     quantity(t, t('Disk'), panelCount(props.usage?.diskBytes), bytesCap(plan?.resources.diskMb), true),
     quantity(t, t('Monthly bandwidth'), panelCount(props.usage?.bandwidthMonth?.totalBytes), bytesCap(plan?.resources.bandwidthMbMonth), true),
-    { label: t(msgctxt('theme:v2', 'IO write cap')), valueText: panelLimit(plan?.resources.ioWriteBps, t, 'B/s'),
+    { label: t(msgctxt('theme:v2', 'IO write cap')), valueText: panelRate(plan?.resources.ioWriteBps, t),
       note: t(props.usage?.ioEnforced === true ? msgid('Verified for this sample') : props.usage?.ioEnforced === false ? msgid('Observed mismatch') : msgctxt('resources-board', 'Not read')),
       tone: props.usage?.ioEnforced === false ? 'warn' : 'neutral' },
     quantity(t, t('Memory'), panelCount(props.usage?.memoryBytes), bytesCap(plan?.resources.memoryMb), true),
@@ -107,6 +109,7 @@ function sites(props: PanelPageProps, t: Translate, routes: ReadonlySet<string>)
       ['/security/ssl', t('SSL/TLS')], ['/domains/zone-editor', t('Zone editor')], ['/metrics/traffic', t('Bandwidth')],
     ].filter(([route]) => routes.has(route!)).map(([route, label]) => ({ label: label!, href: domainHref(route!, domain.name) }))
     const storedCertificate = props.certificates?.find(certificate => certificate.id === domain.certificateId && certificate.accountId === account?.id)
+    const expires = storedCertificate && Number.isFinite(Date.parse(storedCertificate.notAfter)) ? new Date(storedCertificate.notAfter).toISOString().slice(0, 16).replace('T', ' ') : undefined
     const certificateLabel = t(domain.certificateId === null ? msgctxt('theme:v2', 'No stored certificate')
       : storedCertificate ? msgctxt('theme:v2', 'Stored certificate') : msgctxt('resources-board', 'Not read'))
     const name = routes.has('/domains/site-settings')
@@ -117,7 +120,7 @@ function sites(props: PanelPageProps, t: Translate, routes: ReadonlySet<string>)
       cellsHtml: [
         identity,
         `<bdi dir="ltr" class="v2-mono">${escapeHtml(`${domain.php.version} · ${domain.php.handler}`)}</bdi>`,
-        `<span class="v2-home-site__certificate">${icon('shield', 16)}<span>${escapeHtml(certificateLabel)}</span></span>`,
+        `<span class="v2-home-site__certificate">${icon('shield', 16)}<span>${escapeHtml(certificateLabel)}</span></span>${expires ? `<span class="v2-home-site__expiry v2-num" data-home-site-expiry>${escapeHtml(t('Expires (UTC)'))} <bdi dir="ltr">${expires}</bdi></span>` : ''}`,
         statusPill({ tone: domain.suspended ? 'warn' : 'info', label: t(domain.suspended ? msgid('Suspended') : msgctxt('theme:v2', 'Saved active configuration')) }),
       ],
       actionsHtml: (placement: 'table' | 'card'): string =>
@@ -254,14 +257,14 @@ function tools(props: PanelPageProps, t: Translate, visitors: number | undefined
         : item.capability === 'change-language' ? localeInfo(t.locale).nativeName
         : (item.hint ? hints[item.hint] : undefined) ?? t(msgctxt('resources-board', 'Not read'))
       const href = item.capability === 'change-language' ? `?lang=${alternateLocales(t.locale)[0]!.tag}` : item.route
-      const technicalHint = enabled && item.hint !== undefined && hints[item.hint] !== undefined
+      const technicalHint = enabled && item.hint !== undefined && hints[item.hint] !== undefined && /^[ -~]+$/.test(hint) // translated words stay in the reading direction
       const content = `<span class="v2-home-tool__tile v2-tile v2-tile--${enabled ? group.tone ?? 'info' : 'neutral'}" aria-hidden="true">${icon(item.icon, 16)}</span><span class="v2-home-tool__label">${escapeHtml(name)}</span><span class="v2-home-tool__hint v2-num">${technicalHint ? `<bdi dir="ltr" class="v2-mono">${escapeHtml(hint)}</bdi>` : escapeHtml(hint)}</span>`
       const attrs = ` data-tool data-tool-capability="${escapeHtml(item.capability)}" data-tool-keys="${escapeHtml([name, item.keywords].join(' '))}"`
       return enabled ? `<a class="v2-home-tool" href="${escapeHtml(href)}"${attrs}>${content}</a>`
         : `<button type="button" class="v2-home-tool" disabled${attrs}>${content}</button>`
     }).join('')}</div></details>`
   }).join('')
-  return `<section class="v2-home-tools" data-home-tools aria-labelledby="v2-home-tools-title"><header class="v2-home-tools__head"><div class="v2-home-tools__title"><h2 id="v2-home-tools-title">${escapeHtml(t('Tools'))}</h2><p class="v2-muted v2-num" id="tool-filter-count" role="status" data-rest="${escapeHtml(count)}">${escapeHtml(count)}</p></div><div class="v2-field v2-home-tool-filter"><label for="tool-filter">${escapeHtml(t('Find a tool'))}</label><span class="v2-home-tool-search">${icon('search', 18)}<input type="search" id="tool-filter" dir="auto" autocomplete="off" placeholder="${escapeHtml(t(msgctxt('theme:v2', 'Search tools')))}" data-home-filter aria-controls="v2-home-tool-list" aria-describedby="tool-filter-count"></span></div></header><div id="v2-home-tool-list" class="v2-home-tool-list" data-tool-section>${body || emptyState({ icon: 'tools', title: t(msgctxt('theme:v2', 'No tools are available for this account.')) })}</div><div class="v2-home-filter-empty" data-tool-empty hidden><h3 data-home-empty-title>${escapeHtml(t(msgctxt('theme:v2', 'No matching tools.')))}</h3><p>${escapeHtml(t('Clear the field or try a shorter word, such as “mail”.'))}</p><button type="button" class="v2-btn" data-home-filter-clear>${escapeHtml(t(msgctxt('theme:v2', 'Clear filter')))}</button></div></section>`
+  return `<section class="v2-home-tools" data-home-tools aria-labelledby="v2-home-tools-title"><header class="v2-home-tools__head"><div class="v2-home-tools__title"><h2 id="v2-home-tools-title">${escapeHtml(t('Tools'))}</h2><p class="v2-muted v2-num" id="tool-filter-count" role="status" data-rest="${escapeHtml(count)}">${escapeHtml(count)}</p></div><div class="v2-field v2-home-tool-filter"><label for="tool-filter">${escapeHtml(t('Find a tool'))}</label><span class="v2-home-tool-search">${icon('search', 18)}<input type="search" id="tool-filter" autocomplete="off" placeholder="${escapeHtml(t(msgctxt('theme:v2', 'Search tools')))}" data-home-filter aria-controls="v2-home-tool-list" aria-describedby="tool-filter-count"></span></div></header><div id="v2-home-tool-list" class="v2-home-tool-list" data-tool-section>${body || emptyState({ icon: 'tools', title: t(msgctxt('theme:v2', 'No tools are available for this account.')) })}</div><div class="v2-home-filter-empty" data-tool-empty hidden><h3 data-home-empty-title>${escapeHtml(t(msgctxt('theme:v2', 'No matching tools.')))}</h3><p>${escapeHtml(t('Clear the field or try a shorter word, such as “mail”.'))}</p><button type="button" class="v2-btn" data-home-filter-clear>${escapeHtml(t(msgctxt('theme:v2', 'Clear filter')))}</button></div></section>`
 }
 
 function information(props: PanelPageProps, t: Translate): string {
@@ -269,12 +272,12 @@ function information(props: PanelPageProps, t: Translate): string {
   const plan = selectedPanelPlan(props)
   return card({ title: t('General information'), titleId: 'v2-home-information-title', bodyHtml:
     `<dl class="v2-panel-facts">${[
-      panelFact(t('Username'), account?.username ?? t('Not read'), true), panelFact(t('Primary domain'), account?.primaryDomain ?? t('Not read'), true),
-      panelFact(t('Home directory'), account?.home ?? t('Not read'), true), panelFact(t('Shared IP'), account?.ipv4 ?? t('Not read'), true),
+      panelFact(t('Username'), account?.username ?? t('Not read'), !!account), panelFact(t('Primary domain'), account?.primaryDomain ?? t('Not read'), !!account),
+      panelFact(t('Home directory'), account?.home ?? t('Not read'), !!account), panelFact(t('Shared IP'), account?.ipv4 ?? t('Not read'), !!account?.ipv4),
       panelFact(t('Plan'), plan?.name ?? t(msgctxt('resources-board', 'Not read'))),
-      panelFact(t('Default PHP'), props.usage?.phpVersion ?? t('Not reported by the agent'), true),
-      panelFact(t('Isolation slice'), account ? `xpanel-${account.uid}.slice` : t('Not read'), true),
-      panelFact(t('Last sign-in'), props.lastSignInAt && Number.isFinite(Date.parse(props.lastSignInAt)) ? new Date(props.lastSignInAt).toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, ' UTC') : t('Not reported by the agent'), true),
+      panelFact(t('Default PHP'), props.usage?.phpVersion ?? t('Not reported by the agent'), !!props.usage?.phpVersion),
+      panelFact(t('Isolation slice'), account ? `xpanel-${account.uid}.slice` : t('Not read'), !!account),
+      panelFact(t('Last sign-in'), props.lastSignInAt && Number.isFinite(Date.parse(props.lastSignInAt)) ? new Date(props.lastSignInAt).toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, ' UTC') : t('Not reported by the agent'), !!props.lastSignInAt && Number.isFinite(Date.parse(props.lastSignInAt))),
     ].join('')}</dl>`,
   })
 }
@@ -306,14 +309,17 @@ export function renderV2PanelHome(props: PanelPageProps, authority?: SurfaceAuth
   const domainsAuthorized = !!props.visibility && !!domainsDefinition && isToolAuthorized(domainsDefinition, props.visibility)
   const meters = panelHomeMeters(props, t)
   const domains = account ? props.domains?.filter(item => item.accountId === account.id) : undefined
+  // Core sends the active generation only; an absent or invalid id shows nothing.
+  const generation = account && Number.isSafeInteger(props.generationId) && props.generationId! > 0
+    ? `<span data-home-generation>${statusPill({ tone: 'ok', label: t('Applied in generation #{generationId}', { generationId: props.generationId! }) })}</span>` : ''
   const traffic = !account || props.websiteAnalyticsUnavailable === true ? null
     : parseWebsiteAnalyticsSnapshot(props.websiteAnalytics, { accountId: account.id, domain })
   const summary = [
     { label: t('Domains'), value: domains === undefined ? '—' : String(domains.length), icon: 'globe' as const,
       note: meters[5]!.valueText },
-    { label: t('Disk'), value: panelCount(props.usage?.diskBytes) === undefined ? '—' : panelBytes(props.usage!.diskBytes!), icon: 'disk' as const,
+    { label: t('Disk'), value: panelCount(props.usage?.diskBytes) === undefined ? '—' : formatAsciiBytes(props.usage!.diskBytes!), icon: 'disk' as const,
       note: meters[0]!.valueText, ...(meters[0]!.percent === undefined ? {} : { meter: { percent: meters[0]!.percent!, tone: meters[0]!.tone } }) },
-    { label: t('Bandwidth'), value: panelCount(props.usage?.bandwidthMonth?.totalBytes) === undefined ? '—' : panelBytes(props.usage!.bandwidthMonth!.totalBytes!), icon: 'activity' as const,
+    { label: t('Bandwidth'), value: panelCount(props.usage?.bandwidthMonth?.totalBytes) === undefined ? '—' : formatAsciiBytes(props.usage!.bandwidthMonth!.totalBytes!), icon: 'activity' as const,
       note: meters[1]!.valueText, ...(meters[1]!.percent === undefined ? {} : { meter: { percent: meters[1]!.percent!, tone: meters[1]!.tone } }) },
     { label: t('Visitors'), value: traffic ? String(traffic.totals.uniqueVisitors) : '—', icon: 'users' as const,
       note: traffic ? `${props.websiteAnalyticsWindow ?? t(msgctxt('theme:v2', 'Traffic window not reported'))} · ${traffic.domain}`
@@ -326,75 +332,102 @@ export function renderV2PanelHome(props: PanelPageProps, authority?: SurfaceAuth
     title: t('Resource usage'), titleId: 'v2-home-resources-title', bodyHtml: meters.map(item => meter(item)).join(''),
     ...(routes.has('/resources') ? { footerHtml: `<a href="/resources">${escapeHtml(t('Resources & quotas'))}${icon('arrow', 16)}</a>` } : {}),
   })
-  return `<div class="v2-layout v2-panel-home" data-panel-home ${account ? `data-account="${escapeHtml(account.id)}" data-uid="${account.uid}"` : ''}>
+  return `<div class="v2-layout v2-panel-home" data-panel-home ${account ? `${authority?.presentation === 'read-only' ? '' : `data-account="${escapeHtml(account.id)}" `}data-uid="${account.uid}"` : ''}>
 ${pageHeader(t, { breadcrumb: [{ label: t('Home') }], route: '/home', title: t(msgctxt('theme:v2', 'Welcome back, {username}'), { username: account?.username ?? t('Not read') }),
     description: t(msgctxt('theme:v2', 'Your sites, tools and account resources.')),
-    actionsHtml: `<div class="v2-home-page-actions"><p class="v2-home-selected-domain"><span>${escapeHtml(t('Selected domain'))}</span><bdi dir="ltr" class="v2-mono">${escapeHtml(domain)}</bdi></p>${routes.has('/domains') ? `<a class="v2-btn v2-btn--primary" href="/domains">${icon('plus', 18)}${escapeHtml(t(msgid('Add domain')))}</a>` : domainsAuthorized ? `<button type="button" class="v2-btn" disabled>${icon('plus', 18)}${escapeHtml(t(msgid('Add domain')))}</button>` : ''}</div>` })}
+    actionsHtml: `<div class="v2-home-page-actions">${generation}<p class="v2-home-selected-domain"><span>${escapeHtml(t('Selected domain'))}</span><bdi dir="ltr" class="v2-mono">${escapeHtml(domain)}</bdi></p>${routes.has('/domains') ? `<a class="v2-btn v2-btn--primary" href="/domains">${icon('plus', 18)}${escapeHtml(t(msgid('Add domain')))}</a>` : domainsAuthorized ? `<button type="button" class="v2-btn" disabled>${icon('plus', 18)}${escapeHtml(t(msgid('Add domain')))}</button>` : ''}</div>` })}
 ${renderV2HomeNotices(props, t, routes)}${props.personal?.notifications.announcements === false ? '' : renderV2AccountAnnouncementsBanner(t, canReadAnnouncements)}${bandwidthNotice}<section class="v2-kpi-row" aria-label="${escapeHtml(t('Account summary'))}">${summary.map(item => kpiCard({ headingLevel: 2, ...item })).join('')}</section>
 ${sites(props, t, routes)}<div class="v2-home-columns">${tools(props, t, traffic?.totals.uniqueVisitors)}<aside class="v2-stack" aria-label="${escapeHtml(t(msgctxt('theme:v2', 'Account information')))}">${resourceCard}${information(props, t)}${recentChanges(props, t)}</aside></div>
 ${renderV2AccountPlugins(t, canReadAnnouncements)}
 </div>`
 }
 
-export const V2_PANEL_HOME_CSS = V2_HOME_ANNOUNCEMENTS_CSS + V2_HOME_PLUGINS_CSS + '\n' + V2_HOME_NOTICES_CSS + '\n' + `.v2-panel-home .v2-home-columns{display:flex;flex-wrap:wrap;gap:var(--space-3);align-items:flex-start}
+export const V2_PANEL_HOME_CSS = V2_HOME_ANNOUNCEMENTS_CSS + V2_HOME_PLUGINS_CSS + '\n' + V2_HOME_NOTICES_CSS + '\n' + `.v2-panel-home :is(.v2-account-announcements__list,[data-account-plugins-list]):empty{display:none}
+.v2-panel-home .v2-account-plugins__link{min-block-size:64px;padding:12px var(--space-2);border:1px solid var(--line);border-radius:var(--radius-card);background:var(--surface);font-size:14px;font-weight:600;text-decoration:none}.v2-panel-home .v2-account-plugins__link:hover{border-color:var(--line-strong)}.v2-panel-home .v2-account-plugins__link:focus-visible{outline:2px solid var(--accent-fill);outline-offset:2px}.v2-panel-home .v2-account-plugins__link img{inline-size:40px;block-size:40px;border-radius:var(--radius-control);background:var(--sunken)}
+.v2-panel-home .v2-home-tool__hint:not(:has(.v2-mono)){white-space:nowrap}
+.v2-panel-home .v2-home-columns{display:flex;flex-wrap:wrap;gap:var(--space-3);align-items:flex-start}
+.v2-panel-home>.v2-kpi-row{grid-template-columns:repeat(4,minmax(0,1fr))}
+.v2-panel-home .v2-kpi__value>:first-child{font-size:26px;overflow-wrap:anywhere}
+.v2-panel-home .v2-kpi__note{overflow-wrap:anywhere}
 .v2-panel-home .v2-home-page-actions{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2)}
 .v2-panel-home .v2-home-columns>.v2-home-tools{flex:1.75 1 560px;min-inline-size:0}
 .v2-panel-home .v2-home-columns>aside{flex:1 1 300px;min-inline-size:0;gap:var(--space-3)}
 .v2-panel-home .v2-home-site{display:flex;align-items:center;gap:12px;min-inline-size:0}
 .v2-panel-home .v2-home-site__mark{display:flex;align-items:center;justify-content:center;flex:none;inline-size:34px;block-size:34px;border-radius:9px;background:var(--accent-soft);color:var(--accent)}
-.v2-panel-home .v2-home-site__text{display:flex;flex-direction:column;gap:var(--space-1);min-inline-size:0}
-.v2-panel-home .v2-home-site__name{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-1);font-size:13px;font-weight:600}
+.v2-panel-home .v2-home-site__text{display:flex;flex-direction:column;gap:2px;min-inline-size:0}
+.v2-panel-home #v2-home-sites :is(th,td):not(:first-child){padding-inline-start:12px}.v2-panel-home #v2-home-sites :is(th,td):not(:last-child){padding-inline-end:12px}
+.v2-panel-home #v2-home-sites td:is(:nth-child(2),:nth-child(3)){white-space:nowrap}
+.v2-panel-home .v2-home-site__name{display:block;font-size:13px;font-weight:600;overflow-wrap:anywhere}
 .v2-panel-home .v2-home-site__name>a{text-decoration:none}
-.v2-panel-home .v2-home-site__kind{padding:1px var(--space-1);border-radius:var(--radius-pill);background:var(--sunken);color:var(--text-2);font-family:var(--font-sans);font-size:11px;font-weight:600}
+.v2-panel-home .v2-home-site__expiry{display:block;margin-block-start:2px;font-size:12px;color:var(--muted);white-space:nowrap}
+.v2-panel-home .v2-home-site__kind{display:inline-block;margin-inline-start:var(--space-1);vertical-align:middle;white-space:nowrap;padding:1px var(--space-1);border-radius:var(--radius-pill);background:var(--sunken);color:var(--text-2);font-family:var(--font-sans);font-size:11px;font-weight:600}
 .v2-panel-home .v2-home-site__root{font-size:12px;color:var(--muted);overflow-wrap:anywhere}
 .v2-panel-home .v2-home-site__certificate{display:inline-flex;align-items:center;gap:var(--space-1);font-size:13px}
 .v2-home-sites-mobile{display:none}.v2-home-site-cards{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:var(--space-2)}
 .v2-home-site-card{display:flex;flex-direction:column;gap:var(--space-2);padding:var(--v2-panel-padding);background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-card);box-shadow:var(--shadow)}
 .v2-home-site-card__head{min-inline-size:0;overflow-wrap:anywhere}
 .v2-home-site-card__facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-2);padding-block-start:var(--space-2);border-block-start:1px solid var(--line)}
-.v2-home-site-card__facts>div{display:flex;flex-direction:column;align-items:stretch;gap:var(--space-1);min-inline-size:0;text-align:start}.v2-home-site-card__facts>div:last-child{grid-column:1/-1}
+.v2-home-site-card__facts>div{display:flex;flex-direction:column;align-items:stretch;gap:var(--space-1);min-inline-size:0;text-align:start}.v2-home-site-card__facts>div:first-child{grid-column:1/-1}.v2-home-site-card__facts .v2-home-site__expiry{white-space:normal}
 .v2-home-site-card__facts dt{font-size:12px;color:var(--muted)}.v2-home-site-card__facts dd{font-size:13px;overflow-wrap:anywhere;text-align:start}
 .v2-home-site-card__actions{display:flex;align-items:center;gap:var(--space-1)}.v2-home-site-card__actions>.v2-btn{flex:1}
 .v2-panel-home .v2-home-tools{display:flex;flex-direction:column;gap:var(--space-2)}
+.v2-panel-home .v2-home-tools__title>h2{font-size:16px}
 .v2-panel-home .v2-home-tools__head{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:var(--space-2)}
 .v2-panel-home .v2-home-tools__title{display:flex;flex-direction:column;gap:var(--space-1)}
 .v2-panel-home .v2-home-tools__title>p{font-size:13px}
 .v2-panel-home .v2-home-tool-filter{flex:0 1 360px;min-inline-size:min(240px,100%)}
+.v2-panel-home .v2-home-tool-filter>label{padding-inline-start:43px}
 .v2-panel-home .v2-home-tool-search{display:block;position:relative}
 .v2-panel-home .v2-home-tool-search>.v2-icon{position:absolute;inset-inline-start:14px;top:13px;color:var(--muted);pointer-events:none}
 .v2-panel-home .v2-home-tool-search>input{inline-size:100%;padding-inline-start:42px;padding-inline-end:12px;text-align:start}
-.v2-panel-home .v2-home-tool-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-3);align-items:start;min-inline-size:0}
-.v2-panel-home .v2-home-tool-group{display:block;min-inline-size:0;padding:var(--v2-panel-padding);border:1px solid var(--line);border-radius:var(--radius-card);background:var(--surface);box-shadow:var(--shadow)}
+.v2-panel-home .v2-home-tool-group:last-child:nth-child(odd){grid-column:1/-1}
+.v2-panel-home .v2-home-tool-group:last-child:nth-child(odd)>.v2-home-tool-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:var(--space-3)}
+.v2-panel-home .v2-home-tool-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-2);align-items:start;min-inline-size:0}
+.v2-panel-home .v2-home-tool-group{display:block;min-inline-size:0;padding:var(--space-2) 12px 12px;border:1px solid var(--line);border-radius:var(--radius-card);background:var(--surface);box-shadow:var(--shadow)}
 .v2-home-tool-heading{display:flex;align-items:center;justify-content:space-between;gap:var(--space-1)}
-.v2-home-tool-heading{list-style:none;min-block-size:var(--target);cursor:pointer}.v2-home-tool-heading::-webkit-details-marker{display:none}
-.v2-home-tool-heading h3{flex:1;display:flex;align-items:center;gap:var(--space-1)}.v2-home-group-label{flex:1}
+.v2-home-tool-heading{list-style:none;min-block-size:var(--target);padding-inline:var(--space-1);border-radius:var(--radius-control)}.v2-home-tool-heading::-webkit-details-marker{display:none}
+.v2-home-tool-heading h3{flex:1;display:flex;align-items:center;gap:var(--space-1);font-size:14px}.v2-home-group-label{flex:1}
 .v2-home-tool-heading h3>.v2-icon{display:none;color:var(--muted);transition:transform .15s}.v2-home-tool-group[open]>.v2-home-tool-heading>h3>.v2-icon{transform:rotate(180deg)}
 .v2-home-group-tile{display:none}
 .v2-home-tool-heading h3>.v2-muted{font-size:12px;font-weight:400}
-.v2-panel-home .v2-home-tool-grid{display:flex;flex-direction:column;gap:var(--space-1);margin-block-start:var(--space-3)}
-.v2-panel-home .v2-home-tool{display:flex;align-items:center;gap:12px;inline-size:100%;min-block-size:44px;padding:var(--space-1) 0;border:1px solid transparent;border-radius:var(--radius-control);background:transparent;text-align:start;text-decoration:none;color:var(--text);font-size:14px}
-.v2-home-tool:hover{background:var(--subtle);border-color:var(--line)}
+.v2-panel-home .v2-home-tool-grid{display:flex;flex-direction:column;margin-block-start:var(--space-1)}
+.v2-panel-home .v2-home-tool{display:flex;align-items:center;gap:12px;inline-size:100%;min-block-size:44px;padding:6px var(--space-1);border:1px solid transparent;border-radius:var(--radius-control);background:transparent;text-align:start;text-decoration:none;color:var(--text);font-size:14px;transition:background .12s}
+.v2-home-tool:is(a):hover{background:var(--subtle);color:var(--text)}
 .v2-panel-home .v2-home-tool__tile{inline-size:30px;block-size:30px;border-radius:8px}
-.v2-panel-home .v2-home-tool__label{flex:1;min-inline-size:0;font-weight:500;overflow-wrap:anywhere}
-.v2-panel-home .v2-home-tool__hint{flex:0 1 auto;max-inline-size:45%;font-size:12px;font-weight:400;color:var(--muted);overflow-wrap:anywhere}
-.v2-home-tool:disabled{cursor:not-allowed}
-.v2-panel-home .v2-meter__row{flex-direction:column;align-items:stretch;gap:var(--space-1)}
-.v2-panel-home .v2-meter__value{align-self:stretch;justify-content:flex-start;flex-wrap:wrap;min-inline-size:0;white-space:normal;overflow-wrap:anywhere;text-align:start}
+.v2-panel-home .v2-home-tool__label{flex:1 1 auto;font-weight:500;overflow-wrap:break-word}
+.v2-panel-home .v2-home-tool__hint{flex:0 4 auto;min-inline-size:0;max-inline-size:55%;unicode-bidi:isolate;font-size:12px;font-weight:400;color:var(--muted);overflow-wrap:anywhere;text-align:end}
+.v2-panel-home .v2-home-tool__hint>.v2-mono{font-size:12px}
+.v2-home-tool:disabled{cursor:not-allowed;color:var(--muted)}
+.v2-panel-home .v2-meter__row{flex-wrap:wrap;gap:2px var(--space-1)}
+.v2-panel-home .v2-meter__value{flex-wrap:wrap;min-inline-size:0;white-space:normal;overflow-wrap:anywhere}
 .v2-panel-home .v2-meter__value>span{min-inline-size:0}
-.v2-panel-facts{display:grid;gap:var(--space-2);min-inline-size:0}
+.v2-panel-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(180px,100%),1fr));gap:var(--space-2);min-inline-size:0}
+.v2-panel-home .v2-home-columns>aside .v2-panel-facts{grid-template-columns:repeat(2,minmax(0,1fr))}
+.v2-panel-home .v2-home-columns>aside .v2-card__foot{justify-content:flex-start}.v2-panel-home .v2-card__foot>a{display:inline-flex;align-items:center;gap:6px;min-block-size:var(--target);font-size:13px;font-weight:600;text-decoration:none}
+.v2-panel-home:dir(rtl) .v2-card__foot>a>.v2-icon{transform:scaleX(-1)}
 .v2-panel-facts>div,.v2-home-selected-domain{display:flex;flex-direction:column;align-items:stretch;gap:var(--space-1);min-inline-size:0;text-align:start}
 .v2-panel-facts dt{font-size:12px;color:var(--muted)}.v2-panel-facts dd{font-size:13px;min-inline-size:0;overflow-wrap:anywhere;text-align:start}
 .v2-panel-facts bdi{display:inline;unicode-bidi:isolate}.v2-home-selected-domain>span{font-size:12px;color:var(--muted)}
 .v2-home-changes{display:flex;flex-direction:column;gap:var(--space-3);list-style:none;margin:0;padding:0}
-.v2-home-changes>li{display:flex;align-items:flex-start;gap:12px}.v2-home-changes>li>.v2-icon{margin-block-start:2px;color:var(--muted)}
+.v2-home-changes>li{display:flex;align-items:flex-start;gap:12px}.v2-home-changes>li>.v2-icon{flex:none;inline-size:28px;block-size:28px;padding:6px;border-radius:50%;background:var(--accent-soft);color:var(--accent)}
+.v2-home-changes h3{font-size:14px;line-height:1.4}
 .v2-home-changes>li>div{display:flex;flex-direction:column;gap:var(--space-1);min-inline-size:0;overflow-wrap:anywhere}
-.v2-home-changes p{font-size:12px}.v2-home-filter-empty{display:flex;flex-direction:column;gap:var(--space-1);padding:var(--v2-panel-padding);border:1px dashed var(--line-strong);border-radius:var(--radius-card)}
+.v2-home-changes p{font-size:12px}.v2-home-filter-empty{display:flex;flex-direction:column;align-items:center;gap:12px;padding:40px var(--space-3);border:1px dashed var(--line-strong);border-radius:var(--radius-card);background:var(--surface);text-align:center}
+.v2-home-filter-empty[hidden]{display:none}.v2-home-filter-empty>h3{font-size:16px}.v2-home-filter-empty>p{max-inline-size:46ch;font-size:13px;color:var(--muted);line-height:1.6}
+@media(max-width:1100px){.v2-panel-home>.v2-kpi-row{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:600px){.v2-panel-home>.v2-kpi-row{grid-template-columns:repeat(2,minmax(0,1fr))}
 .v2-home-sites-desktop{display:none}.v2-home-sites-mobile{display:block}.v2-panel-home [data-home-sites]{padding:0;background:transparent;border:0;box-shadow:none}
 .v2-panel-home [data-home-sites]>.v2-card__head{padding:0;margin-block-end:var(--space-2)}
 .v2-card[aria-labelledby=v2-home-resources-title]>.v2-card__body{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-2)}
-.v2-panel-home .v2-home-tool-list{grid-template-columns:minmax(0,1fr);gap:var(--space-2)}.v2-panel-home .v2-home-tool-group{overflow:hidden}
-.v2-home-tool-heading{min-block-size:44px;gap:12px}.v2-home-tool-heading h3{font-size:15px}.v2-home-group-tile{display:flex;inline-size:30px;block-size:30px}
-.v2-home-tool-heading h3>.v2-icon{display:block}.v2-panel-home .v2-home-tool-grid{margin-block-start:var(--space-2)}.v2-home-tool{min-block-size:56px}.v2-home-columns>aside{display:flex}
-.v2-panel-home .v2-home-tool-filter{flex-basis:100%;min-inline-size:0}.v2-panel-home .v2-home-tool__hint{max-inline-size:45%}}
+.v2-panel-home .v2-home-tool-list{grid-template-columns:minmax(0,1fr);gap:var(--space-1)}.v2-panel-home .v2-home-tool-group{padding:0;overflow:hidden}
+.v2-home-tool-heading{min-block-size:52px;padding-inline:var(--space-2);gap:12px;border-radius:0;cursor:pointer}.v2-home-tool-heading h3{gap:12px;font-size:15px}.v2-home-group-tile{display:flex;inline-size:30px;block-size:30px;border-radius:8px}
+.v2-home-tool-heading h3>.v2-icon{display:block}
+.v2-panel-home .v2-home-tool-group>.v2-home-tool-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-1);margin:0;padding:12px;border-block-start:1px solid var(--line)}
+.v2-panel-home .v2-home-tool{display:grid;grid-template-columns:30px minmax(0,1fr);align-content:center;column-gap:10px;row-gap:2px;min-block-size:64px;padding:10px;border-color:var(--line)}
+.v2-panel-home .v2-home-tool__tile{grid-row:1/span 2;align-self:center}
+.v2-panel-home .v2-home-tool__label{grid-column:2;font-size:13px;font-weight:600;line-height:1.3}
+.v2-panel-home .v2-home-tool__hint{grid-column:2;max-inline-size:none;line-height:1.3;text-align:start}
+.v2-home-columns>aside{display:flex}
+.v2-panel-home .v2-home-tool-filter{flex-basis:100%;min-inline-size:0}.v2-panel-home .v2-home-tool-search>input{font-size:16px}}
+@media(max-width:359px){.v2-panel-home .v2-home-tool-group>.v2-home-tool-grid{grid-template-columns:minmax(0,1fr)}}
 `

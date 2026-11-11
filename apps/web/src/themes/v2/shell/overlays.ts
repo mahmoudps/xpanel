@@ -41,7 +41,7 @@ export function commandPalette(t: Translate, props: CommandPaletteProps): string
       const favorite = item.persistable
         ? `<button type="button" class="v2-cmdk__fav" data-cmdk-favorite="${escapeHtml(item.route)}" aria-pressed="false" aria-label="${escapeHtml(`${t('Favorite page')}: ${item.label}`)}">${icon('star', 16)}</button>`
         : ''
-      return `<li data-cmdk-row role="presentation" class="v2-cmdk__row"><a id="xp-cmdk-option-${index++}" href="${escapeHtml(item.href)}" class="v2-cmdk__item" data-cmdk-item="${escapeHtml(item.route)}" data-cmdk-kind="${item.kind}" data-cmdk-key="${escapeHtml(item.key)}" data-cmdk-persistable="${item.persistable}" data-cmdk-search-text="${escapeHtml(item.search)}" role="option" aria-selected="false" tabindex="-1"><span class="v2-cmdk__tile" aria-hidden="true">${icon(KIND_ICONS[kind], 16)}</span><span class="v2-cmdk__copy"><strong>${escapeHtml(item.label)}</strong><span>${escapeHtml(item.section)}</span></span><code dir="ltr">${escapeHtml(item.hint)}</code></a>${favorite}</li>`
+      return `<li data-cmdk-row role="presentation" class="v2-cmdk__row"><a id="xp-cmdk-option-${index++}" href="${escapeHtml(item.href)}" class="v2-cmdk__item" data-cmdk-item="${escapeHtml(item.route)}" data-cmdk-kind="${item.kind}" data-cmdk-key="${escapeHtml(item.key)}" data-cmdk-persistable="${item.persistable}" data-cmdk-search-text="${escapeHtml(item.search)}" role="option" aria-selected="false" tabindex="-1"><span class="v2-cmdk__tile" aria-hidden="true">${icon(KIND_ICONS[kind], 16)}</span><span class="v2-cmdk__copy"><strong>${escapeHtml(item.label)}</strong><span>${escapeHtml(item.section)}</span></span><code dir="ltr"><bdi dir="ltr">${escapeHtml(item.hint)}</bdi></code></a>${favorite}</li>`
     }).join('')
     return `<li data-cmdk-group="${kind}" role="presentation" class="v2-cmdk__group"><span class="v2-cmdk__group-label">${escapeHtml(name)}</span><ul role="group" aria-label="${escapeHtml(name)}">${items}</ul></li>`
   }).join('')
@@ -109,13 +109,16 @@ ${steps}${error}
 }
 
 export const OVERLAYS_CSS = `.v2-cmdk{position:fixed;inset:0;z-index:90;display:flex;justify-content:center;align-items:flex-start;padding:min(12vh,96px) var(--space-2) var(--space-2);background:var(--scrim)}
-.v2-cmdk__panel{inline-size:min(720px,100%);max-block-size:100%;display:flex;flex-direction:column;border-radius:var(--radius-card);background:var(--surface);border:1px solid var(--line-strong);box-shadow:0 16px 40px rgba(0,0,0,.24);overflow:hidden}
+.v2-cmdk__panel{inline-size:min(720px,100%);max-block-size:100%;display:flex;flex-direction:column;border-radius:var(--radius-card);background:var(--surface);border:1px solid var(--line-strong);box-shadow:var(--shadow);overflow:hidden}
 .v2-cmdk__head{display:flex;align-items:center;gap:12px;padding-block:var(--space-1);padding-inline:var(--space-2) var(--space-1);border-bottom:1px solid var(--line);color:var(--muted)}
 .v2-cmdk__head>input{flex:1 1 auto;min-width:0;min-height:var(--target);padding:0;border:0;background:transparent;font-size:16px;color:var(--text)}
-.v2-cmdk__head>input:focus-visible{outline:none}
+.v2-cmdk__head>input:focus-visible{outline:none;box-shadow:none}
 .v2-cmdk__close{display:inline-flex;align-items:center;justify-content:center;min-width:var(--target);min-height:var(--target);border:0;background:transparent;color:var(--muted);cursor:pointer}
 .v2-cmdk kbd{display:inline-flex;align-items:center;height:22px;padding:0 6px;border-radius:6px;border:1px solid var(--line-strong);background:var(--surface);font-size:11px;color:var(--muted)}
 .v2-cmdk__scopes{margin:12px var(--space-2) 0;align-self:flex-start}
+.v2-cmdk__scopes{display:inline-flex;flex-wrap:wrap;gap:4px;padding:4px;border-radius:var(--radius-control);background:var(--sunken)}
+.v2-cmdk__scopes>button{min-height:var(--target);min-inline-size:var(--target);padding:0 12px;border:0;border-radius:var(--radius-chip);background:transparent;color:var(--muted);font-size:13px;font-weight:600;cursor:pointer}
+.v2-cmdk__scopes>button[aria-pressed="true"]{background:var(--surface);color:var(--text);box-shadow:var(--shadow)}
 .v2-cmdk__history{display:flex;flex-direction:column;gap:12px;padding:12px var(--space-2) 0}
 .v2-cmdk__history h3{margin-bottom:var(--space-1);font-size:12px;color:var(--muted)}
 .v2-cmdk__links{display:flex;flex-wrap:wrap;gap:var(--space-1)}
@@ -130,7 +133,8 @@ export const OVERLAYS_CSS = `.v2-cmdk{position:fixed;inset:0;z-index:90;display:
 .v2-cmdk__copy{display:flex;flex-direction:column;min-width:0}
 .v2-cmdk__copy>strong{font-weight:600}
 .v2-cmdk__copy>span{font-size:12px;color:var(--muted)}
-.v2-cmdk__item>code{margin-inline-start:auto;font-size:12px;color:var(--muted);overflow-wrap:anywhere}
+.v2-cmdk__item>code{margin-inline-start:auto;font-size:12px;color:var(--muted);text-align:start;overflow-wrap:anywhere}
+@media(max-width:959px){.v2-cmdk__item{display:grid;grid-template-columns:30px minmax(0,1fr)}.v2-cmdk__item>code{grid-column:2;margin-inline-start:0;direction:inherit}}
 .v2-cmdk__fav{flex:none;display:inline-flex;align-items:center;justify-content:center;width:var(--target);height:var(--target);border:0;border-radius:var(--radius-control);background:transparent;color:var(--muted);cursor:pointer}
 .v2-cmdk__fav[aria-pressed="true"]{color:var(--warn)}
 .v2-cmdk__fav[aria-pressed="true"] svg{fill:currentColor}

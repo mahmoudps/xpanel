@@ -147,7 +147,7 @@ describe('monitoring client binding', () => {
   it.each([false, true])('reads filesystems with unavailable quota usage (arabic=%s)', async ar => {
     boot(renderWhmMonitoringDisk({ locale: ar ? 'ar' : 'en', canRead: true }), async () => disk(), undefined, ar); await tick()
     expect(state()).toBe('read')
-    expect(text('[data-whm-monitoring-rows]')).toContain('40.0 GiB')
+    expect(text('[data-whm-monitoring-rows]')).toContain('\u206640.0\u00a0GiB\u2069')
     expect(text('[data-whm-monitoring-rows]')).toContain('/srv/My Data')
     expect(text('[data-whm-monitoring-rows]')).toContain('25%')
     expect(document.querySelector<HTMLElement>('[data-whm-monitoring-quota-status]')!.dataset.state).toBe('unavailable')
@@ -236,7 +236,7 @@ describe('full timestamp display additional monitoring surfaces', () => {
     document.querySelector<HTMLInputElement>('[data-whm-monitoring-since]')!.value = '2026-10-27T10:00'
     document.querySelector<HTMLSelectElement>('[data-whm-monitoring-priority]')!.value = '3'
     document.querySelector<HTMLButtonElement>('[data-whm-monitoring-refresh]')!.click(); await tick()
-    expect(text('[data-whm-monitoring-message]')).toBe('<img src=x onerror=alert(1)> [مقتطعة عند 4 KiB]')
+    expect(text('[data-whm-monitoring-message]')).toBe('\u2066<img src=x onerror=alert(1)>\u2069 [مقتطعة عند 4 KiB]')
   })
   it.each(['en', 'ar'] as const)('formats performance window metadata without changing point times or chart gaps in %s', async locale => {
     const raw = { ...performance('1h'), from: '2026-10-27T11:00:05.000Z', to: '2026-10-27T12:00:06.125Z' }, before = JSON.stringify(raw)

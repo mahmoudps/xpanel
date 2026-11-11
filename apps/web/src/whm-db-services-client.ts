@@ -2,13 +2,14 @@
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
 import { generateMailboxPassword } from './password-generate-client.ts'
+import { ASCII_BYTES_BINDING, formatIsolatedBytes as canonicalFormatClientBytes } from './display-format.ts'
+// Module-local alias: the binding source defines it again from ASCII_BYTES_BINDING.
+const formatClientBytes = canonicalFormatClientBytes
 
 export type DbServicesRequest = (method: string, path: string, body?: unknown) => Promise<unknown>
 export const dbServiceBytes = (value: unknown): string => {
   const bytes = Number(value)
-  if (!Number.isFinite(bytes)) return '—'
-  const mib = bytes / 1048576
-  return mib >= 1024 ? `${(mib / 1024).toFixed(1)} GiB` : `${mib.toFixed(mib >= 10 ? 0 : 1)} MiB`
+  return Number.isFinite(bytes) ? formatClientBytes(bytes) : '—'
 }
 /** redis.conf(5): k and m are powers of 1000, kb and mb of 1024; the form holds whole MB, so a value never rounds down to no limit. */
 export const dbServiceRedisMb = (value: unknown): number | null => {
@@ -205,7 +206,7 @@ function bindDbServices(askDialog: ((options: Record<string, unknown>) => Promis
     const lock = (on: boolean): void => { database.disabled = limit.disabled = save.disabled = clear.disabled = on || !manage }
     const show = (reply: Record<string, unknown>): void => {
       revision = String(reply.revision); const rows = list(reply.rows)
-      fill(body, rows.map(row => [String(row.database), String(row.account), row.sizeBytes === null ? t('Not read') : dbServiceBytes(row.sizeBytes), row.limitMb === null ? t('No limit') : t('{limit} MB', { limit: String(row.limitMb) }), row.locked === true ? t('Over the limit: writes blocked') : row.limitMb === null ? '—' : t('Within the limit')]), 5, t('No saved databases.'))
+      fill(body, rows.map(row => [String(row.database), String(row.account), row.sizeBytes === null ? t('Not read') : dbServiceBytes(row.sizeBytes), row.limitMb === null ? t('No limit') : formatClientBytes(Number(row.limitMb) * 1048576), row.locked === true ? t('Over the limit: writes blocked') : row.limitMb === null ? '—' : t('Within the limit')]), 5, t('No saved databases.'))
       const current = database.value
       database.replaceChildren(...rows.map(row => { const option = document.createElement('option'); option.value = option.textContent = String(row.database); return option }))
       if (current) database.value = current
@@ -251,4 +252,4 @@ function bindDbServices(askDialog: ((options: Record<string, unknown>) => Promis
   })
 }
 
-export const WHM_DB_SERVICES_CLIENT_BINDING = `(()=>{const generateMailboxPassword=${generateMailboxPassword.toString()};const dbServiceBytes=${dbServiceBytes.toString()};const dbServicePgSize=${dbServicePgSize.toString()};const dbServiceRedisMb=${dbServiceRedisMb.toString()};return ${bindDbServices.toString()};})()`
+export const WHM_DB_SERVICES_CLIENT_BINDING = `(()=>{const formatClientBytes=${ASCII_BYTES_BINDING};const generateMailboxPassword=${generateMailboxPassword.toString()};const dbServiceBytes=${dbServiceBytes.toString()};const dbServicePgSize=${dbServicePgSize.toString()};const dbServiceRedisMb=${dbServiceRedisMb.toString()};return ${bindDbServices.toString()};})()`

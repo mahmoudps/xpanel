@@ -7,6 +7,9 @@ import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
 import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+import { ASCII_BYTES_BINDING, formatIsolatedBytes as canonicalFormatClientBytes } from './display-format.ts'
+// Module-local alias: the binding source defines it again from ASCII_BYTES_BINDING.
+const formatClientBytes = canonicalFormatClientBytes
 const frameRequest = canonicalFrameRequest
 const displayDateTime = formatDisplayDateTime
 export type WhmDatabaseDrift = 'in-sync' | 'saved-only' | 'server-only' | 'system' | 'unverified'
@@ -180,11 +183,7 @@ function bindWhmDatabases(askDialog: ((options: Record<string, unknown>) => Prom
       return row
     }
     const bytes = (value: number | null): string => {
-      if (value === null) return notObserved
-      const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB']
-      let size = value, unit = 0
-      while (size >= 1024 && unit < units.length - 1) { size /= 1024; unit++ }
-      return (unit === 0 ? String(size) : size.toFixed(1)) + ' ' + units[unit]
+      return value === null ? notObserved : formatClientBytes(value)
     }
     const amount = (value: number | null): string => value === null ? notObserved : String(value)
     const applyFilter = (): void => {
@@ -333,4 +332,4 @@ function bindWhmDatabases(askDialog: ((options: Record<string, unknown>) => Prom
   })
 }
 
-export const WHM_DATABASES_CLIENT_BINDING = withFrameRequest(`(()=>{${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const displayDateTime=${DISPLAY_DATETIME_BINDING};const readWhmDatabasesView=${readWhmDatabasesView.toString()};const readWhmDatabaseKillOutcome=${readWhmDatabaseKillOutcome.toString()};const readWhmDatabaseMaintenance=${readWhmDatabaseMaintenance.toString()};return ${bindWhmDatabases.toString()};})()`)
+export const WHM_DATABASES_CLIENT_BINDING = withFrameRequest(`(()=>{const formatClientBytes=${ASCII_BYTES_BINDING};${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const displayDateTime=${DISPLAY_DATETIME_BINDING};const readWhmDatabasesView=${readWhmDatabasesView.toString()};const readWhmDatabaseKillOutcome=${readWhmDatabaseKillOutcome.toString()};const readWhmDatabaseMaintenance=${readWhmDatabaseMaintenance.toString()};return ${bindWhmDatabases.toString()};})()`)

@@ -177,7 +177,7 @@ describe('WHM announcements client binding', () => {
     boot(send)
     await flush()
     $<HTMLButtonElement>('[data-whm-announcements-rows] button[data-action="edit"]').click()
-    expect($('[data-whm-announcements-editor-heading]').textContent).toBe('Edit announcement')
+    expect($('[data-whm-announcements-editor-heading]').textContent).toMatch(/^Edit announcement: /)
     expect(input('title-en').value).toBe('Disk upgrade')
     expect((input('plan') as unknown as HTMLSelectElement).value).toBe(PLAN)
     expect(input('ends').value).toBe('2026-10-30T18:00')
@@ -186,7 +186,7 @@ describe('WHM announcements client binding', () => {
     expect(send).toHaveBeenLastCalledWith('PUT', '/api/server/announcements/' + A, expect.objectContaining({ audience: { kind: 'plan', planId: PLAN }, endsAt: '2026-10-30T18:00:00.000Z', expectedRevision: R1 }))
     expect($('[data-whm-announcements-save-status]').textContent).toBe('The announcements changed since they were read. Refresh the list, then try again.')
     $<HTMLButtonElement>('[data-whm-announcements-cancel]').click()
-    expect($('[data-whm-announcements-editor-heading]').textContent).toBe('Create announcement')
+    expect($('[data-whm-announcements-editor-heading]').textContent).toBe('New announcement')
   })
 
   it('archives only after confirmation and verifies the archived state, in Arabic too', async () => {

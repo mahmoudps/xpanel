@@ -170,7 +170,8 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
     assert.match(loginPage.headers.get('content-type') ?? '', /text\/html/)
     const loginHtml = await loginPage.text()
     assert.match(loginHtml, /data-surface="login"/)
-    assert.match(loginHtml, /id="xpanel-design-tokens"/)
+    assert.match(loginHtml, /data-ui-theme="v2"/)
+    assert.match(loginHtml, /href="\/assets\/themes\/v2\/styles\.css\?v=/)
     assert.doesNotMatch(loginHtml, /must complete enrollment/)
     assert.doesNotMatch(loginHtml, /<form[^>]*data-auth-setup-form/)
 
@@ -204,7 +205,7 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
       assert.equal(denied.status, 403)
       const html = await denied.text()
       assert.match(html, /data-status-page="403"/)
-      assert.doesNotMatch(html, /data-tool-availability="unverified"|data-board-port="xpanel-home"/)
+      assert.doesNotMatch(html, /data-tool-availability="unverified"|data-board-port="xpanel-home"|data-panel-home\b/)
       assert.doesNotMatch(html, /<(?:div|section|main)\b[^>]*data-mail-layout=/)
     }
 
@@ -240,7 +241,7 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
         assert.equal(home.status, 200)
         const homeHtml = await home.text()
         assert.match(homeHtml, /data-surface="xpanel"/)
-        assert.match(homeHtml, /data-board-port="xpanel-home"/)
+        assert.match(homeHtml, /data-panel-home\b/)
         assert.ok(homeHtml.includes(account.primaryDomain))
         assert.ok(homeHtml.includes(plan.name))
         // xMail opens only for a mailbox identity; the hosting owner gets its denial without account data.
@@ -270,7 +271,7 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
             assert.equal(['data-action', 'onclick', 'onsubmit'].some(attribute => node.attrs.has(attribute)), false)
           }
           assert.match(html, /<html\b[^>]*data-realtime-enabled="false"/)
-          assert.doesNotMatch(html, /data-status-page="404"|data-board-port="xpanel-home"/)
+          assert.doesNotMatch(html, /data-status-page="404"|data-board-port="xpanel-home"|data-panel-home\b/)
           assert.doesNotMatch(markup, /<(?:div|section|main)\b[^>]*data-mail-layout=/)
           // The saved document root and IPv4 binding of the owner's own domain may show in closed fields.
           for (const value of [account.id, plan.id, featureList.id, user.id, account.contactEmail, password, passwordHash]) assert.ok(!html.includes(value), 'Unqualified documents must not expose full account or authentication data')

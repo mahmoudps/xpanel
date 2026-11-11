@@ -5,6 +5,9 @@ import './i18n.ts'
 import type { LogSecurityReport } from '../../agent/src/log-security-analysis.ts'
 import type { DatabaseErrorEntry, DatabaseLogView, SlowQueryEntry } from '../../agent/src/database-logs.ts'
 import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+import { ASCII_BYTES_BINDING, formatIsolatedBytes as canonicalFormatClientBytes } from './display-format.ts'
+// Module-local alias: the binding source defines it again from ASCII_BYTES_BINDING.
+const formatClientBytes = canonicalFormatClientBytes
 const frameRequest = canonicalFrameRequest
 const formatDisplayDateTime = sharedFormatDisplayDateTime
 
@@ -35,7 +38,7 @@ export function readDatabaseLogView(raw: unknown, log: string): DatabaseLogView 
 
 function bindWhmLogTools(): void {
   const t = (message: string, values?: MessageValues): string => xpT(message, values)
-  const bytes = (value: number): string => { const units = ['B', 'KiB', 'MiB', 'GiB']; let size = value, index = 0; while (size >= 1024 && index < units.length - 1) { size /= 1024; index++ } return (index ? size.toFixed(1) : String(size)) + ' ' + units[index] }
+  const bytes = (value: number): string => formatClientBytes(value)
   document.querySelectorAll<HTMLElement>('[data-whm-log-tools]').forEach(root => {
     if (root.dataset.logToolsBound === 'true') return
     root.dataset.logToolsBound = 'true'
@@ -115,4 +118,4 @@ function bindWhmLogTools(): void {
   })
 }
 
-export const WHM_LOG_TOOLS_CLIENT_BINDING = withFrameRequest(`(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readLogAnalysis=${readLogAnalysis.toString()};const readDatabaseLogView=${readDatabaseLogView.toString()};return ${bindWhmLogTools.toString()}})()`)
+export const WHM_LOG_TOOLS_CLIENT_BINDING = withFrameRequest(`(()=>{const formatClientBytes=${ASCII_BYTES_BINDING};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readLogAnalysis=${readLogAnalysis.toString()};const readDatabaseLogView=${readDatabaseLogView.toString()};return ${bindWhmLogTools.toString()}})()`)

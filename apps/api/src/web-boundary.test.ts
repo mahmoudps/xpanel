@@ -27,7 +27,8 @@ vi.mock('../../web/src/index.ts', async (importOriginal) => {
       if (!provider) return web.serveWebUi(req)
       const state = await provider()
       hydration.push(state)
-      return web.serveWebUi(req, () => state as unknown as import('../../web/src/app.ts').WebAppRenderState)
+      // These assertions read the classic markup; the captured hydration is the theme-neutral part.
+      return web.serveWebUi(req, () => ({ ...state, uiTheme: 'classic' }) as unknown as import('../../web/src/app.ts').WebAppRenderState)
     },
   }
 })

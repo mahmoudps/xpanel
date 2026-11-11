@@ -3,6 +3,7 @@ import { defaultPlan, type Account, type Domain } from '@xpanel/core'
 import { parseMarkup } from '../../../../markup.ts'
 import { icon } from '../../../icons.ts'
 import { renderV2CloudflarePage, renderV2DomainPage, renderV2DomainsPage, renderV2DynamicDnsPage, renderV2RedirectsPage, renderV2ReverseProxyPage, renderV2SitePublisherPage, renderV2StagingPage } from './index.ts'
+import { renderV2SiteSettingsPage } from './site-settings.ts'
 
 const account: Account = {
   id: '10000000-0000-4000-8000-000000000001', username: 'alice', uid: 20014, gid: 20014,
@@ -89,9 +90,9 @@ describe('v2 account domain workflows', () => {
   it('keeps an unread domain collection distinct from a successfully read empty collection', () => {
     const unread = renderV2DomainsPage({ account }, authority)
     const empty = renderV2DomainsPage({ account, domains: [] }, authority)
-    expect(unread).toContain('<p data-domain-count>Not read</p>')
+    expect(unread).toContain('<p data-domain-count class="v2-num">Not read</p>')
     expect(unread).not.toContain('No domains were returned.')
-    expect(empty).toContain('<p data-domain-count>0</p>')
+    expect(empty).toContain('<p data-domain-count class="v2-num">0</p>')
     expect(empty).toContain('No domains were returned.')
   })
 
@@ -129,11 +130,53 @@ describe('v2 account domain workflows', () => {
     expect(html).not.toContain('nginx -t passed')
   })
 
+  it('names the plan and the active generation only from supplied facts and labels each phone cell', () => {
+    const plan = defaultPlan({ id: account.planId, name: 'Business' })
+    const html = renderV2DomainsPage({ ...props, plan, generationId: 142 }, authority)
+    expect(html).toContain('data-domain-plan-name>Business<')
+    expect(html).toMatch(/data-domain-generation>.*Applied in generation #142/)
+    expect(html).toContain('<td data-label="Type">Primary</td>')
+    expect(html).toContain('<td data-xp-slot="kind" data-label="Type"></td>')
+    const bare = renderV2DomainsPage(props, authority)
+    expect(bare).not.toContain('data-domain-plan-name')
+    expect(bare).not.toContain('data-domain-generation')
+    expect(renderV2DomainsPage({ ...props, generationId: 0 }, authority)).not.toContain('data-domain-generation')
+  })
+
+  it('keeps the create form in the side column beside rename and the save rules', () => {
+    const html = renderV2DomainsPage(props, authority)
+    expect(html.indexOf('v2-domain-rename-heading')).toBeLessThan(html.indexOf('<aside'))
+    expect(html.indexOf('<aside')).toBeLessThan(html.indexOf('data-domain-create '))
+  })
+
+  it('groups the site settings sections under 6 presentation tabs and keeps every panel in the document', () => {
+    const html = renderV2SiteSettingsPage({ activeRoute: '/domains/site-settings', locale: 'en', ...props }, { canRead: true, canManage: true })
+    const nodes = parseMarkup(html)
+    const root = nodes.find(node => node.attrs.get('data-presentation-tabs') === 'panels')!
+    const tabs = nodes.filter(node => node.attrs.has('data-presentation-tab'))
+    const panels = nodes.filter(node => node.attrs.get('role') === 'tabpanel')
+    expect(root).toBeDefined()
+    expect(tabs.map(node => node.attrs.get('data-presentation-tab'))).toEqual(['general', 'php', 'redirects', 'proxy', 'logs', 'protection'])
+    expect(html).not.toContain(' style="display:')
+    expect(html).not.toContain(' style="grid-')
+    expect(html).not.toContain(' style="flex:')
+    expect(tabs.filter(node => node.attrs.get('aria-selected') === 'true')).toHaveLength(1)
+    expect(panels.map(node => node.attrs.has('hidden'))).toEqual([false, true, true, true, true, true])
+    for (const [index, tab] of tabs.entries()) expect(panels[index]!.attrs.get('aria-labelledby')).toBe(tab.attrs.get('id'))
+    for (const hook of ['data-site-docroot', 'data-site-deny-rows', 'data-site-save', 'data-site-review-rows']) expect(nodes.some(node => node.attrs.has(hook)), hook).toBe(true)
+  })
+
   it('retains read-only domain refresh without granting mutations and closes suspended account writes', () => {
     const readOnly = parseMarkup(renderV2DomainsPage(props, { canRead: true, canManage: false }))
     expect(readOnly.find(node => node.attrs.has('data-domain-workspace'))?.attrs.get('data-domain-manage')).toBe('false')
     expect(readOnly.find(node => node.attrs.has('data-domain-refresh'))?.attrs.has('disabled')).toBe(false)
     expect(readOnly.find(node => node.attrs.has('data-domain-create-submit'))?.attrs.has('disabled')).toBe(true)
+    expect(readOnly.some(node => node.template < 0 && node.tag === 'form')).toBe(false)
+    const unqualifiedHtml = renderV2DomainsPage({ ...props, visibility: { principal: { kind: 'user', id: account.id, username: account.username, accountId: account.id }, disabledFeatures: new Set() } }, { canRead: false, canManage: false, presentation: 'read-only', canReadFacts: true, authorizedTools: new Set(['domains']) })
+    const unqualified = parseMarkup(unqualifiedHtml)
+    expect(unqualifiedHtml).not.toContain(account.id)
+    expect(unqualified.some(node => node.template < 0 && node.tag === 'form')).toBe(false)
+    expect(unqualified.filter(node => node.template < 0 && ['button', 'input', 'select', 'textarea'].includes(node.tag)).every(node => node.attrs.has('disabled'))).toBe(true)
     expect(renderV2DomainsPage({ ...props, account: { ...account, status: 'suspended' } }, authority)).toContain('data-domain-manage="false"')
   })
 
@@ -221,5 +264,19 @@ describe('v2 account domain workflows', () => {
     for (const value of nodes.filter(node => node.tag === 'dd')) expect(value.attrs.has('dir')).toBe(false)
     expect(nodes.find(node => node.attrs.has('data-rp-root'))?.attrs.get('dir')).toBe('ltr')
     expect(nodes.find(node => node.attrs.has('data-rp-selected'))?.attrs.get('dir')).toBe('ltr')
+  })
+})
+
+describe('v2 domain list filter', () => {
+  it('admits server rows and template rows to the shared list filter by kind and keeps it closed without an account', () => {
+    const html = renderV2DomainsPage(props, authority)
+    expect(html).toContain(`data-domain-id="${domain.id}" data-list-row data-list-kind="primary"`)
+    expect(html).toContain('<template data-xp-template="domain-row"><tr data-list-row>')
+    expect(html).toContain('data-list-filter-key="kind"')
+    for (const kind of ['', 'primary', 'addon', 'alias', 'subdomain']) expect(html).toContain(`data-list-filter-value="${kind}"`)
+    expect(html.indexOf('data-list-filter>')).toBeLessThan(html.indexOf('data-list-filter-search'))
+    expect(html.indexOf('data-list-filter-search')).toBeLessThan(html.indexOf('data-domain-rows'))
+    expect(html).toContain('data-list-filter-empty hidden')
+    expect(renderV2DomainsPage({}, authority)).not.toContain('data-list-filter-search>')
   })
 })

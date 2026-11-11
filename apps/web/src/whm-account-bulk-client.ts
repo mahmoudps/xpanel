@@ -142,8 +142,11 @@ function bindWhmAccountBulk(askDialog: Ask | undefined): void {
       paint()
     })
     // Filters and the pager change which rows are visible; repaint so select-all reflects the current page.
-    workspace.addEventListener('input', () => { if (!busy) paint() })
+    // A checkbox toggles before its click and input events and reports through change afterwards; a repaint in between would reset it from the old selection.
+    const picking = (event: Event): boolean => event.target instanceof Element && event.target.matches('[data-account-selection],[data-account-select-all]')
+    workspace.addEventListener('input', event => { if (!busy && !picking(event)) paint() })
     workspace.addEventListener('click', event => {
+      if (picking(event)) return
       const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>('[data-account-bulk-control]') : null
       if (!button || !bar.contains(button) || button.disabled) { if (!busy) paint(); return }
       if (button.dataset.accountBulkControl === 'clear') { selected.clear(); paint(); return }

@@ -35,18 +35,19 @@ export function kpiCard(props: KpiCardProps): string {
   })() : ''
   return `<article class="v2-kpi"${hookAttrs(props.hooks)}>
 <div class="v2-kpi__head"><${h}>${escapeHtml(props.label)}</${h}>${props.icon ? `<span class="v2-tile v2-tile--${tone}" aria-hidden="true">${icon(props.icon)}</span>` : ''}</div>
-<p class="v2-kpi__value v2-num"><span${hookAttrs(props.valueHooks)}>${escapeHtml(props.value)}</span>${props.unit ? `<span class="v2-kpi__unit">${escapeHtml(props.unit)}</span>` : ''}</p>
+<p class="v2-kpi__value${/\d/.test(props.value) ? '' : ' v2-kpi__value--text'} v2-num"><span${hookAttrs(props.valueHooks)}>${escapeHtml(props.value)}</span>${props.unit ? `<span class="v2-kpi__unit">${escapeHtml(props.unit)}</span>` : ''}</p>
 ${meter}${spark}${props.note ? `<p class="v2-kpi__note v2-num${props.noteTone ? ` v2-text--${props.noteTone}` : ''}">${escapeHtml(props.note)}</p>` : ''}
 </article>`
 }
 
-export const KPI_CARD_CSS = `.v2-kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(230px,100%),1fr));gap:var(--space-2)}
-.v2-kpi{display:flex;flex-direction:column;gap:var(--space-2);padding:var(--v2-panel-padding);border-radius:var(--radius-card);background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow);min-width:0}
+export const KPI_CARD_CSS = `.v2-kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(200px,100%),1fr));gap:var(--space-2)}
+.v2-kpi{display:flex;flex-direction:column;gap:var(--space-2);padding:min(20px,var(--v2-panel-padding));border-radius:var(--radius-card);background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow);min-width:0}
 .v2-kpi__head{display:flex;align-items:center;justify-content:space-between;gap:var(--space-1)}
 .v2-kpi__head>:is(h2,h3){font-size:13px;font-weight:600;color:var(--muted)}
 .v2-kpi__value{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px}
 .v2-kpi__value>span{unicode-bidi:plaintext}
 .v2-kpi__value>:first-child{font-size:30px;line-height:1;font-weight:600;letter-spacing:-.02em}
+.v2-kpi__value--text>:first-child{font-size:20px;line-height:30px;font-weight:500;letter-spacing:0;color:var(--text-2)}
 .v2-kpi__unit{font-size:14px;color:var(--muted)}
 .v2-kpi__spark{display:block;width:100%;height:28px;color:var(--accent)}
 .v2-kpi__note{font-size:12px;color:var(--muted)}

@@ -80,14 +80,14 @@ try {
         const rtl = getComputedStyle(element).direction === 'rtl'
         return { label: label.textContent.trim(), gap: rect(control).y - rect(label).bottom, labelBoxHeight:rect(label).height, labelTextHeight:text.height, textGap:bounds.top-text.bottom, textAlignment:rtl ? Math.abs(text.right-(bounds.right-parseFloat(style.paddingRight)-parseFloat(style.borderRightWidth))) : Math.abs(text.left-(bounds.left+parseFloat(style.paddingLeft)+parseFloat(style.borderLeftWidth))), alignment: Math.abs(rect(control).x - rect(label).x), control:rect(control) }
       }).filter(Boolean)
-      const shown = node => node.getClientRects().length > 0, form = element.querySelector('[data-forwarder-create]'), fieldNodes=[...form.querySelectorAll('.xp-field')].filter(shown)
+      const shown = node => node.getClientRects().length > 0 && !node.closest('[hidden]'), form = element.querySelector('[data-forwarder-create]'), fieldNodes=[...form.querySelectorAll('.v2-field,.xp-field')].filter(shown)
       // Sibling spacing applies to adjacent fields of one group; fields split by the mode fieldset are separate groups.
       const siblings = fieldNodes.slice(1).flatMap((node,index)=>node.parentElement === fieldNodes[index].parentElement ? [rect(node).y-rect(fieldNodes[index]).bottom] : [])
       const children=[...form.children].filter(shown), groups=children.slice(1).map((node,index)=>rect(node).y-rect(children[index]).bottom)
-      const extension=element.closest('.xp-extension'), sections=[...extension.children].filter(node=>node.tagName !== 'STYLE'), sectionGaps=sections.slice(1).map((node,index)=>rect(node).y-rect(sections[index]).bottom)
-      const cards=[...extension.querySelectorAll('.xp-extension__card')].map(card=>{ const content=[...card.children].filter(node=>node.tagName!=='STYLE'), style=getComputedStyle(card), first=content[0], last=content.at(-1), bounds=rect(card);return { paddingLeft:rect(first).x-bounds.x-parseFloat(style.borderLeftWidth), paddingRight:bounds.right-rect(first).right-parseFloat(style.borderRightWidth), paddingTop:rect(first).y-bounds.y-parseFloat(style.borderTopWidth), paddingBottom:bounds.bottom-rect(last).bottom-parseFloat(style.borderBottomWidth) } })
+      const extension=element.closest('.xp-extension') || element.closest('.v2-email-routing')?.querySelector('.v2-layout > .v2-stack'), sections=[...extension.children].filter(node=>node.tagName !== 'STYLE' && node.tagName !== 'TEMPLATE' && shown(node)), sectionGaps=sections.slice(1).map((node,index)=>rect(node).y-rect(sections[index]).bottom)
+      const cards=[...extension.querySelectorAll('.v2-card,.xp-extension__card')].filter(shown).map(card=>{ const content=[...card.children].filter(node=>node.tagName!=='STYLE' && node.tagName!=='TEMPLATE' && shown(node)), style=getComputedStyle(card), first=content[0], last=content.at(-1), bounds=rect(card);return { paddingLeft:rect(first).x-bounds.x-parseFloat(style.borderLeftWidth), paddingRight:bounds.right-rect(first).right-parseFloat(style.borderRightWidth), paddingTop:rect(first).y-bounds.y-parseFloat(style.borderTopWidth), paddingBottom:bounds.bottom-rect(last).bottom-parseFloat(style.borderBottomWidth) } })
       const targets=[...element.querySelectorAll('button,input[type=radio]')].filter(shown).map(node=>{ const native=rect(node), label=node.closest('label'), actual=label ? rect(label):native;return {type:node.type,native,associated:label ? actual:null,passes:(native.width>=43.5&&native.height>=43.5)||(actual.width>=43.5&&actual.height>=43.5)} })
-      const table=element.querySelector('table'), wrap=element.querySelector('.xp-forwarder-table')
+      const table=element.querySelector('table'), wrap=element.querySelector('.v2-table-scroll,.xp-forwarder-table')
       const technical=[...table.querySelectorAll('bdi')].map(node=>{const range=document.createRange();range.selectNodeContents(node);return {lines:new Set([...range.getClientRects()].map(r=>Math.round(r.y))).size,whiteSpace:getComputedStyle(node).whiteSpace}})
       return { direction:getComputedStyle(element).direction, viewport:innerWidth, scrollWidth:document.documentElement.scrollWidth, fonts:{status:document.fonts.status,faces:[...document.fonts].map(face=>({family:face.family,status:face.status}))}, workspace:rect(element), fields, siblings, groups, sectionGaps, cards, targets, table:{width:rect(table).width,minimum:getComputedStyle(table).minInlineSize,wrapper:rect(wrap).width,scrollWidth:wrap.scrollWidth,technical} }
     })
@@ -107,7 +107,8 @@ try {
     for (const gap of geometry.sectionGaps) assert.ok(Math.abs(gap-32)<=1, `Section gap ${gap}`)
     for (const card of geometry.cards) for(const value of Object.values(card)) assert.ok(Math.abs(value-(width<600?16:24))<=1, `Card content padding ${value}`)
     for (const target of geometry.targets) assert.equal(target.passes,true,'Native or associated label touch target')
-    assert.ok(geometry.table.width>=699,'Readable native table minimum width')
+    if (width > 600) assert.ok(geometry.table.width>=699,'Readable native table minimum width')
+    else assert.ok(geometry.table.scrollWidth <= geometry.table.wrapper + 1, 'Phone stacked rows fit the table container')
     for(const value of geometry.table.technical) assert.ok(value.lines<=1,'Technical table values remain on one line')
     assert.equal(geometry.direction, lang === 'ar' ? 'rtl' : 'ltr')
     checkpoint = `${lang}-${width}:screenshot`
@@ -142,7 +143,7 @@ try {
     let requests = 0
     await page.route('**/api/mail/forwarders**', route => { requests++; return route.fulfill({ status:503, json:{ error:'unexpected_request' } }) })
     await page.goto(`${unqualified.baseUrl}/email/forwarders?lang=en`, { waitUntil:'load' })
-    assert.equal(await page.locator('[data-forwarder-create]').count(), 0)
+    assert.equal(await page.locator('[data-forwarder-create] :is(input,select,textarea,button):enabled').count(), 0)
     assert.equal(requests, 0)
     cases.push({ status:'passed', scope:'unqualified fixture', checks:['no create form','no forwarder API request'] })
     await page.close()

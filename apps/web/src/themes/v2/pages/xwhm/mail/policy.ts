@@ -7,9 +7,9 @@ interface Field { key: string; label: string; kind: 'check' | 'text' | 'email' |
 const FIELDS: Readonly<Record<MailPolicyPage, readonly Field[]>> = {
   spam: [
     { key: 'enabled', label: msgid('Filter incoming mail'), kind: 'check' },
+    { key: 'greylisting', label: msgid('Greylisting'), kind: 'check', help: msgid('Ask unknown senders to retry later. Needs rspamd.') },
     { key: 'rejectScore', label: msgid('Reject at score'), kind: 'number', step: 0.5, min: 0.5, max: 100, help: msgid('Messages at or above this score are refused during delivery. SpamAssassin has no reject action.') },
     { key: 'headerScore', label: msgid('Mark as spam at score'), kind: 'number', step: 0.5, min: 0.5, max: 100, help: msgid('Messages at or above this score get a spam header so mailbox filters can move them.') },
-    { key: 'greylisting', label: msgid('Greylisting'), kind: 'check', help: msgid('Ask unknown senders to retry later. Needs rspamd.') },
     { key: 'greylistScore', label: msgid('Greylist at score'), kind: 'number', step: 0.5, min: 0.5, max: 100 },
     { key: 'blockedDomains', label: msgid('Blocked sender domains'), kind: 'lines', help: msgid('One domain per line, at most 500. Mail from these domains is refused.') },
   ],
@@ -57,7 +57,7 @@ export function renderV2WhmMailPolicy(input: WhmMailPageInput, kind: MailPolicyP
     })
   }).join('')
   const summary = group(`${kind}-summary`, t(msgid('Policy and host state')),
-    `<p>${escapeHtml(t(NOTES[kind]))}</p>${status(t(msgid('The saved mail policy has not been read.')), { 'data-mailx-status': true })}
+    `${status(t(msgid('The saved mail policy has not been read.')), { 'data-mailx-status': true })}
 ${facts(t, [['saved', msgid('Saved policy')], ['host', msgid('Host agent')], ['state', msgid('Applied on this server')],
       ...(kind === 'spam' ? [['engine', msgid('Detected filter')], ['wiring', msgid('Postfix passes mail to the filter')]] as const : []),
       ['observed-at', msgid('Observed at (UTC)')], ['updated', msgid('Last saved')]], 'data-mailx-fact')}`,

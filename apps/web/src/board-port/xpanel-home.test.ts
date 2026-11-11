@@ -81,7 +81,7 @@ describe('xPanel home board port', () => {
     assert.match(html, /10\.0\.0\.21/)
     assert.match(html, /Synthetic plan/)
     assert.match(html, /8\.3 · PHP-FPM/)
-    assert.match(html, /— \/ 5 GB/)
+    assert.match(html, /— \/ 5\.00\u00a0GiB/)
     assert.match(html, /1 \/ 10/)
     assert.doesNotMatch(html, /3\.2 \/ 10 GB|Generation 142|alice-blog\.net|orders@alice-shop\.com|1,431|10\.0\.0\.12|data-generation-chip=/)
     assert.doesNotMatch(html, /[\u0660-\u0669\u06f0-\u06f9]/)
@@ -146,7 +146,7 @@ describe('xPanel home board port', () => {
   })
 
   it('renders no other panel or account context in the full xPanel document', () => {
-    const html = renderWebApp({
+    const html = renderWebApp({ uiTheme: 'classic',
       surface: 'xpanel' as const, activeRoute: '/home', locale: 'ar' as const, theme: 'light' as const,
       accountId: account.id,
       visibility: { principal: { kind: 'user' as const, id: 'owner', username: account.username, accountId: account.id } },
@@ -181,7 +181,7 @@ describe('authenticated Home account menu', () => {
     for (const route of ['/home', '/panel']) {
       const documentRoute = resolveWebDocumentRoute(route)
       assert.ok(documentRoute && documentRoute.surface === 'xpanel')
-      const html = renderWebApp({
+      const html = renderWebApp({ uiTheme: 'classic',
         surface: 'xpanel', activeRoute: documentRoute.activeRoute, locale, theme: 'light', density: 'compact', accountId: account.id,
         visibility: { principal: { kind: 'user', id: 'home-menu-owner', username: account.username, accountId: account.id } },
         panel: { account },

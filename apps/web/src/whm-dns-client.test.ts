@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderWhmDnsWorkspace } from './board-port/whm-dns-workspace.ts'
+import { LIST_FILTER_CLIENT_SCRIPT } from './list-filter-client.ts'
+import { renderV2WhmDnsPage } from './themes/v2/pages/xwhm/dns/index.ts'
 import { WHM_DNS_CLIENT_BINDING } from './whm-dns-client.ts'
 
 const id = (value: number) => 'aaaaaaaa-aaaa-4aaa-8aaa-' + String(value).padStart(12, '0')
@@ -150,5 +152,41 @@ describe('xWHM DNS controller', () => {
     expect(button('add-record').disabled).toBe(true)
     f.setZones([zone({ name: '<img src=x onerror=alert(1)>' })]); button('refresh').click(); await tick()
     expect(status().dataset.state).toBe('failed'); expect(document.querySelector('img')).toBeNull()
+  })
+  it('keeps newly added and unsaved draft rows visible on v2 when a record-type or search filter is active', async () => {
+    document.body.innerHTML = renderV2WhmDnsPage(
+      { locale: 'en', accounts: [{ id: id(2), username: 'alpha', primaryDomain: 'alpha.example.test', status: 'active' }] as never },
+      { canRead: true, canManage: true, canCreateServerZone: true },
+    )
+    new Function(LIST_FILTER_CLIENT_SCRIPT)()
+    const f = model()
+    f.setZones([zone({
+      records: [
+        { id: id(3), name: '@', type: 'A', ttl: 300, content: '192.0.2.1', priority: null },
+        { id: id(9), name: '@', type: 'MX', ttl: 300, content: 'mail.alpha.example.test', priority: 10 },
+      ],
+    })])
+    f.boot()
+    await tick()
+    const filter = document.querySelector<HTMLSelectElement>('select[data-list-filter-key="type"]')!
+    filter.value = 'MX'
+    filter.dispatchEvent(new Event('change', { bubbles: true }))
+    const visibleRows = () => Array.from(document.querySelectorAll<HTMLElement>('[data-dns-records] tr[data-list-row]')).filter(row => !row.hidden)
+    expect(visibleRows()).toHaveLength(1)
+
+    button('add-record').click()
+    await tick()
+    expect(visibleRows()).toHaveLength(2)
+    const added = visibleRows()[1]!
+    expect(added.dataset.listKeep).toBe('true')
+    expect(added.querySelector<HTMLSelectElement>('[data-field="type"]')!.value).toBe('A')
+
+    const content = added.querySelector<HTMLInputElement>('[data-field="content"]')!
+    content.value = '192.0.2.55'
+    content.dispatchEvent(new Event('input', { bubbles: true }))
+    button('save').click()
+    await tick(); await tick()
+    expect(status().dataset.state).toBe('saved')
+    expect(visibleRows()).toHaveLength(1)
   })
 })

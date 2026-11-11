@@ -20,10 +20,10 @@ const matrix = [
   ['compose-en-tablet', '/mail/compose', 'en', 'light', 768], ['compose-ar-phone', '/mail/compose', 'ar', 'dark', 360],
 ].map(([id, path, locale, theme, width, interactions = false]) => ({ id, path, locale, theme, width, height: width === 1440 ? 900 : width === 768 ? 1024 : 800, interactions }))
 const screenMarkers = {
-  '/login': '[data-login-form]', '/whm': '[data-section="overview-attention"]',
-  '/whm/accounts': '[data-section="accounts-isolation"]', '/whm/accounts/new': '[data-create-account-form]',
+  '/login': '[data-login-form]', '/whm': '[data-whm-overview]',
+  '/whm/accounts': '[data-accounts-workspace] .v2-whm-accounts__table', '/whm/accounts/new': '[data-create-account-form]',
   // The owner's /domains page is the approved domain workspace; its table replaced the former summary table.
-  '/home': '[data-board-port="xpanel-home"]', '/domains': '[data-approved-xpanel-workspace="/domains"] [data-domain-workspace] [data-domain-table]',
+  '/home': '[data-panel-home]', '/domains': '[data-domain-workspace] [data-domain-table]',
   '/files/manager': '[data-file-manager-table]', '/mail/inbox': '[data-mail-pane="message-list"]', '/mail/compose': '[data-compose-form]',
 }
 const focusSelector = 'a[href],button:not([disabled]),input:not([disabled]):not([type="hidden"]),select:not([disabled]),textarea:not([disabled]),details > summary:first-of-type,[tabindex]'
@@ -71,7 +71,7 @@ async function geometry(page) {
       const rect = element.getBoundingClientRect(), style = getComputedStyle(element)
       return rect.width > 0 && rect.height > 0 && style.visibility === 'visible' && !element.closest('[hidden],[inert]')
     }
-    const targets = [...document.querySelectorAll('button,a.xp-btn,a.xp-nav-item,a[data-nav-route],a[data-theme-toggle],a[data-lang-switch],[data-tool] a[href],a[data-usage-link],summary,input:not([type="hidden"]),select,textarea')]
+    const targets = [...document.querySelectorAll('button,a.v2-btn,a.xp-btn,.v2-nav a,a.xp-nav-item,a[data-nav-route],a[data-theme-toggle],a[data-lang-switch],[data-tool] a[href],a[data-tool],a[data-usage-link],summary,input:not([type="hidden"]),select,textarea')]
       .filter(visible).map(element => {
         const compact = element instanceof HTMLInputElement && ['checkbox', 'radio'].includes(element.type)
         const labels = compact ? [...element.labels ?? []].filter(candidate => candidate.control === element && visible(candidate) && getComputedStyle(candidate).pointerEvents !== 'none') : []
@@ -84,29 +84,29 @@ async function geometry(page) {
           type: element.getAttribute('type'), target_basis: targetElement === element ? 'native_control' : 'associated_label', associated_label: label ? label.control === element : null,
           native_width: native.width, native_height: native.height, disabled: element.matches(':disabled'), read_only: Boolean(element.readOnly), aria_disabled: element.getAttribute('aria-disabled') === 'true' }
       })
-    const fields = [...document.querySelectorAll('label[for],.xp-form-group > .xp-label')].filter(label => !label.classList.contains('xp-sr-only') && !/^rect\(\s*0px(?:,\s*0px){3}\s*\)$/.test(getComputedStyle(label).clip) && visible(label)).flatMap(label => {
+    const fields = [...document.querySelectorAll('label[for],.xp-form-group > .xp-label,.v2-field > .v2-label')].filter(label => !label.classList.contains('xp-sr-only') && !label.classList.contains('v2-sr') && !/^rect\(\s*0px(?:,\s*0px){3}\s*\)$/.test(getComputedStyle(label).clip) && getComputedStyle(label).clipPath !== 'inset(50%)' && visible(label)).flatMap(label => {
       const value = label.htmlFor ? document.getElementById(label.htmlFor) : label.nextElementSibling
       if (!value || !visible(value) || (value instanceof HTMLInputElement && ['checkbox', 'radio'].includes(value.type))) return []
       const range = document.createRange(); range.selectNodeContents(label)
       const labelRect = range.getBoundingClientRect(), box = value.getBoundingClientRect(), style = getComputedStyle(value)
       const isControl = /^(INPUT|SELECT|TEXTAREA)$/.test(value.tagName)
-      const isBadge = value.classList.contains('xp-badge')
+      const isBadge = value.classList.contains('xp-badge') || value.classList.contains('v2-pill')
       const valueRange = document.createRange(); valueRange.selectNodeContents(value)
       const valueRect = isControl ? { left: box.left + parseFloat(style.paddingLeft) + parseFloat(style.borderLeftWidth), right: box.right - parseFloat(style.paddingRight) - parseFloat(style.borderRightWidth) } : isBadge ? box : valueRange.getBoundingClientRect()
       return [{ id: value.id || null, tag: value.tagName, right_delta: Math.abs(labelRect.right - valueRect.right), left_delta: Math.abs(labelRect.left - valueRect.left),
         label_bottom: labelRect.bottom, value_top: box.top, direction: style.direction, text_align: style.textAlign, explicit_ltr: value.getAttribute('dir') === 'ltr', control: isControl, value_kind: isBadge ? 'badge_outer_box' : isControl ? 'control_outer_box' : 'plain_value_text' }]
     })
-    const phone = [...document.querySelectorAll('[data-home-phone]')].find(visible)
-    const board = [...document.querySelectorAll('[data-home-desktop],[data-board-port="xwhm-dashboard"],[data-board-port="xmail-inbox"],[data-board-port="xmail-compose"]')].find(visible)
-    const sidebar = phone ? phone.querySelector('#m-drawer') : board?.querySelector('[data-xp-sidebar]') ?? document.querySelector('[data-xp-sidebar]')
-    const header = phone?.querySelector(':scope > header') ?? board?.querySelector(':scope > header') ?? board?.querySelector('main > header') ?? document.querySelector('.xp-topbar')
-    const navigationMode = phone ? 'home-drawer' : board ? 'inline' : 'shared'
+    const sidebar = document.querySelector('[data-xp-sidebar]')
+    const header = document.querySelector('header.v2-top') ?? document.querySelector('.xp-topbar')
+    const navigationMode = document.querySelector('.v2-shell') ? 'v2-shell' : 'shared'
     const rect = element => { const r = element?.getBoundingClientRect(); return r ? { left: r.left, right: r.right, top: r.top, width: r.width, height: r.height } : null }
     const bdis = [...document.querySelectorAll('bdi[dir="ltr"]')].filter(visible)
     return { viewport: innerWidth, scroll_width: document.documentElement.scrollWidth, dir: document.documentElement.dir,
       eastern_digits: /[\u0660-\u0669\u06f0-\u06f9]/.test(document.body.innerText), targets, fields,
       target_violations: targets.filter(target => target.width < 43.5 || target.height < 43.5),
-      navigation_mode: navigationMode, header: rect(header), sidebar: rect(sidebar), sidebar_visibility: sidebar ? getComputedStyle(sidebar).visibility : null,
+      navigation_mode: navigationMode, header: rect(header), sidebar: rect(sidebar),
+      sidebar_visibility: sidebar ? getComputedStyle(sidebar).visibility : null,
+      sidebar_display: sidebar ? getComputedStyle(sidebar).display : null,
       bdi_count: bdis.length, bdi_all_ltr_isolated: bdis.every(element => getComputedStyle(element).direction === 'ltr' && getComputedStyle(element).unicodeBidi.includes('isolate')) }
   })
 }
@@ -149,7 +149,7 @@ async function openUserMenu(page) {
 
 async function interactions(page, state, base, expect, observations, breadcrumb) {
   const home = state.path === '/home'
-  const mobile = home ? state.width <= 800 : state.width < 960
+  const mobile = state.width < 960
   const toolbar = page.locator('[data-xp-toolbar-options]'), summary = toolbar.locator(':scope > summary')
   const hasToolbar = await toolbar.count() > 0
   const prepareToolbar = async () => {
@@ -158,14 +158,13 @@ async function interactions(page, state, base, expect, observations, breadcrumb)
   const original = page.url()
   if (mobile) {
     breadcrumb('mobile_navigation_open')
-    const toggle = page.locator(home ? '#xpanel-home-menu' : '[data-action="toggle-mobile-nav"]')
+    const toggle = page.locator('[data-action="toggle-mobile-nav"]')
     await toggle.click()
-    const sidebar = page.locator(home ? '#m-drawer' : '[data-xp-sidebar]')
-    const background = page.locator(home ? '[data-home-phone] > main' : '[data-xp-shell-content]')
+    const sidebar = page.locator('[data-xp-sidebar]')
+    const background = page.locator('[data-xp-shell-content]')
     await expect(sidebar).toHaveAttribute('role', 'dialog')
     await expect(sidebar).toHaveAttribute('aria-modal', 'true')
     assert.equal(await background.evaluate(element => element.inert), true, 'Background must be inert')
-    if (home) assert.equal(await page.locator('[data-home-phone] > header').evaluate(element => element.inert), true)
     assert.equal(await sidebar.evaluate(element => element.contains(document.activeElement)), true, 'Opening navigation must move focus inside')
     const details = sidebar.locator('details')
     if (await details.count()) {
@@ -180,7 +179,6 @@ async function interactions(page, state, base, expect, observations, breadcrumb)
     } else {
       breadcrumb('flat_navigation_links')
       assert.ok(await sidebar.locator('a[data-nav-route]').count() > 1, 'Flat navigation must expose real route destinations')
-      if (!home) assert.ok(await sidebar.locator('.xp-nav-group').count() > 0, 'The current shared navigation must retain its labeled flat groups')
     }
     breadcrumb('mobile_navigation_tab_wrap')
     const loop = await assertFocusLoop(page, sidebar)
@@ -196,7 +194,6 @@ async function interactions(page, state, base, expect, observations, breadcrumb)
     await expect(toggle).toHaveAttribute('aria-expanded', 'false')
     await expect(toggle).toBeFocused()
     assert.equal(await background.evaluate(element => element.inert), false)
-    if (home) assert.equal(await page.locator('[data-home-phone] > header').evaluate(element => element.inert), false)
     observations.push({ step: 'mobile_navigation_modality', focus_destinations: loop.count, native_summaries: loop.summaries, tab_wrap: true, shift_tab_wrap: true, escape_focus_return: true })
     if (hasToolbar) {
       breadcrumb('toolbar_disclosure_toggle_escape')
@@ -206,26 +203,25 @@ async function interactions(page, state, base, expect, observations, breadcrumb)
       assert.equal(await toolbar.evaluate(element => element.open), false)
       await expect(summary).toBeFocused()
     }
-    if (home) {
+    if (home && state.width <= 600) {
       breadcrumb('home_tool_accordion_and_filter')
-      const phone = page.locator('[data-home-phone]')
-      const closed = phone.locator('button[data-home-action="toggle-group"][aria-expanded="false"]').first()
-      await expect(closed).toHaveCount(1)
-      const panelId = await closed.getAttribute('aria-controls')
-      const group = phone.locator(`button[data-home-action="toggle-group"][aria-controls="${panelId}"]`)
-      const panel = page.locator(`#${panelId}`)
-      await group.click()
-      await expect(group).toHaveAttribute('aria-expanded', 'true')
-      await expect(panel).toBeVisible()
+      const rootHome = page.locator('[data-panel-home]')
+      const accordions = rootHome.locator('details[data-home-accordion]')
+      const closedIndex = await accordions.evaluateAll(elements => elements.findIndex(element => !element.open))
+      assert.ok(closedIndex >= 0, 'Phone tool accordion must expose a closed group')
+      const group = accordions.nth(closedIndex)
+      await group.locator(':scope > summary').click()
+      assert.equal(await group.evaluate(element => element.open), true)
       await page.keyboard.press('Tab')
-      assert.equal(await panel.evaluate(element => element.contains(document.activeElement) && document.activeElement.tagName === 'A'), true, 'Expanded tool group must expose its first real destination to Tab')
-      const count = await phone.locator('[data-tool] a:visible').count()
+      assert.equal(await group.evaluate(element => element.contains(document.activeElement) && document.activeElement.tagName === 'A'), true, 'Expanded tool group must expose its first real destination to Tab')
+      const count = await rootHome.locator('a[data-tool]:visible').count()
       assert.ok(count > 0)
-      await phone.locator('#m-filter').fill('no-matching-tool-query-xyz')
-      await expect(phone.locator('[data-tool] a:visible')).toHaveCount(0)
-      await phone.locator('#m-filter').fill('')
-      await expect(phone.locator('[data-tool] a:visible')).toHaveCount(count)
-      observations.push({ step: 'home_tool_accordion_and_filter', real_destinations: count, button_aria_controls: true, zero_results: true, clear_restores_groups: true })
+      await rootHome.locator('#tool-filter').fill('no-matching-tool-query-xyz')
+      await expect(rootHome.locator('a[data-tool]:visible')).toHaveCount(0)
+      await expect(rootHome.locator('[data-tool-empty]')).toBeVisible()
+      await rootHome.locator('[data-home-filter-clear]').click()
+      await expect(rootHome.locator('a[data-tool]:visible')).toHaveCount(count)
+      observations.push({ step: 'home_tool_accordion_and_filter', real_destinations: count, details_disclosure: true, zero_results: true, clear_restores_groups: true })
     }
   }
   await prepareToolbar()
@@ -337,26 +333,17 @@ export async function runPhase1Acceptance({ output } = {}) {
           }
         }
         if (state.path !== '/login') {
-          const expectedNavigation = state.path === '/home' ? (state.width <= 800 ? 'home-drawer' : 'inline') : ['/whm', '/mail/inbox', '/mail/compose'].includes(state.path) ? 'inline' : 'shared'
-          assert.equal(metrics.navigation_mode, expectedNavigation, 'Each route must expose its expected current navigation primitive')
+          assert.equal(metrics.navigation_mode, 'v2-shell', 'Each route must expose the unified v2 shell navigation primitive')
           await expect(page.locator('html')).toHaveAttribute('data-realtime-enabled', 'false')
           assert.ok(await page.locator('[data-ws-indicator="unavailable"]').count(), 'Synthetic transport must say unavailable')
-          if (metrics.navigation_mode === 'home-drawer') {
-            assert.ok(Math.abs(metrics.header.height - 64) <= 1, 'Home phone header must be 64px')
-            await expect(page.locator('#xpanel-home-menu')).toBeVisible()
-            await expect(page.locator('#xpanel-home-menu')).toHaveAttribute('aria-expanded', 'false')
-            await expect(page.locator('#m-drawer')).toBeHidden()
-          } else if (metrics.navigation_mode === 'shared' && state.width < 960) {
-            assert.ok(Math.abs(metrics.header.height - 64) <= 1, 'Shared mobile/tablet header must be 64px')
-            assert.equal(metrics.sidebar_visibility, 'hidden', 'Shared mobile navigation must begin offcanvas')
+          if (state.width < 960) {
+            assert.ok(metrics.header && metrics.header.width <= state.width + 1 && metrics.header.height >= 64, 'Mobile/tablet header must remain usable within the viewport')
+            assert.equal(metrics.sidebar_visibility, 'hidden', 'Mobile/tablet navigation must begin offcanvas')
             await expect(page.locator('[data-action="toggle-mobile-nav"]')).toBeVisible()
           } else {
-            assert.ok(metrics.header && metrics.header.width <= state.width + 1 && metrics.header.height >= 44, 'The actual header must remain usable within the viewport')
-            assert.ok(metrics.sidebar && metrics.sidebar.width <= state.width + 1, 'The actual navigation must fit the viewport')
-            if (state.width >= 960) {
-              const expectedRail = state.path.startsWith('/mail/') ? 200 : 248
-              assert.ok(Math.abs(metrics.sidebar.width - expectedRail) <= 1, `Desktop rail must be ${expectedRail}px for the current surface`)
-            }
+            assert.ok(metrics.header && metrics.header.width <= state.width + 1 && metrics.header.height >= 64, 'Desktop header must remain usable within the viewport')
+            assert.ok(metrics.sidebar && metrics.sidebar.width <= state.width + 1, 'Desktop navigation must fit the viewport')
+            assert.ok(Math.abs(metrics.sidebar.width - 264) <= 1, 'Desktop rail must be 264px in the v2 shell')
           }
         }
         breadcrumb('interactions')

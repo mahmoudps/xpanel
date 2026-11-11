@@ -149,10 +149,10 @@ function bindAccountCron(askDialog: ((options: Record<string, unknown>) => Promi
       root.querySelector<HTMLElement>('[data-cron-editor-title]')!.textContent = job ? t('Edit cron job') : t('Add a cron job')
       preview(job)
     }
-    const ask = async (title: string, body: string, danger = false): Promise<boolean> => {
+    const ask = async (title: string, body: string, danger = false, code?: string): Promise<boolean> => {
       if (!askDialog || confirming) { note('failed', t('Confirmation is unavailable. Nothing was sent.')); return false }
       confirming = true; lock()
-      try { return await askDialog({ title, body, danger, confirm: t('Confirm') }) === true } catch { return false }
+      try { return await askDialog({ title, body, code, danger, confirm: t('Confirm') }) === true } catch { return false }
       finally { confirming = false; lock() }
     }
     const discard = (): Promise<boolean> => !dirty() && !review ? Promise.resolve(true) : ask(t('Discard draft and read saved jobs?'), t('Unsaved edits will be discarded. No previous request is retried.'), true)
@@ -161,6 +161,8 @@ function bindAccountCron(askDialog: ((options: Record<string, unknown>) => Promi
       for (const job of view?.jobs ?? []) {
         const row = cloneClientTemplate(rowTemplate, 'tr', rowSlots)
         const observed = observations.get(job.id), unknown = t('Not observed')
+        // Filter key of the generic list filter: the last result is not a painted cell.
+        row.dataset.listResult = !observed ? 'unobserved' : observed.lastResult === 'success' ? 'succeeded' : observed.lastResult === 'unknown' ? 'never' : 'failed'
         for (const [slot, text] of [['name', job.comment || t('Scheduled command')], ['schedule', job.schedule], ['command', job.command], ['last-run', cronLatinDigits(observed?.lastStartedAt ?? observed?.lastTriggerAt ?? unknown)], ['duration', observed?.durationMs === null || observed?.durationMs === undefined ? unknown : String(observed.durationMs) + ' ms'], ['next-run', cronLatinDigits(observed?.nextRunAt ?? unknown)]] as const) clientTemplateSlot(row, slot).textContent = text
         const actions = clientTemplateSlot(row, 'actions')
         const button = (label: string, callback: () => void): void => { const button = cloneClientTemplate(actionTemplate, 'button', ['label']) as HTMLButtonElement; clientTemplateSlot(button, 'label').textContent = label; button.setAttribute('aria-label', label + ': ' + (job.comment || job.command)); button.addEventListener('click', () => { if (!button.disabled && eligible()) callback() }); actions.append(button) }
@@ -175,6 +177,12 @@ function bindAccountCron(askDialog: ((options: Record<string, unknown>) => Promi
       view = next; selectedId = next.jobs.some(job => job.id === id) ? id : null; review = false; observations.clear()
       field('runtime').setAttribute('min', '1'); field('runtime').setAttribute('max', String(next.capacity.maxRuntimeSec)); field('runtime').setAttribute('step', '1')
       root.querySelector<HTMLElement>('[data-cron-capacity]')!.textContent = t('{used} / {max} saved jobs', { used: next.capacity.used, max: next.capacity.maxJobs })
+      // Optional summary value: the count of saved jobs, once the list is read. A v2 tile drops its text styling and its "read first" note.
+      document.querySelectorAll<HTMLElement>('[data-cron-kpi="jobs"]').forEach(node => {
+        node.textContent = String(next.jobs.length); node.closest('[data-unread]')?.removeAttribute('data-unread')
+        const tile = node.parentElement
+        if (tile?.classList.contains('v2-kpi__value')) { tile.classList.remove('v2-kpi__value--text'); for (const sibling of Array.from(tile.parentElement?.children ?? [])) if (sibling.classList.contains('v2-kpi__note')) sibling.remove() }
+      })
       root.querySelector<HTMLElement>('[data-cron-username]')!.textContent = next.context.username
       root.querySelector<HTMLElement>('[data-cron-home]')!.textContent = next.context.home
       fill(selected()); paintRows()
@@ -195,7 +203,7 @@ function bindAccountCron(askDialog: ((options: Record<string, unknown>) => Promi
       } else if (!target) return
       const before = view, command = mode === 'delete' ? target!.command : draft!.command
       const discardNotice = dirty() ? '\n' + t('This action replaces the current unsaved draft after success.') : ''
-      if (!await ask(mode === 'delete' ? t('Delete scheduled command?') : t('Save scheduled command?'), command + '\n' + t('Saved configuration is reconciled as the account user. Execution is not verified here.') + discardNotice, mode === 'delete')) return
+      if (!await ask(mode === 'delete' ? t('Delete scheduled command?') : t('Save scheduled command?'), t('Saved configuration is reconciled as the account user. Execution is not verified here.') + discardNotice, mode === 'delete', command)) return
       if (!eligible() || busy || view !== before) return
       busy = true; lock(); note('saving', t('Saving and verifying the saved readback…'))
       try {
@@ -229,7 +237,7 @@ function bindAccountCron(askDialog: ((options: Record<string, unknown>) => Promi
     async function readHost(running: boolean): Promise<void> {
       const target = selected(), before = view
       if (!eligible() || !before || !target || busy || confirming || review || dirty() || (running ? !before.capabilities.runNow || !target.enabled || !target.scheduleSupported : !before.capabilities.observation)) return
-      if (running && !await ask(t('Run this saved command now?'), target.command + '\n' + t('This starts work as your account user. Request acceptance does not mean the job completed.'), true)) return
+      if (running && !await ask(t('Run this saved command now?'), t('This starts work as your account user. Request acceptance does not mean the job completed.'), true, target.command)) return
       if (!eligible() || busy || confirming || view !== before || selectedId !== target.id || dirty()) return
       busy = true; lock(); note('observing', running ? t('Requesting execution and reading host state…') : t('Reading the selected job from the host…'))
       try {

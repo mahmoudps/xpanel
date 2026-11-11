@@ -16,13 +16,13 @@ const unknownPreference = (() => {
 })()
 
 it.each([undefined, null, '', unknownPreference, '../v2', '__proto__', 'constructor', { id: 'classic' }])('falls back for an unregistered preference %j', preference => {
-  expect(resolveUiTheme(preference).id).toBe('classic')
+  expect(resolveUiTheme(preference).id).toBe('v2')
 })
 
-it('exposes unique immutable registered packages with classic as the default', () => {
+it('exposes unique immutable registered packages with v2 as the default', () => {
   const ids = registeredUiThemeIds()
   expect(ids).toEqual(['classic', 'v2'])
-  expect(resolveUiTheme().id).toBe('classic')
+  expect(resolveUiTheme().id).toBe('v2')
   expect(new Set(ids).size).toBe(ids.length)
   for (const id of ids) {
     expect(resolveUiTheme(id).id).toBe(id)

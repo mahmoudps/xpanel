@@ -45,7 +45,7 @@ describe('account SSH access page', () => {
     try {
       await bind(renderAccountSshWorkspace({ lang, accountId, username: 'alice', canManage: true }), vi.fn(async () => clone(view([key(FP, 1)], { unrecognizedLines: [2, 3, 4] }))))
       expect($('[data-ssh-file]').textContent).toBe(lang === 'ar' ? 'ملف المفاتيح موجود (90 بايت). 3 أسطر ليست مفاتيح تستطيع هذه الصفحة قراءتها؛ تبقى دون تغيير.' : 'The key file exists (90 bytes). 3 lines are not keys this page can read; they are kept unchanged.')
-      expect($('[data-ssh-rows] button').getAttribute('aria-label')).toBe((lang === 'ar' ? 'إزالة: ' : 'Remove: ') + FP)
+      expect($('[data-ssh-rows] button').getAttribute('aria-label')).toBe(lang === 'ar' ? 'إزالة: \u2066' + FP + '\u2069' : 'Remove: ' + FP)
     } finally { document.documentElement.lang = 'en'; document.documentElement.dir = 'ltr' }
   })
   it('adds with the captured revision, requires an exact acknowledgement and readback, and removes by fingerprint', async () => {

@@ -89,4 +89,21 @@ describe('v2 email accounts', () => {
     expect(html).not.toMatch(/[\u0660-\u0669\u06f0-\u06f9]/)
     expect(html).not.toContain('<dd dir="ltr">')
   })
+
+  it('filters users by service from real rows and explains the service-user contract', () => {
+    const html = page()
+    expect(html).toContain('data-email-services="email ftp"')
+    expect(html).toContain('value="ftp"><span>FTP</span><span class="v2-count v2-num">1<')
+    expect(html).toContain('value="webdisk"><span>Web Disk</span><span class="v2-count v2-num">0<')
+    expect(html).toContain('<span class="v2-email-fact" data-label="File directory">')
+    expect(html).toContain('id="v2-email-how-title"')
+    // The board search by login: rows carry their login for the shared list filter, and the card is its root.
+    expect(html).toContain('data-list-row data-list-search="')
+    expect(html.indexOf('data-list-filter>')).toBeLessThan(html.indexOf('data-list-filter-search'))
+    expect(html).toContain('data-list-filter-empty hidden')
+    const unread = page({ users: { state: 'unread' } })
+    expect(unread).not.toContain('data-email-service-filter')
+    expect(unread).not.toContain('data-list-filter')
+    expect(unread).toContain('id="v2-email-how-title"')
+  })
 })

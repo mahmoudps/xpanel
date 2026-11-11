@@ -69,8 +69,8 @@ describe('readable date closure site health', () => {
     expect($('[data-health-at]').textContent).toBe('2026-10-27 09:01 UTC'); expect($('[data-health-at]').getAttribute('dir')).toBe('ltr')
     expect($('[data-health-rows]').textContent).toContain('2026-11-01 00:00 UTC')
     const rowsText = $('[data-health-rows]').textContent, ar = lang === 'ar'
-    expect(rowsText).toContain(ar ? 'يشير سجل A إلى عنوان آخر: 198.51.100.7' : 'The A record points to another address: 198.51.100.7'); expect(rowsText).toContain(ar ? 'تستجيب الصفحة الرئيسية (HTTP 200).' : 'The home page answers (HTTP 200).')
-    expect(rowsText).toContain(ar ? 'إصدار PHP 8.3 مدعوم.' : 'PHP 8.3 is supported.'); expect($('[data-health-rows] a').getAttribute('aria-label')).toBe(ar ? 'إصلاح DNS: example.test' : 'Fix DNS: example.test')
+    expect(rowsText).toContain(ar ? 'يشير سجل A إلى عنوان آخر: \u2066198.51.100.7\u2069' : 'The A record points to another address: 198.51.100.7'); expect(rowsText).toContain(ar ? 'تستجيب الصفحة الرئيسية (HTTP 200).' : 'The home page answers (HTTP 200).')
+    expect(rowsText).toContain(ar ? 'إصدار PHP 8.3 مدعوم.' : 'PHP 8.3 is supported.'); expect($('[data-health-rows] a').getAttribute('aria-label')).toBe(ar ? 'إصلاح \u2066DNS\u2069: \u2066example.test\u2069' : 'Fix DNS: example.test')
     expect(JSON.stringify(source)).toBe(before); expect(readSiteHealthView(source, accountId).checkedAt).toBe('2026-10-27T09:01:02.123Z')
     expect(send.mock.calls).toEqual([['GET', '/api/account/site-health']]); expect(document.body.textContent).not.toMatch(/[\u0660-\u0669\u06f0-\u06f9]/)
   })

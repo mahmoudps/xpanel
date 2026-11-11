@@ -184,4 +184,56 @@ describe('v2 WHM diagnostic, security and activity bodies', () => {
       expect(html).not.toMatch(/[٠-٩۰-۹]/)
     }
   })
+
+  it('pairs the security advisor cards in two columns under one sign-in policy root, with a jump list to every card', () => {
+    const html = render('/whm/security')
+    expect(html.match(/data-sign-in-policy/g)).toHaveLength(1)
+    const policy = html.slice(html.indexOf('data-sign-in-policy'), html.indexOf('id="v2-observation-security-tokens"'))
+    for (const hook of ['data-sign-in-field="lockout.username.attempts"', 'data-sign-in-lockouts', 'data-sign-in-unlock-target', 'data-sign-in-save', 'data-sign-in-status']) expect(policy).toContain(hook)
+    expect(html).toContain('id="v2-observation-security-locked"')
+    const jump = html.match(/<nav class="v2-observation__jump"[^>]*>(.*?)<\/nav>/)![1]!
+    for (const id of [...jump.matchAll(/href="#([^"]+)"/g)].map(match => match[1])) expect(html).toContain(`id="${id}"`)
+    expect(jump.match(/<a /g)).toHaveLength(8)
+    expect(render('/whm/security/ssh')).toMatch(/<div class="v2-observation__columns"><section class="v2-card" aria-labelledby="v2-observation-ssh-settings"/)
+  })
+
+  it('counts and filters advisor findings from the rows the controller paints, and keeps one save bar inside the policy root', () => {
+    const html = render('/whm/security')
+    // The tiles come before the findings in the document, as they read on screen; the controller writes their text.
+    expect(html.indexOf('data-whm-security-count="all"')).toBeLessThan(html.indexOf('data-whm-security-check-rows'))
+    expect(WHM_OBSERVATION_CSS).not.toContain('counter(')
+    for (const state of ['all', 'observed-ok', 'attention', 'unavailable']) {
+      expect(html).toContain(`<span data-whm-security-count="${state}">—</span>`)
+      expect(html).toMatch(new RegExp(`<input type="radio" name="v2-security-state" value="${state}"`))
+    }
+    expect(html).not.toContain('Problems')
+    expect(WHM_OBSERVATION_CSS).toContain(':has(.v2-observation__filter [value=attention]:checked) tr[data-check-state]:not([data-check-state=attention]){visibility:collapse}')
+    const bar = html.match(/<div class="v2-observation__savebar">(.*?)<\/div><\/div>/)![1]!
+    expect(bar).toContain('data-sign-in-status'); expect(bar).toContain('data-sign-in-save'); expect(bar).toContain('data-sign-in-refresh')
+    expect(html.match(/data-sign-in-save/g)).toHaveLength(1)
+  })
+
+  it('shows SSH status tiles through the service fact hooks and the session address only to an admitted reader', () => {
+    const html = render('/whm/security/ssh', { ...admitted, adminSessionIp: '192.0.2.9' })
+    for (const key of ['active', 'enabled', 'today-accepted', 'today-failed', 'total-accepted', 'total-failed']) expect(html.match(new RegExp(`data-whm-ssh-fact="${key}"`, 'g'))).toHaveLength(1)
+    expect(html).toMatch(/<p class="v2-kpi__value v2-kpi__value--text v2-num"><span data-whm-ssh-fact="active">Not read<\/span>/)
+    expect(html).toMatch(/v2-notice--ok[^>]*>.*Current session protection\..*<bdi class="v2-mono" dir="ltr">192\.0\.2\.9<\/bdi>/)
+    expect(render('/whm/security/ssh', { adminSessionIp: '192.0.2.9' })).not.toContain('192.0.2.9')
+  })
+
+  it('keeps controller result paragraphs out of the muted help rule and gives the alert matrix a phone layout', () => {
+    const muted = WHM_OBSERVATION_CSS.match(/:where\(\.v2-card__body p:not\(([^)]*)\)\)/)![1]!
+    for (const hook of ['[data-whm-jobs-error]', '[data-whm-repair-preview-summary]', '[data-whm-tokens-reveal-text]', '[data-xp-slot]']) expect(muted).toContain(hook)
+    expect(WHM_OBSERVATION_CSS).toMatch(/@media\(max-width:640px\)\{[^@]*\[data-whm-alerts-form\] tbody>tr\{display:grid/)
+  })
+})
+
+describe('v2 security KPI tiles filled with numbers', () => {
+  it('keeps the numeric value size on tiles a controller fills with a count', () => {
+    const overview = render('/whm/security')
+    expect(overview.match(/<p class="v2-kpi__value v2-num"><span data-whm-security-count=/g)).toHaveLength(4)
+    const ssh = render('/whm/security/ssh')
+    expect(ssh).toMatch(/<p class="v2-kpi__value v2-num"><span data-whm-ssh-fact="today-accepted">/)
+    expect(ssh).toMatch(/<p class="v2-kpi__value v2-kpi__value--text v2-num"><span data-whm-ssh-fact="active">/)
+  })
 })

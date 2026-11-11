@@ -23,13 +23,14 @@ function workspaceSummary(props: UnavailableProps): string {
   return `<section class="v2-card v2-unavailable__summary" data-workspace-identity="true"${props.surface === 'xpanel' ? ' data-workspace-account-overview="true"' : ''} aria-labelledby="v2-workspace-summary-title"><h2 id="v2-workspace-summary-title">${escapeHtml(view.title)}</h2><dl class="v2-unavailable__facts">${view.fields.map(field => `<div data-workspace-field="${escapeHtml(field.key)}"><dt>${escapeHtml(field.label)}</dt><dd>${field.ltr ? `<bdi dir="ltr">${escapeHtml(field.value)}</bdi>` : escapeHtml(field.value)}</dd></div>`).join('')}</dl>${view.accountEmpty && view.accountEmptyText ? `<p data-workspace-account-empty="true">${escapeHtml(view.accountEmptyText)}</p>` : ''}${view.mfaHref && view.mfaText ? `<p data-mfa-optional-link><a href="${escapeHtml(view.mfaHref)}">${escapeHtml(view.mfaText)}</a></p>` : ''}</section>`
 }
 
-/** Missing qualified renderers are an integration error, never silently replaced by an unavailable card. */
+/** Missing qualified renderers are an integration error, never silently replaced by an unavailable card; an admitted caller without realm facts gets the unavailable summary. */
 export function createV2UnavailableRenderer(readOnlyPage: V2ReadOnlyPage): UiTheme['renderUnavailable'] {
   return props => {
     const t = v2Messages.translator(props.locale)
-    const layout = props.admitted ? readOnlyPage(props) : undefined
-    if (props.admitted && !layout) throw new Error(`v2_unqualified_layout_missing:${props.surface}:${props.route}`)
-    if (props.admitted && props.securityPage && layout!.split(V2_SECURITY_SLOT).length !== 2) throw new Error('v2_unqualified_security_slot_missing_or_duplicated')
+    const hasReadOnly = props.admitted && props.readOnlyFacts !== undefined
+    const layout = hasReadOnly ? readOnlyPage(props) : undefined
+    if (hasReadOnly && !layout) throw new Error(`v2_unqualified_layout_missing:${props.surface}:${props.route}`)
+    if (hasReadOnly && props.securityPage && layout!.split(V2_SECURITY_SLOT).length !== 2) throw new Error('v2_unqualified_security_slot_missing_or_duplicated')
     const contact = publicContactEmail(props.supportEmail)
     const path = props.route.startsWith('/') ? props.route : '/'
     const href = (locale = props.locale, theme = props.theme) => `${path}?${new URLSearchParams({ lang: locale, theme, density: props.density })}`
@@ -48,5 +49,5 @@ export function createV2UnavailableRenderer(readOnlyPage: V2ReadOnlyPage): UiThe
 }
 
 export const V2_UNAVAILABLE_CSS = `.v2-unavailable,.v2-unavailable__panel,.v2-unavailable__summary{display:flex;flex-direction:column;gap:var(--space-4);min-inline-size:0}.v2-unavailable__panel,.v2-unavailable__summary{padding:var(--space-3)}
-.v2-unavailable__fields,.v2-unavailable__facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-2)}.v2-unavailable__field,.v2-unavailable__facts>div{display:flex;flex-direction:column;align-items:stretch;gap:var(--space-1);min-inline-size:0;text-align:start}.v2-unavailable__facts dt{color:var(--muted)}.v2-unavailable__facts dd{overflow-wrap:anywhere}.v2-unavailable__facts bdi{display:inline;unicode-bidi:isolate}.v2-unavailable__field>label{padding-inline-start:12px}.v2-unavailable__field>input,.v2-unavailable__field>textarea,.v2-unavailable__field>select{inline-size:100%;text-align:var(--v2-control-align,start)}.v2-unavailable__actions{display:flex;flex-wrap:wrap;gap:var(--space-2)}
+.v2-unavailable__fields,.v2-unavailable__facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-2)}.v2-unavailable__field,.v2-unavailable__facts>div{display:flex;flex-direction:column;align-items:stretch;gap:var(--space-1);min-inline-size:0;text-align:start}.v2-unavailable__facts dt{color:var(--muted)}.v2-unavailable__facts dd{overflow-wrap:anywhere}.v2-unavailable__facts bdi{display:inline;unicode-bidi:isolate}.v2-unavailable__field>label{padding-inline:13px;line-height:1.25}.v2-unavailable__field>input,.v2-unavailable__field>textarea,.v2-unavailable__field>select{inline-size:100%;text-align:var(--v2-control-align,start)}.v2-unavailable__actions{display:flex;flex-wrap:wrap;gap:var(--space-2)}
 @media(max-width:600px){.v2-unavailable__panel,.v2-unavailable__summary{padding:var(--space-2)}.v2-unavailable__fields,.v2-unavailable__facts{grid-template-columns:1fr}}`

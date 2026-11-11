@@ -1,6 +1,9 @@
 /// <reference lib="dom" />
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { ASCII_BYTES_BINDING, formatIsolatedBytes as canonicalFormatClientBytes } from './display-format.ts'
+// Module-local alias: the binding source defines it again from ASCII_BYTES_BINDING.
+const formatClientBytes = canonicalFormatClientBytes
 
 interface WebsiteView { domains: { id: string; name: string }[]; databases: string[]; contactEmail: string; job: { kind: string } | null; selected: null | { domainId: string; estimateBytes: number | null; remainingBytes: number | null; fits: boolean | null; backups: { id: string; createdAt: string; bytes: number; databases: string[] }[] } }
 
@@ -14,7 +17,7 @@ function bindWebsiteBackups(): void {
     if (!domain || !rows || !status || !create || !dbs || !mode || !facts || !notify) continue
     let timer: ReturnType<typeof setTimeout> | null = null, contactRead = false
     const note = (state: string, text: string): void => { status.dataset.state = state; status.textContent = text }
-    const size = (bytes: number): string => (bytes / 1048576).toFixed(1) + ' MB'
+    const size = (bytes: number): string => formatClientBytes(bytes)
     const failed = (error: { details?: { reason?: string } }): void => note('failed', error?.details?.reason === 'OPERATION_IN_PROGRESS' ? t('A backup or restore is already running for this account.') : error?.details?.reason === 'invalid_email' ? t('Check the email address. Nothing was started.') : t('The operation was refused. Nothing was changed.'))
     const send = (body: Record<string, unknown>, done: string): void => { note('saving', t('Starting…')); request('POST', '/api/account/website-backups', { ...body, domainId: domain.value }).then(() => { note('read', done); schedule() }).catch(failed) }
     const paint = (v: WebsiteView): void => {
@@ -46,4 +49,4 @@ function bindWebsiteBackups(): void {
   }
 }
 
-export const WEBSITE_BACKUPS_CLIENT_BINDING = `(()=>{(${bindWebsiteBackups.toString()})()})`
+export const WEBSITE_BACKUPS_CLIENT_BINDING = `(()=>{const formatClientBytes=${ASCII_BYTES_BINDING};(${bindWebsiteBackups.toString()})()})`

@@ -6,6 +6,9 @@ const cloneClientTemplate = canonicalCloneClientTemplate
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as canonicalFormatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { ASCII_BYTES_BINDING, formatIsolatedBytes as canonicalFormatClientBytes } from './display-format.ts'
+// Module-local alias: the binding source defines it again from ASCII_BYTES_BINDING.
+const formatClientBytes = canonicalFormatClientBytes
 const formatDisplayDateTime = canonicalFormatDisplayDateTime
 
 export interface HtaccessClientView {
@@ -191,7 +194,7 @@ function bindAccountHtaccess(askDialog: unknown): void {
           const time = clientTemplateSlot(row, 'time', 'time') as HTMLTimeElement
           time.dateTime = version.at; time.textContent = formatDisplayDateTime(version.at)
           clientTemplateSlot(row, 'actor').textContent = version.actor
-          clientTemplateSlot(row, 'size').textContent = String(version.sizeBytes)
+          clientTemplateSlot(row, 'size').textContent = formatClientBytes(version.sizeBytes)
           clientTemplateSlot(row, 'state').textContent = version.current ? copy(msgctxt('account-htaccess-client', 'Current')) : version.state === 'failed' ? copy('Check failed; kept') : copy('Kept')
           const restore = clientTemplateSlot(row, 'restore', 'button') as HTMLButtonElement
           restore.textContent = copy('Restore'); restore.disabled = blocked || !version.canRestore
@@ -219,4 +222,4 @@ function bindAccountHtaccess(askDialog: unknown): void {
     void controller.load()
   })
 }
-export const ACCOUNT_HTACCESS_CLIENT_BINDING = `(()=>{${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const HTACCESS_UI_BYTES=${HTACCESS_UI_BYTES};const HTACCESS_UUID=${HTACCESS_UUID.toString()};const HTACCESS_REVISION=${HTACCESS_REVISION.toString()};const htaccessObject=${htaccessObject.toString()};const readHtaccessView=${readHtaccessView.toString()};const htaccessUncertain=${htaccessUncertain.toString()};const createHtaccessController=${createHtaccessController.toString()};return ${bindAccountHtaccess.toString()};})()`
+export const ACCOUNT_HTACCESS_CLIENT_BINDING = `(()=>{const formatClientBytes=${ASCII_BYTES_BINDING};${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const HTACCESS_UI_BYTES=${HTACCESS_UI_BYTES};const HTACCESS_UUID=${HTACCESS_UUID.toString()};const HTACCESS_REVISION=${HTACCESS_REVISION.toString()};const htaccessObject=${htaccessObject.toString()};const readHtaccessView=${readHtaccessView.toString()};const htaccessUncertain=${htaccessUncertain.toString()};const createHtaccessController=${createHtaccessController.toString()};return ${bindAccountHtaccess.toString()};})()`

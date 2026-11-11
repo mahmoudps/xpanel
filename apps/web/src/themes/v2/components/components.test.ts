@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { v2Messages } from '../messages.ts'
 import * as kit from './index.ts'
 import { FILTER_BAR_CSS } from './filter-bar.ts'
+import { seriesPaths } from './chart.ts'
 import { V2_BASE_CSS } from '../base.ts'
 
 const t = v2Messages.translator('en')
@@ -123,6 +124,12 @@ describe('v2 component kit', () => {
     expect(tabList).toContain('id="b" aria-selected="false" aria-controls="pb" tabindex="-1"')
     expect(kit.tabPanel({ id: 'pa', tabId: 'a', bodyHtml: '', hidden: true })).toBe('<div class="v2-tabpanel" role="tabpanel" id="pa" aria-labelledby="a" tabindex="0" hidden></div>')
 
+    // A controller fills the empty count slot; a disabled filter bar disables every control it renders.
+    expect(kit.tabs({ label: 'T', tabs: [{ id: 'a', label: 'A', panelId: 'pa', selected: true, countHooks: { 'data-count': 'a' } }] })).toContain('A<span class="v2-count v2-num" data-count="a"></span></button>')
+    const offBar = kit.filterBar({ disabled: true, search: { id: 'q', label: 'Find' }, selects: [{ id: 's', label: 'State', options: [] }], segments: { label: 'Show', options: [{ label: 'All', pressed: true }] } })
+    expect(offBar.startsWith('<div class="v2-filter v2-filter--fields" aria-disabled="true">')).toBe(true)
+    expect(offBar.split(' disabled').length - 1).toBe(3)
+
     const steps = kit.stepper({ label: 'Steps', steps: [{ label: 'One', state: 'done' }, { label: 'Two', state: 'current' }, { label: 'Three', state: 'upcoming' }] })
     expect(steps).toContain('<ol class="v2-steps" aria-label="Steps">')
     expect(steps.match(/aria-current="step"/g)).toHaveLength(1)
@@ -157,8 +164,13 @@ describe('v2 component kit', () => {
 
     expect(kit.lineChart({ label: 'CPU', max: 100, series: [{ label: 'CPU', values: [0, 50, 100] }, { label: 'Memory', values: [10, 20], dashed: true }] }))
       .toMatch(/role="img" aria-label="CPU".*stroke-dasharray/s)
+    expect(seriesPaths([null, 50, 100], 288, 100, 100)).toEqual({ line: 'M144 50L288 0', area: 'M144 50L288 0L288 100L144 100Z' })
+    expect(seriesPaths([25, null, 75], 288, 100, 100)).toEqual({ line: 'M0 75L0 75M288 25L288 25', area: '' })
     expect(kit.kpiCard({ label: 'CPU', value: '28', valueHooks: { 'data-live-kpi': 'cpu' }, meter: { percent: 140 } })).toContain('<span data-live-kpi="cpu">28</span>')
     expect(kit.kpiCard({ label: 'CPU', value: '28', meter: { percent: 140 } })).toContain('inline-size:100%')
+    // A value without a digit is a state in words and takes the lighter text style; a number keeps the large figure.
+    expect(kit.kpiCard({ label: 'Backup', value: 'Not read' })).toContain('<p class="v2-kpi__value v2-kpi__value--text v2-num">')
+    expect(kit.kpiCard({ label: 'CPU', value: '28' })).toContain('<p class="v2-kpi__value v2-num">')
     expect(kit.loadingState(t, { label: 'Loading databases' })).toMatch(/aria-busy="true"><span class="v2-sr" role="status">Loading databases<\/span>/)
     expect(kit.errorState(t, { lead: 'Not read.', retry: { 'data-retry': true } })).toMatch(/role="alert".*data-retry>.*Retry/s)
     expect(kit.toastRegion(t)).toBe('<div id="xp-toast-region" class="v2-toasts" role="status" aria-live="polite" aria-label="Notifications"></div>')
@@ -184,11 +196,13 @@ describe('v2 component kit', () => {
 
     // Inline steps: marker, label and rail side by side.
     expect(kit.stepper({ label: 'Steps', inline: true, steps: [{ label: 'Pick', sub: 'Done', state: 'done' }] }))
-      .toMatch(/^<ol class="v2-steps v2-steps--inline" aria-label="Steps"><li class="v2-step" data-step-status="done"><span class="v2-step__dot">.*<\/span><span class="v2-step__text"><span class="v2-step__label">Pick<\/span><span class="v2-step__sub v2-num">Done<\/span><\/span><span class="v2-step__rail" aria-hidden="true"><\/span><\/li><\/ol>$/)
+      .toMatch(/^<ol class="v2-steps v2-steps--inline" aria-label="Steps"><li class="v2-step" data-step-status="done"><span class="v2-step__dot">.*<\/span><span class="v2-step__text"><span class="v2-step__label" title="Pick">Pick<\/span><span class="v2-step__sub v2-num">Done<\/span><\/span><span class="v2-step__rail" aria-hidden="true"><\/span><\/li><\/ol>$/)
 
     // Meters report their value; a threshold meter adds its scale and the warning and problem ticks.
     expect(kit.meter({ label: 'Disk', valueText: '3.2 / 10 GB', percent: 32 })).toContain('<div class="v2-bar" role="meter" aria-label="Disk" aria-valuenow="32" aria-valuemin="0" aria-valuemax="100" aria-valuetext="Disk 3.2 / 10 GB">')
     expect(kit.meter({ label: 'Mail', valueText: '412 MB / unlimited' })).toContain('<div class="v2-bar" aria-hidden="true">')
+    // Used and limit are isolated so a right-to-left page keeps each part's own reading order.
+    expect(kit.meter({ label: 'Disk', valueText: 'Unavailable / 5120 MiB' })).toContain('<span class="v2-meter__pair"><bdi>Unavailable</bdi> / <bdi>5120 MiB</bdi></span>')
     const graded = kit.meter({ label: 'Certificate validity left', valueText: '13 days', unit: 'alice-shop.com', tone: 'warn', scale: { value: 13, max: 60, warn: 14, minText: '0 days', maxText: '60 days' }, note: 'Warning under 14 days' })
     expect(graded).toContain('<span class="v2-meter__value v2-num"><span class="v2-text--warn">13 days</span><span class="v2-meter__unit">alice-shop.com</span></span>')
     expect(graded).toContain('role="meter" aria-label="Certificate validity left" aria-valuenow="13" aria-valuemin="0" aria-valuemax="60" aria-valuetext="Certificate validity left 13 days alice-shop.com"')

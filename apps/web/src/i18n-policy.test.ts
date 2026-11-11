@@ -57,3 +57,15 @@ describe('catalog overrides', () => {
     expect(installLocaleOverrides({ ar: po('msgid "No such message here"\nmsgstr "x"') })).toEqual({ applied: [], rejected: ['ar'] })
   })
 })
+
+describe('Arabic release catalog wording', () => {
+  const ar = translator('ar')
+  it('isolates number ranges so they keep their order between Arabic words', () => {
+    expect(ar('One port or a range such as 8000-8100. Leave source empty for any source.')).toContain('\u20668000-8100\u2069')
+    expect(ar('{start}–{end} of {total} loaded rows · Page {page} of {totalPages}', { start: 1, end: 6, total: 6, page: 1, totalPages: 1 })).toMatch(/^\u20661–6\u2069 /)
+    expect(ar('1–{shown} of {total}', { shown: 3, total: 3 })).toMatch(/^\u20661–3\u2069 /)
+  })
+  it('names a source and an origin with different words', () => {
+    expect([ar('Source'), ar('Origin')]).toEqual(['المصدر', 'المنشأ'])
+  })
+})

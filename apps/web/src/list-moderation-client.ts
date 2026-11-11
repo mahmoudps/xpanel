@@ -2,6 +2,12 @@ import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
 import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
 import { frameAccess as canonicalFrameAccess, withFrameRequest } from './read-only-frame.ts'
+import { ASCII_BYTES_BINDING, formatIsolatedBytes as canonicalFormatClientBytes } from './display-format.ts'
+import { ISOLATE_LTR_BINDING, isolateLtr as canonicalIsolateLtr } from './display-format.ts'
+// Module-local alias: the binding source declares it again from ISOLATE_LTR_BINDING.
+const isolateLtr = canonicalIsolateLtr
+// Module-local alias: the binding source defines it again from ASCII_BYTES_BINDING.
+const formatClientBytes = canonicalFormatClientBytes
 const frameAccess = canonicalFrameAccess
 const clientTemplate = canonicalClientTemplate
 const clientTemplateSlot = canonicalClientTemplateSlot
@@ -103,7 +109,7 @@ function bindListModeration(askDialog: ((options: Record<string, unknown>) => Pr
         clientTemplateSlot(row, 'from').textContent = item.from || copy('Unknown sender')
         clientTemplateSlot(row, 'subject').textContent = item.subject || copy('No subject')
         clientTemplateSlot(row, 'reason').textContent = heldReasons[item.reason] ?? item.reason
-        clientTemplateSlot(row, 'at').textContent = moderationTime(item.at) + ' · ' + copy('{size} KB', { size: Math.ceil(item.size / 1024) })
+        clientTemplateSlot(row, 'at').textContent = isolateLtr(moderationTime(item.at)) + ' · ' + formatClientBytes(item.size)
         const open = clientTemplateSlot(row, 'open', 'button') as HTMLButtonElement
         open.textContent = copy('Read message'); open.disabled = false
         open.addEventListener('click', () => { void show(item.id) })
@@ -115,7 +121,7 @@ function bindListModeration(askDialog: ((options: Record<string, unknown>) => Pr
       if (!call) return
       try {
         const item = readHeldMessage(await call('message', { id }))
-        message.textContent = item.headers + '\n\n' + item.body + (item.truncated ? '\n\n' + copy('This view stops at 256 KB.') : ''); message.hidden = false
+        message.textContent = item.headers + '\n\n' + item.body + (item.truncated ? '\n\n' + copy('This view stops at 256 KiB.') : ''); message.hidden = false
       } catch (error) { say(failure(error, copy('The held message could not be read.')), 'failed') }
     }
     const read = async (next: Call): Promise<void> => {
@@ -242,4 +248,4 @@ function bindListModeration(askDialog: ((options: Record<string, unknown>) => Pr
   })
 }
 
-export const LIST_MODERATION_CLIENT_BINDING = withFrameRequest(`(function(askDialog){const clientTemplate=${clientTemplate.toString()};const clientTemplateSlot=${clientTemplateSlot.toString()};const cloneClientTemplate=${cloneClientTemplate.toString()};const moderationObject=${moderationObject.toString()};const moderationRow=${moderationRow.toString()};const readModerationQueue=${readModerationQueue.toString()};const readHeldMessage=${readHeldMessage.toString()};const readListModeration=${readListModeration.toString()};const moderationLines=${moderationLines.toString()};const moderationWhole=${moderationWhole.toString()};const moderationTime=${moderationTime.toString()};(${bindListModeration.toString()})(askDialog);})`)
+export const LIST_MODERATION_CLIENT_BINDING = withFrameRequest(`(function(askDialog){${ISOLATE_LTR_BINDING};const formatClientBytes=${ASCII_BYTES_BINDING};const clientTemplate=${clientTemplate.toString()};const clientTemplateSlot=${clientTemplateSlot.toString()};const cloneClientTemplate=${cloneClientTemplate.toString()};const moderationObject=${moderationObject.toString()};const moderationRow=${moderationRow.toString()};const readModerationQueue=${readModerationQueue.toString()};const readHeldMessage=${readHeldMessage.toString()};const readListModeration=${readListModeration.toString()};const moderationLines=${moderationLines.toString()};const moderationWhole=${moderationWhole.toString()};const moderationTime=${moderationTime.toString()};(${bindListModeration.toString()})(askDialog);})`)

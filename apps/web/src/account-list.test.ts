@@ -143,4 +143,66 @@ describe('readonly native create-plan preview', () => {
     expect(document.querySelectorAll('input,select')).toHaveLength(1)
     expect(select.disabled).toBe(false)
   })
+  it('reads a plan choice group like the list and mirrors named fields into the review, never the password', () => {
+    const second = { ...plan, id: 'second-plan', name: 'Second Plan' }
+    const html = renderAccountPlanPreview(accountPlanPreviewModel({ principal: root, plans: [plan, second], accounts: [] }))
+    const review = ['username', 'planId', 'ipAssignment', 'password'].map(name => `<bdi data-create-review="${name}">${name === 'username' ? 'Not entered' : name === 'password' ? 'Hidden' : ''}</bdi>`).join('')
+    document.body.innerHTML = `<div data-accounts-workspace><form data-create-account-form><input name="username"><input name="password" type="password" value="synthetic-secret"><input type="radio" name="planId" value="${plan.id}" data-review-label="First" checked><input type="radio" name="planId" value="second-plan" data-review-label="Second"><select name="ipAssignment"><option value="shared">Default shared</option></select>${html}</form>${review}</div>`
+    new Function(ACCOUNT_LIST_CLIENT_SCRIPT)()
+    const cell = (name: string) => document.querySelector(`[data-create-review="${name}"]`)?.textContent
+    expect(document.querySelector('[data-preview-plan-name]')?.textContent).toBe('First Plan')
+    expect([cell('username'), cell('planId'), cell('ipAssignment'), cell('password')]).toEqual(['Not entered', 'First', 'Default shared', 'Hidden'])
+    const choice = document.querySelector<HTMLInputElement>('input[value="second-plan"]')!
+    choice.checked = true; choice.dispatchEvent(new Event('change', { bubbles: true }))
+    expect(document.querySelector('[data-preview-plan-name]')?.textContent).toBe('Second Plan')
+    expect(cell('planId')).toBe('Second')
+    const username = document.querySelector<HTMLInputElement>('[name="username"]')!
+    username.value = 'alpha'; username.dispatchEvent(new Event('input', { bubbles: true }))
+    expect(cell('username')).toBe('alpha')
+    username.value = ''; username.dispatchEvent(new Event('input', { bubbles: true }))
+    expect(cell('username')).toBe('Not entered')
+    expect(document.body.textContent).not.toContain('synthetic-secret')
+  })
+})
+
+describe('optional status chips of the account list', () => {
+  it('sets the status filter from a chip and mirrors aria-pressed with the select', () => {
+    const accounts = [row(1), row(2, { status: 'suspended' }), row(3)]
+    const model = accountListModel({ principal: root, accounts, plans: [plan], resellers: [reseller] })
+    document.body.innerHTML = `<section data-accounts-workspace><div><button type="button" data-list-state-chip="" aria-pressed="true">All</button><button type="button" data-list-state-chip="suspended" aria-pressed="false">Suspended</button></div>${renderAccountListControls(model)}<table><tbody>${model.accounts.map(account => `<tr data-account-row="${account.username}" ${accountListRowAttributes(account)}><td>${account.username}</td></tr>`).join('')}</tbody></table></section>`
+    new Function(ACCOUNT_LIST_CLIENT_SCRIPT)()
+    const chip = (value: string) => document.querySelector<HTMLButtonElement>(`[data-list-state-chip="${value}"]`)!
+    expect(visible()).toHaveLength(3)
+    chip('suspended').click()
+    expect(visible().map(item => item.dataset.accountRow)).toEqual(['user2'])
+    expect(document.querySelector<HTMLSelectElement>('[data-list-state-filter]')!.value).toBe('suspended')
+    expect([chip('').getAttribute('aria-pressed'), chip('suspended').getAttribute('aria-pressed')]).toEqual(['false', 'true'])
+    filter('[data-list-state-filter]', '')
+    expect(visible()).toHaveLength(3)
+    expect([chip('').getAttribute('aria-pressed'), chip('suspended').getAttribute('aria-pressed')]).toEqual(['true', 'false'])
+  })
+})
+
+describe('generic live form review', () => {
+  it('mirrors inputs, radios, selects, switches and repeated fields of a marked scope, never a password', () => {
+    document.body.innerHTML = `<div data-form-review>
+      <form id="identity"><input name="hostname" value="host.example.test"><input name="nameservers" value="ns1.example.test"><input name="nameservers" value=""><input type="password" name="secret" value="synthetic-secret"></form>
+      <form id="engine"><input type="radio" name="engine" value="apache" data-review-label="Apache" checked><input type="radio" name="engine" value="openlitespeed" data-review-label="OpenLiteSpeed">
+        <select name="mpm"><option value="event">Event</option><option value="itk" selected>ITK</option></select><input type="checkbox" name="multiAccept" data-review-label="On" data-review-off="Off"><textarea name="note"></textarea></form>
+      <dl>${['hostname', 'nameservers', 'secret', 'engine', 'mpm', 'multiAccept', 'note', 'absent'].map(name => `<dd data-form-review-field="${name}">${name === 'secret' ? 'Hidden' : 'Not set'}</dd>`).join('')}</dl></div>
+      <form><input name="hostname" value="outside"></form>`
+    new Function(ACCOUNT_LIST_CLIENT_SCRIPT)()
+    const cell = (name: string) => document.querySelector(`[data-form-review-field="${name}"]`)!.textContent
+    const all = () => ['hostname', 'nameservers', 'secret', 'engine', 'mpm', 'multiAccept', 'note', 'absent'].map(cell)
+    expect(all()).toEqual(['host.example.test', 'ns1.example.test', 'Hidden', 'Apache', 'ITK', 'Off', 'Not set', 'Not set'])
+    const set = (selector: string, change: (control: HTMLInputElement) => void, event = 'input') => { const control = document.querySelector<HTMLInputElement>(selector)!; change(control); control.dispatchEvent(new Event(event, { bubbles: true })) }
+    set('[name="hostname"]', control => { control.value = '' })
+    set('#identity [name="nameservers"]:nth-of-type(3)', control => { control.value = 'ns2.example.test' })
+    set('[value="openlitespeed"]', control => { control.checked = true }, 'change')
+    set('[name="multiAccept"]', control => { control.checked = true }, 'change')
+    set('[name="note"]', control => { control.value = 'kept' })
+    set('[name="secret"]', control => { control.value = 'another-secret' })
+    expect(all()).toEqual(['Not set', 'ns1.example.test, ns2.example.test', 'Hidden', 'OpenLiteSpeed', 'ITK', 'On', 'kept', 'Not set'])
+    expect(document.querySelector('dl')!.textContent).not.toContain('secret')
+  })
 })

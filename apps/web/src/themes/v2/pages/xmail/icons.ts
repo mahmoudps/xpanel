@@ -10,6 +10,14 @@ const PATHS = {
   quote: 'M6 8h4v4H6zM6 12c0 2.5-.8 4-2.5 5M14 8h4v4h-4zM14 12c0 2.5-.8 4-2.5 5',
   link: 'M10 14a4 4 0 0 0 6 .5l3-3a4 4 0 0 0-5.7-5.7L12 7M14 10a4 4 0 0 0-6-.5l-3 3a4 4 0 0 0 5.7 5.7L12 17',
   clear: 'M5 5h11M10.5 5L8 19M4 20l16-16',
+  reply: 'M9 14L4 9l5-5M4 9h10a6 6 0 0 1 6 6v4',
+  replyAll: 'M7 14L2 9l5-5M12 14L7 9l5-5M7 9h9a6 6 0 0 1 6 6v4',
+  forward: 'M15 14l5-5-5-5M20 9H10a6 6 0 0 0-6 6v4',
+  junk: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM5.6 5.6l12.8 12.8',
+  inbox: 'M22 12h-6l-2 3h-4l-2-3H2M5.5 5h13L22 12v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-6z',
+  restore: 'M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5',
+  back: 'M19 12H5M12 19l-7-7 7-7',
+  trash: 'M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3',
 } as const
 
 export type MailIcon = keyof typeof PATHS

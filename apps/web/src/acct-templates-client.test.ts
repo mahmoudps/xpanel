@@ -48,6 +48,15 @@ describe('account templates client', () => {
     expect(send).toHaveBeenLastCalledWith('PUT', '/api/server/account-templates/' + T1, expect.objectContaining({ name: 'Renamed', planIds: [PLAN], expectedRevision: R1 }))
     expect($('[data-acct-templates-save-status]').dataset.state).toBe('ok')
   })
+  it('gives the editor its own heading and never leaves the saved table header-only', async () => {
+    boot(vi.fn(async () => view()))
+    await flush()
+    $<HTMLButtonElement>('[data-action="edit"]').click()
+    expect($('[data-acct-templates-editor-heading]').textContent).toMatch(/^Edit template: \S/)
+    boot(vi.fn(async () => { throw { status: 503 } }))
+    await flush()
+    expect($('[data-acct-templates-rows]').textContent).toBe('Templates have not been read.')
+  })
   it('reports a refused zone line without claiming success', async () => {
     const send = vi.fn(async (method: string) => { if (method === 'GET') return view({ templates: [], state: 'default' }); throw Object.assign(new Error('bad'), { status: 400, details: { line: 2 } }) })
     boot(send)

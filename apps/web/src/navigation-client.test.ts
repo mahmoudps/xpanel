@@ -989,7 +989,7 @@ describe('authorized command palette rendering', () => {
   const root: VisibilityContext = { principal: { kind: 'root', id: 'fixture-root', username: 'fixture-admin' } }
 
   it.each(['en', 'ar'] as const)('includes existing search aliases only for admitted pages in %s', locale => {
-    const html = renderWebApp({ surface: 'xpanel', visibility: owner, catalog: qualifiedCatalog, locale })
+    const html = renderWebApp({ uiTheme: 'classic', surface: 'xpanel', visibility: owner, catalog: qualifiedCatalog, locale })
     const parsed = new DOMParser().parseFromString(html, 'text/html')
     const domains = parsed.querySelector('[data-cmdk-item="/domains"]')!
     expect(domains.getAttribute('data-cmdk-search-text')).toContain('Addon Domains')
@@ -1008,7 +1008,7 @@ describe('authorized command palette rendering', () => {
     try {
       admitted.keywords = [...admittedKeywords, hostile]
       forbidden.keywords = [...forbiddenKeywords, 'admin-only-alias-marker']
-      const html = renderWebApp({ surface: 'xpanel', visibility: owner, catalog: qualifiedCatalog })
+      const html = renderWebApp({ uiTheme: 'classic', surface: 'xpanel', visibility: owner, catalog: qualifiedCatalog })
       const parsed = new DOMParser().parseFromString(html, 'text/html')
       expect(parsed.querySelector('[data-cmdk-item="/domains"]')?.getAttribute('data-cmdk-search-text')).toContain(hostile)
       expect(parsed.querySelector('[data-alias-injected]')).toBeNull()
@@ -1024,7 +1024,7 @@ describe('authorized command palette rendering', () => {
   it.each(['xpanel', 'xwhm', 'xmail'] as const)('includes every authorized %s page once, beyond the former section and global caps', surface => {
     const visibility = surface === 'xwhm' ? root : owner
     const expected = visibleNavigation(visibility, qualifiedCatalog).find(item => item.surface === surface)!.sections.flatMap(section => section.pages)
-    const html = renderWebApp({ surface, visibility, catalog: qualifiedCatalog, locale: 'ar', theme: 'dark', density: 'compact', accountId: 'fixture-account' })
+    const html = renderWebApp({ uiTheme: 'classic', surface, visibility, catalog: qualifiedCatalog, locale: 'ar', theme: 'dark', density: 'compact', accountId: 'fixture-account' })
     const parsed = new DOMParser().parseFromString(html, 'text/html')
     const options = [...parsed.querySelectorAll<HTMLAnchorElement>('[data-cmdk-item]')]
     expect(options).toHaveLength(expected.length)
@@ -1042,7 +1042,7 @@ describe('authorized command palette rendering', () => {
   })
 
   it('never renders a palette or navigation options for an unqualified catalog', () => {
-    const html = renderWebApp({ surface: 'xpanel', visibility: owner })
+    const html = renderWebApp({ uiTheme: 'classic', surface: 'xpanel', visibility: owner })
     const parsed = new DOMParser().parseFromString(html, 'text/html')
     expect(parsed.querySelector('[data-xp-cmdk]')).toBeNull()
     expect(parsed.querySelectorAll('[data-cmdk-item]')).toHaveLength(0)
@@ -1051,7 +1051,7 @@ describe('authorized command palette rendering', () => {
 
   it('limits the palette to the same reseller permissions as the sidebar', () => {
     const visibility: VisibilityContext = { principal: { kind: 'reseller', id: 'fixture-reseller', username: 'fixture' }, reseller: { acl: ['list-accounts'] } }
-    const html = renderWebApp({ surface: 'xwhm', visibility, catalog: qualifiedCatalog })
+    const html = renderWebApp({ uiTheme: 'classic', surface: 'xwhm', visibility, catalog: qualifiedCatalog })
     const parsed = new DOMParser().parseFromString(html, 'text/html')
     const sidebarRoutes = [...parsed.querySelectorAll('[data-xp-sidebar] [data-nav-route]')].map(link => link.getAttribute('data-nav-route'))
     const paletteRoutes = [...parsed.querySelectorAll('[data-cmdk-item]')].map(link => link.getAttribute('data-cmdk-item'))

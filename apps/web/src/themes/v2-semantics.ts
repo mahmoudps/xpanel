@@ -1,6 +1,6 @@
 import { checkConformance, routeContracts, type HookRequirement } from './contract.ts'
 import { isHtmlElement, matchesHook, parseMarkup, type HookSelector, type MarkupNode } from './markup.ts'
-import { isLocale, translator, type Locale } from '../i18n.ts'
+import { isLocale, translator } from '../i18n.ts'
 import { escapeHtml } from '../html.ts'
 import { msgctxt } from '@xpanel/core'
 import type { ControllerDeclaration } from './controller-conformance.ts'
@@ -547,13 +547,7 @@ const backupManagerRequirement: ControllerDeclaration = {
     { templateSelector:'template[data-xp-template="backup-destination-empty"]',required:true,requiredSelectors:['tr > td[data-xp-slot="message"][colspan="5"]'] },
   ],
 }
-const backupLocalRequirement: ControllerDeclaration = {
-  id:'v2-semantic-local-archive-unavailable',rootSelector:'section[data-local-archives-unavailable]',rootRequired:true,applicableRoutes:backupRoutes,parentRootSelector:backupParent,
-  requiredSelectors:['select[data-backup-account]','tbody[data-backup-files]','[data-backup-status]','[data-local-archive-scope-warning]','button[data-backup-create]'],
-  elements:[{selector:'[data-backup-account]',tags:['select'],attributes:{disabled:true}},{selector:'[data-backup-create]',tags:['button'],attributes:{type:'button',disabled:true}},{selector:'[data-backup-status]',tags:['p'],attributes:{role:'status'}}],
-}
 const backupCounterparts: readonly ObservationCounterpart[] = backupRoutes.flatMap(route => [
-  ...(['[data-account-backups]','[data-backup-local-read]'] as const).map(legacyHook=>({route,legacyHook,requirement:backupLocalRequirement,evidence:'Local archive client binds only its legacy root; real V2 retains explicit unavailable layout with disabled native controls and guarded-preview handoff.'})),
   ...(['[data-backup-destination-rows]','[data-backup-sftp-status]'] as const).map(legacyHook=>({route,legacyHook,requirement:backupManagerRequirement,evidence:'Positively delegated editor uses real independent destination manager rows/status and typed Test/Activate actions, retaining legacy schedule/run/restore ownership.'})),
 ])
 
@@ -613,6 +607,24 @@ function v2BackupDeclaration(original: ControllerDeclaration): ControllerDeclara
 const phpSwitchRequirement: ControllerDeclaration = { id: 'v2-semantic-php-extension-switch', rootSelector: 'document', rootRequired: true, applicableRoutes: ['/whm/software/php'],
   templateScopes: [{ templateSelector: 'template[data-xp-template="whm-php-extension-switch"]', required: true, requiredSelectors: ['input[type="checkbox"][data-xp-slot="input"]', '[data-xp-slot="state"]'] }] }
 
+/** Controller templates V2 provides in another finite form the same controller accepts. Every other template the
+ *  classic document records stays required, so a V2 page that omits a template its controller clones fails. */
+export const V2_TEMPLATE_COUNTERPARTS: readonly { readonly routes: readonly string[]; readonly templates?: readonly string[]; readonly slots?: Readonly<Record<string, readonly string[]>>; readonly evidence: string; readonly requirement?: ControllerDeclaration }[] = [
+  { routes: ['/domains/redirects'], templates: ['web-directive-action', 'web-directive-empty', 'web-directive-error', 'web-directive-row', 'web-directive-summary', 'web-directive-technical-cell', 'web-directive-text-cell'],
+    evidence: 'account-web-directives-client.ts:170-174 takes the redirect-* family for the redirects feature and then needs only the notice and issue templates',
+    requirement: { id: 'v2-semantic-redirect-templates', rootSelector: 'document', rootRequired: true, applicableRoutes: ['/domains/redirects'], templateScopes: [
+      { templateSelector: 'template[data-xp-template="redirect-row"]', required: true, requiredSelectors: ['tr', '[data-xp-slot="status"]', '[data-xp-slot="path"]', '[data-xp-slot="target"]', '[data-xp-slot="actions"]'] },
+      { templateSelector: 'template[data-xp-template="redirect-action"]', required: true, requiredSelectors: ['button[data-xp-slot="label"]'] },
+      { templateSelector: 'template[data-xp-template="redirect-empty"]', required: true, requiredSelectors: ['tr', '[data-xp-slot="message"]'] },
+      { templateSelector: 'template[data-xp-template="redirect-error"]', required: true, requiredSelectors: ['tr', '[data-xp-slot="message"]'] },
+    ] } },
+  { routes: ['/whm/transfers', '/whm/transfers/server'], slots: { 'transfer-inventory-row': ['selected'] },
+    evidence: 'whm-transfer-client.ts:63,77 reads the comparison layout: a uid slot and the select action replace the selected slot',
+    requirement: { id: 'v2-semantic-transfer-inventory-row', rootSelector: 'document', rootRequired: true, applicableRoutes: ['/whm/transfers', '/whm/transfers/server'], templateScopes: [
+      { templateSelector: 'template[data-xp-template="transfer-inventory-row"]', required: true, requiredSelectors: ['tr', '[data-xp-slot="uid"]', 'input[type="checkbox"][data-xp-action="select"]'] },
+    ] } },
+]
+
 /** A V2 profile is selected deliberately by conformance tooling. The default Classic API is untouched.
  * Only the explicitly sourced observations below are substituted; all original independent controllers/templates, real announcements, backup and transfer requirements stay active. */
 export function v2RouteContracts(): ReturnType<typeof routeContracts> {
@@ -626,7 +638,15 @@ export function v2RouteContracts(): ReturnType<typeof routeContracts> {
       // A retired classic placeholder leaves its V2 requirement in force.
       if (counterpart.legacyHook !== '[data-wiring="soon"]' && !base.hooks.includes(counterpart.legacyHook)) throw new Error('v2_observation_mapping_stale:' + base.route + ':' + counterpart.legacyHook)
     }
-    return { ...base, hooks, authoritativeControllers: [
+    const templateCounterparts = V2_TEMPLATE_COUNTERPARTS.filter(item => item.routes.includes(base.route))
+    const templates = (base.templates ?? []).filter(template => !templateCounterparts.some(item => item.templates?.includes(template.name)))
+      .map(template => ({ ...template, slots: template.slots.filter(slot => !templateCounterparts.some(item => item.slots?.[template.name]?.includes(slot))) }))
+    // A counterpart whose classic template or slot is gone would silently excuse nothing: it must be removed.
+    for (const item of templateCounterparts) {
+      for (const name of item.templates ?? []) if (!base.templates?.some(template => template.name === name)) throw new Error('v2_template_mapping_stale:' + base.route + ':' + name)
+      for (const [name, slots] of Object.entries(item.slots ?? {})) for (const slot of slots) if (!base.templates?.find(template => template.name === name)?.slots.includes(slot)) throw new Error('v2_template_mapping_stale:' + base.route + ':' + name + ':' + slot)
+    }
+    return { ...base, hooks, ...(base.templates ? { templates } : {}), authoritativeControllers: [
       ...(backupRoutes.includes(base.route) ? (base.authoritativeControllers ?? []).map(v2BackupDeclaration) : (base.authoritativeControllers ?? [])), ...V2_SHARED_CHROME_REQUIREMENTS,
       { id: 'v2-semantic-document-surface', rootSelector: 'html', rootRequired: true, rootAttributes: { 'data-surface': base.surface } },
       ...counterparts.map(item => item.requirement),
@@ -634,6 +654,7 @@ export function v2RouteContracts(): ReturnType<typeof routeContracts> {
       ...(base.route === '/metrics/web-stats' ? [V2_WEB_STATS_REQUIREMENT] : []),
       ...(backupRoutes.includes(base.route) ? [{ id:'v2-semantic-backup-manager-mode',rootSelector:backupParent,rootRequired:true,applicableRoutes:backupRoutes,rootAttributes:{'data-backup-manage':{oneOf:['true','false']}} }] : []),
       ...(base.route === '/whm/software/php' ? [phpSwitchRequirement] : []),
+      ...templateCounterparts.flatMap(item => item.requirement ? [item.requirement] : []),
     ] }
   })
 }
@@ -688,14 +709,8 @@ const asciiCount = (value: string | undefined): number | undefined => {
   const number = Number(value)
   return Number.isSafeInteger(number) ? number : undefined
 }
-interface V2ThemedConformanceCopy {
-  readonly locale: Locale
-  readonly localArchiveWorkflowNotice: string
-}
-
-/** Preserve the core checker, then validate actual V2 visibility/text and optional known count semantics.
- * The owning theme supplies resolved copy; missing, wrong-locale or empty providers fail closed where it is required. */
-export function checkV2Conformance(html: string, requirement: HookRequirement, themeCopy?: (locale: Locale) => V2ThemedConformanceCopy): ReturnType<typeof checkConformance> {
+/** Preserve the core checker, then validate actual V2 visibility/text and optional known count semantics. */
+export function checkV2Conformance(html: string, requirement: HookRequirement): ReturnType<typeof checkConformance> {
   const issues = checkConformance(html, requirement), nodes = parseMarkup(html)
   const add = (name: string, controller: string): void => { if (!issues.some(issue => issue.kind === 'element' && issue.name === name && issue.controller === controller)) issues.push({ kind: 'element', name, controller }) }
   const blocked = (index: number): boolean => {
@@ -829,18 +844,17 @@ export function checkV2Conformance(html: string, requirement: HookRequirement, t
           }
         }
       }
-      const localGroups=live('[data-local-archives-unavailable]',parent),local=localGroups[0]
-      if(localGroups.length!==1 || local===undefined || !isHtmlElement(nodes[local] ?? owner,'section') || live('[data-account-backups]').length) fail('[data-local-archives-unavailable]')
+      // The local archive list is mounted once, inside the backup owner, with its home-files-only scope warning.
+      const archives=live('[data-account-backups]'),local=archives[0]
+      if(archives.length!==1 || local===undefined || !isHtmlElement(nodes[local] ?? owner,'section') || !within(local,parent)) fail('[data-account-backups]')
       else {
         const locale=nodes.find(node=>isHtmlElement(node,'html'))?.attrs.get('lang')
         if(!isLocale(locale)) fail('[data-local-archive-scope-warning]')
         else {
-          const t=translator(locale), themed=themeCopy?.(locale)
-          const workflowNotice=typeof themed?.localArchiveWorkflowNotice==='string'?themed.localArchiveWorkflowNotice:''
-          if(!themed || themed.locale!==locale || !workflowNotice.trim()) fail('[data-local-archives-unavailable]:theme-provider')
-          const copies=[t('This local archive workflow copies home files and excludes the standard mail data and mail settings directories. It does not create database dumps or capture DNS zones. Review a component backup for those parts.'),t('The archive is stored in the local backup directory, limited to 2 GiB, and restored only into that account home.'),workflowNotice]
+          const t=translator(locale)
+          const copies=[t('This local archive workflow copies home files and excludes the standard mail data and mail settings directories. It does not create database dumps or capture DNS zones. Review a component backup for those parts.'),t('The archive is stored in the local backup directory, limited to 2 GiB, and restored only into that account home.')]
           const paragraphs=nodes.flatMap((node,index)=>node.template<0 && isHtmlElement(node,'p') && within(index,local)?[index]:[])
-          for(const copy of copies) if(!paragraphs.some(index=>ownedPlainText(html,nodes,index)===escapeHtml(copy))) fail('[data-local-archives-unavailable]:copy')
+          for(const copy of copies) if(!paragraphs.some(index=>ownedPlainText(html,nodes,index)===escapeHtml(copy))) fail('[data-account-backups]:copy')
           const warnings=live('[data-local-archive-scope-warning]',local),warning=warnings[0]
           if(warnings.length!==1 || warning===undefined || ownedPlainText(html,nodes,warning)!==escapeHtml(copies[0]??'')) fail('[data-local-archive-scope-warning]')
         }

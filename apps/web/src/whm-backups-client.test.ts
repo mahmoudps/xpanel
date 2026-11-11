@@ -88,6 +88,14 @@ describe('WHM backups browser controller', () => {
     expect(input('destination-enabled').disabled).toBe(true)
     expect(document.querySelector('#backup-destination-activation-help a')?.getAttribute('href')).toBe('/whm/backups/destinations')
   })
+  it('ends a static "not read" line of the page with the first successful read', async () => {
+    document.querySelector('[data-approved-whm-backups]')!.insertAdjacentHTML('beforeend', '<p data-backup-unread-note>Saved schedule and retention have not been read.</p>')
+    const note = document.querySelector<HTMLElement>('[data-backup-unread-note]')!
+    expect(note.hidden).toBe(false)
+    const f = model(); f.boot(); await tick()
+    expect(status().dataset.state).toBe('read')
+    expect(note.hidden).toBe(true)
+  })
   it('saves the captured schedule revision and verifies persisted readback', async () => {
     const f = model(); f.boot(); await tick(); edit('policy-cron', '15 3 * * *'); edit('daily-copies', '14')
     action('save-schedule').click(); await tick(); await tick()

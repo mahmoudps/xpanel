@@ -58,7 +58,7 @@ describe('mail compose independent capability authority', () => {
 
 describe('compose filter controls', () => {
   // link text to href, so a renamed or redirected control fails by name
-  const links = (html: string): Record<string, string> => Object.fromEntries([...html.matchAll(/<a\b[^>]*\bhref="([^"]*)"[^>]*>(?:<svg\b[\s\S]*?<\/svg>)?(Add filter|Manage filters)<\/a>/g)].map(match => [match[2], match[1]]))
+  const links = (html: string): Record<string, string> => Object.fromEntries([...html.matchAll(/<a\b[^>]*\bhref="([^"]*)"[^>]*>(?:<svg\b(?:(?!<\/a>)[\s\S])*?<\/svg>)?(Add filter|Manage filters)<\/a>/g)].map(match => [match[2], match[1]]))
   const themes = (props: MailSurfaceProps) => [renderMailSurface(props), renderV2MailCompose(v2Messages.translator('en'), compose(props))]
 
   it('leads Add filter to a new rule and Manage filters to the mailbox filter page in both themes', () => {

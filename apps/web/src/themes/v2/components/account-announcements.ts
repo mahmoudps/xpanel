@@ -9,7 +9,7 @@ export function renderV2AccountAnnouncementsBanner(t: Translate, canRead: boolea
 
 export const V2_HOME_ANNOUNCEMENTS_CSS = V2_ACCOUNT_ANNOUNCEMENT_CSS.replaceAll('[data-whm-announcements-workspace]', '.v2-panel-home [data-account-announcements]') + `
 .v2-panel-home [data-account-announcements]{display:flex;flex-direction:column;gap:var(--space-2);min-inline-size:0}
-.v2-panel-home [data-account-announcements][hidden],.v2-panel-home [data-account-announcements] [hidden]{display:none}
+.v2-panel-home [data-account-announcements][hidden],.v2-panel-home [data-account-announcements] [hidden],.v2-panel-home .v2-account-announcements__list:empty{display:none}
 .v2-panel-home .v2-account-announcements__list{display:flex;flex-direction:column;gap:var(--space-2);min-inline-size:0}
 .v2-panel-home [data-account-announcements-status]{margin:0;overflow-wrap:anywhere}
 .v2-panel-home [data-account-announcements][data-state=failed]>[data-account-announcements-status],.v2-panel-home [data-account-announcements][data-state=unavailable]>[data-account-announcements-status]{padding:var(--space-2);border:1px solid var(--line);border-radius:var(--radius-card);background:var(--subtle);color:var(--text)}

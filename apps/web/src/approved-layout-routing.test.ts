@@ -45,7 +45,7 @@ const expectReadOnlyMailWorkspace = (html: string): void => {
 
 describe('approved layout admission boundary', () => {
   it('retains a known owner layout and forwards only stored records, never audit or provider data', () => {
-    const html = renderWebApp({
+    const html = renderWebApp({ uiTheme: 'classic',
       surface: 'xpanel', activeRoute: '/resources', locale: 'en', catalog: [],
       visibility: { principal: { kind: 'user', id: 'u1', username: 'owner7', accountId: 'a1' } },
       panel: { recentAudit: [{ action: 'private-audit-marker', target: 'private-target-marker' }] },
@@ -60,7 +60,7 @@ describe('approved layout admission boundary', () => {
   })
 
   it('retains a known root layout as unavailable, showing saved records without admitting its operations', () => {
-    const html = renderWebApp({
+    const html = renderWebApp({ uiTheme: 'classic',
       surface: 'xwhm', activeRoute: '/whm/plans/features', locale: 'ar', catalog: [],
       visibility: { principal: { kind: 'root', id: 'root1', username: 'administrator7' } },
       whm: { featureLists: [{ id: 'private-feature-id', name: 'private-feature-name' }] },
@@ -72,12 +72,12 @@ describe('approved layout admission boundary', () => {
   })
 
   it.each([undefined, { principal: { kind: 'user' as const, id: 'u1', username: 'owner7', accountId: 'a1' } }])('does not call a root layout renderer for absent or wrong-role identity', visibility => {
-    renderWebApp({ surface: 'xwhm', activeRoute: '/whm/plans/features', locale: 'en', catalog: [], visibility })
+    renderWebApp({ uiTheme: 'classic', surface: 'xwhm', activeRoute: '/whm/plans/features', locale: 'en', catalog: [], visibility })
     expect(renderers.whm).not.toHaveBeenCalled()
   })
 
   it('does not admit unknown routes merely to show an approved layout', () => {
-    renderWebApp({ surface: 'xpanel', activeRoute: '/not-a-registered-document', locale: 'en', catalog: [],
+    renderWebApp({ uiTheme: 'classic', surface: 'xpanel', activeRoute: '/not-a-registered-document', locale: 'en', catalog: [],
       visibility: { principal: { kind: 'user', id: 'u1', username: 'owner7', accountId: 'a1' } } })
     expect(renderers.panel).not.toHaveBeenCalled()
     expect(renderers.whm).not.toHaveBeenCalled()
@@ -87,7 +87,7 @@ describe('approved layout admission boundary', () => {
 
 describe('unqualified approved mail layout', () => {
   it.each(['/mail/inbox', '/mail/compose'])('retains %s without exposing mailbox data or live actions', route => {
-    const html = renderWebApp({
+    const html = renderWebApp({ uiTheme: 'classic',
       surface: 'xmail', activeRoute: route, locale: 'ar', theme: 'dark', catalog: [],
       visibility: { principal: { kind: 'user', id: 'u1', username: 'owner7', accountId: 'a1' } },
       mail: { mailbox: 'private-mailbox-marker@example.test', messages: [],
@@ -121,7 +121,7 @@ describe('unqualified approved mail layout', () => {
   })
 
   it('does not expose a mail workspace without an admitted identity', () => {
-    const html = renderWebApp({ surface: 'xmail', activeRoute: '/mail/compose', locale: 'en', catalog: [] })
+    const html = renderWebApp({ uiTheme: 'classic', surface: 'xmail', activeRoute: '/mail/compose', locale: 'en', catalog: [] })
     expect(html).not.toContain('data-mail-read-only="true"')
   })
 })

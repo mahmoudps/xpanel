@@ -18,7 +18,8 @@ vi.mock('./index.ts', async importOriginal => {
       if (!provider) return web.serveWebUi(request)
       const data = await provider(new URL(request.url), request)
       capture.hydration.push(data as unknown as Record<string, unknown>)
-      return web.serveWebUi(request, () => data)
+      // These assertions read the classic markup; the hydration captured above is the theme-neutral part.
+      return web.serveWebUi(request, () => ({ ...data, uiTheme: 'classic' }))
     },
   }
 })
@@ -171,7 +172,7 @@ describe('SSR wiring for account resources and traffic analytics', () => {
     expect(lastPanel().usage).toEqual(usageReply)
     const html = await response.text()
     expect(html).toContain('data-resource-reading="read"')
-    expect(html).toContain('1430.51 MiB')
+    expect(html).toContain('1.40\u00a0GiB')
     expect(html).toContain('Stored plan limit')
     expect(html).toContain('Current reading')
     expect(html).toContain('Not reported by the agent')

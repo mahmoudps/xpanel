@@ -4,7 +4,7 @@ import { formField, switchRow } from '../../../components/form-field.ts'
 import { escapeHtml, hookAttrs } from '../../../html.ts'
 
 const technical = (slot: string): string => `<bdi dir="ltr" class="v2-mono" data-xp-slot="${slot}"></bdi>`
-const stack = (body: string): string => `<td><div style="display:flex;flex-direction:column;align-items:flex-start;gap:8px;min-inline-size:0;overflow-wrap:anywhere">${body}</div></td>`
+const stack = (body: string): string => `<td><div class="v2-leech-stack">${body}</div></td>`
 /** Theme-owned records the leech protection controller fills. */
 export const v2LeechTemplates = (): string => `<template data-xp-template="leech-row"><tr>${stack(technical('path') + '<span data-xp-slot="limit"></span>' + technical('redirect'))}${stack('<span data-xp-slot="state"></span><span data-xp-slot="flagged"></span><span data-xp-slot="disabled"></span>')}<td><div class="v2-file-actions"><button type="button" class="v2-btn" data-xp-action="edit" disabled><span data-xp-slot="edit-label"></span></button><button type="button" class="v2-btn" data-xp-action="remove" disabled><span data-xp-slot="remove-label"></span></button></div></td></tr></template><template data-xp-template="leech-empty"><tr><td colspan="3" data-xp-slot="message"></td></tr></template>`
 

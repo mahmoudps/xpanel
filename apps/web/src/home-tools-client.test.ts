@@ -134,6 +134,23 @@ describe('single responsive home tool filter', () => {
     expect(summary.hasAttribute('aria-expanded')).toBe(false)
   })
 
+  it('preserves phone summary expansion when Blink runs click microtasks before default activation and filtering clears before async toggle drains', async () => {
+    const { root, groups, setQuery } = mount(360)
+    await settleNativeToggles()
+    expect(groups[0]!.open).toBe(false)
+    const summary = groups[0]!.querySelector('summary')!
+    summary.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+    await Promise.resolve()
+    groups[0]!.open = true
+    setQuery('no-matching-tool-query-xyz')
+    expect(groups[0]!.open).toBe(false)
+    expect(root.querySelector<HTMLElement>('[data-tool-empty]')!.hidden).toBe(false)
+    root.querySelector<HTMLButtonElement>('[data-home-filter-clear]')!.click()
+    await settleNativeToggles()
+    expect(groups[0]!.open).toBe(true)
+    expect(groups.slice(1).map(group => group.open)).toEqual([false, false])
+  })
+
   it('remembers an explicit native summary choice made during filtering', async () => {
     const { groups, setQuery } = mount(1440)
     setQuery('mail')

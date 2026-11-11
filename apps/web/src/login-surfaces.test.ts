@@ -15,7 +15,7 @@ describe('listener-specific sign-in presentation', () => {
         assert.match(html, new RegExp('data-login-audience="' + audience + '"'))
         const heading = html.match(/<h1[^>]*>(.*?)<\/h1>/s)?.[1]
         assert.equal(heading, headings[audience][locale])
-        const document = renderWebApp({ surface: 'login', locale, login: { audience } })
+        const document = renderWebApp({ uiTheme: 'classic', surface: 'login', locale, login: { audience } })
         assert.ok(document.includes('<title>' + brands[audience] + ' — ' + headings[audience][locale] + '</title>'))
         assert.ok(document.includes('href="/assets/favicon-' + audience + '.svg"'))
         assert.equal((document.match(/<main\b/g) ?? []).length, 1)
@@ -60,19 +60,19 @@ describe('listener-specific sign-in presentation', () => {
   }
 
   it('preserves an explicit escaped document title without changing the listener icon', () => {
-    const html = renderWebApp({ surface: 'login', title: 'Operations <sign in>', login: { audience: 'xwhm' } })
+    const html = renderWebApp({ uiTheme: 'classic', surface: 'login', title: 'Operations <sign in>', login: { audience: 'xwhm' } })
     assert.ok(html.includes('<title>Operations &lt;sign in&gt;</title>'))
     assert.ok(html.includes('href="/assets/favicon-xwhm.svg"'))
   })
 
   it('keeps malformed or target-only identities on the generic document title and icon', () => {
     for (const login of [{ targetSurface: 'xmail' }, { audience: '__proto__' }, { audience: '\"><svg onload=unsafe()>' }] as LoginSurfaceProps[]) {
-      const html = renderWebApp({ surface: 'login', login })
+      const html = renderWebApp({ uiTheme: 'classic', surface: 'login', login })
       assert.ok(html.includes('<title>xPanel Sign In — xPanel Control Plane</title>'))
       assert.ok(html.includes('href="/assets/favicon.svg"'))
       assert.doesNotMatch(html, /<div\b[^>]*\bdata-login-audience=|onload=unsafe/)
     }
-    const workspace = renderWebApp({ surface: 'xwhm', login: { audience: 'xmail' } })
+    const workspace = renderWebApp({ uiTheme: 'classic', surface: 'xwhm', login: { audience: 'xmail' } })
     assert.ok(workspace.includes('href="/assets/favicon.svg"'))
   })
 

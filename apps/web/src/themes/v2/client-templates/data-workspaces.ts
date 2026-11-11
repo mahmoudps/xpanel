@@ -1,33 +1,35 @@
 /** Markup owned by this theme for authenticated database, DNS and TLS refreshes. */
-const row = (name: string, cells: string): string => `<template data-xp-template="${name}"><tr>${cells}</tr></template>`
-const value = (slot: string, technical = false): string => `<td>${technical ? `<bdi dir="ltr" class="v2-mono" data-xp-slot="${slot}"></bdi>` : `<span data-xp-slot="${slot}"></span>`}</td>`
+// data-list-row admits the row to the generic list filter of a page that marks one.
+const row = (name: string, cells: string, listed = false): string => `<template data-xp-template="${name}"><tr${listed ? ' data-list-row' : ''}>${cells}</tr></template>`
+// A label names the value on a phone, where the column header is not shown.
+const value = (slot: string, technical = false, label = ''): string => `<td${label ? ` data-label="${label}"` : ''}>${technical ? `<bdi dir="ltr" class="v2-mono" data-xp-slot="${slot}"></bdi>` : `<span data-xp-slot="${slot}"></span>`}</td>`
 const empty = (name: string, columns: number): string => row(name, `<td colspan="${columns}" data-xp-slot="message"></td>`)
 const action = (slot: string, label: string): string => `<button type="button" class="v2-btn" data-xp-slot="${slot}" disabled>${label}</button>`
 const fact = (name: string): string => `<template data-xp-template="${name}"><div class="v2-db-fact"><dt data-xp-slot="label"></dt><dd><bdi dir="ltr" data-xp-slot="value"></bdi></dd></div></template>`
 
 export function databaseWorkspaceTemplates(t: (message: string) => string): string {
- return row('database-row', value('name',true)+value('size')+value('tables')+value('users',true)+value('collation')+value('last-write')+`<td><div class="v2-db-actions">${action('rename',t(msgctxt('database-workspace-client','Rename')))}${action('export',t('Export'))}${action('import',t('Import'))}${action('trash',t('Move to trash'))}</div></td>`)
-  + row('database-user-row',value('name',true)+value('grants',true)+value('last-connection')+`<td><div class="v2-db-actions">${action('privileges',t('Privileges'))}${action('password',t('Change password'))}${action('delete',t('Delete'))}</div></td>`)
-  + row('database-trash-row',value('name',true)+'<td><bdi dir="ltr" class="v2-mono"><time data-xp-slot="trashed"></time></bdi></td>'+value('retention')+`<td><div class="v2-db-actions">${action('restore',t('Restore'))}${action('drop',t(msgctxt('database-workspace-client','Drop permanently')))}</div></td>`)
+ return row('database-row', value('name',true)+value('size',false,t('Size'))+value('tables',false,t('Tables'))+value('users',true,t('Users with access'))+value('collation',false,t('Collation'))+value('last-write',false,t('Last write'))+`<td><div class="v2-db-actions">${action('rename',t(msgctxt('database-workspace-client','Rename')))}${action('export',t('Export'))}${action('import',t('Import'))}${action('trash',t('Move to trash'))}</div></td>`)
+  + row('database-user-row',value('name',true)+value('grants',true,t('Databases and privileges'))+value('last-connection',false,t('Last connection'))+`<td><div class="v2-db-actions">${action('privileges',t('Privileges'))}${action('password',t('Change password'))}${action('delete',t('Delete'))}</div></td>`)
+  + row('database-trash-row',value('name',true)+`<td data-label="${t('Trashed at')}"><bdi dir="ltr" class="v2-mono"><time data-xp-slot="trashed"></time></bdi></td>`+value('retention',false,t('Retention'))+`<td><div class="v2-db-actions">${action('restore',t('Restore'))}${action('drop',t(msgctxt('database-workspace-client','Drop permanently')))}</div></td>`)
   + empty('database-empty',7)+empty('database-user-empty',4)+empty('database-trash-empty',4)+fact('database-fact')+'<template data-xp-template="database-token"><bdi dir="ltr" class="v2-mono" data-xp-slot="value"></bdi></template>'
 }
-export function databaseInsightsTemplates(): string {
- return row('insights-database-row',value('name',true)+value('server')+value('tables',true)+value('data',true)+value('indexes',true)+value('free',true)+value('collation',true))
-  +row('insights-table-row',value('name',true)+value('engine',true)+value('rows',true)+value('data',true)+value('indexes',true)+value('free',true))
-  +row('insights-user-row',value('name',true)+value('server')+value('hosts',true))
+export function databaseInsightsTemplates(t: (message: string) => string = () => ''): string {
+ return row('insights-database-row',value('name',true)+value('server',false,t('On server'))+value('tables',true,t('Tables'))+value('data',true,t('Data'))+value('indexes',true,t('Indexes'))+value('free',true,t('Free space'))+value('collation',true,t('Collation')))
+  +row('insights-table-row',value('name',true)+value('engine',true,t('Engine'))+value('rows',true,t('Rows (estimate)'))+value('data',true,t('Data'))+value('indexes',true,t('Indexes'))+value('free',true,t('Free space')))
+  +row('insights-user-row',value('name',true)+value('server',false,t('On server'))+value('hosts',true,t('Host entries')))
   +empty('insights-database-empty',7)+empty('insights-table-empty',6)+empty('insights-user-empty',3)+'<template data-xp-template="insights-state"><span class="v2-pill v2-pill--neutral" data-state-chip><span class="v2-pill__dot" aria-hidden="true"></span><span data-xp-slot="label"></span></span></template>'
 }
 export function databaseRemoteTemplates(t: (message: string) => string): string {
- return row('database-remote-row',value('host',true)+value('comment')+value('created',true)+value('firewall')+value('grants')+`<td>${action('manage',t('Manage'))}</td>`)+empty('database-remote-empty',6)
+ return row('database-remote-row',value('host',true)+value('comment',false,t('Comment'))+value('created',true,t('Added (UTC)'))+value('firewall',false,t('Firewall'))+value('grants',false,t('Grants'))+`<td>${action('manage',t('Manage'))}</td>`)+empty('database-remote-empty',6)
 }
 export function dnsEditorTemplates(t: (message: string) => string, whm = false): string {
  const labels: Record<string,string>={name:t('Record name'),type:t('Record type'),ttl:'TTL',content:t('Record content'),priority:t('Priority')}
  const cells=['name','type','ttl','content','priority'].map(name=>{
   const common=`class="${name==='type'?'':''}" dir="ltr" data-xp-slot="${name}" ${whm?'data-field':'data-zone-field'}="${name}" aria-label="${labels[name]}" disabled`
-  const input=name==='type'?`<select ${common}></select>`:`<input ${common} type="${name==='ttl'||name==='priority'?'number':'text'}"${name==='ttl'||name==='priority'?' min="0" step="1"':''}>`
+  const input=name==='type'?`<select ${common} data-list-field="type"></select>`:`<input ${common} type="${name==='ttl'||name==='priority'?'number':'text'}"${name==='ttl'||name==='priority'?' min="0" step="1"':''}>`
   return `<td>${whm?`<label data-xp-slot="${name}-label">${labels[name]}</label>`:''}${input}</td>`
  }).join('')
- return row('dns-record-row',cells+`<td>${action('remove',t('Remove record'))}</td>`)+empty('dns-record-empty',6)
+ return row('dns-record-row',cells+`<td>${action('remove',t('Remove record'))}</td>`,true)+empty('dns-record-empty',6)
   +(whm?row('dns-zone-row',value('name',true)+value('account')+value('records',true)+value('serial',true)+value('provider'))+empty('dns-zone-empty',5):'')
 }
 export function accountSslTemplates(): string {
@@ -35,16 +37,18 @@ export function accountSslTemplates(): string {
   +empty('account-ssl-empty',6)+fact('account-ssl-fact')+'<template data-xp-template="account-ssl-name"><div><bdi dir="ltr" data-xp-slot="value"></bdi></div></template><template data-xp-template="account-ssl-action">'+action('label','')+'</template>'
 }
 export function accountCronTemplates(): string {
- return row('account-cron-row',value('name')+value('schedule',true)+value('command',true)+value('last-run',true)+value('duration',true)+value('next-run',true)+`<td><div class="v2-panel-service__actions" data-xp-slot="actions"></div></td>`)+empty('account-cron-empty',7)+'<template data-xp-template="account-cron-action">'+action('label','')+'</template>'
+ // Run facts hold a time or a localized "Not observed": direction follows the content, in the body font.
+ const observed=(slot:string):string=>`<td><bdi dir="auto" class="v2-num" data-xp-slot="${slot}"></bdi></td>`
+ return row('account-cron-row',value('name')+value('schedule',true)+value('command',true)+observed('last-run')+observed('duration')+observed('next-run')+`<td><div class="v2-panel-service__actions" data-xp-slot="actions"></div></td>`,true)+empty('account-cron-empty',7)+'<template data-xp-template="account-cron-action">'+action('label','')+'</template>'
 }
 export function whmSslTemplates(): string {
  return row('whm-ssl-row',value('names',true)+value('account')+value('source')+value('challenge')+value('expires',true)+value('renewal')+value('status')+`<td><div class="v2-whm-network__actions" data-xp-slot="actions"></div></td>`)+empty('whm-ssl-empty',8)+fact('whm-ssl-fact')+'<template data-xp-template="whm-ssl-action">'+action('label','')+'</template>'
 }
 
-export function dbEngineTemplates(): string {
+export function dbEngineTemplates(t: (message: string) => string = () => ''): string {
  return row('engine-packages-row',value('name',true)+value('installed',true)+value('candidate',true)+value('origin')+value('security'))+empty('engine-packages-empty',5)
-  +row('engine-databases-row',value('name',true)+value('owner',true)+value('size',true)+value('state')+'<td data-xp-slot="actions"></td>')+empty('engine-databases-empty',5)
-  +row('engine-roles-row',value('name',true)+value('login')+'<td data-xp-slot="actions"></td>')+empty('engine-roles-empty',3)
+  +row('engine-databases-row',value('name',true)+value('owner',true,t('Owner role'))+value('size',true,t('Size'))+value('state',false,t('Status'))+'<td data-xp-slot="actions"></td>')+empty('engine-databases-empty',5)
+  +row('engine-roles-row',value('name',true)+value('login',false,t('Can sign in'))+'<td data-xp-slot="actions"></td>')+empty('engine-roles-empty',3)
   +'<template data-xp-template="engine-action">'+action('label','')+'</template><template data-xp-template="engine-actions"><div class="v2-whm-data__actions" data-xp-slot="actions"></div></template>'
 }
 export function whmDatabaseTemplates(): string {
