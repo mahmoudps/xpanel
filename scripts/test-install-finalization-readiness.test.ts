@@ -325,4 +325,35 @@ describe('readiness cgroup writer-lock waiters', () => {
     expect(await f.project([moved], [service])).toEqual([moved])
     expect(f.procText).not.toHaveBeenCalled()
   })
+
+  it('settles transient cgroup child processes while preserving persistent unexpected members', async () => {
+    const settle = new Function('check', 'delay', 'assertTrustedDirectory', 'readBoundedCgroupTree', 'projectReadinessCgroups',
+      declared('settleReadinessCgroups') + '\nreturn settleReadinessCgroups'
+    )(check, async () => {}, async () => {}, async () => ({ nodes: [{ ...root, processes: [42] }], processes: [42], populated: true }), async (value: unknown) => value)
+    const apiGroup = { path: '/system.slice/xpanel-api.service', exists: true, populated: true, nodes: [{ path: '/sys/fs/cgroup/system.slice/xpanel-api.service', processes: [41] }], processes: [41] }
+    const services = [{ pid: 41, uid: 991, cgroup: apiGroup.path }, service]
+    const sleep = vi.fn(async () => {}), assertDir = vi.fn(async () => {})
+    let reads = 0
+    const readTree = vi.fn(async (path: string) => {
+      expect(path).toBe('/sys/fs/cgroup' + cgroup)
+      reads++
+      const pids = reads < 2 ? [42, 99] : [42]
+      return { nodes: [{ ...root, processes: pids }], processes: pids, populated: true }
+    })
+    const settled = await settle([apiGroup, { ...group, nodes: [{ ...root, processes: [42, 99] }], processes: [42, 99] }], services, { sleep, assertDir, readTree, project: async (value: unknown) => value })
+    expect(settled).toEqual([apiGroup, { ...group, nodes: [{ ...root, processes: [42] }], processes: [42] }])
+    expect(sleep).toHaveBeenCalledTimes(2)
+    expect(assertDir).toHaveBeenCalledTimes(2)
+    expect(readTree).toHaveBeenCalledTimes(2)
+
+    const persistentSleep = vi.fn(async () => {})
+    const persistent = await settle([group], [service], {
+      sleep: persistentSleep,
+      assertDir: async () => {},
+      readTree: async () => ({ nodes: [root], processes: [42, 43], populated: true }),
+      project: async (value: unknown) => value,
+    })
+    expect(persistent).toEqual([group])
+    expect(persistentSleep).toHaveBeenCalledTimes(5)
+  })
 })

@@ -3,6 +3,7 @@ import { constants, readFileSync, readlinkSync, statSync } from 'node:fs'
 import { lstat, open, readlink, readdir, realpath, stat } from 'node:fs/promises'
 import { performance } from 'node:perf_hooks'
 import { posix } from 'node:path'
+import { setTimeout as delay } from 'node:timers/promises'
 import { requireLinuxRoot, readInstallationReceipt, readTrustedFile, withTrustedDirectory, withTrustedFile, assertOwnedFile, assertTrustedDirectory } from './lifecycle-ownership.mjs'
 import { LIFECYCLE_LOCK } from './lifecycle-admission.mjs'
 import { observeOwnedControlPlaneUnits, projectOwnedControlPlaneObservation, readBoundedCgroupTree } from './lifecycle-services.mjs'
@@ -184,6 +185,27 @@ async function projectReadinessCgroups(groups, processes) {
     return { ...group, nodes, processes: [...new Set(nodes.flatMap(node => node.processes))].sort((a, b) => a - b) }
   }))
 }
+async function settleReadinessCgroups(groups, processes, { sleep = delay, assertDir = assertTrustedDirectory, readTree = readBoundedCgroupTree, project = projectReadinessCgroups } = {}) {
+  let projected = await project(groups, processes)
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const unsettled = projected.filter(group => {
+      const process = processes.find(row => row.cgroup === group.path)
+      return Boolean(process) && group.processes.some(pid => pid !== process.pid)
+    })
+    if (!unsettled.length) return projected
+    await sleep(50)
+    await assertDir('/sys/fs/cgroup/system.slice')
+    const refreshed = new Map()
+    for (const group of unsettled) {
+      const process = processes.find(row => row.cgroup === group.path)
+      const tree = await readTree('/sys/fs/cgroup' + group.path)
+      check(tree.processes.includes(process.pid), 'INSTALL_READINESS_PROCESS_CGROUP_INVALID')
+      refreshed.set(group.path, { path: group.path, exists: true, ...tree })
+    }
+    projected = await project(projected.map(group => refreshed.get(group.path) ?? group), processes)
+  }
+  return projected
+}
 function accountId(text, name, field) {
   const rows = text.split('\n').filter(line => line.startsWith(name + ':'))
   check(rows.length === 1, 'INSTALL_READINESS_SYSTEM_ACCOUNT_INVALID')
@@ -312,7 +334,7 @@ async function readNativeFacts(context, previous) {
       const value = await processFacts(role, unit, context, node.info, role === 'api' ? apiUid : 0, agentGid)
       processes.push(value.process); sockets.push({ role, descriptors: value.sockets, processDirectory: value.processDirectory })
     }
-    const cgroups = await projectReadinessCgroups(observed.cgroups, processes)
+    const cgroups = await settleReadinessCgroups(observed.cgroups, processes)
     const management = await readManagementTlsReadiness()
     const again = await lstat('/opt/xpanel/current', { bigint: true })
     check(canonical(fileIdentity(current)) === canonical(fileIdentity(again)) && await readlink('/opt/xpanel/current') === expectedRoot, 'INSTALL_READINESS_CURRENT_LINK_CHANGED')

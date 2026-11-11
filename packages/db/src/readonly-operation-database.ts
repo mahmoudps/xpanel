@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import { constants, fstatSync, lstatSync, readSync, realpathSync, type BigIntStats } from 'node:fs'
 import { open, realpath, type FileHandle } from 'node:fs/promises'
 import { dirname, isAbsolute, resolve } from 'node:path'
+import { setTimeout as delay } from 'node:timers/promises'
 import { pathToFileURL } from 'node:url'
 import { DatabaseSync, StatementSync, type SQLInputValue } from 'node:sqlite'
 import { assertId, fail, XpanelError } from '@xpanel/core'
@@ -84,13 +85,27 @@ export async function withReadonlyClosedOperationDatabase<T>(capability: unknown
 export async function withReadonlyOperationDatabase<T>(path: string, callback: (db: ReadonlyOperationDatabase) => Promise<T>, migrations: OperationalMigrationMode = 'complete'): Promise<T> {
   return readOperationDatabase(path, callback, migrations)
 }
+export const REOBSERVED_DATABASE_MAX_ATTEMPTS = 12
+export const reobservedDatabaseBackoffMs = (attempt: number): number => Math.min(150, 20 * attempt)
+export const classifyDatabaseStatChange = ({ closed, sameIdentity, sameContents }: {
+  closed: boolean; sameIdentity: boolean; sameContents: boolean
+}): 'ok' | 'wal_collision' | 'refused' => sameIdentity && sameContents ? 'ok' : !closed && sameIdentity ? 'wal_collision' : 'refused'
+export const classifyAncestorStatChange = ({ isDatabaseDirectory, sameIdentity, sameContents, checkClosedTimestamps }: {
+  isDatabaseDirectory: boolean; sameIdentity: boolean; sameContents: boolean; checkClosedTimestamps: boolean
+}): 'ok' | 'wal_collision' | 'refused' => {
+  if (!sameIdentity || (checkClosedTimestamps && !sameContents)) return 'refused'
+  if (isDatabaseDirectory && !sameContents) return 'wal_collision'
+  return 'ok'
+}
+
 /** For read-only observation callbacks. Reopen only after native WAL contention, with all pins retired. */
 export async function withReobservedReadonlyOperationDatabase<T>(path: string, callback: (db: ReadonlyOperationDatabase) => Promise<T>, migrations: OperationalMigrationMode = 'complete'): Promise<T> {
   for (let attempt = 1; ; attempt++) {
     const observation = Symbol()
     try { return await readOperationDatabase(path, callback, migrations, undefined, observation) }
     catch (error) {
-      if (attempt >= 3 || !(error instanceof XpanelError) || walCollisions.get(error) !== observation) throw error
+      if (attempt >= REOBSERVED_DATABASE_MAX_ATTEMPTS || !(error instanceof XpanelError) || walCollisions.get(error) !== observation) throw error
+      await delay(reobservedDatabaseBackoffMs(attempt))
     }
   }
 }
@@ -148,13 +163,24 @@ async function readOperationDatabase<T>(path: string, callback: (db: ReadonlyOpe
         return refused(reason)
       }
     }
+    const dbDirectory = dirname(path)
     const physical = (): void => {
       if (closed) { closed.assertScope(); absentSidecars() }
       const held = fstatSync(file.fd, { bigint: true }), named = lstatSync(path, { bigint: true })
-      if (!named.isFile() || named.isSymbolicLink() || realpathSync.native(path) !== path || !equal(initial, held, true) || !equal(initial, named, true)) return refused('database_inode_or_content_changed')
+      const sameDbIdentity = held.isFile() && named.isFile() && !named.isSymbolicLink() && realpathSync.native(path) === path && equal(initial, held) && equal(initial, named)
+      const dbChange = classifyDatabaseStatChange({ closed: Boolean(closed), sameIdentity: sameDbIdentity, sameContents: sameDbIdentity && equal(initial, held, true) && equal(initial, named, true) })
+      if (dbChange === 'refused') return refused('database_inode_or_content_changed')
+      if (dbChange === 'wal_collision') return walCollision('database_inode_or_content_changed')
       for (const pin of pins) {
         const held = fstatSync(pin.handle.fd, { bigint: true }), named = lstatSync(pin.path, { bigint: true })
-        if (!held.isDirectory() || !named.isDirectory() || named.isSymbolicLink() || !equal(pin.initial, held, Boolean(closed)) || !equal(pin.initial, named, Boolean(closed))) return refused('database_ancestor_changed')
+        const sameIdentity = held.isDirectory() && named.isDirectory() && !named.isSymbolicLink() && equal(pin.initial, held) && equal(pin.initial, named)
+        const ancestorChange = classifyAncestorStatChange({
+          isDatabaseDirectory: false,
+          sameIdentity,
+          sameContents: sameIdentity && equal(pin.initial, held, true) && equal(pin.initial, named, true),
+          checkClosedTimestamps: Boolean(closed),
+        })
+        if (ancestorChange !== 'ok') return refused('database_ancestor_changed')
       }
       for (const pin of sidecars) {
         const held = fstatSync(pin.handle.fd, { bigint: true }), named = lstatSync(pin.path, { bigint: true }), contents = pin.path.endsWith('-wal')
@@ -175,7 +201,7 @@ async function readOperationDatabase<T>(path: string, callback: (db: ReadonlyOpe
       let offset = 0
       while (offset < Number(expected.size)) {
         const bytes = readSync(wal.handle.fd, block, 0, Math.min(block.length, Number(expected.size) - offset), offset)
-        if (!bytes) return refused('database_wal_initialization_short_read')
+        if (!bytes) return walCollision('database_wal_initialization_short_read')
         hash.update(block.subarray(0, bytes)); offset += bytes
       }
       assertPinned(); return hash.digest('hex')
@@ -185,10 +211,18 @@ async function readOperationDatabase<T>(path: string, callback: (db: ReadonlyOpe
     const initializationDirectories = (): void => {
       for (const pin of pins) {
         const held = fstatSync(pin.handle.fd, { bigint: true }), named = lstatSync(pin.path, { bigint: true })
-        if (!held.isDirectory() || !named.isDirectory() || named.isSymbolicLink()
-          // Live writers keep other files beside the database (bandwidth.json is rewritten every minute), so a changed
-          // ancestor is contention like a moving WAL: a reobserved reader discards this attempt and proves a fresh one.
-          || !equal(pin.initial, held, true) || !equal(pin.initial, named, true)) return walCollision('database_initialization_ancestor_changed')
+        const sameIdentity = held.isDirectory() && named.isDirectory() && !named.isSymbolicLink() && equal(pin.initial, held) && equal(pin.initial, named)
+        // Live writers keep other files beside the database (bandwidth.json is rewritten every minute), so a changed
+        // database directory timestamp is contention like a moving WAL, whereas higher OS ancestors (/var, /var/lib)
+        // only require unchanged directory identity and permissions.
+        const ancestorChange = classifyAncestorStatChange({
+          isDatabaseDirectory: pin.path === dbDirectory,
+          sameIdentity,
+          sameContents: sameIdentity && equal(pin.initial, held, true) && equal(pin.initial, named, true),
+          checkClosedTimestamps: false,
+        })
+        if (ancestorChange === 'refused') return refused('database_ancestor_changed')
+        if (ancestorChange === 'wal_collision') return walCollision('database_initialization_ancestor_changed')
       }
     }
     if (wal) initializationDirectories()
@@ -203,7 +237,7 @@ async function readOperationDatabase<T>(path: string, callback: (db: ReadonlyOpe
       const initialized = fstatSync(wal.handle.fd, { bigint: true })
       if (!equal(wal.initial, initialized) || initialized.ctimeNs < wal.initial.ctimeNs) return refused('database_wal_initialization_changed')
       if (initialized.size !== wal.initial.size || initialized.mtimeNs !== wal.initial.mtimeNs) return walCollision('database_wal_initialization_changed')
-      if (hashWal(initialized) !== walBeforeOpenSha256) return refused('database_wal_initialization_changed')
+      if (hashWal(initialized) !== walBeforeOpenSha256) return walCollision('database_wal_initialization_changed')
       initializationDirectories()
       wal.initial = initialized
       physical()
