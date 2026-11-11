@@ -28,6 +28,9 @@ const refused: (reason: string, detail?: Record<string, unknown>) => never = (re
 /** Marks a refusal a caller may retry: a peer dropped the connection and cleanup proved nothing of the exchange is left. */
 export const transportResetDetail = (failure: unknown, settled: boolean): Record<string, true> =>
   settled && ['ECONNRESET', 'EPIPE'].includes(String((failure as NodeJS.ErrnoException | undefined)?.code)) ? { transportReset: true } : {}
+/** Only quarantine the UID once host listener/HTTP sockets were opened, or if cleanup left uncertain state. */
+export const shouldQuarantineCorrelationFailure = (exchangeStarted: boolean, settled: boolean): boolean =>
+  exchangeStarted || !settled
 /** Code, message and reason identifier, or the first line of a system error; never request bytes. */
 const describeFailure = (error: unknown): string => isXpanelError(error)
   ? `${error.code}: ${error.message}${typeof error.detail.reason === 'string' ? ` (${error.detail.reason})` : ''}`
@@ -155,7 +158,7 @@ export function createNativeHeldAccountHttp(options: NativeAccountHttpOptions) {
       let source: HeldCanarySource | undefined, ingressListener: unknown, callbackListener: unknown
       let backend: Socket | undefined, callback: Socket | undefined, ingress: Socket | undefined, httpSocket: Socket | undefined, ingressPeer: KernelPeerCredentials | undefined, http: ClientRequest | undefined, response: IncomingMessage | undefined
       let backendPin: UnixSocketPeerPin | undefined
-      let failure: unknown, ended = false, releasing = false, claimed = false, acceptedCount = 0, closePromise: Promise<void> | undefined
+      let failure: unknown, ended = false, releasing = false, claimed = false, exchangeStarted = false, acceptedCount = 0, closePromise: Promise<void> | undefined
       let agentEndsCallback: (() => void) | undefined
       const prefix = Buffer.from('XPANEL-PROBE/1 ' + input.challenge + '\n'), expectedBody = Buffer.concat([prefix, Buffer.from('done\n')])
       const failOperation = (error: unknown): void => {
@@ -314,6 +317,7 @@ export function createNativeHeldAccountHttp(options: NativeAccountHttpOptions) {
       }
       try {
         const heldSource = await captureCanarySource(options, input, nativeContext); source = heldSource; await guard(); mark('source')
+        exchangeStarted = true
         callbackListener = listen(paths.callback, account.gid, 0o660, true)
         ingressListener = listen(paths.ingress, heldSource.nginxGid, 0o660, false)
         await guard()
@@ -382,11 +386,12 @@ export function createNativeHeldAccountHttp(options: NativeAccountHttpOptions) {
           },
         }
       } catch (error) {
-        failOperation(error); quarantined.add(account.uid)
+        failOperation(error); if (exchangeStarted) quarantined.add(account.uid)
         // The refusal is generic; the operator needs the first failure to find the host prerequisite.
         console.error('xpanel-agent account HTTP correlation failed:', describeFailure(failure), stages())
         let settled = true
         try { await cleanup() } catch { settled = false /* Preserve the primary failed observation; the UID remains quarantined. */ }
+        if (shouldQuarantineCorrelationFailure(exchangeStarted, settled)) quarantined.add(account.uid)
         return refused('held_http_correlation_not_verified', transportResetDetail(failure, settled))
       }
     },

@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { getReadonlyOperationDatabaseOrigin, readonlyOperationSelect, withReadonlyClosedOperationDatabase } from './readonly-operation-database.ts'
+import {
+  classifyAncestorStatChange, classifyDatabaseStatChange, getReadonlyOperationDatabaseOrigin,
+  readonlyOperationSelect, REOBSERVED_DATABASE_MAX_ATTEMPTS, reobservedDatabaseBackoffMs,
+  withReadonlyClosedOperationDatabase,
+} from './readonly-operation-database.ts'
 import { assertReadonlyLifecycleIntentObservationCurrent, assertReadonlyLifecycleIntentFileObservationCurrent,
   getReadonlyLifecycleIntentFileObservationInfo, withReadonlyLifecycleIntentObservation } from './repos/operation-audit-authority.ts'
 
@@ -33,5 +37,20 @@ describe('read-only operation database syntax and capability boundary', () => {
       expect(() => getReadonlyLifecycleIntentFileObservationInfo(value)).toThrow()
       await expect(assertReadonlyLifecycleIntentFileObservationCurrent(value)).rejects.toThrow()
     }
+  })
+  it('classifies live auto-checkpoint and database-directory contention separately from identity drift', () => {
+    expect(REOBSERVED_DATABASE_MAX_ATTEMPTS).toBe(12)
+    expect(reobservedDatabaseBackoffMs(1)).toBe(20)
+    expect(reobservedDatabaseBackoffMs(10)).toBe(150)
+
+    expect(classifyDatabaseStatChange({ closed: false, sameIdentity: true, sameContents: true })).toBe('ok')
+    expect(classifyDatabaseStatChange({ closed: false, sameIdentity: true, sameContents: false })).toBe('wal_collision')
+    expect(classifyDatabaseStatChange({ closed: true, sameIdentity: true, sameContents: false })).toBe('refused')
+    expect(classifyDatabaseStatChange({ closed: false, sameIdentity: false, sameContents: false })).toBe('refused')
+
+    expect(classifyAncestorStatChange({ isDatabaseDirectory: false, sameIdentity: true, sameContents: false, checkClosedTimestamps: false })).toBe('ok')
+    expect(classifyAncestorStatChange({ isDatabaseDirectory: true, sameIdentity: true, sameContents: false, checkClosedTimestamps: false })).toBe('wal_collision')
+    expect(classifyAncestorStatChange({ isDatabaseDirectory: false, sameIdentity: true, sameContents: false, checkClosedTimestamps: true })).toBe('refused')
+    expect(classifyAncestorStatChange({ isDatabaseDirectory: true, sameIdentity: false, sameContents: false, checkClosedTimestamps: false })).toBe('refused')
   })
 })
