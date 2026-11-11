@@ -16,7 +16,7 @@ describe('optional two-factor enrollment', () => {
   })
 
   it.each(['en', 'ar'] as const)('recommends authenticator setup for root without blocking the workspace (%s)', locale => {
-    const home = renderWebApp({
+    const home = renderWebApp({ uiTheme: 'classic',
       surface: 'xwhm', locale, activeRoute: '/whm', visibility: { principal: root }, security: { totpEnabled: false },
     })
     expect(home).toContain('data-mfa-optional-link')
@@ -24,7 +24,7 @@ describe('optional two-factor enrollment', () => {
     expect(home).not.toMatch(/<form[^>]*data-auth-setup-form/)
     expect(home).not.toMatch(/[\u0660-\u0669\u06f0-\u06f9]/)
 
-    const security = renderWebApp({
+    const security = renderWebApp({ uiTheme: 'classic',
       surface: 'xwhm', locale, activeRoute: '/whm/security/sign-in', visibility: { principal: root }, security: { totpEnabled: false },
     })
     expect(security).toContain('data-mfa-recommendation')
@@ -36,7 +36,7 @@ describe('optional two-factor enrollment', () => {
     expect(security).not.toMatch(/[\u0660-\u0669\u06f0-\u06f9]/)
     if (locale === 'ar') expect(security).toMatch(/[\u0600-\u06ff]/)
 
-    const enrolled = renderWebApp({
+    const enrolled = renderWebApp({ uiTheme: 'classic',
       surface: 'xwhm', locale, activeRoute: '/whm/security/sign-in', visibility: { principal: root }, security: { totpEnabled: true },
     })
     expect(enrolled).toContain('data-mfa-enabled="true"')
@@ -48,21 +48,21 @@ describe('optional two-factor enrollment', () => {
   })
 
   it('offers optional enrollment to resellers and account owners without the root recommendation', () => {
-    const resellerPage = renderWebApp({
+    const resellerPage = renderWebApp({ uiTheme: 'classic',
       surface: 'xwhm', activeRoute: '/whm/security/sign-in', visibility: { principal: reseller }, security: { totpEnabled: false },
     })
     expect(resellerPage).toContain('data-auth-setup-form')
     expect(resellerPage).not.toContain('data-mfa-recommendation')
     expect(resellerPage).not.toContain('disable-2fa')
 
-    const account = renderWebApp({
+    const account = renderWebApp({ uiTheme: 'classic',
       surface: 'xpanel', activeRoute: '/security/account', visibility: { principal: owner }, security: { totpEnabled: false },
     })
     expect(account).toContain('data-auth-setup-form')
     expect(account).not.toContain('data-mfa-recommendation')
     expect(account).not.toContain('disable-2fa')
 
-    const mail = renderWebApp({
+    const mail = renderWebApp({ uiTheme: 'classic',
       surface: 'xmail', activeRoute: '/mail/settings/security', visibility: { principal: owner }, security: { totpEnabled: true },
     })
     expect(mail).toContain('data-mfa-enabled="true"')

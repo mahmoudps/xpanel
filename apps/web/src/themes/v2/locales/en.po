@@ -32,11 +32,6 @@ msgctxt "theme:v2"
 msgid "{value} available"
 msgstr ""
 
-#: apps/web/src/themes/v2/pages/xwhm/overview/index.ts
-msgctxt "theme:v2"
-msgid "{value} seconds"
-msgstr ""
-
 #: apps/web/src/themes/v2/pages/xpanel/services/dns.ts
 msgctxt "theme:v2"
 msgid "A and AAAA point to addresses. CNAME points to another host name. MX and SRV include a priority; TXT and CAA store their record content."
@@ -224,7 +219,57 @@ msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/overview/index.ts
 msgctxt "theme:v2"
-msgid "Accounts near a limit"
+msgid "{count, plural, one {# account in total.} other {# accounts in total.}}"
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xwhm/overview/index.ts
+msgctxt "theme:v2"
+msgid "15-minute averages, times in UTC. {read} of {total} intervals have samples."
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xwhm/overview/index.ts
+msgctxt "theme:v2"
+msgid "CPU and memory use from {from} to {to} UTC"
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xwhm/overview/index.ts
+msgctxt "theme:v2"
+msgid "CPU, peak {value}"
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xwhm/overview/index.ts
+msgctxt "theme:v2"
+msgid "Memory, peak {value}"
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xwhm/overview/index.ts
+msgctxt "theme:v2"
+msgid "Desired = applied"
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xwhm/overview/index.ts
+msgctxt "theme:v2"
+msgid "Need attention"
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xwhm/overview/index.ts
+msgctxt "theme:v2"
+msgid "Resellers see only the accounts they own."
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xwhm/overview/index.ts
+msgctxt "theme:v2"
+msgid "Review {account}"
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xwhm/overview/index.ts
+msgctxt "theme:v2"
+msgid "This server runs {version}."
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xwhm/overview/index.ts
+msgctxt "theme:v2"
+msgid "Upgrade {version} is available."
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/accounts/list.ts
@@ -1417,11 +1462,6 @@ msgctxt "theme:v2"
 msgid "Domain and file"
 msgstr ""
 
-#: apps/web/src/themes/v2/pages/xwhm/domains/index.ts
-msgctxt "theme:v2"
-msgid "Domain serving details"
-msgstr ""
-
 #: apps/web/src/themes/v2/pages/xwhm/software/catalog.ts
 msgctxt "theme:v2"
 msgid "Download (simulated)"
@@ -2328,10 +2368,6 @@ msgid "Local account archives"
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/lifecycle/backups.ts
-msgctxt "theme:v2"
-msgid "Local archive actions require the guarded preview and confirmation workflow before they can be used here."
-msgstr ""
-
 #: apps/web/src/themes/v2/pages/xwhm/dns/tools.ts
 msgctxt "theme:v2"
 msgid "Local zone checks, published comparisons and revision-bound TTL changes."
@@ -2965,11 +3001,6 @@ msgstr ""
 #: apps/web/src/themes/v2/components/data-table.ts apps/web/src/themes/v2/layouts/common.ts
 msgctxt "theme:v2"
 msgid "Nothing to show yet."
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xpanel/observations/traffic.ts
-msgctxt "theme:v2"
-msgid "Observation"
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xpanel/observations/health.ts
@@ -4702,11 +4733,6 @@ msgctxt "theme:v2"
 msgid "Site service configuration"
 msgstr ""
 
-#: apps/web/src/themes/v2/pages/xwhm/service-tools/ftp-log.ts
-msgctxt "theme:v2"
-msgid "Size (bytes)"
-msgstr ""
-
 #: apps/web/src/themes/v2/pages/xpanel/resources.ts
 msgctxt "theme:v2"
 msgid "Slice limits"
@@ -5915,4 +5941,357 @@ msgstr ""
 
 msgctxt "theme:v2"
 msgid "Run a built Go executable or Java archive as one isolated service of an account."
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xwhm/accounts/create.ts
+msgctxt "theme:v2"
+msgid "Account review"
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xwhm/accounts/create.ts
+msgctxt "theme:v2"
+msgid "Live summary of the form."
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xwhm/accounts/create.ts
+msgctxt "theme:v2"
+msgid "Availability checks"
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xwhm/accounts/create.ts
+msgctxt "theme:v2"
+msgid "Checked when submitted"
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xwhm/accounts/create.ts
+msgctxt "theme:v2"
+msgid "Plan and owner capacity"
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xwhm/accounts/create.ts
+msgctxt "theme:v2"
+msgid "The default IPv4 of the server, shared with other accounts."
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xwhm/accounts/create.ts
+msgctxt "theme:v2"
+msgid "The next unallocated IPv4 that this plan may use."
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xwhm/accounts/list.ts
+msgctxt "theme:v2"
+msgid "Usage / configured plan limit. An account the host did not report shows Not read."
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xwhm/accounts/list.ts
+msgctxt "theme:v2"
+msgid "Usage / the account’s own limit."
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xwhm/accounts/list.ts
+msgctxt "theme:v2"
+msgid "Usage / limit in force: the package value or the account’s own limit. Only disk and bandwidth usage are read."
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Account list"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Newest first."
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Edit account"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Editing above"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Edit plan: {name}"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Primary domains"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "One per account"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Separate sites, each with its own document root"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Extra names that serve the parent site"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Explicit names under a hosted domain"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "of {total} domains"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "SSL certificates"
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xwhm/host/firewall.ts
+msgctxt "theme:v2"
+msgid "Applied as one generation"
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xwhm/host/firewall.ts
+msgctxt "theme:v2"
+msgid "Applied at"
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xwhm/security/ssh.ts
+msgctxt "theme:v2"
+msgid "Current session protection."
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xwhm/host/firewall.ts
+msgctxt "theme:v2"
+msgid "Kept, or the previous rules return"
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xwhm/host/firewall.ts
+msgctxt "theme:v2"
+msgid "Lockout check against your session"
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xwhm/host/firewall.ts
+msgctxt "theme:v2"
+msgid "Management ports"
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xwhm/host/firewall.ts
+msgctxt "theme:v2"
+msgid "Read back from this session"
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xwhm/host/firewall.ts
+msgctxt "theme:v2"
+msgid "Rules in this list"
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xwhm/host/firewall.ts
+msgctxt "theme:v2"
+msgid "Saved rules"
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xwhm/host/firewall.ts
+msgctxt "theme:v2"
+msgid "What a save does"
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xwhm/lifecycle/upgrade.ts
+msgctxt "theme:v2"
+msgid "Automatic rollback"
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xwhm/activity/audit.ts
+msgctxt "theme:v2"
+msgid "{count, plural, one {# entry on this page} other {# entries on this page}}"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Defaults for new domains"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Existing domains keep their version and handler."
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Default version"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Default handler"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Always the default"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "{count} of {total} saved domains use CGI."
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Saved domain handlers have not been read."
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Workers start when a request arrives and stop when idle."
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Keeps a few spare workers ready and adds more under load."
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Keeps a fixed number of workers in memory at all times."
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Pool settings"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "The saved choice has not been read."
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Behind the Nginx edge. Every request passes Apache, so .htaccess works."
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "The child serving a site switches to its account before reading a file."
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Values to apply"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Each value follows its field in the steps above. A field you have not changed shows its saved value."
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "One engine serves the whole server, never one per site."
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xpanel/email/accounts.ts
+msgctxt "theme:v2"
+msgid "Show users with"
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xpanel/email/accounts.ts
+msgctxt "theme:v2"
+msgid "No service users match this filter."
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xpanel/email/accounts.ts
+msgctxt "theme:v2"
+msgid "One login"
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xpanel/email/accounts.ts
+msgctxt "theme:v2"
+msgid "The same user@domain and password for every service you turn on."
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xpanel/email/accounts.ts
+msgctxt "theme:v2"
+msgid "Not a Linux user"
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xpanel/email/accounts.ts
+msgctxt "theme:v2"
+msgid "A service user runs as your account, has no shell and cannot sign in to xPanel."
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xpanel/email/accounts.ts
+msgctxt "theme:v2"
+msgid "Locked to a directory"
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xpanel/email/accounts.ts
+msgctxt "theme:v2"
+msgid "FTP and Web Disk never see anything outside the directory you choose."
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xpanel/email/accounts.ts
+msgctxt "theme:v2"
+msgid "Counts toward your disk"
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xpanel/email/accounts.ts
+msgctxt "theme:v2"
+msgid "Mailboxes and uploads use the disk quota of your account."
+msgstr ""
+
+
+#: apps/web/src/themes/v2/pages/xpanel/services/dns.ts
+msgctxt "theme:v2"
+msgid "Filter records"
+msgstr ""
+
+
+#: apps/web/src/themes/v2/pages/xpanel/observations/traffic.ts
+msgctxt "theme:v2"
+msgid "Only the selected domain is read. Other domains and the plan month total are not part of this observation."
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xpanel/software/php.ts
+msgctxt "theme:v2"
+msgid "Requires server configuration"
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xpanel/software/php.ts
+msgctxt "theme:v2"
+msgid "children"
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xpanel/software/php.ts
+msgctxt "theme:v2"
+msgid "servers"
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xpanel/software/php.ts
+msgctxt "theme:v2"
+msgid "requests"
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xpanel/software/php.ts
+msgctxt "theme:v2"
+msgid "Memory at full load"
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xmail/compose.ts
+msgctxt "theme:v2"
+msgid "Back to Inbox"
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xmail/inbox.ts
+msgctxt "theme:v2"
+msgid "Choose a message from the list to read it here."
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xwhm/security/overview.ts
+msgctxt "theme:v2"
+msgid "These settings are read and changed on Panel access."
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xpanel/domains/domains.ts
+msgctxt "theme:v2"
+msgid "Filter domains"
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xpanel/domains/domains.ts
+msgctxt "theme:v2"
+msgid "Filter by name or folder"
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xpanel/domains/domains.ts
+msgctxt "theme:v2"
+msgid "No domains match this filter."
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xpanel/email/accounts.ts
+msgctxt "theme:v2"
+msgid "Filter users by login"
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xpanel/email/accounts.ts
+msgctxt "theme:v2"
+msgid "Filter by login"
 msgstr ""

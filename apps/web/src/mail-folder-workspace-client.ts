@@ -5,6 +5,9 @@ const mailRequireTemplates = canonicalMailRequireTemplates
 import type { MessageValues } from './i18n.ts'
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
+import { ASCII_BYTES_BINDING, formatIsolatedBytes as canonicalFormatClientBytes } from './display-format.ts'
+// Module-local alias: the binding source defines it again from ASCII_BYTES_BINDING.
+const formatClientBytes = canonicalFormatClientBytes
 
 const formatMailDateTime = formatDisplayDateTime
 
@@ -198,7 +201,7 @@ export function bindMailFolderWorkspace(askDialog:(options:Record<string,unknown
       return transport(method,path,body)
     }
     const set=(node:ParentNode,selector:string,value:string)=>{const target=node.querySelector<HTMLElement>(selector);if(target){const technical=/detail-(?:from|to|cc|date)\]|mail-time/.test(selector);let content=target.tagName==='BDI'?target:target.querySelector<HTMLElement>('bdi');if(!content&&technical){content=document.createElement('bdi');content.dir='ltr';target.replaceChildren(content)}if(content){content.textContent=value;content.dir=technical?'ltr':'auto'}else{target.textContent=value;target.dir='auto'}}}
-    const size=(bytes:number)=>bytes<1024?bytes+' B':bytes<1048576?(bytes/1024).toFixed(1)+' KB':(bytes/1048576).toFixed(1)+' MB'
+    const size=(bytes:number)=> formatClientBytes(bytes)
     const stamp=(raw:string,compact=false)=>{const date=new Date(raw);if(Number.isNaN(date.getTime()))return raw;if(compact)return date.toISOString().slice(11,16);const full=formatMailDateTime(raw);return full==='—'?formatMailDateTime(date):full}
     let invalidated=false,refreshTimer:number|undefined
     const scheduleRefresh=()=>{if(refreshTimer!==undefined)return;refreshTimer=window.setTimeout(()=>{refreshTimer=undefined;if(blocked()||workspace.state.busy||workspace.state.reading||workspace.state.uncertain)return;invalidated=false;void workspace.refresh()},50)}
@@ -293,4 +296,4 @@ export function bindMailFolderWorkspace(askDialog:(options:Record<string,unknown
   })
 }
 
-export const MAIL_FOLDER_WORKSPACE_CLIENT_BINDING=`(()=>{${MAIL_CLIENT_TEMPLATE_KIT}const formatMailDateTime=${DISPLAY_DATETIME_BINDING};const canonicalMailFolder=${canonicalMailFolder.toString()};const mailFolderUid=${mailFolderUid.toString()};const mailFolderUidValidity=${mailFolderUidValidity.toString()};const mailFolderObservedUidValidity=${mailFolderObservedUidValidity.toString()};const mailFolderObject=${mailFolderObject.toString()};const mailFolderFlags=${mailFolderFlags.toString()};const readFolderSummary=${readFolderSummary.toString()};const readFolderList=${readFolderList.toString()};const readFolderMessage=${readFolderMessage.toString()};const readFolderMove=${readFolderMove.toString()};const mailFolderWriteUncertain=${mailFolderWriteUncertain.toString()};const mailFolderFingerprint=${mailFolderFingerprint.toString()};const createMailFolderWorkspace=${createMailFolderWorkspace.toString()};return ${bindMailFolderWorkspace.toString()};})()`
+export const MAIL_FOLDER_WORKSPACE_CLIENT_BINDING=`(()=>{const formatClientBytes=${ASCII_BYTES_BINDING};${MAIL_CLIENT_TEMPLATE_KIT}const formatMailDateTime=${DISPLAY_DATETIME_BINDING};const canonicalMailFolder=${canonicalMailFolder.toString()};const mailFolderUid=${mailFolderUid.toString()};const mailFolderUidValidity=${mailFolderUidValidity.toString()};const mailFolderObservedUidValidity=${mailFolderObservedUidValidity.toString()};const mailFolderObject=${mailFolderObject.toString()};const mailFolderFlags=${mailFolderFlags.toString()};const readFolderSummary=${readFolderSummary.toString()};const readFolderList=${readFolderList.toString()};const readFolderMessage=${readFolderMessage.toString()};const readFolderMove=${readFolderMove.toString()};const mailFolderWriteUncertain=${mailFolderWriteUncertain.toString()};const mailFolderFingerprint=${mailFolderFingerprint.toString()};const createMailFolderWorkspace=${createMailFolderWorkspace.toString()};return ${bindMailFolderWorkspace.toString()};})()`

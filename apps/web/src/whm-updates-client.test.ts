@@ -191,7 +191,7 @@ describe('kernel exclusion browser workflow', () => {
     action('read').click(); await tick()
     expect(send).toHaveBeenLastCalledWith('GET', '/api/server/updates/plan?excludeKernel=true')
     expect(boxes().find(box => box.value === 'linux-image-generic')!.disabled).toBe(true)
-    expect(boxes().find(box => box.value === 'linux-image-generic')!.getAttribute('aria-label')).toBe(locale === 'en' ? 'Select linux-image-generic' : 'تحديد linux-image-generic')
+    expect(boxes().find(box => box.value === 'linux-image-generic')!.getAttribute('aria-label')).toBe(locale === 'en' ? 'Select linux-image-generic' : 'تحديد \u2066linux-image-generic\u2069')
     expect(document.querySelector('[data-whm-updates-rows]')!.textContent).toContain('linux-image-generic')
     action('all').click(); await tick()
     expect(send).toHaveBeenLastCalledWith('POST', '/api/server/updates/apply', { expectedRevision: revision, mode: 'all', excludeKernel: true })

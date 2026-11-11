@@ -29,6 +29,8 @@ describe('local archive review entry', () => {
     const link = root.querySelector<HTMLAnchorElement>('[data-backup-files] a')!
     expect(link.getAttribute('href')).toBe('/whm/backups/files?lang=en')
     expect(link.textContent).toContain(file)
+    expect(link.querySelector('bdi[dir="ltr"]')?.textContent).toBe(file)
+    expect(root.querySelector('[data-xp-slot="bytes"]')!.textContent).toBe('\u20662.00\u00a0KiB\u2069')
     expect(root.textContent).toContain('Choose an account to list its backups.')
     link.addEventListener('click', event => event.preventDefault()); link.click(); await tick()
     expect(request.mock.calls).toEqual([['GET', '/api/backups/accounts/alice']])

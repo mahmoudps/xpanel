@@ -88,7 +88,7 @@ export function classicScenarios({ navigation, registeredDocumentAliases, tools,
     supportEmail: 'support@example.test', logoUrl: '/branding/logo?v=1111111111111111', faviconUrl: '/branding/favicon?v=2222222222222222',
   }
   const base = (surface, route, locale, theme) => ({
-    surface, activeRoute: route, locale, theme, density: 'comfortable', mfaRuntimeMode: 'optional', generationId: 7,
+    surface, activeRoute: route, locale, theme, uiTheme: 'classic', density: 'comfortable', mfaRuntimeMode: 'optional', generationId: 7,
     accountId: surface === 'xpanel' || surface === 'xmail' ? account.id : undefined, realtimeEnabled: true, catalog: qualified,
     visibility: { principal: surface === 'xwhm' ? root : owner, disabledFeatures: new Set() }, liveState: live,
     security: { totpEnabled: false }, supportEmail: 'support@example.test',

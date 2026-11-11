@@ -6,6 +6,9 @@ import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
 import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+import { ASCII_BYTES_BINDING, formatIsolatedBytes as canonicalFormatClientBytes } from './display-format.ts'
+// Module-local alias: the binding source defines it again from ASCII_BYTES_BINDING.
+const formatClientBytes = canonicalFormatClientBytes
 const frameRequest = canonicalFrameRequest
 const displayDateTime = formatDisplayDateTime
 export type BackupFilesAccountView = { username: string; primaryDomain: string }
@@ -150,7 +153,7 @@ function bindWhmBackupFiles(): void {
       return (copy ? t(copy) : t('The request failed.')) + detail
     }
     const technical = (value: string): HTMLElement => record('backup-files-value', 'bdi', { value })
-    const size = (bytes: number): string => bytes < 1024 ? bytes + ' B' : bytes < 1048576 ? (bytes / 1024).toFixed(1) + ' KiB' : bytes < 1073741824 ? (bytes / 1048576).toFixed(1) + ' MiB' : (bytes / 1073741824).toFixed(2) + ' GiB'
+    const size = (bytes: number): string => formatClientBytes(bytes)
     const fill = (body: HTMLElement, rows: HTMLElement[], empty: string, columns: number): void => {
       body.replaceChildren(...(rows.length ? rows : [record('backup-files-empty' + columns, 'tr', { message: empty })]))
     }
@@ -325,4 +328,4 @@ function bindWhmBackupFiles(): void {
   })
 }
 
-export const WHM_BACKUP_FILES_CLIENT_BINDING = withFrameRequest(`(()=>{${VIEW_RECORD_HELPERS}const displayDateTime=${DISPLAY_DATETIME_BINDING};const readBackupFilesReply=${readBackupFilesReply.toString()};return ${bindWhmBackupFiles.toString()};})()`)
+export const WHM_BACKUP_FILES_CLIENT_BINDING = withFrameRequest(`(()=>{const formatClientBytes=${ASCII_BYTES_BINDING};${VIEW_RECORD_HELPERS}const displayDateTime=${DISPLAY_DATETIME_BINDING};const readBackupFilesReply=${readBackupFilesReply.toString()};return ${bindWhmBackupFiles.toString()};})()`)

@@ -43,7 +43,7 @@ describe('server information binding', () => {
     ;(window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest = vi.fn(async () => info)
     new Function('return ' + WHM_SERVER_INFO_CLIENT_BINDING)()(); await tick()
     expect($('[data-host-load]').textContent).toBe('0.5 0.25 0.1')
-    expect($('[data-host-memory]').textContent).toBe('1024 MB / 2048 MB')
+    expect($('[data-host-memory]').textContent).toBe('\u20661.00\u00a0GiB\u2069 / \u20662.00\u00a0GiB\u2069')
     expect($('[data-host-disk]').dir).toBe('ltr')
     expect($('[data-host-info-status]').dataset.state).toBe('read')
   })

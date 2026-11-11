@@ -17,19 +17,11 @@ export interface MailboxQuotaText {
  * (`userdb_quota_rule=*:storage=<n>M`, Dovecot M = 2^20). The label is therefore MiB.
  * Used space is shown only when a measurement was passed in.
  */
-const formatQuotaBytes = (bytes: number): string => {
-  if (bytes < 1000) return `${new Intl.NumberFormat('en-US').format(Math.round(bytes))} B`
-  const kb = bytes / 1000
-  const rounded = kb >= 100 ? Math.round(kb) : Math.round(kb * 10) / 10
-  return `${rounded} KB`
-}
+const mib = (value: number): string => formatAsciiBytes(value * 1024 * 1024)
 
-/** Decoded attachment bytes under 10,000 stay in bytes. Larger files use the decimal byte formatter. */
-export const formatAttachmentBytes = (bytes: number): string => {
-  if (!Number.isFinite(bytes) || bytes < 0) return '—'
-  if (bytes < 10_000) return `${new Intl.NumberFormat('en-US').format(Math.round(bytes))} B`
-  return formatAsciiBytes(bytes)
-}
+/** Attachment sizes use the product byte format. */
+export const formatAttachmentBytes = (bytes: number): string =>
+  !Number.isFinite(bytes) || bytes < 0 ? '—' : formatAsciiBytes(bytes)
 
 export const formatMailboxQuota = (
   used: number | undefined,
@@ -43,19 +35,19 @@ export const formatMailboxQuota = (
   const bytesKnown = typeof usedBytes === 'number' && Number.isFinite(usedBytes) && usedBytes >= 0 && usedBytes < 1024 * 1024
   if (bytesKnown && limitKnown) {
     return {
-      text: `${formatQuotaBytes(usedBytes)} / ${limit} MiB`,
+      text: `${formatAsciiBytes(usedBytes)} / ${mib(limit)}`,
       percent: Math.max(0, Math.min(100, Math.round((usedBytes / (limit * 1024 * 1024)) * 100))),
     }
   }
   if (usedKnown && limitKnown) {
     return {
-      text: `${used} / ${limit} MiB`,
+      text: `${mib(used)} / ${mib(limit)}`,
       percent: Math.max(0, Math.min(100, Math.round((used / limit) * 100))),
     }
   }
-  if (usedKnown && limit === 'unlimited') return { text: `${used} MiB / ${unlimited}`, percent: null }
-  if (usedKnown) return { text: `${used} MiB`, percent: null }
-  if (limitKnown) return { text: `— / ${limit} MiB`, percent: null }
+  if (usedKnown && limit === 'unlimited') return { text: `${mib(used)} / ${unlimited}`, percent: null }
+  if (usedKnown) return { text: mib(used), percent: null }
+  if (limitKnown) return { text: `— / ${mib(limit)}`, percent: null }
   if (limit === 'unlimited') return { text: `— / ${unlimited}`, percent: null }
   return { text: '—', percent: null }
 }

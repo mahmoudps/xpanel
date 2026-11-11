@@ -33,7 +33,8 @@ async function fontGate(page, locale) {
   assert.equal(result.glyph_check, true)
   if (locale === 'ar') assert.equal(result.body_family, 'sans-serif')
   else assert.ok(result.body_family.includes(result.family))
-  for (const family of locale === 'ar' ? ['IBM Plex Mono'] : [result.family, 'IBM Plex Mono']) assert.ok(result.faces.some(face => face.family === family && face.status === 'loaded'), 'The actual downloadable font must load: ' + family)
+  for (const family of locale === 'ar' ? [] : [result.family]) assert.ok(result.faces.some(face => face.family === family && face.status === 'loaded'), 'The actual downloadable font must load: ' + family)
+  assert.ok(result.faces.some(face => face.family === 'IBM Plex Mono' && ['loaded', 'unloaded'].includes(face.status)), 'The downloadable mono font must be registered without error')
   assert.deepEqual(result.faces.filter(face => face.status === 'error'), [])
   return result
 }
@@ -45,6 +46,8 @@ const syntheticMessage = { uid: 1, uidValidityObserved: true, uidValidity: 1001,
 async function geometry(page) {
   return page.evaluate(() => {
     const visible = element => element?.checkVisibility({ checkVisibilityCSS: true }) && !element.closest('[hidden],[inert]')
+    const isV2 = Boolean(document.querySelector('.v2-shell[data-surface="xmail"]'))
+    const scope = isV2 ? '.v2-shell[data-surface="xmail"]' : '[data-mail-layout]'
     const rect = selector => {
       const element = document.querySelector(selector)
       if (!element) return null
@@ -52,10 +55,12 @@ async function geometry(page) {
       return { x: box.x, y: box.y, width: box.width, height: box.height, visible: Boolean(visible(element)) }
     }
     const pairs = [
-      ...[...document.querySelectorAll('[data-mail-layout] label[for]')].map(label => ({ label, value: document.getElementById(label.htmlFor) })),
-      ...[...document.querySelectorAll('[data-mail-layout] dl > div')].map(field => ({ label: field.querySelector('dt'), value: field.querySelector('dd') })),
+      ...[...document.querySelectorAll(scope + ' label[for]')].filter(label => !label.classList.contains('v2-sr') && !label.classList.contains('xp-sr-only')).map(label => ({ label, value: document.getElementById(label.htmlFor) })),
+      ...[...document.querySelectorAll(scope + ' dl > div')].map(field => ({ label: field.querySelector('dt'), value: field.querySelector('dd') })),
     ]
-    const fields = pairs.filter(({ label, value }) => visible(label) && visible(value)).map(({ label, value }) => {
+    const rtl = document.documentElement.dir === 'rtl'
+    const edge = rtl ? 'right' : 'left'
+    const fields = pairs.filter(({ label, value }) => visible(label) && visible(value) && (value.tagName !== 'DD' || value.textContent.trim().length > 0)).map(({ label, value }) => {
       const labelRange = document.createRange(), valueRange = document.createRange()
       labelRange.selectNodeContents(label); valueRange.selectNodeContents(value)
       const labelBox = labelRange.getBoundingClientRect(), box = value.getBoundingClientRect(), style = getComputedStyle(value)
@@ -63,14 +68,24 @@ async function geometry(page) {
       const valueBox = control
         ? { left: box.left + parseFloat(style.paddingLeft) + parseFloat(style.borderLeftWidth), right: box.right - parseFloat(style.paddingRight) - parseFloat(style.borderRightWidth) }
         : valueRange.getBoundingClientRect()
-      const edge = document.documentElement.dir === 'rtl' ? 'right' : 'left'
-      return { label: label.textContent.trim(), id: value.id || null, control, edge_delta: Math.abs(labelBox[edge] - valueBox[edge]), glyph_edge_delta: control ? null : Math.abs(labelBox[edge] - valueBox[edge]), below: box.top >= labelBox.bottom - 1 }
+      const inline = Boolean(isV2 && ((label.closest('.v2-mail-compose-fields') && innerWidth >= 768) || label.closest('.v2-mail-sender__who')))
+      const sameRow = box.top < labelBox.bottom + 4 && labelBox.top < box.bottom + 4
+      const readingOrder = !rtl ? valueBox.left >= labelBox.right - 1 : valueBox.right <= labelBox.left + 1
+      return { label: label.textContent.trim(), id: value.id || null, control, inline, same_row: sameRow, reading_order: readingOrder, edge_delta: Math.abs(labelBox[edge] - valueBox[edge]), glyph_edge_delta: control ? null : Math.abs(labelBox[edge] - valueBox[edge]), below: box.top >= labelBox.bottom - 1 }
     })
     const targets = [...document.querySelectorAll('a[href],button,input,select,textarea,summary,[contenteditable="true"]')]
-      .filter(element => visible(element) && (!element.classList.contains('xp-skip-link') || document.activeElement === element))
-      .map(element => { const box = element.getBoundingClientRect(); return { tag: element.tagName, label: (element.getAttribute('aria-label') || element.textContent || element.id).trim().slice(0, 80), width: box.width, height: box.height } })
+      .filter(element => visible(element) && ((!element.classList.contains('xp-skip-link') && !element.classList.contains('v2-skip')) || document.activeElement === element))
+      .map(element => {
+        const hit = ['checkbox', 'radio'].includes(element.type) ? (element.labels?.[0] ?? element.closest('label') ?? element) : element
+        const box = hit.getBoundingClientRect()
+        return { tag: element.tagName, label: (element.getAttribute('aria-label') || element.textContent || element.id).trim().slice(0, 80), width: box.width, height: box.height }
+      })
     return {
-      header: rect('[data-mail-layout="reference"] > header'), folder: rect('[data-mail-pane="folders"]'), list: rect('[data-mail-pane="message-list"]'), reader: rect('[data-mail-pane="reading-pane"]'),
+      is_v2: isV2,
+      header: rect(isV2 ? '.v2-top' : '[data-mail-layout="reference"] > header'),
+      folder: rect(isV2 ? '[data-xp-sidebar]' : '[data-mail-pane="folders"]'),
+      list: rect('[data-mail-pane="message-list"]'),
+      reader: rect('[data-mail-pane="reading-pane"]'),
       fields, targets, scroll_width: document.documentElement.scrollWidth, viewport_width: innerWidth,
       ascii_digits: !/[\u0660-\u0669\u06f0-\u06f9]/.test(document.body.innerText),
     }
@@ -104,8 +119,7 @@ function inspectQuotaNodes({ controls = false } = {}) {
     }
     // Resolve the complete phrase, not the first descendant text node. Numeric
     // tokens may span several nested used/limit elements in the rendered meter.
-    const first = token('160'), slash = token('/'), limit = token('1024')
-    token('MiB')
+    const first = token('160'), usedUnit = token('MiB'), slash = token('/'), limit = token('1.00'), limitUnit = token('GiB')
     const labelRange = document.createRange(), valueRange = document.createRange()
     labelRange.selectNodeContents(label); valueRange.selectNodeContents(value)
     const labelBox = labelRange.getBoundingClientRect(), valueBox = valueRange.getBoundingClientRect()
@@ -113,7 +127,7 @@ function inspectQuotaNodes({ controls = false } = {}) {
       label: label.textContent, phrase: fullText.replace(/\s+/g, ' ').trim(), direction: getComputedStyle(value).direction,
       edge_delta: document.documentElement.dir === 'rtl' ? Math.abs(labelBox.right - valueBox.right) : Math.abs(labelBox.left - valueBox.left),
       label_bottom: labelBox.bottom, value_top: valueBox.top, text_node_count: nodes.length,
-      first, slash, limit,
+      first, usedUnit, slash, limit, limitUnit,
     }
   }
   if (controls) {
@@ -126,15 +140,15 @@ function inspectQuotaNodes({ controls = false } = {}) {
     value.dir = 'ltr'; value.style.display = 'block'
     fixture.append(label, value); document.body.append(fixture)
     try {
-      value.innerHTML = '<strong><span>1</span><span>60</span></strong> / <strong><span>10</span><span>24</span></strong> MiB'
+      value.innerHTML = '<strong><span>1</span><span>60</span></strong> MiB / <strong><span>1.</span><span>00</span></strong> GiB'
       const split = observe(value, label)
       const rejected = []
       for (const [name, html, expected] of [
-        ['missing-limit', '<strong>160</strong> / <strong>999</strong> MiB', 'Quota probe missing token: 1024'],
-        ['missing-slash', '<strong>160</strong> <strong>1024</strong> MiB', 'Quota probe missing token: /'],
-        ['grouped-limit', '<strong>160</strong> / <strong>1,024</strong> MiB', 'Quota probe missing token: 1024'],
-        ['malformed-grouping', '<strong>160</strong> / <strong>10,24</strong> MiB', 'Quota probe missing token: 1024'],
-        ['ambiguous-used', '<strong>160</strong> / <strong>1024</strong> MiB 160', 'Quota probe ambiguous token: 160'],
+        ['missing-limit', '<strong>160</strong> MiB / <strong>999</strong> MiB', 'Quota probe ambiguous token: MiB'],
+        ['missing-slash', '<strong>160</strong> MiB <strong>1.00</strong> GiB', 'Quota probe missing token: /'],
+        ['grouped-limit', '<strong>160</strong> MiB / <strong>1,024</strong> GiB', 'Quota probe missing token: 1.00'],
+        ['malformed-grouping', '<strong>160</strong> MiB / <strong>1,00</strong> GiB', 'Quota probe missing token: 1.00'],
+        ['ambiguous-used', '<strong>160</strong> MiB / <strong>1.00</strong> GiB 160', 'Quota probe ambiguous token: 160'],
       ]) {
         value.innerHTML = html
         let error = null
@@ -155,13 +169,13 @@ function inspectQuotaNodes({ controls = false } = {}) {
 
 async function quotaProbeControls(page) {
   const controls = await page.evaluate(inspectQuotaNodes, { controls: true })
-  assert.equal(controls.split.phrase, '160 / 1024 MiB')
+  assert.equal(controls.split.phrase, '160 MiB / 1.00 GiB')
   assert.ok(controls.split.text_node_count > 3)
   assert.ok(controls.split.first.start_node !== controls.split.first.end_node, 'The used token actually spans text nodes')
   assert.ok(controls.split.limit.start_node !== controls.split.limit.end_node, 'The limit token actually spans text nodes')
   assert.equal(controls.split.first.text, '160')
-  assert.equal(controls.split.limit.text, '1024')
-  assert.ok(controls.split.first.right <= controls.split.slash.left && controls.split.slash.right <= controls.split.limit.left, 'Split tokens retain nonoverlapping LTR glyph order')
+  assert.equal(controls.split.limit.text, '1.00')
+  assert.ok(controls.split.first.right <= controls.split.usedUnit.left && controls.split.usedUnit.right <= controls.split.slash.left && controls.split.slash.right <= controls.split.limit.left && controls.split.limit.right <= controls.split.limitUnit.left, 'Split tokens retain nonoverlapping LTR glyph order')
   assert.equal(controls.rejected.length, 5)
   for (const rejected of controls.rejected) {
     assert.equal(rejected.error?.name, 'Error', 'Invalid token controls must fail explicitly, not with a DOM Range exception')
@@ -173,15 +187,15 @@ async function quotaProbeControls(page) {
 async function quotaGate(page) {
   const observations = await page.evaluate(inspectQuotaNodes)
   for (const observation of observations) {
-    assert.equal(observation.phrase, '160 / 1024 MiB', 'The synthetic quota values and precise binary unit must not change')
+    assert.equal(observation.phrase, '160 MiB / 1.00 GiB', 'The synthetic quota values and precise binary unit must not change')
     assert.equal(observation.direction, 'ltr')
     assert.ok(observation.edge_delta < 1, 'Actual quota glyphs share the heading edge: ' + observation.label)
     assert.ok(observation.value_top >= observation.label_bottom - 1, 'Quota values sit directly below the heading')
     assert.equal(observation.first.text, '160')
     assert.equal(observation.slash.text, '/')
-    assert.equal(observation.limit.text, '1024')
-    assert.ok(observation.first.left < observation.slash.left && observation.slash.left < observation.limit.left, 'The actual quota glyphs keep 160 / 1024 ordering')
-    assert.ok(observation.first.right <= observation.slash.left && observation.slash.right <= observation.limit.left, 'Numeric tokens and slash must not overlap or reverse')
+    assert.equal(observation.limit.text, '1.00')
+    assert.ok(observation.first.left < observation.slash.left && observation.slash.left < observation.limit.left, 'The actual quota glyphs keep 160 MiB / 1.00 GiB ordering')
+    assert.ok(observation.first.right <= observation.usedUnit.left && observation.usedUnit.right <= observation.slash.left && observation.slash.right <= observation.limit.left && observation.limit.right <= observation.limitUnit.left, 'Numeric tokens and slash must not overlap or reverse')
   }
   return observations
 }
@@ -194,49 +208,60 @@ async function currentNavigation(page, state) {
 }
 
 async function keyboardGate(page) {
-  const skip = page.locator('.xp-skip-link')
+  const skip = page.locator('.v2-skip, .xp-skip-link')
   await skip.focus()
   const focus = await skip.evaluate(element => { const box = element.getBoundingClientRect(), style = getComputedStyle(element); return { focused: document.activeElement === element, width: box.width, height: box.height, outline: parseFloat(style.outlineWidth), style: style.outlineStyle } })
   assert.equal(focus.focused, true)
   assert.ok(focus.width >= 44 && focus.height >= 44 && focus.outline >= 2 && focus.style !== 'none')
   await page.keyboard.press('Enter')
   assert.equal(await page.locator('#main-content').evaluate(element => document.activeElement === element), true, 'The skip link must reach the main landmark')
-  const content = await page.evaluate(() => ({ heading_top: document.querySelector('h1').getBoundingClientRect().top, header_bottom: document.querySelector('[data-mail-layout="reference"] > header').getBoundingClientRect().bottom }))
+  const content = await page.evaluate(() => ({ heading_top: document.querySelector('h1').getBoundingClientRect().top, header_bottom: document.querySelector('.v2-top, [data-mail-layout="reference"] > header').getBoundingClientRect().bottom }))
   assert.ok(content.heading_top >= content.header_bottom - 1, 'The focused main heading must remain below the header')
   return { ...focus, ...content }
 }
 
 async function composerGate(page, state) {
   const nativeBoundary = await page.evaluate(() => {
+    const isV2 = Boolean(document.querySelector('.v2-shell[data-surface="xmail"]'))
     const composer = document.querySelector('[data-compose-form]'), send = composer?.querySelector('[data-mail-send="true"]')
+    const nonThemeForms = [...document.forms].filter(form => !form.hasAttribute('data-ui-theme-form'))
     return {
-      forms: [...document.forms].map(form => ({
+      is_v2: isV2,
+      forms: nonThemeForms.map(form => ({
         role: form.getAttribute('role'), action: form.getAttribute('action'), method: form.getAttribute('method'),
         fields: [...form.elements].map(control => ({ tag: control.tagName, name: control.getAttribute('name'), type: control.type })),
         locale: form.querySelector('[name="lang"]')?.value, theme: form.querySelector('[name="theme"]')?.value,
         contains_compose: Boolean(form.querySelector('[data-compose-form], [data-mail-send], [id^="compose-"]')),
       })),
+      theme_form_contains_compose: Boolean(document.querySelector('[data-ui-theme-form] [data-compose-form], [data-ui-theme-form] [data-mail-send], [data-ui-theme-form] [id^="compose-"]')),
       action_owners: [...document.querySelectorAll('[action]')].map(element => element.tagName),
       form_overrides: document.querySelectorAll('[form], [formaction], [formmethod], [formenctype], [formtarget], [onsubmit]').length,
       composer_tag: composer?.tagName, composer_role: composer?.getAttribute('role'),
       composer_form: Boolean(composer?.closest('form')), nested_composer_form: Boolean(composer?.querySelector('form')),
       send_form: Boolean(send?.form),
-      submit_controls: [...document.querySelectorAll('button, input')].filter(control => ['submit', 'image'].includes(control.type)).length,
+      submit_controls: [...document.querySelectorAll('button, input')].filter(control => ['submit', 'image'].includes(control.type) && !control.closest('[data-ui-theme-form]')).length,
     }
   })
-  assert.deepEqual(nativeBoundary.forms, [{
-    role: 'search', action: '/mail/inbox', method: 'get',
-    fields: [
-      { tag: 'INPUT', name: 'lang', type: 'hidden' },
-      { tag: 'INPUT', name: 'theme', type: 'hidden' },
-      { tag: 'INPUT', name: 'q', type: 'search' },
-    ],
-    locale: state.locale, theme: state.theme, contains_compose: false,
-  }], 'The sole native form is the exact local read-only GET inbox search')
-  assert.deepEqual(nativeBoundary.action_owners, ['FORM'], 'Only that search form owns a native action')
+  assert.equal(nativeBoundary.theme_form_contains_compose, false)
+  if (nativeBoundary.is_v2) {
+    assert.deepEqual(nativeBoundary.forms, [], 'No non-theme native form exists on v2 compose')
+    assert.deepEqual(nativeBoundary.action_owners, [], 'No element owns a native submission action on v2 compose')
+    assert.equal(nativeBoundary.composer_tag, 'SECTION')
+  } else {
+    assert.deepEqual(nativeBoundary.forms, [{
+      role: 'search', action: '/mail/inbox', method: 'get',
+      fields: [
+        { tag: 'INPUT', name: 'lang', type: 'hidden' },
+        { tag: 'INPUT', name: 'theme', type: 'hidden' },
+        { tag: 'INPUT', name: 'q', type: 'search' },
+      ],
+      locale: state.locale, theme: state.theme, contains_compose: false,
+    }], 'The sole native form is the exact local read-only GET inbox search')
+    assert.deepEqual(nativeBoundary.action_owners, ['FORM'], 'Only that search form owns a native action')
+    assert.equal(nativeBoundary.composer_tag, 'DIV')
+    assert.equal(nativeBoundary.composer_role, 'group')
+  }
   assert.equal(nativeBoundary.form_overrides, 0, 'Controls cannot override or associate with a native form')
-  assert.equal(nativeBoundary.composer_tag, 'DIV')
-  assert.equal(nativeBoundary.composer_role, 'group')
   assert.equal(nativeBoundary.composer_form, false, 'Compose fields have no native submission ancestor')
   assert.equal(nativeBoundary.nested_composer_form, false, 'Compose contains no nested native form')
   assert.equal(nativeBoundary.send_form, false, 'Send has no native form owner')
@@ -244,35 +269,37 @@ async function composerGate(page, state) {
   const composer = page.locator('[data-compose-form]'), send = composer.locator('[data-mail-send="true"]')
   assert.equal(await composer.getAttribute('data-mail-send-availability'), 'available')
   assert.equal(await send.count(), 1)
+  // The synthetic session reads an empty saved-identity collection before Send becomes available.
+  await page.waitForFunction(() => document.querySelector('[data-compose-identities]')?.dataset.composeIdentitiesState === 'ready')
   assert.equal(await send.isDisabled(), false)
   assert.equal(await send.getAttribute('type'), 'button')
-  const from = page.locator('#compose-from'), mailbox = await page.locator('[data-mail-layout="reference"]').getAttribute('data-mailbox')
+  const from = page.locator('#compose-from'), mailbox = await page.locator('.v2-shell[data-surface="xmail"], [data-mail-layout="reference"]').getAttribute('data-mailbox')
   assert.equal(await from.evaluate(element => element.tagName), 'SELECT')
-  // The synthetic session reads an empty saved-identity collection, so the authenticated mailbox address is the sole sender.
-  await page.waitForFunction(() => document.querySelector('[data-compose-identities]')?.dataset.composeIdentitiesState === 'ready')
   assert.deepEqual(await from.locator('option').evaluateAll(options => options.map(option => ({ value: option.value, selected: option.selected, addr: option.dataset.addr }))), [{ value: '', selected: true, addr: mailbox }])
   await from.selectOption({ index: 0 })
   assert.equal(await from.evaluate(element => element.selectedOptions[0]?.dataset.addr), mailbox, 'The authenticated mailbox address remains the sole native sender option')
   assert.equal(await composer.locator('[data-mail-action="save-draft"][disabled]').count(), 1)
   await page.locator('#compose-to').fill('recipient@example.test')
-  const directions = async () => composer.evaluate(element => ['compose-subject', 'compose-body'].map(id => {
+  const expectedAlign = state.locale === 'ar' ? 'right' : 'left'
+  const directions = async () => composer.evaluate((element, fallback) => ['compose-subject', 'compose-body'].map(id => {
     const input = element.querySelector('#' + id), style = getComputedStyle(input)
-    return { id, value: input.isContentEditable ? input.innerText : input.value, dir: input.getAttribute('dir'), direction: style.direction, alignment: style.textAlign }
-  }))
+    const align = ['match-parent', '-webkit-match-parent'].includes(style.textAlign) ? fallback : style.textAlign
+    return { id, value: input.isContentEditable ? input.innerText : input.value, dir: input.getAttribute('dir'), direction: style.direction, alignment: align }
+  }), expectedAlign)
   await page.locator('#compose-subject').fill('رسالة تجريبية. الاختبار رقم 1.')
   await page.locator('#compose-body').fill('نص عربي مع test@example.test. السطر التالي.')
   const arabic = await directions()
-  for (const input of arabic) { assert.equal(input.dir, 'auto'); assert.equal(input.direction, 'rtl'); assert.equal(input.alignment, state.locale === 'ar' ? 'right' : 'left') }
+  for (const input of arabic) { assert.equal(input.dir, 'auto'); assert.equal(input.direction, 'rtl'); assert.equal(input.alignment, expectedAlign) }
   await page.locator('#compose-subject').fill('Synthetic unsent input')
   await page.locator('#compose-body').fill('Synthetic preview. This must never send.')
   const english = await directions()
-  for (const input of english) { assert.equal(input.dir, 'auto'); assert.equal(input.direction, 'ltr'); assert.equal(input.alignment, state.locale === 'ar' ? 'right' : 'left') }
+  for (const input of english) { assert.equal(input.dir, 'auto'); assert.equal(input.direction, 'ltr'); assert.equal(input.alignment, expectedAlign) }
   await page.locator('#compose-subject').press('Enter')
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
   assert.equal(await page.locator('#compose-subject').inputValue(), 'Synthetic unsent input')
   assert.equal(await page.locator('#compose-body').innerText(), 'Synthetic preview. This must never send.')
   assert.equal(new URL(page.url()).pathname, '/mail/compose')
-  return { explicit_send_available: true, send_clicked: false, native_form: false, search_form: nativeBoundary.forms[0], configured_sender_option: mailbox, arabic, english, input_preserved_after_enter: true }
+  return { explicit_send_available: true, send_clicked: false, native_form: false, search_form: nativeBoundary.forms[0] ?? null, configured_sender_option: mailbox, arabic, english, input_preserved_after_enter: true }
 }
 
 async function mobileGate(page, state) {
@@ -288,8 +315,8 @@ async function mobileGate(page, state) {
     assert.equal(await toggle.evaluate(element => document.activeElement === element), true)
     return { navigation: 'modal', escape_returns_focus: true, quota }
   }
-  assert.equal(await page.locator('[data-mail-layout="reference"]').getAttribute('data-board-port'), 'xmail-' + state.screen, 'Inline navigation is limited to the actual current mail board')
-  assert.equal(await sidebar.evaluate(element => element.tagName), 'NAV')
+  assert.equal(await page.locator('[data-board-port]').first().getAttribute('data-board-port'), 'xmail-' + state.screen, 'Inline navigation is limited to the actual current mail board')
+  assert.ok(['NAV', 'ASIDE'].includes(await sidebar.evaluate(element => element.tagName)))
   assert.equal(await sidebar.isVisible(), true, 'The current inline folder navigation remains visible')
   assert.notEqual(await sidebar.getAttribute('role'), 'dialog')
   assert.notEqual(await sidebar.getAttribute('aria-modal'), 'true')
@@ -341,10 +368,12 @@ export async function runMailLayoutAcceptance({ output, filter } = {}) {
         // Send becomes available; the inbox reads its synthetic folder list and the opened message (no attachments).
         const requested = new URL(route.request().url()), path = requested.pathname
         if (path === '/api/auth/me') { await route.fulfill({ json: { csrfToken: 'synthetic-mail-layout-csrf' } }); return }
+        if (path === '/api/auth/ui-preferences') { await route.fulfill({ json: { state: 'default', uiTheme: 'v2', choices: ['classic', 'v2'], revision: '0'.repeat(64), updatedAt: null, application: 'next_navigation' } }); return }
         if (state.screen === 'inbox' && path === '/api/webmail/inbox' && requested.searchParams.get('folder') === 'INBOX') { await route.fulfill({ json: { mailbox: syntheticMailbox, folder: 'INBOX', complete: true, messages: [syntheticMessage], capabilities: { move: false } } }); return }
         if (state.screen === 'inbox' && path === '/api/webmail/inbox/' + syntheticMessage.uid && requested.searchParams.get('folder') === 'INBOX') { await route.fulfill({ json: { mailbox: syntheticMailbox, folder: 'INBOX', message: { ...syntheticMessage, body: 'This is synthetic visual test data.' } } }); return }
         if (state.screen === 'inbox' && path === '/api/webmail/attachment-workspace') { await route.fulfill({ json: { context: { mailbox: syntheticMailbox, folder: 'INBOX', uid: syntheticMessage.uid, uidValidity: syntheticMessage.uidValidity }, attachments: [] } }); return }
         if (state.screen === 'compose' && path === '/api/webmail/identities') { await route.fulfill({ json: { identities: [] } }); return }
+        if (state.screen === 'compose' && path === '/api/webmail/contacts') { await route.fulfill({ json: { contacts: [] } }); return }
         if (state.screen === 'compose' && path === '/api/webmail/vacation') { await route.fulfill({ json: { context: { mailbox: syntheticMailbox }, revision: '0'.repeat(64), vacation: null, application: { status: 'configuration_only', nativeApplied: false } } }); return }
         await route.continue()
       })
@@ -356,7 +385,8 @@ export async function runMailLayoutAcceptance({ output, filter } = {}) {
         for (const [key, value] of Object.entries({ lang: state.locale, theme: state.theme, density: 'compact', accountId: 'visual-account' })) url.searchParams.set(key, value)
         assert.equal((await page.goto(url.href, { waitUntil: 'domcontentloaded' })).status(), 200)
         assert.equal(await page.locator('html').getAttribute('data-visual-fixture'), 'synthetic')
-        assert.equal(await page.locator('[data-mail-layout="reference"]').count(), 1)
+        const isV2 = await page.locator('.v2-shell[data-surface="xmail"]').count() === 1
+        assert.equal(await page.locator('.v2-shell[data-surface="xmail"], [data-mail-layout="reference"]').count(), 1)
         assert.equal(await page.locator('main').count(), 1)
         assert.equal(await page.locator('h1').count(), 1)
         assert.equal(await page.locator('html').getAttribute('data-realtime-enabled'), 'false')
@@ -365,7 +395,10 @@ export async function runMailLayoutAcceptance({ output, filter } = {}) {
         outcome.fonts = await fontGate(page, state.locale)
         if (!probeControls) probeControls = await quotaProbeControls(page)
         outcome.applied_fonts = {}
-        for (const [role, selector, family, typographyRole] of [['brand', '[data-mail-layout="reference"] > header > a:first-of-type > span:last-child', 'IBM Plex Mono', 'mail-wordmark'], ['heading', state.screen === 'inbox' ? '#list-title' : '#compose-title', state.locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans', 'ordinary']]) {
+        const brandCheck = isV2
+          ? ['brand', state.width >= 960 ? '.v2-side .v2-brand__name' : '.v2-top__brand', state.locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans', 'ordinary']
+          : ['brand', '[data-mail-layout="reference"] > header > a:first-of-type > span:last-child', 'IBM Plex Mono', 'mail-wordmark']
+        for (const [role, selector, family, typographyRole] of [brandCheck, ['heading', state.screen === 'inbox' ? '#list-title' : '#compose-title', state.locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans', 'ordinary']]) {
           try { outcome.applied_fonts[role] = await assertAppliedFont(page, selector, family, { role: typographyRole }) }
           catch (error) { if (error.appliedFontObservation) outcome.applied_fonts[role] = error.appliedFontObservation; throw error }
         }
@@ -377,30 +410,41 @@ export async function runMailLayoutAcceptance({ output, filter } = {}) {
         outcome.geometry = await geometry(page)
         const observed = outcome.geometry
         assert.ok(observed.scroll_width <= state.width + 1, 'The document must not overflow horizontally')
-        assert.ok(Math.abs(observed.header.width - state.width) < 1, 'The mail header spans the full workspace')
+        const expectedHeaderWidth = observed.is_v2 && state.width >= 960 ? state.width - observed.folder.width : state.width
+        assert.ok(Math.abs(observed.header.width - expectedHeaderWidth) < 1, 'The mail header spans the full workspace')
         assert.equal(observed.ascii_digits, true)
         assert.ok(observed.targets.length > 0 && observed.targets.every(target => target.width >= 43.9 && target.height >= 43.9), 'Rendered interactive controls meet the approved 44px target')
-        assert.ok(observed.fields.length >= 3, 'Actual labeled fields are measured non-vacuously')
+        assert.ok(observed.fields.length >= (observed.is_v2 && state.screen === 'inbox' ? 1 : 3), 'Actual labeled fields are measured non-vacuously')
         for (const field of observed.fields) {
-          assert.ok(field.label && field.edge_delta < 1 && field.below, 'Nonempty labels sit directly above their values: ' + field.label)
-          if (field.glyph_edge_delta !== null) assert.ok(field.glyph_edge_delta < 1, 'The actual value glyphs share the locale edge: ' + field.label)
+          assert.ok(field.label, 'Nonempty field label required')
+          if (field.inline) assert.ok(field.same_row && field.reading_order, 'Inline field sits beside its label in reading order: ' + field.label)
+          else {
+            assert.ok(field.edge_delta < 1 && field.below, 'Nonempty labels sit directly above their values: ' + field.label)
+            if (field.glyph_edge_delta !== null) assert.ok(field.glyph_edge_delta < 1, 'The actual value glyphs share the locale edge: ' + field.label)
+          }
         }
         if (state.screen === 'inbox') {
-          if (state.width >= 960) { assert.equal(observed.folder.visible, true); assert.ok(Math.abs(observed.folder.width - 200) < 1); assert.ok(observed.list.height >= 700, 'The continuous inbox fills the desktop workspace') }
+          if (observed.is_v2) {
+            assert.equal(await page.locator('[data-mail-detail-subject]').isVisible(), true)
+            assert.equal(await page.locator('[data-mail-detail-from]').isVisible(), true)
+            assert.equal(await page.locator('[data-mail-detail-date]').isVisible(), true)
+          }
+          if (state.width >= 960) { assert.equal(observed.folder.visible, true); assert.ok(Math.abs(observed.folder.width - (observed.is_v2 ? 264 : 200)) < 1); assert.ok(observed.list.height >= (observed.is_v2 ? 560 : 700), 'The continuous inbox fills the desktop workspace') }
           else {
             // Below 960px the folder navigation is a drawer behind the visible Menu toggle (checked as a modal by mobileGate); otherwise it is inline.
             const drawer = await page.locator('[data-action="toggle-mobile-nav"]:visible').count() > 0
             assert.equal(observed.folder.visible, !drawer, 'Narrow folder navigation is inline or behind the visible Menu drawer')
             if (!drawer) assert.ok(observed.folder.width <= state.width + 1, 'Inline folder navigation fits the narrow viewport')
           }
-          if (state.width >= 640) assert.ok(Math.abs(observed.list.y - observed.reader.y) < 1, 'Tablet and desktop keep list and reader side by side')
+          if (state.width >= (observed.is_v2 ? 768 : 640)) assert.ok(Math.abs(observed.list.y - observed.reader.y) < 1, 'Tablet and desktop keep list and reader side by side')
           else assert.ok(observed.reader.y >= observed.list.y + observed.list.height - 1, 'Phone panes stack in reading order')
         }
         outcome.keyboard = await keyboardGate(page)
         if (state.screen === 'compose') outcome.composer = await composerGate(page, state)
         if (state.width < 960) outcome.mobile = await mobileGate(page, state)
         outcome.quota = await quotaGate(page)
-        if (state.screen === 'compose' || state.width >= 960) assert.ok(outcome.quota.length > 0, 'Visible mailbox quota glyphs are measured')
+        if (state.width >= 960) assert.ok(outcome.quota.length > 0, 'Visible mailbox quota glyphs are measured')
+        else if (state.screen === 'compose') assert.ok(outcome.quota.length > 0 || (await page.locator('[data-mail-storage-card]').textContent())?.replace(/\s+/g, ' ').includes('160 MiB / 1.00 GiB'), 'Compose storage card or inline quota shows 160 MiB / 1.00 GiB')
         outcome.unexpected_console = outcome.console_errors.filter(error => !/\/api\/auth\/me(?:\?|$)/.test(error.url))
         assert.deepEqual(outcome.unexpected_console, [])
         assert.deepEqual(outcome.page_errors, [])

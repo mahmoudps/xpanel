@@ -48,7 +48,8 @@ function bindMailboxSettings(): void {
       if (!Number.isNaN(when.getTime())) node.textContent = `${when.getFullYear()}-${two(when.getMonth() + 1)}-${two(when.getDate())} ${two(when.getHours())}:${two(when.getMinutes())}`
     }
   }
-  const inputs = [...document.querySelectorAll<HTMLInputElement>('input[name="to"],input[name="cc"],input[name="bcc"]')]
+  // Only the compose form: the filter test form has a field named "to" as well and needs no address book.
+  const inputs = [...document.querySelectorAll<HTMLInputElement>('[data-compose-form="true"] input[name="to"],[data-compose-form="true"] input[name="cc"],[data-compose-form="true"] input[name="bcc"]')]
   if (!inputs.length || document.getElementById('compose-contact-suggestions')) return
   // Compose autocomplete: the browser's own list keeps keyboard, RTL and screen reader behaviour.
   request('GET', '/api/webmail/contacts').then(raw => {

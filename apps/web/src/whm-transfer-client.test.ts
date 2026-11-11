@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderWhmTransferWorkspace } from './board-port/whm-transfer-workspace.ts'
 import { WHM_TRANSFER_CLIENT_BINDING } from './whm-transfer-client.ts'
-import { ASCII_BYTES_BINDING, formatAsciiBytes } from './display-format.ts'
+import { ASCII_BYTES_BINDING, formatIsolatedBytes } from './display-format.ts'
 
 const id = (value: number) => 'aaaaaaaa-aaaa-4aaa-8aaa-' + String(value).padStart(12, '0')
 const entry = (state = 'created', inventory: unknown = null, review: { accounts: { source: string; target: string; plan: string; domains: string[]; mailboxes: number }[] } | null = null, digest: string | null = null) => ({ session: { id: id(1), actor: 'synthetic-root', createdAt: '2026-10-26T12:00:00.000Z', updatedAt: '2026-10-26T12:00:00.000Z', state,
@@ -51,10 +51,10 @@ const model = (initial = entry(), execute = false) => {
 }
 
 describe('persisted transfer review browser contract', () => {
-  it.each([[0, '0 B'], [64, '64 B'], [1500, '1.50 KB'], [2_100_000_000, '2.10 GB']] as const)('ships the canonical standalone byte formatter for observed %s bytes', (bytes, expected) => {
+  it.each([[0, '\u20660\u00a0B\u2069'], [64, '\u206664\u00a0B\u2069'], [1500, '\u20661.46\u00a0KiB\u2069'], [2_100_000_000, '\u20661.96\u00a0GiB\u2069']] as const)('ships the canonical standalone byte formatter for observed %s bytes', (bytes, expected) => {
     document.documentElement.lang = 'ar'
     const standalone = new Function('return ' + ASCII_BYTES_BINDING)() as (bytes: number) => string
-    expect(standalone(bytes)).toBe(expected); expect(standalone(bytes)).toBe(formatAsciiBytes(bytes))
+    expect(standalone(bytes)).toBe(expected); expect(standalone(bytes)).toBe(formatIsolatedBytes(bytes))
     expect(standalone(bytes)).not.toMatch(/[\u0660-\u0669\u06f0-\u06f9]/)
   })
 
@@ -145,10 +145,10 @@ describe('persisted transfer review browser contract', () => {
     initial.session.selection.accounts = ['alice']; initial.session.progress = { alice: { phase: 'copying', bytes: 32, totalBytes: 64 } }
     const f = model(initial); f.boot(); await tick()
     expect(document.querySelector('[data-whm-detail-section="transfer-identities"] tbody')!.textContent).toContain('alice')
-    expect(document.querySelector('[data-whm-detail-section="transfer-progress"] tbody')!.textContent).toContain('32 / 64')
+    expect(document.querySelector('[data-whm-detail-section="transfer-progress"] tbody')!.textContent).toContain('\u206632\u00a0B\u2069 / \u206664\u00a0B\u2069')
     expect(document.querySelector('[data-transfer-progress-state]')!.getAttribute('data-transfer-progress-state')).toBe('read')
     f.setCurrent(entry()); button('refresh').click(); await tick(); await tick()
-    expect(document.querySelector('[data-whm-detail-section="transfer-progress"] tbody')!.textContent).not.toContain('32 / 64')
+    expect(document.querySelector('[data-whm-detail-section="transfer-progress"] tbody')!.textContent).not.toContain('\u206632\u00a0B\u2069 / \u206664\u00a0B\u2069')
     expect(document.querySelector('[data-transfer-progress-state]')!.getAttribute('data-transfer-progress-state')).toBe('not-read')
   })
   it('uploads the archive in checked pieces without discarding an unsaved source selection', async () => {
@@ -225,7 +225,7 @@ describe('transfer human session dates preserve persisted option identity', () =
     expect(document.querySelector('[data-transfer-archive-limit]')!.textContent).toBe(lang === 'ar' ? 'الحد الأقصى لحجم الأرشيف: 524288 بايت' : 'Maximum archive size: 524288 bytes')
     const picker = document.querySelector<HTMLSelectElement>('[data-transfer-session]')!, option = picker.options[0]!
     expect(option.textContent).toContain('2026-10-27 12:00 UTC')
-    expect(option.textContent).toMatch(lang === 'ar' ? /^جلسة غير مرقمة · .+ · 2026-10-27 12:00 UTC · .+$/ : /^Unnumbered session · .+ · 2026-10-27 12:00 UTC · .+$/)
+    expect(option.textContent).toMatch(lang === 'ar' ? /^جلسة غير مرقمة · .+ · \u20662026-10-27 12:00 UTC\u2069 · .+$/ : /^Unnumbered session · .+ · 2026-10-27 12:00 UTC · .+$/)
     expect(option.textContent).not.toContain(rawAt); expect(option.textContent).not.toContain(id(1))
     expect(option.value).toBe(id(1)); expect(picker.value).toBe(id(1))
     expect(f.send.mock.calls.map(call => call.slice(0, 2))).toEqual([['GET', '/api/transfers/sessions'], ['GET', '/api/plans']])

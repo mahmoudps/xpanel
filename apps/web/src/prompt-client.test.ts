@@ -117,6 +117,18 @@ describe.each([
     expect(document.querySelector('[data-xp-prompt]')).toBeNull(); expect(fetch).not.toHaveBeenCalled()
   })
 
+  it('puts a command on its own left-to-right line before the body and clears it on the next prompt', async () => {
+    const ask = mount(markup, 'ar')
+    void ask({ title: 'Delete scheduled command?', body: 'Saved configuration is reconciled.', code: '/opt/xpanel/php/8.3/bin/php ~/cron.php', danger: true })
+    const dialog = document.querySelector<HTMLDialogElement>('[data-xp-prompt]')!, body = dialog.querySelector('[data-xp-prompt-body]')!
+    const code = body.querySelector<HTMLElement>('code[data-xp-prompt-code]')!
+    expect([code.dir, code.textContent, body.firstChild === code, code.nextSibling?.nodeName]).toEqual(['ltr', '/opt/xpanel/php/8.3/bin/php ~/cron.php', true, 'BR'])
+    expect(body.textContent).toBe('/opt/xpanel/php/8.3/bin/php ~/cron.phpSaved configuration is reconciled.')
+    dialog.close('cancel')
+    void ask({ title: 'Plain', body: 'No command.' })
+    expect(body.querySelector('code')).toBeNull()
+  })
+
   it('does not adopt a pre-existing unowned dialog', async () => {
     const ask = mount(markup)
     const unowned = document.createElement('dialog'); unowned.setAttribute('data-xp-prompt', ''); document.body.appendChild(unowned)

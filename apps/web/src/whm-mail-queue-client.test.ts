@@ -55,7 +55,7 @@ describe('mail queue client binding', () => {
     expect(send).toHaveBeenCalledWith('GET', '/api/server/mail-queue')
     expect(status().dataset.state).toBe('read')
     expect(document.querySelector('[data-whm-mail-queue-count="deferred"]')!.textContent).toBe('1')
-    expect(document.querySelector('[data-whm-mail-queue-total-size]')!.textContent).toBe('4.0 KB')
+    expect(document.querySelector('[data-whm-mail-queue-total-size]')!.textContent).toBe('\u20664.00\u00a0KiB\u2069')
     expect(document.querySelector('[data-whm-mail-queue-observed-at]')!.textContent).toBe('2026-10-27 10:00 UTC')
     const rows = document.querySelectorAll('[data-whm-mail-queue-rows] tr')
     expect(rows).toHaveLength(2)

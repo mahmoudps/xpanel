@@ -136,7 +136,7 @@ function bindSvcPanels(askDialog: Ask | undefined): void {
         }
         body.append(tr)
       }
-      if (!rows.length) { const tr = document.createElement('tr'), td = document.createElement('td'); td.colSpan = columns.length + (ops.length ? 1 : 0); td.textContent = body.dataset.svcEmpty ?? ''; tr.append(td); body.append(tr) }
+      if (!rows.length) { const tr = document.createElement('tr'), td = document.createElement('td'); td.colSpan = columns.length + (ops.length ? 1 : 0); td.dataset.tableEmpty = ''; td.textContent = body.dataset.svcEmpty ?? ''; tr.append(td); body.append(tr) }
     }
     const confirmed = async (message: unknown): Promise<boolean> => {
       if (!message) return true

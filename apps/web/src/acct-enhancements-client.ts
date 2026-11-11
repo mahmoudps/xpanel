@@ -108,10 +108,10 @@ function bindWhmEnhancements(askDialog: ((options: Record<string, unknown>) => P
     const syncChoices = (): void => {
       const enhancements = (view?.document.definitions ?? []).map(item => ({ id: item.id, label: item.label }))
       const scope = inputs['assign-scope']!.value
-      fill(inputs['assign-target'] as HTMLSelectElement, scope === 'plan' ? (view?.directory.plans ?? []).map(plan => ({ id: plan.id, label: plan.name })) : (view?.directory.accounts ?? []).map(account => ({ id: account.id, label: account.username })), scope === 'plan' ? t('No plans exist') : t('No accounts exist'))
-      fill(inputs['assign-enhancement'] as HTMLSelectElement, enhancements, t('No enhancements defined'))
-      fill(inputs['limit-enhancement'] as HTMLSelectElement, enhancements, t('No enhancements defined'))
-      fill(inputs['limit-reseller'] as HTMLSelectElement, (view?.directory.resellers ?? []).map(reseller => ({ id: reseller.id, label: reseller.username })), t('No resellers exist'))
+      fill(inputs['assign-target'] as HTMLSelectElement, scope === 'plan' ? (view?.directory.plans ?? []).map(plan => ({ id: plan.id, label: plan.name })) : (view?.directory.accounts ?? []).map(account => ({ id: account.id, label: account.username })), !view ? t('Not read') : scope === 'plan' ? t('No plans exist') : t('No accounts exist'))
+      fill(inputs['assign-enhancement'] as HTMLSelectElement, enhancements, view ? t('No enhancements defined') : t('Not read'))
+      fill(inputs['limit-enhancement'] as HTMLSelectElement, enhancements, view ? t('No enhancements defined') : t('Not read'))
+      fill(inputs['limit-reseller'] as HTMLSelectElement, (view?.directory.resellers ?? []).map(reseller => ({ id: reseller.id, label: reseller.username })), view ? t('No resellers exist') : t('Not read'))
       valueField.hidden = view?.document.definitions.find(item => item.id === inputs['assign-enhancement']!.value)?.kind !== 'limit'
     }
     const removeButton = (accessible: string, change: (document: WhmEnhancementsDocument) => void): HTMLButtonElement => {

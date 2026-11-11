@@ -65,8 +65,14 @@ export const dbCard = (key: string, title: string, bodyHtml: string, options: { 
 export const dbEmptyRow = (columns: number, text: string): string =>
   `<tr><td colspan="${columns}" class="v2-db-unread">${escapeHtml(text)}</td></tr>`
 
+// Server-rendered rows carry the same phone labels as the rows the controller rebuilds.
+const labelCells = (headings: readonly string[], rowsHtml: string): string => rowsHtml.replace(/<tr[ >].*?<\/tr>/gs, row => {
+  let index = 0
+  return row.replace(/<td(?=[ >])(?! colspan)/g, cell => index++ > 0 && headings[index - 1] ? `${cell} data-label="${escapeHtml(headings[index - 1]!)}"` : cell)
+})
+
 export const dbTable = (id: string, title: string, headings: readonly string[], bodyHtml: string, bodyHooks: HookAttributes, tableHooks?: HookAttributes): string =>
-  `<div class="v2-db-table-region" role="region" tabindex="0" aria-label="${escapeHtml(title)}"><table id="${escapeHtml(id)}" class="v2-table"${hookAttrs(tableHooks)}><caption class="v2-sr">${escapeHtml(title)}</caption><thead><tr>${headings.map(heading => `<th scope="col">${escapeHtml(heading)}</th>`).join('')}</tr></thead><tbody${hookAttrs(bodyHooks)}>${bodyHtml}</tbody></table></div>`
+  `<div class="v2-db-table-region" role="region" tabindex="0" aria-label="${escapeHtml(title)}"><table id="${escapeHtml(id)}" class="v2-table"${hookAttrs(tableHooks)}><caption class="v2-sr">${escapeHtml(title)}</caption><thead><tr>${headings.map(heading => `<th scope="col">${escapeHtml(heading)}</th>`).join('')}</tr></thead><tbody${hookAttrs(bodyHooks)}>${labelCells(headings, bodyHtml)}</tbody></table></div>`
 
 export function dbPage(t: Translate, route: DatabaseRoute, title: string, description: string, bodyHtml: string): string {
   return `<div class="v2-db-page">${pageHeader(t, {

@@ -170,7 +170,7 @@ describe('scoped authorized DOM row binding', () => {
     document.documentElement.lang = 'ar'
     document.body.innerHTML = workspace('a', row(1) + row(2))
     bind()
-    expect(status()).toContain('1–2 من 2')
+    expect(status()).toContain('\u20661–2\u2069 من 2')
     expect(status()).not.toMatch(/[\u0660-\u0669\u06f0-\u06f9]/)
     change('whm-account', 'unknown')
     expect(status()).toBe('لا توجد نتائج مطابقة في الصفوف المحمّلة.')

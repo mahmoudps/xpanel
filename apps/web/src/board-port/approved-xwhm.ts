@@ -98,7 +98,7 @@ import { renderApprovedWhmPlanSupplement, renderApprovedWhmFeatureListSupplement
 import { renderApprovedWhmOperationsSupplement } from './approved-whm-operations-components.ts'
 import { renderApprovedWhmAccountCreateFields, renderApprovedWhmAccountCreateStatus, renderApprovedWhmAccountBulkControls } from './approved-whm-account-components.ts'
 import { auditActionLabel, auditActorLabel, auditOutcomeLabel, auditTargetLabel } from '../audit-labels.ts'
-import { escapeHtml, formatDisplayDateTime, renderLtrValue } from '../tokens.ts'
+import { escapeHtml, formatAsciiBytes, formatAsciiRate, formatDisplayDateTime, renderLtrValue } from '../tokens.ts'
 import { openFrameReads } from '../read-only-frame.ts'
 import { shownFeatureKeys } from '@xpanel/catalog'
 import { SOURCE_LOCALE, catalogText, translator, type Locale } from '../i18n.ts'
@@ -155,7 +155,7 @@ const table = (v: View, title: Copy, headers: readonly Copy[], rows: readonly (r
 const pick = (v: View, name: string, label: Copy, options: readonly (readonly [string, string])[], current: string | undefined, id = `whm-detail-${name}`): string => {
   return `<div class="xp-whm-detail-field"><label for="${id}">${v.text(label)}</label><select id="${id}" name="${escapeHtml(name)}"${v.readOnly ? ' disabled' : ''}>${current === undefined ? `<option value="">${v.text(msgid('Choose…'))}</option>` : ''}${options.map(([key, title]) => `<option value="${escapeHtml(key)}"${key === current ? ' selected' : ''}>${title}</option>`).join('')}</select></div>`
 }
-const limitText = (v: View, limit: Limit | undefined, unit = ''): string => limit === undefined ? v.text(unavailable) : limit === 'unlimited' ? v.text(msgid('Unlimited')) : renderLtrValue(`${limit}${unit ? ' ' + unit : ''}`)
+const limitText = (v: View, limit: Limit | undefined, unit = ''): string => limit === undefined ? v.text(unavailable) : limit === 'unlimited' ? v.text(msgid('Unlimited')) : renderLtrValue(unit === 'MiB' ? formatAsciiBytes(limit * 1024 * 1024) : unit === 'B/s' ? formatAsciiRate(limit) : `${limit}${unit ? ' ' + unit : ''}`)
 /** The scoped saved lists a read-only document carries; no catalog travels, so every operation stays closed. */
 const savedLists = (input: DetailProps): DetailProps => ({ principal: input.principal, visibility: input.visibility, activeReseller: input.activeReseller, accounts: input.accounts,
   plans: input.plans, resellers: input.resellers, featureLists: input.featureLists, domains: input.domains, dnsZones: input.dnsZones })

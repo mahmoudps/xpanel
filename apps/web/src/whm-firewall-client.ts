@@ -84,7 +84,7 @@ function bindWhmFirewall(askDialog?: (options: Record<string, unknown>) => Promi
     }
     const failure = (error: unknown): string => { const message = error && typeof error === 'object' ? (error as { message?: unknown }).message : null; return typeof message === 'string' && message.length < 300 ? message : t('The request failed. Nothing was changed.') }
     const button = (label: string, run: () => void, disabled = false): HTMLButtonElement => { const node = cloneViewRecord(root, 'firewall-action', 'button', { label }) as HTMLButtonElement; node.disabled = disabled || busy; node.addEventListener('click', () => { if (!busy) run() }); return node }
-    const emptyRow = (body: HTMLElement, columns: number, message: string): void => { const row = cloneViewRecord(root, 'firewall-empty', 'tr', { message }); viewAction<HTMLTableCellElement>(row, 'cell', 'td').colSpan = columns; body.append(row) }
+    const emptyRow = (body: HTMLElement, columns: number, message: string): void => { const row = cloneViewRecord(root, 'firewall-empty', 'tr', { message }); viewAction<HTMLTableCellElement>(row, 'cell', 'td').colSpan = columns; body.append(row) }; const ruleCount = (body: Element, total: number): void => { const slot = body.closest('[data-whm-firewall-panel]')?.querySelector('[data-firewall-rule-count]'); if (slot) slot.textContent = String(total) } // optional slot: a theme may show a list's size as text
     const system = (rule: FirewallRuleView): boolean => rule.id.startsWith('default-')
     const locked = (rule: FirewallRuleView): boolean => /^default-backend(?:-tls)?-/.test(rule.id)
     const action = (rule: FirewallRuleView): string => rule.action === 'accept' ? t('Allow') : rule.action === 'reject' ? t('Reject') : t('Drop')
@@ -164,7 +164,7 @@ function bindWhmFirewall(askDialog?: (options: Record<string, unknown>) => Promi
         const selected = rules.filter(rule => rule.kind === kind)
         for (const rule of selected) {
           const index = rules.indexOf(rule), row = cloneViewRecord(root, 'firewall-' + kind + '-row', 'tr', values(rule, index)) as HTMLTableRowElement
-          row.dataset.firewallRuleId = rule.id
+          row.dataset.firewallRuleId = rule.id; row.dataset.listAction = rule.action
           const group = viewAction(row, 'actions', 'div')
           if (locked(rule)) group.textContent = t('Locked to loopback')
           else {
@@ -175,7 +175,7 @@ function bindWhmFirewall(askDialog?: (options: Record<string, unknown>) => Promi
           }
           body.append(row)
         }
-        if (!selected.length) emptyRow(body, columns, t('No saved rules of this type.'))
+        if (!selected.length) emptyRow(body, columns, t('No saved rules of this type.')); ruleCount(body, selected.length)
         // the static edit and discard placeholders of this panel are superseded by the live row actions
         table.closest('[data-whm-firewall-panel]')?.querySelectorAll<HTMLElement>(':scope > [data-firewall-static-management]').forEach(node => { node.hidden = true })
       }
@@ -197,12 +197,12 @@ function bindWhmFirewall(askDialog?: (options: Record<string, unknown>) => Promi
         const rule = view.rules.find(entry => entry.kind === 'prefix-list' && entry.list === item.name), row = cloneViewRecord(root, 'firewall-prefix-row', 'tr', { name: item.name, action: rule ? action(rule) : '—', entries: item.entries, port: rule?.port ?? t('All ports'), file: '—', updated: '—' })
         body.append(row)
       }
-      if (!body.childElementCount) emptyRow(body, 6, t('No prefix lists yet.'))
+      if (!body.childElementCount) emptyRow(body, 6, t('No prefix lists yet.')); ruleCount(body, view.prefixLists.length)
     }
     const listField = (name: string): HTMLInputElement | HTMLSelectElement | null => listsPanel?.querySelector<HTMLInputElement | HTMLSelectElement>('[name="' + name + '"]') ?? null
     const uploadList = async (replace: boolean): Promise<void> => {
       const name = listField('firewall-prefix-name')?.value.trim() ?? '', file = (listField('firewall-prefix-file') as HTMLInputElement | null)?.files?.[0]
-      if (!/^[a-z][a-z0-9_]{0,23}$/.test(name) || !file || file.size > 4 * 1024 * 1024) { note('failed', t('Give the list a name such as blocklist_feed and choose a plain text file of at most 4 MB.')); return }
+      if (!/^[a-z][a-z0-9_]{0,23}$/.test(name) || !file || file.size > 4 * 1024 * 1024) { note('failed', t('Give the list a name such as blocklist_feed and choose a plain text file of at most 4 MiB.')); return }
       const entries = await file.text(), choice = listField('firewall-prefix-action')?.value ?? ''
       await write('PUT', '/api/firewall/prefix-lists/' + name, { entries, ...(replace || !choice ? {} : { action: choice, ports: listField('firewall-prefix-ports')?.value.trim() ?? '' }) })
     }
@@ -236,7 +236,7 @@ function bindWhmFirewall(askDialog?: (options: Record<string, unknown>) => Promi
         const row = cloneViewRecord(root, 'firewall-ban-row', 'tr', { address: item.address, reason: '—', source: '—', since: '—', expires: item.expiresSec === null ? '—' : t('{seconds} s left', { seconds: String(item.expiresSec) }) })
         viewAction(row, 'actions', 'div').append(button(t('Unban'), () => { void unban([item.address]) })); body.append(row)
       }
-      if (!body.childElementCount) emptyRow(body, 6, bans.state === 'read' ? t('No address is banned now.') : t('The live ban sets have not been applied on this host yet.'))
+      if (!body.childElementCount) emptyRow(body, 6, bans.state === 'read' ? t('No address is banned now.') : t('The live ban sets have not been applied on this host yet.')); ruleCount(body, bans.bans.length)
     }
     const unbanHook = bansPanel?.querySelector<HTMLButtonElement>('[data-firewall-action="unban"]')
     if (unbanHook) { unbanHook.removeAttribute('data-wiring'); unbanHook.disabled = false; unbanHook.addEventListener('click', () => { const field = bansPanel!.querySelector<HTMLInputElement>('[name="firewall-unban-address"]'); void unban((field?.value ?? '').split(/[\s,]+/).filter(Boolean)) }) }

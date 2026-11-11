@@ -6,6 +6,9 @@ import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
 import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+import { ASCII_BYTES_BINDING, formatIsolatedBytes as canonicalFormatClientBytes } from './display-format.ts'
+// Module-local alias: the binding source defines it again from ASCII_BYTES_BINDING.
+const formatClientBytes = canonicalFormatClientBytes
 const frameRequest = canonicalFrameRequest
 const formatMailDateTime = formatDisplayDateTime
 
@@ -97,7 +100,7 @@ function bindWhmMailQueue(askDialog: Ask | undefined): void {
     const selected = new Set<string>()
     const note = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
     const technical = (value: string): HTMLElement => { const bdi = document.createElement('bdi'); bdi.dir = 'ltr'; bdi.textContent = value; return bdi }
-    const size = (bytes: number): string => bytes < 1024 ? bytes + ' B' : bytes < 1048576 ? (bytes / 1024).toFixed(1) + ' KB' : (bytes / 1048576).toFixed(1) + ' MB'
+    const size = (bytes: number): string => formatClientBytes(bytes)
     const age = (message: MailQueueMessageView): number => Math.max(0, Math.floor((Date.parse(view?.observedAt ?? message.arrivalTime) - Date.parse(message.arrivalTime)) / 1000))
     const ageText = (seconds: number): string => seconds < 3600 ? t('{n} min', { n: Math.floor(seconds / 60) }) : seconds < 86400 ? t('{n} h', { n: Math.floor(seconds / 3600) }) : t('{n} d', { n: Math.floor(seconds / 86400) })
     const shown = (): MailQueueMessageView[] => {
@@ -133,7 +136,7 @@ function bindWhmMailQueue(askDialog: Ask | undefined): void {
         put('arrived', technical(formatMailDateTime(item.arrivalTime))); put('age', ageText(age(item))); put('bytes', technical(size(item.sizeBytes)))
         put('sender', item.sender ? technical(item.sender) : t('Null sender (bounce)'))
         const first = item.recipients[0]
-        put('recipients', String(item.recipientCount), ...(first ? [' · ', technical(first.address)] : []), ...(item.recipientCount > 1 ? [technical(' +' + (item.recipientCount - 1))] : []))
+        put('recipients', technical(String(item.recipientCount) + (first ? ' · ' + first.address : '') + (item.recipientCount > 1 ? ' +' + (item.recipientCount - 1) : '')))
         const reason = item.recipients.find(recipient => recipient.delayReason)?.delayReason
         put('reason', reason ? technical(reason) : t('None reported'))
         const actions = whmClientNode(root, 'whm-mail-queue-actions', 'div')
@@ -245,4 +248,4 @@ function bindWhmMailQueue(askDialog: Ask | undefined): void {
   })
 }
 
-export const WHM_MAIL_QUEUE_CLIENT_BINDING = withFrameRequest(`(()=>{${WHM_CLIENT_TEMPLATE_BINDING}const formatMailDateTime=${DISPLAY_DATETIME_BINDING};const readMailQueueView=${readMailQueueView.toString()};const readMailQueueActionResult=${readMailQueueActionResult.toString()};return ${bindWhmMailQueue.toString()};})()`)
+export const WHM_MAIL_QUEUE_CLIENT_BINDING = withFrameRequest(`(()=>{const formatClientBytes=${ASCII_BYTES_BINDING};${WHM_CLIENT_TEMPLATE_BINDING}const formatMailDateTime=${DISPLAY_DATETIME_BINDING};const readMailQueueView=${readMailQueueView.toString()};const readMailQueueActionResult=${readMailQueueActionResult.toString()};return ${bindWhmMailQueue.toString()};})()`)

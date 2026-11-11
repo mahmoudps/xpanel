@@ -68,6 +68,10 @@ function controllerReferences(js) {
   }
   for (const m of js.matchAll(/(?:get|has)Attribute\(\s*['"](data-[a-z0-9-]+|name|role)['"]/g)) names.add(m[1])
   for (const m of js.matchAll(/\.dataset\.([a-zA-Z][a-zA-Z0-9]*)/g)) names.add(`data-${m[1].replace(/[A-Z]/g, c => `-${c.toLowerCase()}`)}`)
+  // Permission flags are passed by name to frameAccess, which reads them with getAttribute.
+  for (const m of js.matchAll(/frameAccess\(\s*[\w$.]+\s*,\s*['"](data-[a-z0-9-]+)['"]\s*,\s*['"](data-[a-z0-9-]+)['"]/g)) { names.add(m[1]); names.add(m[2]) }
+  // Templates are looked up by name through one shared helper, so the selector value is interpolated.
+  if (/\[data-xp-template=["']?\$\{/.test(js)) names.add('data-xp-template')
   for (const m of js.matchAll(/getElementById\(\s*['"]([\w-]+)['"]/g)) ids.add(m[1])
   for (const m of js.matchAll(/#([a-z][\w-]*)/g)) ids.add(m[1])
   return { names, pairs, ids }
@@ -94,6 +98,8 @@ function documentHooks(html, sharedJs) {
   const hooks = new Set()
   for (const node of nodes) {
     if (node.template >= 0 || node.namespace === 'html' && node.tag === 'template') continue
+    // The classic account page wraps its read-only native sections in this marker; its state is not a theme contract.
+    if (node.attrs.has('data-classic-native-security')) continue
     for (const [name, value] of node.attrs) {
       if (name === 'id' && refs.ids.has(value) && ID.test(value)) hooks.add(`#${value}`)
       if (!HOOK_NAME.test(name)) continue
@@ -109,12 +115,13 @@ function documentHooks(html, sharedJs) {
 const sharedJs = await serveStaticAsset('/assets/ws-client.js').text()
 const live = createInitialLiveEventState()
 
+// The recorded contracts observe the classic theme; the default theme is no longer classic.
 const generationFailures = []
 const login = {}, loginDisabled = {}
 for (const audience of ['xpanel', 'xwhm', 'xmail'])
   {
-    const enabledHtml = renderWebApp({ surface: 'login', locale: 'en', theme: 'light', login: { audience } })
-    const disabledHtml = renderWebApp({ surface: 'login', locale: 'en', theme: 'light', mfaRuntimeMode: 'disabled', login: { audience } })
+    const enabledHtml = renderWebApp({ surface: 'login', uiTheme: 'classic', locale: 'en', theme: 'light', login: { audience } })
+    const disabledHtml = renderWebApp({ surface: 'login', uiTheme: 'classic', locale: 'en', theme: 'light', mfaRuntimeMode: 'disabled', login: { audience } })
     for (const html of [enabledHtml, disabledHtml]) {
       const issues = checkConformance(html, loginContract(audience))
       if (issues.length) generationFailures.push({ route: `/login:${audience}`, issues })
@@ -125,7 +132,7 @@ for (const audience of ['xpanel', 'xwhm', 'xmail'])
 
 const pages = registeredThemeDocuments().map(page => {
   const renderState = {
-    surface: page.surface, activeRoute: page.route, locale: 'en', theme: 'light', catalog: qualified, liveState: live,
+    surface: page.surface, uiTheme: 'classic', activeRoute: page.route, locale: 'en', theme: 'light', catalog: qualified, liveState: live,
     visibility: { principal: principals[page.surface], disabledFeatures: new Set() }, ...identity[page.surface],
     ...(['/security/ssl', '/email/forwarders'].includes(page.route) ? { panel: { ...identity.xpanel.panel, domains: [sslDomain] } } : {}),
     ...(page.route === '/domains/site-settings' ? { panel: { ...identity.xpanel.panel, domains: [sslDomain], activeDomain: sslDomain.name, customConfig: { domainId: sslDomain.id, accountId: sslDomain.accountId, domainName: sslDomain.name, nginxInclude: '', apacheInclude: '', userIni: {}, customHeaders: {}, cacheBypassPaths: [], updatedAt: '', updatedBy: 'user' } } } : {}),

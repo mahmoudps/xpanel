@@ -159,7 +159,7 @@ msgstr "يمكنك إضافة 18 صندوقًا"
 
 #: apps/web/src/board-port/xmail-inbox.ts
 msgid "1–{shown} of {total}"
-msgstr "1–{shown} من {total}"
+msgstr "⁦1–{shown}⁩ من {total}"
 
 #: apps/web/src/board-port/xpanel-home.fixture.ts
 msgid "2 / 5 addon"
@@ -3845,8 +3845,8 @@ msgid "Attachments read from this message. Download links expire after 5 minutes
 msgstr "قُرئت المرفقات من هذه الرسالة. تنتهي صلاحية روابط التنزيل بعد 5 دقائق."
 
 #: apps/web/src/mail-attachments-client.ts
-msgid "Attachments · {count} · {bytes} B"
-msgstr "المرفقات · {count} · {bytes} B"
+msgid "Attachments · {count} · {size}"
+msgstr "المرفقات · {count} · {size}"
 
 #: apps/web/src/board-port/approved-xwhm.ts apps/web/src/board-port/ops-integrations-workspace.ts apps/web/src/board-port/whm-mail-log-workspace.ts apps/web/src/board-port/xmail-track-delivery.ts apps/web/src/design-board.ts
 msgid "Attempts"
@@ -6259,8 +6259,8 @@ msgid "Choose a mailbox"
 msgstr "اختر صندوق بريد"
 
 #: apps/web/src/account-runtime-client.ts
-msgid "Choose a memory limit from 8 to {max} MB. Nothing was saved."
-msgstr "اختر حد ذاكرة من 8 إلى {max} MB. لم يُحفظ شيء."
+msgid "Choose a memory limit from 8 to {max} MiB. Nothing was saved."
+msgstr "اختر حد ذاكرة من 8 إلى {max} MiB. لم يُحفظ شيء."
 
 #: apps/web/src/board-port/xmail-inbox.ts
 msgid "Choose a message from the list to read it here."
@@ -11334,6 +11334,10 @@ msgstr "قُرئ استخدام المساحة للمجلدات: {count}"
 msgid "Disk used, MB"
 msgstr "القرص المستخدم، MB"
 
+#: apps/web/src/themes/v2/pages/xwhm/monitoring/snapshots.ts
+msgid "Disk used, MiB"
+msgstr "القرص المستخدم، MiB"
+
 #: apps/web/src/board-canvas.ts
 msgid "Disk write"
 msgstr "كتابة القرص"
@@ -12010,10 +12014,6 @@ msgctxt "whm-announcements-client"
 msgid "Edit"
 msgstr "تحرير"
 
-#: apps/web/src/whm-announcements-client.ts
-msgid "Edit announcement"
-msgstr "تحرير الإعلان"
-
 #: apps/web/src/board-port/approved-xpanel-pages.ts
 msgid "Edit autoresponder"
 msgstr "تعديل الرد التلقائي"
@@ -12085,10 +12085,6 @@ msgstr "تعديل قواعد الموقع والتحقق قبل استبدال 
 #: apps/web/src/acct-team-client.ts
 msgid "Edit team member"
 msgstr "تعديل عضو الفريق"
-
-#: apps/web/src/acct-templates-client.ts
-msgid "Edit template"
-msgstr "تعديل القالب"
 
 #: apps/web/src/board-port/account-htaccess-workspace.ts
 msgid "Edit the actual file for an authorized domain. Each save keeps the prior content, runs a protected Apache test and checks the site locally. A failed site check triggers guarded restoration."
@@ -14218,6 +14214,10 @@ msgstr "الملفات المطلوب رفعها"
 msgid "Files up to 2 MB. The upload stays inside this account."
 msgstr "الحد 2 ميجابايت. يبقى الرفع داخل هذا الحساب."
 
+#: apps/web/src/themes/v2/pages/xpanel/files/index.ts
+msgid "Files up to 2 MiB. The upload stays inside this account."
+msgstr "الحد 2 MiB. يبقى الرفع داخل هذا الحساب."
+
 #: apps/web/src/surfaces/xpanel.ts
 msgid "Files you move to the trash stay here until you restore them or delete them for good."
 msgstr "تبقى الملفات التي تنقلها إلى سلة المهملات هنا حتى تستعيدها أو تحذفها نهائيًا."
@@ -15160,8 +15160,8 @@ msgid "Give every mapping row a package name of up to 64 characters and a plan."
 msgstr "حدد لكل صف ربط اسم باقة لا يتجاوز 64 حرفًا وخطة."
 
 #: apps/web/src/whm-firewall-client.ts
-msgid "Give the list a name such as blocklist_feed and choose a plain text file of at most 4 MB."
-msgstr "سمِّ القائمة باسم مثل blocklist_feed واختر ملفًا نصيًا لا يتجاوز 4 ميغابايت."
+msgid "Give the list a name such as blocklist_feed and choose a plain text file of at most 4 MiB."
+msgstr "سمِّ القائمة باسم مثل blocklist_feed واختر ملفًا نصيًا لا يتجاوز 4 MiB."
 
 #: apps/web/src/board-port/approved-xwhm.ts
 msgid "Global account defaults for PHP-FPM and lsphp have not been read and have no connected setup write operation. Per-domain PHP settings do not establish these global defaults."
@@ -17958,8 +17958,8 @@ msgid "Languages"
 msgstr "اللغات"
 
 #: apps/web/src/board-port/xmail-disk-usage.ts
-msgid "Larger than (MB)"
-msgstr "أكبر من (ميغابايت)"
+msgid "Larger than (MiB)"
+msgstr "أكبر من (MiB)"
 
 #: apps/web/src/board-port/sec-workspace.ts
 msgid "Larger uploads get 413."
@@ -17975,8 +17975,8 @@ msgid "Largest request body"
 msgstr "أكبر جسم للطلب"
 
 #: apps/web/src/board-port/sec-workspace.ts
-msgid "Largest request body (MB)"
-msgstr "أكبر حجم لجسم الطلب (MB)"
+msgid "Largest request body (MiB)"
+msgstr "أكبر حجم لجسم الطلب (MiB)"
 
 #: apps/web/src/board-port/account-database-insights-workspace.ts
 msgid "Largest tables"
@@ -18871,10 +18871,6 @@ msgstr "تُرفض عناوين الاسترجاع وهذا الخادم وعن�
 msgid "Lower-case letters and digits, starting with a letter."
 msgstr "أحرف لاتينية صغيرة وأرقام، ويبدأ بحرف."
 
-#: apps/web/src/board-port/whm-jobs-workspace.ts
-msgid "Lowercase letters, digits and . _ : - only, for example"
-msgstr "أحرف إنجليزية صغيرة وأرقام و . _ : - فقط، مثل"
-
 #: apps/web/src/board-port/whm-panel-tokens-workspace.ts
 msgid "Lowercase letters, digits and dashes, up to 64 characters."
 msgstr "أحرف إنجليزية صغيرة وأرقام وشرطات، حتى 64 حرفًا."
@@ -19278,8 +19274,8 @@ msgid "Mailbox quota"
 msgstr "حصة صندوق البريد"
 
 #: apps/web/src/board-port/approved-xpanel-pages.ts apps/web/src/board-port/extensions/email-accounts.ts
-msgid "Mailbox quota (MB)"
-msgstr "حصة صندوق البريد (MB)"
+msgid "Mailbox quota (MiB)"
+msgstr "حصة صندوق البريد (MiB)"
 
 #: apps/web/src/surfaces/xmail.ts
 msgid "Mailbox quota: not read"
@@ -19953,6 +19949,10 @@ msgstr "الذاكرة {memory} · المعالج {cpu} · العمليات {pro
 #: apps/web/src/board-port/whm-monitoring-workspace.ts
 msgid "Memory, MB"
 msgstr "الذاكرة، MB"
+
+#: apps/web/src/themes/v2/pages/xwhm/monitoring/snapshots.ts
+msgid "Memory, MiB"
+msgstr "الذاكرة، MiB"
 
 #: apps/web/src/board-port/whm-monitoring-workspace.ts
 msgid "Memory, highest first"
@@ -25665,7 +25665,7 @@ msgstr "name = value واحد في كل سطر. حذف السطر يعيد ال�
 
 #: apps/web/src/board-port/approved-whm-operations-components.ts
 msgid "One port or a range such as 8000-8100. Leave source empty for any source."
-msgstr "منفذ واحد أو نطاق مثل 8000-8100. اترك المصدر فارغًا لأي مصدر."
+msgstr "منفذ واحد أو نطاق مثل ⁦8000-8100⁩. اترك المصدر فارغًا لأي مصدر."
 
 #: apps/web/src/board-port/acct-templates-workspace.ts
 msgid "One record per line: name, TTL in seconds, type, the priority for MX and SRV, then the content, for example: shop 3600 CNAME www.%domain%. These are added to the default zone. Lines starting with ; are ignored. Placeholders: {placeholders}. A line using %ipv6% is left out for an account without IPv6."
@@ -25684,6 +25684,10 @@ msgstr "تستعيد الدفعة الواحدة 500 رسالة كحد أقصى 
 #: apps/web/src/board-port/account-virus-scan-workspace.ts
 msgid "One scan at a time and one start every 15 minutes. Symbolic links are not followed, files larger than 100 MB are skipped and at most 400 MB is scanned from each archive."
 msgstr "فحص واحد في كل مرة وبدء واحد كل 15 دقيقة. لا تُتبع الروابط الرمزية، وتُتخطى الملفات الأكبر من 100 MB، ويُفحص 400 MB على الأكثر من كل أرشيف."
+
+#: apps/web/src/themes/v2/pages/xpanel/security/tools.ts
+msgid "One scan at a time and one start every 15 minutes. Symbolic links are not followed, files larger than 100 MiB are skipped and at most 400 MiB is scanned from each archive."
+msgstr "فحص واحد في كل مرة وبدء واحد كل 15 دقيقة. لا تُتبع الروابط الرمزية، وتُتخطى الملفات الأكبر من 100 MiB، ويُفحص 400 MiB على الأكثر من كل أرشيف."
 
 #: apps/web/src/board-port/ops-terminal-workspace.ts
 msgid "One session at a time. It closes when idle, at its time limit, or when you close it."
@@ -25738,7 +25742,7 @@ msgstr "تُعرض معلومات الحساب المقروءة صراحةً ف�
 
 #: apps/web/src/board-port/whm-server-observation-workspace.ts
 msgid "Only file names in /etc/cron.d are listed. File contents are never read."
-msgstr "تُعرض أسماء الملفات في /etc/cron.d فقط. لا تُقرأ محتويات الملفات أبدًا."
+msgstr "تُعرض أسماء الملفات في ‎/etc/cron.d فقط. لا تُقرأ محتويات الملفات أبدًا."
 
 #: apps/web/src/board-port/acct-staging-workspace.ts
 msgid "Only files are staged. Databases are not copied; a site that uses a database keeps using the live one."
@@ -26330,7 +26334,7 @@ msgstr "المؤسسة"
 
 #: apps/web/src/board-port/account-git-workspace.ts apps/web/src/board-port/db-engines-workspace.ts apps/web/src/board-port/sw-deployments-workspace.ts apps/web/src/board-port/whm-updates-workspace.ts
 msgid "Origin"
-msgstr "المصدر"
+msgstr "المنشأ"
 
 #: apps/web/src/account-web-directives-client.ts
 msgid "Other access rules in this file would combine with blocked addresses."
@@ -27402,8 +27406,8 @@ msgid "Path protection"
 msgstr "حماية المسارات"
 
 #: apps/web/src/board-port/approved-xpanel-pages.ts
-msgid "Path quota (MB)"
-msgstr "حصة المسار (MB)"
+msgid "Path quota (MiB)"
+msgstr "حصة المسار (MiB)"
 
 #: apps/web/src/board-port/account-git-workspace.ts
 msgid "Path relative to home"
@@ -32679,8 +32683,8 @@ msgid "Requested permissions"
 msgstr "الأذونات المطلوبة"
 
 #: apps/web/src/board-port/approved-xpanel-pages.ts apps/web/src/board-port/extensions/email-accounts.ts
-msgid "Requested quota (MB)"
-msgstr "الحصة المطلوبة (MB)"
+msgid "Requested quota (MiB)"
+msgstr "الحصة المطلوبة (MiB)"
 
 #: apps/web/src/whm-jobs-client.ts
 msgid "Requested; takes effect before the next step"
@@ -32900,7 +32904,7 @@ msgstr "حل تنبيه الموفّق"
 
 #: apps/web/src/board-port/whm-server-observation-workspace.ts
 msgid "Resolvers (/etc/resolv.conf)"
-msgstr "المحللات (/etc/resolv.conf)"
+msgstr "المحللات (‎/etc/resolv.conf)"
 
 #: apps/web/src/whm-composer-client.ts
 msgid "Resolving the dependency graph with the confined provider…"
@@ -34284,6 +34288,11 @@ msgstr "تحتاج تطبيقات Ruby إلى ملف Gemfile في مجلد ال�
 #: apps/web/src/board-port/account-owner-tools-cards.ts apps/web/src/account-owner-tools-client.ts
 msgid "Rule"
 msgstr "خط فاصل"
+
+#: apps/web/src/models/svc-panels.ts
+msgctxt "waf-rules"
+msgid "Rule"
+msgstr "قاعدة"
 
 #: apps/web/src/board-port/approved-whm-operations-components.ts
 msgid "Rule categories"
@@ -39234,7 +39243,7 @@ msgstr "ملفات ثابتة من جذر المستندات"
 
 #: apps/web/src/board-port/whm-server-observation-workspace.ts
 msgid "Static hostname (/etc/hostname)"
-msgstr "اسم المضيف الثابت (/etc/hostname)"
+msgstr "اسم المضيف الثابت (‎/etc/hostname)"
 
 #: apps/web/src/board-port/account-site-publisher-workspace.ts
 msgid "Static page preview"
@@ -44367,6 +44376,10 @@ msgstr "الفحص في الانتظار. حدّث الصفحة لمتابعته
 #: apps/web/src/board-port/whm-security-tools-workspace.ts
 msgid "The scan runs as a host job on the account home only. Symbolic links are not followed, files over 100 MB and archives over 400 MB of content are skipped, and a scan can use about 1 GB of memory."
 msgstr "يعمل الفحص كمهمة على المضيف لمجلد الحساب فقط. لا تُتبع الروابط الرمزية، وتُتخطى الملفات الأكبر من 100 MB والأرشيفات التي يتجاوز محتواها 400 MB، وقد يستهلك الفحص نحو 1 GB من الذاكرة."
+
+#: apps/web/src/themes/v2/pages/xwhm/security/tools.ts
+msgid "The scan runs as a host job on the account home only. Symbolic links are not followed, files over 100 MiB and archives over 400 MiB of content are skipped, and a scan can use about 1 GiB of memory."
+msgstr "يعمل الفحص كمهمة على المضيف لمجلد الحساب فقط. لا تُتبع الروابط الرمزية، وتُتخطى الملفات الأكبر من 100 MiB والأرشيفات التي يتجاوز محتواها 400 MiB، وقد يستهلك الفحص نحو 1 GiB من الذاكرة."
 
 #: apps/web/src/account-virus-scan-client.ts
 msgid "The scan start could not be confirmed. No retry was sent. Refresh before starting again."
@@ -51270,8 +51283,8 @@ msgid "{bytes, plural, one {# byte} other {# bytes}}"
 msgstr "{bytes, plural, zero {لا بايتات} one {بايت واحد} two {بايتان} few {# بايتات} many {# بايتًا} other {# بايت}}"
 
 #: apps/web/src/whm-transfer-client.ts
-msgid "{bytes} bytes, compared"
-msgstr "{bytes} بايت، تمت المقارنة"
+msgid "{size}, compared"
+msgstr "{size}، تمت المقارنة"
 
 #: apps/web/src/mail-contacts-tools-client.ts
 msgid "{cards} card(s) are ready to import after confirmation."
@@ -51821,7 +51834,7 @@ msgid "{n} selected"
 msgstr "{n} مختار"
 
 #: apps/web/src/whm-mail-server-client.ts
-msgid "{n} values differ from the configuration xPanel renders. Use the reviewed repair workflow."
+msgid "{n, plural, one {# value differs from the configuration xPanel renders.} other {# values differ from the configuration xPanel renders.}} Use the reviewed repair workflow."
 msgstr "{n, plural, one {قيمة واحدة تختلف عن الإعدادات التي يولّدها xPanel.} two {قيمتان تختلفان عن الإعدادات التي يولّدها xPanel.} few {{n} قيم تختلف عن الإعدادات التي يولّدها xPanel.} other {{n} قيمة تختلف عن الإعدادات التي يولّدها xPanel.}} استخدم سير عمل الإصلاح المراجَع."
 
 #: apps/web/src/mail-calendar-client.ts
@@ -51926,7 +51939,7 @@ msgstr "من {start} إلى {end}"
 
 #: apps/web/src/board-port/approved-xwhm-table-filters.ts
 msgid "{start}–{end} of {total} loaded rows · Page {page} of {totalPages}"
-msgstr "{start}–{end} من {total} صفًا محمّلًا · الصفحة {page} من {totalPages}"
+msgstr "⁦{start}–{end}⁩ من {total} صفًا محمّلًا · الصفحة {page} من {totalPages}"
 
 msgid "{status} (paused)"
 msgstr "{status} (متوقف مؤقتًا)"
@@ -51981,10 +51994,6 @@ msgstr "المستخدم {used} · الحر {free}"
 #: apps/web/src/account-database-remote-client.ts
 msgid "{users} database users · {databases} active databases"
 msgstr "مستخدمو قواعد البيانات: {users} · قواعد البيانات النشطة: {databases}"
-
-#: apps/web/src/account-runtime-client.ts
-msgid "{value} MB"
-msgstr "{value} MB"
 
 #: apps/web/src/acct-backup-runs-client.ts apps/web/src/whm-backups-client.ts
 msgid "{verified} of {total}"
@@ -53073,8 +53082,8 @@ msgid "Reading log retention…"
 msgstr "جارٍ قراءة الاحتفاظ بالسجلات…"
 
 #: apps/web/src/whm-metering-client.ts
-msgid "Enter whole megabytes, choose unlimited, or leave a field empty for the package value."
-msgstr "أدخل عددًا صحيحًا من الميغابايت، أو اختر غير محدود، أو اترك الحقل فارغًا لقيمة الباقة."
+msgid "Enter whole MiB, choose unlimited, or leave a field empty for the package value."
+msgstr "أدخل عددًا صحيحًا بوحدة MiB، أو اختر غير محدود، أو اترك الحقل فارغًا لقيمة الباقة."
 
 #: apps/web/src/whm-metering-client.ts
 msgid "Saving limits…"
@@ -53321,8 +53330,8 @@ msgid "Package: {plan}"
 msgstr "الباقة: {plan}"
 
 #: apps/web/src/whm-metering-client.ts
-msgid "Disk limit of {username} (MB)"
-msgstr "حد القرص للحساب {username} (ميغابايت)"
+msgid "Disk limit of {username} (MiB)"
+msgstr "حد القرص للحساب {username} (MiB)"
 
 #: apps/web/src/whm-metering-client.ts
 msgid "Page {page} of {pages} · {total, plural, one {# account} other {# accounts}}"
@@ -53581,8 +53590,8 @@ msgid "Unavailable on this host"
 msgstr "غير متاح على هذا الخادم"
 
 #: apps/web/src/whm-network-client.ts
-msgid "{size} MiB, observed {time}"
-msgstr "{size} MiB، رُصد في {time}"
+msgid "{size}, observed {time}"
+msgstr "{size}، رُصد في {time}"
 
 #: apps/web/src/whm-network-client.ts
 msgid "{count, plural, one {({count} account not measured)} other {({count} accounts not measured)}}"
@@ -56993,10 +57002,6 @@ msgid "No sender"
 msgstr "بلا مرسل"
 
 #: apps/web/src/boxtrapper-client.ts
-msgid "{size} KB"
-msgstr "{size} ك.ب"
-
-#: apps/web/src/boxtrapper-client.ts
 msgid "The rest of this message is not shown."
 msgstr "لا يُعرض باقي هذه الرسالة."
 
@@ -58961,8 +58966,8 @@ msgid "Rearranging requires root authorization. Nothing was read or changed."
 msgstr "تتطلب إعادة الترتيب صلاحية الجذر. لم يُقرأ أو يتغير شيء."
 
 #: apps/web/src/whm-account-admin-client.ts
-msgid "{path} ({gb} GB free)"
-msgstr "{path} (متاح {gb} GB)"
+msgid "{path} ({size} free)"
+msgstr "{path} (متاح {size})"
 
 #: apps/web/src/whm-account-admin-client.ts
 msgid "{count, plural, one {{count} home root found.} other {{count} home roots found.}}"
@@ -61638,9 +61643,9 @@ msgstr "عاد حساب الاستضافة {account} للنطاق {domain} عل�
 msgid "Disk quota warning for {account}"
 msgstr "تحذير حصة القرص للحساب {account}"
 
-#: apps/web/src/models/mail-cert-panels.ts
-msgid "The account {account} on {server} uses {usedMb} MB of its {limitMb} MB disk quota ({percent}%)."
-msgstr "يستخدم الحساب {account} على {server} مقدار {usedMb} MB من حصته البالغة {limitMb} MB ({percent}%)."
+#: apps/api/src/notification-templates.ts
+msgid "The account {account} on {server} uses {usedMb} MiB of its {limitMb} MiB disk quota ({percent}%)."
+msgstr "يستخدم الحساب {account} على {server} مقدار {usedMb} MiB من حصته البالغة {limitMb} MiB ({percent}%)."
 
 #: apps/web/src/models/mail-cert-panels.ts
 msgid "Certificate report for {server}"
@@ -61905,10 +61910,6 @@ msgstr "يفتح هذا الرابط جلسة xWHM للقراءة فقط لمد�
 #: apps/web/src/panel-access-client.ts
 msgid "Open the session"
 msgstr "افتح الجلسة"
-
-#: apps/web/src/panel-access-client.ts
-msgid "Panel access changes these settings. The fields here are read-only."
-msgstr "تُغيَّر هذه الإعدادات من صفحة الوصول إلى اللوحة. الحقول هنا للقراءة فقط."
 
 #: apps/web/src/panel-access-client.ts
 msgid "Saved the panel access rules"
@@ -62703,24 +62704,24 @@ msgid "Only when run"
 msgstr "عند التشغيل فقط"
 
 #: packages/core/src/host-tool-cards.ts
-msgid "Every N seconds"
-msgstr "كل N ثانية"
+msgid "Every few seconds"
+msgstr "كل بضع ثوانٍ"
 
 #: packages/core/src/host-tool-cards.ts
-msgid "Every N minutes"
-msgstr "كل N دقيقة"
+msgid "Every few minutes"
+msgstr "كل بضع دقائق"
 
 #: packages/core/src/host-tool-cards.ts
 msgid "Hourly"
 msgstr "كل ساعة"
 
 #: packages/core/src/host-tool-cards.ts
-msgid "Every N hours"
-msgstr "كل N ساعة"
+msgid "Every few hours"
+msgstr "كل بضع ساعات"
 
 #: packages/core/src/host-tool-cards.ts
-msgid "Every N days"
-msgstr "كل N يوم"
+msgid "Every few days"
+msgstr "كل بضعة أيام"
 
 #: packages/core/src/host-tool-cards.ts
 msgid "Weekly"
@@ -64104,6 +64105,10 @@ msgstr "عمرها سنة أو أكثر"
 msgid "30 MB or larger"
 msgstr "حجمها 30 MB أو أكبر"
 
+#: apps/web/src/themes/v2/pages/xpanel/email-tools/disk-usage.ts
+msgid "30 MiB or larger"
+msgstr "حجمها 30 MiB أو أكبر"
+
 msgid "Already read"
 msgstr "المقروءة"
 
@@ -64589,9 +64594,6 @@ msgstr "هذه الخدمة غير مثبتة. تبقى الأدوات مغلق�
 
 msgid "Read-only until this tool is verified on this release."
 msgstr "للقراءة فقط حتى يتم التحقق من هذه الأداة في هذا الإصدار."
-
-msgid "{limit} MB"
-msgstr "{limit} ميجابايت"
 
 msgid "Over the limit: writes blocked"
 msgstr "تجاوزت الحد: الكتابة ممنوعة"
@@ -66729,8 +66731,8 @@ msgid "Read message"
 msgstr "قراءة الرسالة"
 
 #: apps/web/src/list-moderation-client.ts
-msgid "This view stops at 256 KB."
-msgstr "يتوقف هذا العرض عند 256 KB."
+msgid "This view stops at 256 KiB."
+msgstr "يتوقف هذا العرض عند 256 KiB."
 
 #: apps/web/src/list-moderation-client.ts
 msgid "Discarding needs confirmation; nothing was sent."
@@ -66850,3 +66852,91 @@ msgstr "تغيّر ما يُسقطه التراجع منذ المعاينة. ل�
 
 msgid "Revert first reads what changed here since the cutover and asks you to confirm that list. None of it is carried back to the source."
 msgstr "يقرأ التراجع أولًا ما تغيّر هنا منذ التحويل ويطلب منك تأكيد تلك القائمة. لا يُنقل شيء منه إلى المصدر."
+
+#: apps/web/src/whm-service-detail-client.ts
+msgid "The service reported a reason xPanel does not recognize ({code})."
+msgstr "أبلغت الخدمة عن سبب لا يتعرّف عليه xPanel ({code})."
+
+#: apps/web/src/board-port/whm-jobs-workspace.ts
+msgid "Lowercase letters, digits and . _ : - only, for example {example}."
+msgstr "أحرف إنجليزية صغيرة وأرقام و . _ : - فقط، مثل {example}."
+
+#: apps/web/src/whm-web-server-client.ts
+msgid "Tested"
+msgstr "مُختبَر"
+
+#: apps/web/src/whm-web-server-client.ts
+msgid "Superseded"
+msgstr "مُستبدَل"
+
+#: apps/web/src/whm-whmcs-client.ts
+msgid "The request was not valid"
+msgstr "الطلب غير صالح"
+
+#: apps/web/src/whm-whmcs-client.ts
+msgid "Provisioning authority changed"
+msgstr "تغيّرت صلاحية التزويد"
+
+#: apps/web/src/whm-whmcs-client.ts
+msgid "The package is not mapped to a plan"
+msgstr "الباقة غير مربوطة بخطة"
+
+#: apps/web/src/whm-whmcs-client.ts
+msgid "Account creation is turned off"
+msgstr "إنشاء الحسابات مُعطَّل"
+
+#: apps/web/src/whm-whmcs-client.ts
+msgid "Account not found"
+msgstr "الحساب غير موجود"
+
+#: apps/web/src/whm-whmcs-client.ts
+msgid "The host agent was unavailable"
+msgstr "وكيل الخادم غير متاح"
+
+#: apps/web/src/whm-whmcs-client.ts
+msgid "The API token was not valid"
+msgstr "رمز الواجهة البرمجية غير صالح"
+
+#: apps/web/src/whm-whmcs-client.ts
+msgid "The integration is turned off"
+msgstr "التكامل مُعطَّل"
+
+#: apps/web/src/whm-whmcs-client.ts
+msgid "The address is not allowed"
+msgstr "العنوان غير مسموح به"
+
+#: apps/web/src/whm-whmcs-client.ts
+msgid "Internal error"
+msgstr "خطأ داخلي"
+
+#: apps/web/src/whm-upgrade-client.ts
+msgid "The host gave a reason xPanel does not recognize ({code})."
+msgstr "أعطى الخادم سببًا لا يتعرّف عليه xPanel ({code})."
+
+#: apps/web/src/whm-upgrade-client.ts
+msgid "The host reported: {error}"
+msgstr "أبلغ الخادم: {error}"
+
+#: apps/web/src/acct-templates-client.ts
+msgid "New template"
+msgstr "قالب جديد"
+
+#: apps/web/src/acct-templates-client.ts
+msgid "Edit template: {name}"
+msgstr "تعديل القالب: {name}"
+
+#: apps/web/src/whm-announcements-client.ts
+msgid "New announcement"
+msgstr "إعلان جديد"
+
+#: apps/web/src/whm-announcements-client.ts
+msgid "Edit announcement: {title}"
+msgstr "تعديل الإعلان: {title}"
+
+#: apps/web/src/mail-cards-client.ts
+msgid "Nothing to show."
+msgstr "لا يوجد ما يُعرض."
+
+#: apps/web/src/domain-workspace-client.ts
+msgid "Node.js"
+msgstr "Node.js"

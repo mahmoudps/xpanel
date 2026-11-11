@@ -107,7 +107,14 @@ describe('V2 WHM database documents', () => {
     const html = render('/whm/databases/upgrade', { locale: 'ar' })
     expect(html).toContain('dir="rtl"')
     expect(html).not.toMatch(/[\u0660-\u0669\u06f0-\u06f9]/)
-    expect(WHM_DATABASE_PAGES_CSS).toContain('gap:var(--space-1)')
+    expect(WHM_DATABASE_PAGES_CSS).toContain('[data-whm-detail-route^="/whm/databases"]')
+    expect(WHM_DATABASE_PAGES_CSS).not.toContain('.v2-whm-data__fields{')
+    // The controllers switch a status line to role="alert" on failure and paint plain tables: rules follow data-state and the table element.
+    expect(WHM_DATABASE_PAGES_CSS).not.toContain('p[role=status]')
+    expect(WHM_DATABASE_PAGES_CSS).not.toContain('.v2-table')
+    // A failed line takes the foundation's failed box; the page boxes the other states itself.
+    expect(WHM_DATABASE_PAGES_CSS).toContain('>p[data-state]:not([data-state=failed])')
+    expect(WHM_DATABASE_PAGES_CSS).toContain('>p[data-state=uncertain]')
     expect(WHM_DATABASE_PAGES_CSS).not.toMatch(/text-align:(?:left|right)|margin-(?:left|right)|padding-(?:left|right)/)
   })
 })

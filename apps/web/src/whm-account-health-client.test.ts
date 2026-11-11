@@ -166,7 +166,7 @@ describe('full timestamp display additional account health', () => {
     boot(send, locale === 'ar'); q<HTMLButtonElement>('[data-whm-health-run]').click(); await tick()
     expect(q('[data-whm-health-observed-at]').textContent).toBe('2026-10-27 10:00 UTC')
     expect(q('[data-whm-health-observed-at]').getAttribute('dir')).toBe('ltr')
-    expect(document.querySelector('[data-whm-health-pick][value="alice"]')?.getAttribute('aria-label')).toBe(locale === 'ar' ? 'تحديد alice' : 'Select alice')
+    expect(document.querySelector('[data-whm-health-pick][value="alice"]')?.getAttribute('aria-label')).toBe(locale === 'ar' ? 'تحديد \u2066alice\u2069' : 'Select alice')
     expect(Array.from(q('[data-whm-health-check="certificates"]').querySelectorAll('pre')).map(node => node.textContent)).toEqual(['1 checked, 1 with problems, 0 not verified', 'source=acme notAfter=2026-10-01T00:00:00.000Z'])
     expect(readAccountHealthReport(raw).observedAt).toBe('2026-10-27T10:00:07.120Z')
     expect(send).toHaveBeenCalledWith('GET', '/api/accounts/health')

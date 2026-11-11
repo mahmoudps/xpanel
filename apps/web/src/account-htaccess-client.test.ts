@@ -41,7 +41,7 @@ describe('account .htaccess controller', () => {
       const history = document.querySelector<HTMLElement>('[data-htaccess-versions]')!, row = history.querySelector('tr')!
       expect(row.querySelectorAll('td')).toHaveLength(5)
       expect(row.querySelector('td:nth-child(2)')!.textContent).toBe(actor)
-      expect(row.querySelector('td:nth-child(3)')!.textContent).toBe('12345')
+      expect(row.querySelector('td:nth-child(3)')!.textContent).toBe('\u206612.1\u00a0KiB\u2069')
       expect(row.querySelector<HTMLButtonElement>('button')!.disabled).toBe(true)
       expect(document.querySelector<HTMLTextAreaElement>('[data-htaccess-editor]')!.value).toBe(source)
       expect(request.mock.calls).toEqual([['GET', '/api/domains/' + domainId + '/htaccess']])
@@ -88,7 +88,7 @@ describe('account .htaccess controller', () => {
       await vi.waitFor(() => expect(document.querySelector<HTMLButtonElement>('[data-htaccess-versions] button')!.disabled).toBe(false))
       const confirmation = confirm.mock.calls[0]![0], body = String(confirmation.body)
       expect(confirmation.title).toBe(locale === 'ar' ? 'استعادة نسخة محفوظة' : 'Restore kept file')
-      expect(document.querySelector('[data-htaccess-issues] li')!.textContent).toBe((locale === 'ar' ? 'السطر 3: ' : 'Line 3: ') + 'Directive is not allowed')
+      expect(document.querySelector('[data-htaccess-issues] li')!.textContent).toBe(locale === 'ar' ? 'السطر 3: \u2066Directive is not allowed\u2069' : 'Line 3: Directive is not allowed')
       expect(body.split('\n')[0]).toBe('example.test')
       expect(body.split('\n')[1]).toBe('2026-10-27 09:01 UTC')
       expect(body.split('\n')[1]).toBe(formatDisplayDateTime(storedAt))

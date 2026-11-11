@@ -1,5 +1,8 @@
 /// <reference lib="dom" />
 import './i18n.ts'
+import { ASCII_BYTES_BINDING, formatIsolatedBytes as canonicalFormatClientBytes } from './display-format.ts'
+// Module-local alias: the binding source defines it again from ASCII_BYTES_BINDING.
+const formatClientBytes = canonicalFormatClientBytes
 
 /**
  * Shared browser controllers of the runtime, developer and panel-data cards. Each binds by its data-* root in either
@@ -39,7 +42,7 @@ function bindPanelTools(askDialog: ((options: Record<string, unknown>) => Promis
     body.replaceChildren(...lines.map(line => { const row = document.createElement('tr'); for (const value of line) { const cell = document.createElement('td'); cell.textContent = String(value); row.append(cell) } return row }))
   }
   const when = (iso: string): string => iso.slice(0, 16).replace('T', ' ')
-  const size = (bytes: number): string => bytes >= 1048576 ? (bytes / 1048576).toFixed(1) + ' MB' : Math.ceil(bytes / 1024) + ' KB'
+  const size = (bytes: number): string => formatClientBytes(bytes)
   const save = (name: string, data: BlobPart, type: string): void => { const link = document.createElement('a'); link.href = URL.createObjectURL(new Blob([data], { type })); link.download = name; link.click(); URL.revokeObjectURL(link.href) }
   const confirmed = async (title: string, body: string): Promise<boolean> => typeof askDialog === 'function' && await askDialog({ title, body, confirmLabel: t('Continue'), tone: 'danger' }) === true
 
@@ -371,4 +374,4 @@ function bindPanelTools(askDialog: ((options: Record<string, unknown>) => Promis
   })
 }
 
-export const PANEL_TOOLS_CLIENT_BINDING = bindPanelTools.toString()
+export const PANEL_TOOLS_CLIENT_BINDING = `(()=>{const formatClientBytes=${ASCII_BYTES_BINDING};return ${bindPanelTools.toString()};})()`

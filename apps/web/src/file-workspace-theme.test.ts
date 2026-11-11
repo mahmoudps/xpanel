@@ -9,7 +9,7 @@ const row = '<tr class="theme-row"><td><input type="checkbox" data-xp-slot="sele
 const templates = `<template data-xp-template="file-row">${row}</template><template data-xp-template="trash-row">${row}</template><template data-xp-template="file-action"><button type="button" class="theme-action" data-xp-slot="label"></button></template><template data-xp-template="trash-action"><button type="button" class="theme-restore" data-xp-slot="label"></button></template><template data-xp-template="trash-purge-action"><button type="button" class="theme-purge" data-xp-slot="label"></button></template><template data-xp-template="file-empty-row"><tr class="theme-empty"><td colspan="7" data-xp-slot="message"></td></tr></template><template data-xp-template="file-upload-row"><li><bdi data-xp-slot="name"></bdi><bdi data-xp-slot="bytes"></bdi><span data-xp-slot="state"></span><div data-xp-slot="progress" role="progressbar" hidden></div><button type="button" data-xp-slot="dismiss" data-capability-unavailable="true" disabled></button></li></template>`
 const listeners: EventListener[] = []
 
-function mount(mode: 'browse' | 'trash', send: (method: string, path: string, body: Record<string, unknown>) => Promise<unknown>, markup = templates, beforeBoot?: () => void) {
+function mount(mode: 'browse' | 'trash', send: (method: string, path: string, body: Record<string, unknown>) => Promise<unknown>, markup = templates, beforeBoot?: () => void, ask: (options: Record<string, unknown>) => Promise<unknown> = vi.fn(async () => true)) {
   const locale: Locale = 'en'
   const text: Translate = Object.assign((value: string) => value, { locale })
   const view = filePresentation(text, 'controls') + filePresentation(text, 'details') + (mode === 'browse' ? filePresentation(text, 'closed') + '<div data-file-editor-panel hidden><textarea id="jailed-code-editor"></textarea><button type="button" data-file-editor-close>Close</button></div>' + filePresentation(text, 'uploads') : '')
@@ -21,7 +21,7 @@ function mount(mode: 'browse' | 'trash', send: (method: string, path: string, bo
     if (name === 'beforeunload') listeners.push(listener as EventListener)
     original(name, listener, options)
   })
-  new Function('return ' + FILE_WORKSPACE_CLIENT_BINDING)()(vi.fn(async () => true))
+  new Function('return ' + FILE_WORKSPACE_CLIENT_BINDING)()(ask)
   return document.querySelector<HTMLElement>('[data-file-manager]')!
 }
 
@@ -46,11 +46,22 @@ describe('file workspace presentation contract', () => {
     expect(result.querySelector('[data-xp-slot="name"]')!.textContent).toBe('<note>.txt')
     expect(result.querySelector('[data-xp-slot="path"]')!.textContent).toBe('<note>.txt')
     expect(result.querySelector('note')).toBeNull()
-    expect(result.querySelector('[data-xp-slot="size"]')!.textContent).toBe('2.00 KiB')
+    expect(result.querySelector('[data-xp-slot="size"]')!.textContent).toBe('\u20662.00\u00a0KiB\u2069')
     expect(result.querySelector('time')!.dateTime).toBe(timestamp)
     expect(result.querySelectorAll('.theme-action')).toHaveLength(4)
     expect(result.querySelector('[class^="xp-"]')).toBeNull()
     expect(request).toHaveBeenCalledTimes(1)
+  })
+
+  it('offers an entry its own mode, not the page default, and shows its path on its own line', async () => {
+    const ask = vi.fn(async (_options: Record<string, unknown>) => null)
+    const root = mount('browse', vi.fn(async () => ({ entries: [{ name: 'app', path: 'app', kind: 'directory', sizeBytes: 4096, mode: 0o750, mtime: timestamp }] })), templates, () => {
+      document.querySelector('section')!.insertAdjacentHTML('beforeend', '<input id="chmod-octal-input" value="0640">')
+    }, ask)
+    await vi.waitFor(() => expect(root.querySelector('[data-file-workspace-action="chmod"]')).not.toBeNull())
+    root.querySelectorAll<HTMLButtonElement>('[data-file-workspace-action="chmod"]')[0]!.click()
+    await vi.waitFor(() => expect(ask).toHaveBeenCalled())
+    expect(ask.mock.calls[0]![0]).toMatchObject({ value: '0750', code: 'app' })
   })
 
   it('uses the theme empty row after an observed empty read', async () => {

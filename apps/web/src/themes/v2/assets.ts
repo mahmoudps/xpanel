@@ -5,7 +5,6 @@ import { createV2Stylesheet } from './stylesheet.ts'
 import { v2RouteStylesheets, v2SharedStylesheets, v2SupplementalStylesheets, v2ViewStylesheets } from './route-assets.ts'
 import { V2_BASE_CSS } from './base.ts'
 import { V2_TOKENS_CSS } from './tokens.ts'
-import { BULK_BAR_CSS } from './components/bulk-bar.ts'
 import { CARD_CSS } from './components/card.ts'
 import { CHANGE_REVIEW_CSS } from './components/change-review.ts'
 import { CHART_CSS } from './components/chart.ts'
@@ -13,7 +12,6 @@ import { CODE_BLOCK_CSS } from './components/code-block.ts'
 import { DATA_TABLE_CSS } from './components/data-table.ts'
 import { DIALOG_CSS } from './components/dialog.ts'
 import { DRAWER_CSS } from './components/drawer.ts'
-import { FILTER_BAR_CSS } from './components/filter-bar.ts'
 import { FORM_FIELD_CSS } from './components/form-field.ts'
 import { KPI_CARD_CSS } from './components/kpi-card.ts'
 import { METER_CSS } from './components/meter.ts'
@@ -31,11 +29,13 @@ import { LAYOUTS_CSS } from './layouts/index.ts'
 import { OVERLAYS_CSS } from './shell/overlays.ts'
 import { SHELL_CSS } from './shell/shell.ts'
 
+// The filter bar, the bulk bar and the layout families no route renders yet stay out of this foundation (see
+// LAYOUT_FAMILIES_CSS); a route that adopts one adds its rules to its own page stylesheet.
 // Order matters only where equal selectors meet: base before components, components before the page layouts,
 // layouts before the shell.
 const SOURCES = [
   V2_TOKENS_CSS, V2_BASE_CSS, STATUS_PILL_CSS, PAGE_HEADER_CSS, CARD_CSS, KPI_CARD_CSS, CHART_CSS, NOTICE_CSS,
-  DATA_TABLE_CSS, FILTER_BAR_CSS, BULK_BAR_CSS, DRAWER_CSS, DIALOG_CSS, ROW_MENU_CSS, TABS_CSS, STEPPER_CSS,
+  DATA_TABLE_CSS, DRAWER_CSS, DIALOG_CSS, ROW_MENU_CSS, TABS_CSS, STEPPER_CSS,
   PAGINATION_CSS, CHANGE_REVIEW_CSS, FORM_FIELD_CSS, CODE_BLOCK_CSS, METER_CSS, STATE_BLOCK_CSS, TOAST_REGION_CSS,
   LAYOUTS_CSS, OVERLAYS_CSS, SHELL_CSS, ACTION_STATE_CSS,
 ]

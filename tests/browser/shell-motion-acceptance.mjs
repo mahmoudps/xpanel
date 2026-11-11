@@ -25,7 +25,7 @@ async function observe(page, kind, action) {
     if (action === 'palette') key('k', true)
     if (action === 'escape') key('Escape')
     const element = kind === 'drawer' ? document.querySelector('[data-xp-sidebar]') : document.querySelector('[data-xp-cmdk]')
-    const surface = kind === 'drawer' ? element : element.querySelector('.xp-cmdk-dialog')
+    const surface = kind === 'drawer' ? element : element.querySelector('.v2-cmdk__panel, .xp-cmdk-dialog')
     const backdrop = kind === 'drawer' ? document.querySelector('[data-xp-nav-backdrop]') : element
     const style = getComputedStyle(surface), r = surface.getBoundingClientRect(), animations = [...surface.getAnimations(),...backdrop.getAnimations()].filter((a,i,all) => all.indexOf(a) === i)
     const matrix = new DOMMatrixReadOnly(style.transform === 'none' ? undefined : style.transform)
@@ -34,14 +34,14 @@ async function observe(page, kind, action) {
 }
 async function settled(page, kind, visible) {
   await page.waitForFunction(({ kind, visible }) => {
-    const e = document.querySelector(kind === 'drawer' ? '[data-xp-sidebar]' : '[data-xp-cmdk]'), s = kind === 'drawer' ? e : e.querySelector('.xp-cmdk-dialog'), b = kind === 'drawer' ? document.querySelector('[data-xp-nav-backdrop]') : e
+    const e = document.querySelector(kind === 'drawer' ? '[data-xp-sidebar]' : '[data-xp-cmdk]'), s = kind === 'drawer' ? e : e.querySelector('.v2-cmdk__panel, .xp-cmdk-dialog'), b = kind === 'drawer' ? document.querySelector('[data-xp-nav-backdrop]') : e
     const shown = !e.hidden && getComputedStyle(e).visibility === 'visible'
     return shown === visible && ![...s.getAnimations(),...b.getAnimations()].some(a => a.playState === 'running')
   }, { kind, visible })
 }
 async function reverseDuringClose(page, kind, waitForProgress = true) {
   return page.evaluate(async ({kind, waitForProgress}) => {
-    const e = document.querySelector(kind === 'drawer' ? '[data-xp-sidebar]' : '[data-xp-cmdk]'), surface = kind === 'drawer' ? e : e.querySelector('.xp-cmdk-dialog')
+    const e = document.querySelector(kind === 'drawer' ? '[data-xp-sidebar]' : '[data-xp-cmdk]'), surface = kind === 'drawer' ? e : e.querySelector('.v2-cmdk__panel, .xp-cmdk-dialog')
     const backdrop = kind === 'drawer' ? document.querySelector('[data-xp-nav-backdrop]') : e
     const command = () => kind === 'drawer' ? document.querySelector('[data-action="toggle-mobile-nav"]').click() : document.dispatchEvent(new KeyboardEvent('keydown', {key:'k',ctrlKey:true,bubbles:true,cancelable:true}))
     // Reentrant controller request, fired after real animation frames advance.
@@ -91,7 +91,7 @@ try {
           check(kind+'-reverse-without-position-jump',reverse.progressed&&reverse.jump<0.5&&reverse.opacity_jump<0.01&&reverse.focused,reverse)
           await settled(page,kind,true)
           const endpoint = await page.evaluate(kind=>{
-            const element=document.querySelector(kind==='drawer'?'[data-xp-sidebar]':'[data-xp-cmdk]'),surface=kind==='drawer'?element:element.querySelector('.xp-cmdk-dialog'),backdrop=kind==='drawer'?document.querySelector('[data-xp-nav-backdrop]'):element
+            const element=document.querySelector(kind==='drawer'?'[data-xp-sidebar]':'[data-xp-cmdk]'),surface=kind==='drawer'?element:element.querySelector('.v2-cmdk__panel, .xp-cmdk-dialog'),backdrop=kind==='drawer'?document.querySelector('[data-xp-nav-backdrop]'):element
             document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}))
             const before=surface.getBoundingClientRect(),opacity=Number(getComputedStyle(backdrop).opacity)
             kind==='drawer'?document.querySelector('[data-action="toggle-mobile-nav"]').click():document.dispatchEvent(new KeyboardEvent('keydown',{key:'k',ctrlKey:true,bubbles:true,cancelable:true}))
@@ -110,7 +110,7 @@ try {
         if(normal){
           await observe(page,kind,kind)
           const interrupted=await page.evaluate(async kind=>{
-            const e=document.querySelector(kind==='drawer'?'[data-xp-sidebar]':'[data-xp-cmdk]'),s=kind==='drawer'?e:e.querySelector('.xp-cmdk-dialog'),b=kind==='drawer'?document.querySelector('[data-xp-nav-backdrop]'):e
+            const e=document.querySelector(kind==='drawer'?'[data-xp-sidebar]':'[data-xp-cmdk]'),s=kind==='drawer'?e:e.querySelector('.v2-cmdk__panel, .xp-cmdk-dialog'),b=kind==='drawer'?document.querySelector('[data-xp-nav-backdrop]'):e
             let progressed=false
             for(let i=0;i<20;i++){await new Promise(resolve=>requestAnimationFrame(resolve));const a=s.getAnimations()[0];if(a&&Number(a.currentTime)>=30&&Number(a.currentTime)<Number(a.effect.getTiming().duration)){progressed=true;break}}
             const before=s.getBoundingClientRect(),opacity=Number(getComputedStyle(b).opacity)
@@ -139,13 +139,13 @@ try {
         await observe(page,'palette','palette');await observe(page,'palette','escape');await page.emulateMedia({reducedMotion:'reduce'});await settled(page,'palette',false)
         check('preference-change-settles-closing-with-cleanup',(await observe(page,'palette')).body_overflow===original.body)
       }
-      if(state.width<960){await page.emulateMedia({reducedMotion:state.motion});await observe(page,'drawer','drawer');await page.setViewportSize({width:960,height:900});await page.waitForFunction(()=>document.querySelector('.xp-shell').dataset.mobileNav!=='open'&&document.body.style.overflow!=='hidden');check('resize-cleans-drawer-and-inert',await page.evaluate(()=>document.querySelectorAll('[inert]').length===0));await page.setViewportSize({width:state.width,height:600})}
+      if(state.width<960){await page.emulateMedia({reducedMotion:state.motion});await observe(page,'drawer','drawer');await page.setViewportSize({width:960,height:900});await page.waitForFunction(()=>document.querySelector('.v2-shell, .xp-shell').dataset.mobileNav!=='open'&&document.body.style.overflow!=='hidden');check('resize-cleans-drawer-and-inert',await page.evaluate(()=>document.querySelectorAll('[inert]').length===0));await page.setViewportSize({width:state.width,height:600})}
       await page.emulateMedia({reducedMotion:state.motion})
       await page.keyboard.press('Control+k');await settled(page,'palette',true)
       const destination=page.locator('a[data-cmdk-item]').filter({visible:true}).first(), href=await destination.getAttribute('href')
       await page.evaluate(()=>document.addEventListener('click',event=>{
         const link=event.target.closest?.('a[data-cmdk-item]')
-        if(link)sessionStorage.setItem('shell-motion-navigation',JSON.stringify({default_prevented:event.defaultPrevented,body:document.body.style.overflow,root:document.documentElement.style.overflow,inert:document.querySelectorAll('[inert]').length,animations:document.querySelector('.xp-cmdk-dialog').getAnimations().length}))
+        if(link)sessionStorage.setItem('shell-motion-navigation',JSON.stringify({default_prevented:event.defaultPrevented,body:document.body.style.overflow,root:document.documentElement.style.overflow,inert:document.querySelectorAll('[inert]').length,animations:document.querySelector('.v2-cmdk__panel, .xp-cmdk-dialog').getAnimations().length}))
       }))
       await Promise.all([page.waitForURL(new URL(href,fixture.baseUrl).href),destination.click()])
       const navigation=await page.evaluate(()=>JSON.parse(sessionStorage.getItem('shell-motion-navigation')))

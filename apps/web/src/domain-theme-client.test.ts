@@ -61,6 +61,7 @@ describe.each(['classic', 'v2'] as const)('%s authenticated domain row updates',
     if (v2) {
       const cards = [...label.querySelectorAll('[data-domain-limit-kind]')]
       expect(cards).toHaveLength(4); expect(cards.every(card => card.querySelector('svg'))).toBe(true)
+      expect(label.querySelectorAll('.v2-kpi__value--text')).toHaveLength(0)
       expect(label.querySelector('[data-domain-limit-kind="primary"] [data-domain-limit-value]')?.textContent).toBe('1')
       expect(label.querySelector('[data-domain-limit-kind="addon"] [data-domain-limit-value]')?.textContent).toBe('1')
       expect(label.querySelector('[data-domain-limit-kind="addon"] [data-domain-limit-unit]')?.textContent).toBe('/ 2')
@@ -99,7 +100,9 @@ describe.each(['classic', 'v2'] as const)('%s authenticated domain row updates',
     const { document } = mount(themed(renderV2StagingPage(props, authority), renderAccountStagingWorkspace({ lang: 'en', accountId, canManage: true })), ACCT_STAGING_CLIENT_BINDING, send)
     await settle()
     const row = document.querySelector('[data-staging-rows] tr')!
-    expect(row.children).toHaveLength(7)
+    expect(row.children).toHaveLength(v2 ? 6 : 7)
+    // v2 shows the staging folder under the domain in one column; classic keeps separate columns
+    if (v2) expect(row.children[0]!.querySelectorAll('[data-xp-slot="name"],[data-xp-slot="path"]')).toHaveLength(2)
     expect(row.querySelector('time')?.getAttribute('datetime')).toBe(stamp)
     const review = row.querySelector<HTMLButtonElement>('[data-action="review"]')!
     expect(review.classList.contains(v2 ? 'v2-btn' : 'xp-btn')).toBe(true)

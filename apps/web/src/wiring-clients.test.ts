@@ -38,6 +38,17 @@ describe('worker suggestions', () => {
   })
 })
 
+describe('server settings suggestion for a radio group', () => {
+  it('checks the suggested choice, keeps each choice value and leaves a disabled group alone', () => {
+    document.body.innerHTML = `<form data-server-settings-form><input type="radio" name="apacheMpm" value="event" checked><input type="radio" name="apacheMpm" value="itk">
+      <input type="radio" name="engine" value="apache" checked disabled><input type="radio" name="engine" value="openlitespeed" disabled></form>
+      <button data-server-settings-suggest='{"apacheMpm":"itk","engine":"openlitespeed"}'></button>`
+    new Function(SERVER_SETTINGS_SUGGEST_CLIENT_BINDING)()
+    document.querySelector<HTMLButtonElement>('[data-server-settings-suggest]')!.click()
+    expect(Array.from(document.querySelectorAll<HTMLInputElement>('input[type="radio"]'), item => [item.value, item.checked])).toEqual([['event', false], ['itk', true], ['apache', true], ['openlitespeed', false]])
+  })
+})
+
 describe('FTP login removal', () => {
   const row = (hooks: Record<string, string>) => { document.body.innerHTML = `<button ${Object.entries(hooks).map(([name, value]) => `${name}='${value}'`).join(' ')}>Delete</button><p data-ftp-remove-status hidden></p>`; return document.querySelector('button')! }
   it('keeps the other services of a shared login', async () => {

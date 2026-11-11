@@ -315,6 +315,24 @@ export function clientMessageKeys(script: string): readonly string[] {
 export const scriptMessageKeys = (html: string): string[] =>
   [...[...html.matchAll(SCRIPT_BLOCK)].map(match => match[1] ?? ''), ...pageScriptBodies(html)].flatMap(clientMessageKeys)
 
+/**
+ * Browser text in a right-to-left locale: a technical value (date-time, path, file name, command, address,
+ * "number unit") keeps its own order inside the sentence, wrapped in LRI ... PDI. Plain numbers, values that
+ * contain right-to-left letters and values that are already isolated stay as they are.
+ */
+export function isolateClientValues(locale: string, values?: MessageValues): MessageValues | undefined {
+  if (!values) return values
+  let rtl = false
+  try { const info = new Intl.Locale(locale) as unknown as { getTextInfo?: () => { direction?: string }; textInfo?: { direction?: string } }; rtl = (info.getTextInfo ? info.getTextInfo() : info.textInfo)?.direction === 'rtl' } catch { rtl = false }
+  if (!rtl) return values
+  const out: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(values)) {
+    out[key] = typeof value === 'string' && !/^[\u2066-\u2068]/.test(value) && !/[\u0590-\u08ff\ufb1d-\ufdff\ufe70-\ufeff]/.test(value)
+      && /[A-Za-z0-9/~@._:-]/.test(value) && !/^-?\d+(?:\.\d+)?$/.test(value) ? '\u2066' + value + '\u2069' : value
+  }
+  return out as MessageValues
+}
+
 function installClientI18n(messages: Record<string, string>, locale: string): void {
   const scope = globalThis as unknown as { xpI18n?: { messages: Record<string, string> }; xpT?: unknown; msgid?: unknown; msgctxt?: unknown }
   if (scope.xpI18n) { Object.assign(scope.xpI18n.messages, messages); return }
@@ -331,11 +349,11 @@ function installClientI18n(messages: Record<string, string>, locale: string): vo
       compiled.set(message, render)
     }
     // ASCII digits only, as on the server.
-    return render(values).replace(/[\u0660-\u0669\u06F0-\u06F9]/g, digit => String(digit.charCodeAt(0) & 0xf))
+    return render(isolateClientValues(locale, values)).replace(/[\u0660-\u0669\u06F0-\u06F9]/g, digit => String(digit.charCodeAt(0) & 0xf))
   }
 }
 
-const CLIENT_RUNTIME = `const parseMessage=${parseMessage.toString()};const compileMessage=${compileMessage.toString()};(${installClientI18n.toString()})`
+const CLIENT_RUNTIME = `const parseMessage=${parseMessage.toString()};const compileMessage=${compileMessage.toString()};const isolateClientValues=${isolateClientValues.toString()};(${installClientI18n.toString()})`
 
 const scriptJson = (value: unknown): string => JSON.stringify(value).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029')
 

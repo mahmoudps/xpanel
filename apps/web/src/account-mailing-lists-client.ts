@@ -198,7 +198,7 @@ function bindMailingLists(askDialog: ((options: Record<string, unknown>) => Prom
     }
     createButton?.addEventListener('click', event => { event.preventDefault(); void createList() })
     // Clear only the initial "Reading" text; a faster action's outcome message stays.
-    void load().then(() => { if (!status.dataset.state) setStatus('', 'loaded') }, () => setStatus(copy('Stored mailing lists could not be read. Editing stays unavailable.'), 'failed'))
+    void load().then(() => { if (!status.dataset.state || status.dataset.state === 'unread') setStatus('', 'loaded') }, () => setStatus(copy('Stored mailing lists could not be read. Editing stays unavailable.'), 'failed'))
   })
 }
 

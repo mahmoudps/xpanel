@@ -176,7 +176,7 @@ function bindWhmMailServer(): void {
       if (view.host !== 'connected') note('unavailable', view.host === 'not-connected' ? t('No protected host agent is connected. Rendered and saved values are shown without a host observation.')
         : t('The host observation could not be verified. Rendered and saved values are shown without it.'))
       else if (relevant.some(key => view.sources[key] !== 'read')) note('partial', t('Some configuration sources could not be read. Their values are shown as not read.'))
-      else if (drift) note('drift', t('{n} values differ from the configuration xPanel renders. Use the reviewed repair workflow.', { n: drift }))
+      else if (drift) note('drift', t('{n, plural, one {# value differs from the configuration xPanel renders.} other {# values differ from the configuration xPanel renders.}} Use the reviewed repair workflow.', { n: drift }))
       else note('read', view.sources.desired === 'rendered' ? t('Configuration read from the host. No drift was found in managed values.') : t('Configuration read from the host. The rendered configuration is unavailable, so drift was not checked.'))
     }
 

@@ -2,10 +2,12 @@ import { actions, button, check, context, esc, field, fields, note, page, sectio
 
 const technical = (slot: string): string => `<td><bdi dir="ltr" class="v2-mono" data-xp-slot="${slot}"></bdi></td>`
 const text = (slot: string): string => `<td data-xp-slot="${slot}"></td>`
+// Names stay in the text face like other account and domain tables; a purge time or "Never" takes its own direction.
+const name = (slot: string): string => `<td><bdi dir="ltr" data-xp-slot="${slot}"></bdi></td>`
 const action = (name: string): string => `<button type="button" class="v2-btn" data-xp-action="${name}" disabled><span data-xp-slot="${name}-label"></span></button>`
 /** Theme-owned records the manager's controller fills. */
 const templates = `<template data-xp-template="nginx-proxy-rule"><tr>${technical('path')}${technical('target')}${text('host')}${text('websocket')}${text('state')}<td>${action('remove')}</td></tr></template>`
-  + `<template data-xp-template="nginx-proxy-account"><tr>${technical('account')}${technical('domain')}${text('rules')}${text('cache')}${technical('purged')}<td>${action('toggle')} ${action('purge')}</td></tr></template>`
+  + `<template data-xp-template="nginx-proxy-account"><tr>${name('account')}${name('domain')}${text('rules')}${text('cache')}<td><bdi data-xp-slot="purged"></bdi></td><td>${action('toggle')} ${action('purge')}</td></tr></template>`
   + '<template data-xp-template="nginx-proxy-empty"><tr><td colspan="6" data-xp-slot="message"></td></tr></template>'
 
 /** /whm/services/nginx-proxy: per-domain reverse proxy rules at the edge and the response cache of each account. */

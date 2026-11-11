@@ -25,7 +25,7 @@ ${props.footerHtml ? `<footer class="v2-drawer__foot">${props.footerHtml}</foote
 }
 
 export const DRAWER_CSS = `.v2-split{display:flex;flex-wrap:wrap;align-items:flex-start;gap:var(--space-3)}
-.v2-split>:first-child{flex:999 1 560px;min-width:0}
+.v2-split>:first-child{flex:999 1 480px;min-width:0}
 .v2-drawer{flex:1 1 380px;max-width:440px;min-width:0;display:flex;flex-direction:column;border-radius:var(--radius-card);background:var(--surface);border:1px solid var(--line-strong);box-shadow:var(--shadow)}
 .v2-drawer__head{display:flex;align-items:center;justify-content:space-between;gap:var(--space-1);padding:12px;padding-inline-start:var(--space-3);border-bottom:1px solid var(--line)}
 .v2-drawer__body{display:flex;flex-direction:column;gap:var(--space-2);padding:var(--space-3)}

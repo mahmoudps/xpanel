@@ -71,7 +71,7 @@ export function renderV2WhmLogs(input: WhmObservationInput): string {
 
 export function renderV2WhmPerformance(input: WhmObservationInput): string {
   const { t, canRead } = context(input)
-  const metrics = [['cpuPercent', msgid('CPU %')], ['memoryMb', msgid('Memory, MB')], ['load1', msgid('Load average, 1 minute')], ['processes', msgid('Processes')], ['diskMb', msgid('Disk used, MB')]] as const
+  const metrics = [['cpuPercent', msgid('CPU %')], ['memoryMb', msgid('Memory, MiB')], ['load1', msgid('Load average, 1 minute')], ['processes', msgid('Processes')], ['diskMb', msgid('Disk used, MiB')]] as const
   const charts = `<div class="v2-observation__charts" data-whm-monitoring-charts>${metrics.map(([key, label]) => `<figure class="v2-observation__chart" data-whm-monitoring-chart="${key}"><figcaption>${esc(t(label))}</figcaption><p data-whm-monitoring-chart-state>${esc(t(msgid('Not read')))}</p></figure>`).join('')}</div>`
   const body = section(t, 'performance', msgid('Host performance history'), help(t, msgid('Recorded host samples from the metrics history, averaged into fixed intervals. Intervals without a sample are gaps, not zero.'))
     + fields(field(t, 'v2-monitoring-window', msgid('Time window'), select(t, 'v2-monitoring-window', { 'data-whm-monitoring-window': true }, [['1h', msgid('Last hour')], ['24h', msgid('Last 24 hours')], ['7d', msgid('Last 7 days')]], canRead)))

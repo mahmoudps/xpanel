@@ -80,7 +80,7 @@ describe('readable date closure dynamic DNS', () => {
     const stamp = document.querySelector('[data-ddns-rows] tr td:nth-child(4) bdi')!
     expect(stamp.textContent).toBe('2026-10-27 09:01 UTC'); expect(stamp.getAttribute('dir')).toBe('ltr')
     expect(document.querySelectorAll('[data-ddns-rows] tr')[1]!.children[3]!.textContent).toBe(ar ? 'لم يُحدّث' : 'Not updated')
-    expect(document.querySelector('[data-ddns-rows] tr button')!.getAttribute('aria-label')).toBe((ar ? 'إدارة ' : 'Manage ') + entry.hostname)
+    expect(document.querySelector('[data-ddns-rows] tr button')!.getAttribute('aria-label')).toBe(ar ? 'إدارة \u2066' + entry.hostname + '\u2069' : 'Manage ' + entry.hostname)
     expect(find('count').textContent).toBe(ar ? '2 / 25 اعتمادًا' : '2 / 25 credentials')
     expect(JSON.stringify(source)).toBe(before); expect(readDynamicDnsView(source, accountId, false).entries[0]!.lastChangedAt).toBe('2026-10-27T09:01:02.123Z')
     expect(readDynamicDnsView(source, accountId, false).entries[0]!.createdAt).toBe(date); expect(readDynamicDnsView(source, accountId, false).revision).toBe('a'.repeat(64))

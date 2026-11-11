@@ -35,14 +35,16 @@ export function renderAccountPlanPreview(model: AccountPlanPreview, locale: Loca
 function bindAccountPlanPreviews(): void {
   document.querySelectorAll<HTMLElement>('[data-create-plan-preview]').forEach(preview => {
     const form = preview.closest('form[data-create-account-form]')
-    const select = form?.querySelector<HTMLSelectElement>('[name="planId"]')
+    // The plan is one list or a group of choices: read the checked choice, or the single control.
+    const fields = Array.from(form?.querySelectorAll<HTMLSelectElement | HTMLInputElement>('[name="planId"]') ?? [])
     const source = preview.querySelector('[data-plan-preview-model]')
-    if (!select || !source) return
+    if (!fields.length || !source) return
     let model: AccountPlanPreview
     try { model = JSON.parse(source.textContent || '{}') as AccountPlanPreview } catch { return }
     if (!Array.isArray(model.plans)) return
     const refresh = () => {
-      const plan = model.plans.find(item => item.id === select.value)
+      const selected = fields.find(field => field.type !== 'radio' || (field as HTMLInputElement).checked)?.value
+      const plan = model.plans.find(item => item.id === selected)
       const text = (selector: string, value: string) => { const node = preview.querySelector(selector); if (node) node.textContent = value }
       text('[data-preview-plan-name]', plan?.name ?? (xpT('Unavailable')))
       for (const key of ['disk', 'memory', 'cpu'] as const) text('[data-preview-plan-' + key + ']', plan?.[key] === 'unlimited' ? (xpT('Unlimited')) : plan?.[key] ?? '—')
@@ -52,7 +54,39 @@ function bindAccountPlanPreviews(): void {
         : (xpT('Capacity preview is unavailable.'))
       text('[data-preview-plan-capacity]', message)
     }
-    select.addEventListener('change', refresh); refresh()
+    fields.forEach(field => field.addEventListener('change', refresh))
+    form?.addEventListener('reset', () => setTimeout(refresh, 0))
+    refresh()
+  })
+}
+
+/**
+ * Mirrors named form fields into review cells. A password is never mirrored.
+ * The account form fills data-create-review cells of its workspace. Any other page marks a scope with
+ * data-form-review: its data-form-review-field="<name>" cells follow the controls of that name inside the scope.
+ */
+function bindAccountCreateReviews(): void {
+  const mirror = (host: HTMLElement, cell: HTMLElement, name: string): void => {
+    const blank = cell.textContent ?? ''
+    const text = (field: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement): string | undefined => field instanceof HTMLSelectElement ? field.selectedOptions[0]?.textContent ?? ''
+      : field instanceof HTMLInputElement && field.type === 'checkbox' ? (field.checked ? field.dataset.reviewLabel ?? field.value : field.dataset.reviewOff ?? '')
+        : field.dataset.reviewLabel ?? field.value
+    const refresh = () => {
+      const fields = Array.from(host.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('input[name], select[name], textarea[name]')).filter(field => field.name === name)
+      if (!fields.length || fields.some(field => field.type === 'password')) return
+      const chosen = fields.some(field => field.type === 'radio') ? fields.filter(field => field.type === 'radio' && (field as HTMLInputElement).checked) : fields
+      cell.textContent = chosen.map(field => text(field)?.trim()).filter(Boolean).join(', ') || blank
+    }
+    host.addEventListener('input', refresh); host.addEventListener('change', refresh)
+    host.addEventListener('reset', () => setTimeout(refresh, 0))
+    refresh()
+  }
+  document.querySelectorAll<HTMLElement>('[data-create-review]').forEach(cell => {
+    const form = cell.closest('[data-accounts-workspace]')?.querySelector<HTMLFormElement>('form[data-create-account-form]')
+    if (form) mirror(form, cell, cell.dataset.createReview ?? '')
+  })
+  document.querySelectorAll<HTMLElement>('[data-form-review]').forEach(scope => {
+    scope.querySelectorAll<HTMLElement>('[data-form-review-field]').forEach(cell => mirror(scope, cell, cell.dataset.formReviewField ?? ''))
   })
 }
 
@@ -72,6 +106,8 @@ function bindAccountLists(): void {
     const next = controls.querySelector<HTMLButtonElement>('[data-list-next]')
     const current = controls.querySelector<HTMLElement>('[data-list-page]')
     if (!search || !owner || !plan || !state || !count || !empty || !pages || !previous || !next || !current) return
+    // Optional quick chips set the status filter; data-list-state-chip holds the status, empty for all.
+    const chips = Array.from(workspace.querySelectorAll<HTMLButtonElement>('button[data-list-state-chip]'))
     const pageSize = Math.min(100, Math.max(1, Number(controls.dataset.listPageSize) || 20))
     let page = 1
     const paint = () => {
@@ -82,6 +118,7 @@ function bindAccountLists(): void {
       const start = (page - 1) * pageSize
       const visible = new Set(matched.slice(start, start + pageSize))
       rows.forEach(row => { row.hidden = !visible.has(row) })
+      chips.forEach(chip => chip.setAttribute('aria-pressed', String((chip.dataset.listStateChip ?? '') === state.value)))
       empty.hidden = matched.length !== 0
       pages.hidden = totalPages < 2
       previous.disabled = page === 1; next.disabled = page === totalPages
@@ -90,10 +127,11 @@ function bindAccountLists(): void {
     }
     search.addEventListener('input', () => { page = 1; paint() })
     ;[owner, plan, state].forEach(control => control.addEventListener('change', () => { page = 1; paint() }))
+    chips.forEach(chip => chip.addEventListener('click', () => { state.value = chip.dataset.listStateChip ?? ''; page = 1; paint() }))
     previous.addEventListener('click', () => { page -= 1; paint() })
     next.addEventListener('click', () => { page += 1; paint() })
     paint()
   })
 }
 
-export const ACCOUNT_LIST_CLIENT_SCRIPT = `(${bindAccountLists.toString()})(); (${bindAccountPlanPreviews.toString()})();`
+export const ACCOUNT_LIST_CLIENT_SCRIPT = `(${bindAccountLists.toString()})(); (${bindAccountPlanPreviews.toString()})(); (${bindAccountCreateReviews.toString()})();`

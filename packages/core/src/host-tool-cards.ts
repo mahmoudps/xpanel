@@ -54,7 +54,7 @@ const check = (name: string, label: string, extra: Partial<HostToolField> = {}):
 const area = (name: string, label: string, extra: Partial<HostToolField> = {}): HostToolField => ({ name, label, kind: 'area', technical: true, ...extra })
 const select = (name: string, label: string, choices: readonly (readonly [string, string])[], extra: Partial<HostToolField> = {}): HostToolField => ({ name, label, kind: 'select', choices, ...extra })
 
-const cycles = [['manual', msgid('Only when run')], ['seconds', msgid('Every N seconds')], ['minutes', msgid('Every N minutes')], ['hourly', msgid('Hourly')], ['hours', msgid('Every N hours')], ['daily', msgid('Daily')], ['days', msgid('Every N days')], ['weekly', msgid('Weekly')], ['monthly', msgid('Monthly')]] as const
+const cycles = [['manual', msgid('Only when run')], ['seconds', msgid('Every few seconds')], ['minutes', msgid('Every few minutes')], ['hourly', msgid('Hourly')], ['hours', msgid('Every few hours')], ['daily', msgid('Daily')], ['days', msgid('Every few days')], ['weekly', msgid('Weekly')], ['monthly', msgid('Monthly')]] as const
 const weekdays = [['0', msgid('Sunday')], ['1', msgid('Monday')], ['2', msgid('Tuesday')], ['3', msgid('Wednesday')], ['4', msgid('Thursday')], ['5', msgid('Friday')], ['6', msgid('Saturday')]] as const
 const cycleFields: readonly HostToolField[] = [
   select('cycle', msgid('Cycle'), cycles, { help: msgid('Times are in UTC.') }),

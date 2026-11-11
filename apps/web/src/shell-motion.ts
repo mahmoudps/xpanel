@@ -3,7 +3,7 @@
 export const SHELL_MOTION_CLIENT_SCRIPT = /* js */ String.raw`
   function createShellMotionController(element, kind) {
     if (kind !== 'mobile-nav' && kind !== 'cmdk') return null;
-    var surface = kind === 'cmdk' ? element.querySelector('.xp-cmdk-dialog') : element;
+    var surface = kind === 'cmdk' ? element.querySelector('.v2-cmdk__panel, .xp-cmdk-dialog') : element;
     var backdrop = kind === 'cmdk' ? element : document.querySelector('[data-xp-nav-backdrop]');
     if (!surface || !backdrop) return null;
     var preference = typeof window.matchMedia === 'function' ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;

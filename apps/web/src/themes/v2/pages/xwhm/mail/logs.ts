@@ -37,7 +37,7 @@ ${facts(t, [['observed', msgid('Observed at (UTC)')], ['window', msgid('Window (
     const ranking = [['senders', msgid('Top senders'), [msgid('Sender'), msgid('Messages')]], ['domains', msgid('Top recipient domains'), [msgid('Domain'), msgid('Recipients')]],
       ['deferrals', msgid('Deferral reasons'), [msgid('DSN'), msgid('Reason'), msgid('Attempts')]]] as const
     return page(input, '/whm/email/monitor', t(msgid('Mail monitor')), t(msgid('Mail flow counts computed from the same parsed journal window. Read-only.')),
-      `<div class="v2-whm-mail__stack" data-whm-mail-log="monitor" data-mail-log-can-read="${canRead}" lang="${locale}" dir="${dir}">${search}${summary}${ranking.map(([key, label, headings]) => group(`monitor-${key}`, t(label), table(t, t(label), headings.map(value => t(value)), { 'data-mail-monitor-table': key }, t(msgid('Not read'))))).join('')}</div>`)
+      `<div class="v2-whm-mail__stack" data-whm-mail-log="monitor" data-mail-log-can-read="${canRead}" lang="${locale}" dir="${dir}">${v2WhmClientTemplates('mail-log')}${search}${summary}${ranking.map(([key, label, headings]) => group(`monitor-${key}`, t(label), table(t, t(label), headings.map(value => t(value)), { 'data-mail-monitor-table': key }, t(msgid('Not read'))))).join('')}</div>`)
   }
   const results = group('delivery-results', t(msgid('Messages')), `${observed}<p data-mail-log-omitted hidden></p>
 ${table(t, t(msgid('Delivery messages, newest first')), [t(msgid('Last event (UTC)')), t(msgid('Queue ID')), t(msgid('Sender')), t(msgid('Recipients')), t(msgid('Status')), t(msgid('DSN')), t(msgid('Timeline'))], { 'data-mail-log-rows': true }, t(msgid('No delivery events have been read.')))}
@@ -47,5 +47,5 @@ ${table(t, t(msgid('Delivery messages, newest first')), [t(msgid('Last event (UT
 ${table(t, t(msgid('Recipients of the selected message')), [t(msgid('Recipient')), t(msgid('Status')), t(msgid('DSN')), t(msgid('Relay')), t(msgid('Attempts')), t(msgid('Response'))], { 'data-mail-log-detail-recipients': true }, t(msgid('Not read')))}
 <h3>${escapeHtml(t(msgid('Timeline')))}</h3><ol class="v2-whm-mail__timeline" data-mail-log-detail-events></ol></div></div>`)
   return page(input, '/whm/email/delivery', t(msgid('Delivery reports')), t(msgid('Postfix delivery events from the system journal, grouped by queue ID. Read-only.')),
-    `<div class="v2-whm-mail__split" data-whm-mail-log="delivery" data-mail-log-can-read="${canRead}" lang="${locale}" dir="${dir}">${v2WhmClientTemplates('mail-log')}<div class="v2-whm-mail__stack">${search}${results}</div><aside>${detail}</aside></div>`)
+    `<div class="v2-whm-mail__stack" data-whm-mail-log="delivery" data-mail-log-can-read="${canRead}" lang="${locale}" dir="${dir}">${v2WhmClientTemplates('mail-log')}${search}${results}${detail}</div>`)
 }

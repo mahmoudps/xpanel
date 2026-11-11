@@ -122,6 +122,26 @@ describe('account cron page controller', () => {
     expect(document.querySelector('[data-cron-username]')!.textContent).toBe('cronowner')
     expect(action('save').disabled).toBe(true)
   })
+  it('writes the saved job count into an optional summary value and drops its unread mark', async () => {
+    document.body.insertAdjacentHTML('beforeend', '<article data-unread><span data-cron-kpi="jobs">Not observed</span></article>')
+    const f = model(); f.boot(); await tick()
+    expect(document.querySelector('[data-cron-kpi="jobs"]')!.textContent).toBe('1')
+    expect(document.querySelector('article[data-unread]')).toBeNull()
+  })
+  it('drops the read-first note and text styling of a v2 summary tile once the count is written', async () => {
+    document.body.insertAdjacentHTML('beforeend', '<article class="v2-kpi" data-unread><p class="v2-kpi__value v2-kpi__value--text"><span data-cron-kpi="jobs">Not observed</span></p><p class="v2-kpi__note">Read saved jobs first.</p></article><article class="v2-kpi" data-unread><p class="v2-kpi__value v2-kpi__value--text"><span>Not observed</span></p><p class="v2-kpi__note">Read saved jobs first.</p></article>')
+    const f = model(); f.boot(); await tick()
+    const [jobs, other] = document.querySelectorAll('article.v2-kpi')
+    expect(jobs!.querySelector('.v2-kpi__note')).toBeNull()
+    expect(jobs!.querySelector('.v2-kpi__value')!.classList.contains('v2-kpi__value--text')).toBe(false)
+    // Tiles the list does not fill keep their note.
+    expect(other!.querySelector('.v2-kpi__note')).not.toBeNull()
+  })
+  it('asks with the command on its own line instead of running it into the sentence', async () => {
+    const f = model(); f.boot(); await tick(); await f.select()
+    Array.from(document.querySelectorAll<HTMLButtonElement>('[data-cron-jobs] button')).find(button => button.textContent === 'Delete')!.click(); await tick()
+    expect(f.ask).toHaveBeenCalledWith(expect.objectContaining({ code: job().command, body: expect.not.stringContaining(job().command) }))
+  })
   it('creates a real draft and verifies the exact returned job and readback', async () => {
     const f = model(); f.boot(); await tick(); edit('command', '  echo "new command"  '); edit('comment', 'New task')
     action('save').click(); await tick(); await tick()

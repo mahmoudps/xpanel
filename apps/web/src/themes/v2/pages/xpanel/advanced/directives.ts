@@ -1,6 +1,6 @@
 import { webDirectiveClientTemplates } from './directive-client-templates.ts'
 import type { PanelSurfaceProps } from '../../../../contract.ts'
-import { actions, area, button, check, deniedPage, esc, facts, field, fields, input, note, page, section, select, settingsContext, split, status, table, technical, unreadRow, NO_SETTINGS_AUTHORITY, type PanelSettingsAuthority } from '../settings/common.ts'
+import { actions, area, button, check, deniedPage, esc, facts, field, fields, groups, input, note, page, pair, section, select, settingsContext, status, table, technical, unreadRow, NO_SETTINGS_AUTHORITY, type PanelSettingsAuthority } from '../settings/common.ts'
 
 type DirectiveKind = 'error-pages' | 'indexes' | 'mime-types' | 'handlers' | 'hotlink'
 interface DirectiveField { key: string; label: string; kind?: 'select' | 'textarea' | 'checkbox'; options?: readonly (readonly [string, string])[]; maxlength?: number; help?: string; technical?: boolean }
@@ -31,10 +31,10 @@ const SPECS: Readonly<Record<DirectiveKind, DirectiveSpec>> = {
 export function renderV2WebDirectivePage(props: PanelSurfaceProps, kind: DirectiveKind, authority: PanelSettingsAuthority = NO_SETTINGS_AUTHORITY): string {
   const c = settingsContext(props, authority), { t } = c, spec = SPECS[kind], id = `v2-wd-${kind}`
   const title = t(spec.title), description = t(spec.description)
-  const current = section(`${id}-context`, t(msgctxt('theme:v2', 'Domain and file')), fields(field(`${id}-domain`, t(msgid('Domain')), select(`${id}-domain`, '', (c.domains ?? []).map(domain => [domain.id, domain.name]), ' data-wd-domain', true, c.selected?.id)))
-    + facts([{ label: t(msgid('Account-relative file')), valueHtml: `<bdi class="v2-mono" dir="ltr" data-wd-path>${esc(t(msgid('Not read')))}</bdi>` }, { label: t(msgid('Blocks managed by xPanel')), valueHtml: `<bdi dir="ltr" data-wd-managed>${esc(t(msgid('Not read')))}</bdi>` }, { label: t(msgid('Local site check')), valueHtml: `<bdi dir="ltr" data-wd-http>${esc(t(msgid('Not checked')))}</bdi>` }])
+  const current = section(`${id}-context`, t(msgctxt('theme:v2', 'Domain and file')), '<div class="v2-panel-settings__lead">' + fields(field(`${id}-domain`, t(msgid('Domain')), select(`${id}-domain`, '', (c.domains ?? []).map(domain => [domain.id, domain.name]), ' data-wd-domain', true, c.selected?.id)))
+    + facts([{ label: t(msgid('Account-relative file')), valueHtml: `<bdi class="v2-mono" dir="ltr" data-wd-path>${esc(t(msgid('Not read')))}</bdi>` }, { label: t(msgid('Blocks managed by xPanel')), valueHtml: `<bdi dir="ltr" data-wd-managed>${esc(t(msgid('Not read')))}</bdi>` }, { label: t(msgid('Local site check')), valueHtml: `<bdi dir="ltr" data-wd-http>${esc(t(msgid('Not checked')))}</bdi>` }], { 'data-cols': '3' }) + '</div>'
     + status(t(msgid('The current rules have not been read.')), { 'data-wd-status': true })
-    + '<div class="v2-panel-settings__preview" data-wd-notice role="note" hidden></div>')
+    + '<div class="v2-panel-settings__preview" data-wd-notice role="note" hidden></div>', actions(button(t(msgid('Read saved rules')), { 'data-wd-refresh': true })))
   const controls = spec.fields.map(item => {
     const controlId = `${id}-${item.key}`, extra = ` data-wd-field="${esc(item.key)}" aria-describedby="${controlId}-error${item.help ? ` ${controlId}-help` : ''}"${item.technical ? ' dir="ltr" class="v2-mono"' : ''}`
     const control = item.kind === 'checkbox' ? `<label class="v2-panel-settings__check" for="${controlId}"><input id="${controlId}" type="checkbox" data-wd-field="${esc(item.key)}" aria-describedby="${controlId}-error" disabled><span>${esc(t(item.label))}</span></label>`
@@ -46,11 +46,14 @@ export function renderV2WebDirectivePage(props: PanelSurfaceProps, kind: Directi
   const draft = section(`${id}-rules`, t(kind === 'error-pages' ? msgctxt('theme:v2', 'Rules in the draft') : msgid('Current rules')), table(`${id}-table`, title, spec.columns.map(label => t(label)), unreadRow(spec.columns.length, t(msgid('The current rules have not been read.'))), { 'data-wd-rows': true }))
   const editor = section(`${id}-editor`, t(spec.formTitle), fields(controls) + (spec.list ? actions(button(t(msgid('Add or update in draft')), { 'data-wd-add': true }) + button(t(msgid('Clear form')), { 'data-wd-clear': true })) : ''))
   const save = section(`${id}-save`, t(msgid('Save changes')), `<ol><li>${esc(t(msgid('Re-reads the current file and its revision.')))}</li><li>${esc(t(msgid('Replaces only the xPanel block for this page; other lines stay byte-for-byte.')))}</li><li>${esc(t(msgctxt('theme:v2', 'Keeps the previous file, validates with the protected Apache parser and checks the site locally. A failed check restores the kept file.')))}</li></ol>`
-    + actions(button(t(msgid('Read saved rules')), { 'data-wd-refresh': true }) + button(t(msgid('Discard draft')), { 'data-wd-discard': true }) + button(t(msgid('Save and check site')), { 'data-wd-save': true }, true, true))
-    + `<ul data-wd-issues><li>${esc(t(msgid('Diagnostics have not been read.')))}</li></ul>`)
+    + `<ul data-wd-issues><li>${esc(t(msgid('Diagnostics have not been read.')))}</li></ul>`
+    + `<div class="v2-panel-settings__foot">${button(t(msgid('Discard draft')), { 'data-wd-discard': true }) + button(t(msgid('Save and check site')), { 'data-wd-save': true }, true, true)}</div>`)
+  // The hotlink form and its limits are as tall as the rules and the save card together, so those share its row. Elsewhere the rule
+  // tables take the full width, so their columns fit; a list form is as tall as the save steps, so the limits follow
+  // as a strip, while the one-select index form carries the limits under it.
   const limits = section(`${id}-limits`, t(msgid('Limits of this page')), `<ul>${spec.notes.map(copy => `<li>${esc(t(copy))}</li>`).join('')}</ul>`)
   const system = kind === 'handlers' ? section(`${id}-system`, t(msgid('System handlers')), note(t(msgid('Mappings the server configuration sets for this domain. They are read-only.'))) + table(`${id}-system-table`, t(msgid('System handlers')), [t(msgid('Handler')), t(msgid('Extensions'))], unreadRow(2, t(msgid('The current rules have not been read.'))), { 'data-wd-system': true })) : ''
-  return page(props, authority, spec.route, title, description, split(current + draft + system + editor + save, limits) + webDirectiveClientTemplates(), { 'data-web-directives': kind, 'data-wd-account': (c.account?.id ?? ''), 'data-wd-can-read': String(c.editable), 'data-wd-manage': String(c.editable) })
+  return page(props, authority, spec.route, title, description, current + (kind === 'hotlink' ? pair(groups(draft + save), groups(editor + limits)) : groups(draft + system) + (spec.list ? pair(editor, save) + limits : pair(groups(editor + limits), save))) + webDirectiveClientTemplates(), { 'data-web-directives': kind, 'data-wd-account': (c.account?.id ?? ''), 'data-wd-can-read': String(c.editable), 'data-wd-manage': String(c.editable) })
 }
 
 export const V2_WEB_DIRECTIVE_ROUTES: Readonly<Record<string, DirectiveKind>> = Object.freeze(Object.fromEntries(Object.entries(SPECS).map(([kind, spec]) => [spec.route, kind as DirectiveKind])))

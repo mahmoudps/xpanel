@@ -30,10 +30,10 @@ const previewResponse = () => {
   const bytes = new TextEncoder().encode(JSON.stringify({ scope: 'desired-state', hostBinding: 'unverified', defaultSharedIpv4: { poolId: planId, address: '192.0.2.10' }, dedicated: { entitled: false, count: 0, unallocated: [] } }))
   return { ok: true, body: { getReader: () => ({ read: async () => sent ? { done: true } : (sent = true, { done: false, value: bytes }), cancel: async () => {}, releaseLock: () => {} }) } }
 }
-const boot = (send: Request, withChoices = true, actor: string | null = 'root:operator', runtime: Window = window) => {
+const boot = (send: Request, withChoices = true, actor: string | null = 'root:operator', runtime: Window = window, shape = (markup: string) => markup) => {
   const choice = withChoices ? '<input type="radio" name="ownerId" value="" checked><input type="radio" name="ownerId" value="' + ownerId + '"><input type="radio" name="shell" value="jailed" checked><input type="radio" name="shell" value="none">' : ''
   const actorAttribute = actor === null ? '' : ' data-account-create-actor="' + actor + '"'
-  document.body.innerHTML = '<section data-accounts-workspace><form data-create-account-form' + actorAttribute + '><input name="username" value="alpha"><input name="primaryDomain" value="alpha.example.test"><input id="new-acc-password" type="password" name="password" autocomplete="new-password" value="synthetic-initial-password"><input name="contactEmail" value=""><input name="ipv6" value=""><select name="planId"><option value="' + planId + '">Standard</option></select><select name="ipAssignment"><option value="shared">Shared</option></select>' + choice + '<button type="button" data-account-ip-refresh>Refresh</button><button type="button" data-account-generate-password data-password-target="new-acc-password">Generate</button><button type="button" data-account-toggle-password data-password-target="new-acc-password" aria-pressed="false">Reveal password</button><p data-account-ip-status></p><p><bdi data-account-ip-address></bdi></p><p data-account-create-status tabindex="-1"></p><button type="submit">Create</button><button type="reset">Discard</button></form><section data-approved-account-create-status><p data-account-creation-observation></p><button type="button" disabled data-account-create-another data-create-route="/whm/accounts/new?lang=en&amp;theme=dark&amp;density=comfortable">Create another</button></section></section>'
+  document.body.innerHTML = shape('<section data-accounts-workspace><form data-create-account-form' + actorAttribute + '><input name="username" value="alpha"><input name="primaryDomain" value="alpha.example.test"><input id="new-acc-password" type="password" name="password" autocomplete="new-password" value="synthetic-initial-password"><input name="contactEmail" value=""><input name="ipv6" value=""><select name="planId"><option value="' + planId + '">Standard</option></select><select name="ipAssignment"><option value="shared">Shared</option></select>' + choice + '<button type="button" data-account-ip-refresh>Refresh</button><button type="button" data-account-generate-password data-password-target="new-acc-password">Generate</button><button type="button" data-account-toggle-password data-password-target="new-acc-password" aria-pressed="false">Reveal password</button><p data-account-ip-status></p><p><bdi data-account-ip-address></bdi></p><p data-account-create-status tabindex="-1"></p><button type="submit">Create</button><button type="reset">Discard</button></form><section data-approved-account-create-status><p data-account-creation-observation></p><button type="button" disabled data-account-create-another data-create-route="/whm/accounts/new?lang=en&amp;theme=dark&amp;density=comfortable">Create another</button></section></section>')
   ;(window as Window & { xpanelSessionRequest?: Request }).xpanelSessionRequest = send
   const fetch = vi.fn().mockImplementation(async () => previewResponse()); vi.stubGlobal('fetch', fetch)
   new Function('window', 'document', BROWSER_REALTIME_SCRIPT)(runtime, document)
@@ -56,6 +56,39 @@ describe('approved new-account controls in the complete client', () => {
     expect(send).toHaveBeenCalledTimes(1); expect(body.ownerId).toBe(ownerId); expect(body.shell).toBe('none'); expect(body.ipAssignment).toEqual({ mode: 'shared' })
     expect(get<HTMLInputElement>('[name="password"]').value).toBe('')
     expect(get<HTMLInputElement>('input[name="ownerId"]:checked').value).toBe(ownerId)
+  })
+  it('reads the plan and the IP mode from choice groups as it does from the lists', async () => {
+    const other = '10000000-0000-4000-8000-000000000003'
+    let body: Record<string, unknown> = {}
+    const send = vi.fn<Request>().mockImplementation(async (_method, _path, payload) => { body = { ...payload }; throw refusal })
+    const fetch = boot(send, true, 'root:operator', window, markup => markup
+      .replace('<select name="planId"><option value="' + planId + '">Standard</option></select>', '<input type="radio" name="planId" value="' + planId + '" checked><input type="radio" name="planId" value="' + other + '">')
+      .replace('<p data-account-ip-status>', '<input type="radio" name="ipMode" value="shared" data-account-ip-mode checked><input type="radio" name="ipMode" value="dedicated:auto" data-account-ip-mode disabled><p data-account-ip-status>')
+      .replace('<p data-account-creation-observation>', '<span data-account-ip-check></span><p data-account-creation-observation>'))
+    await tick()
+    const mode = (value: string) => get<HTMLInputElement>('[data-account-ip-mode][value="' + value + '"]')
+    expect(document.querySelectorAll('input[name="planId"]')).toHaveLength(2)
+    expect(fetch.mock.calls.at(-1)?.[0]).toBe('/api/ips?view=allocation&planId=' + planId)
+    expect(mode('dedicated:auto').disabled).toBe(true); expect(mode('shared').checked).toBe(true)
+    // This harness cannot stream the availability body, so the read ends as failed: both places say so.
+    expect(get('[data-account-ip-check]').textContent).toBe('Could not load IP availability.')
+    expect(get('[data-account-ip-check]').textContent).toBe(get('[data-account-ip-status]').textContent)
+    expect(get('[data-account-ip-check]').getAttribute('data-state')).toBe('failed')
+    const second = get<HTMLInputElement>('input[name="planId"][value="' + other + '"]')
+    second.checked = true; second.dispatchEvent(new Event('change')); await tick()
+    expect(fetch.mock.calls.at(-1)?.[0]).toBe('/api/ips?view=allocation&planId=' + other)
+    const list = get<HTMLSelectElement>('[name="ipAssignment"]')
+    list.value = 'dedicated:auto'; list.dispatchEvent(new Event('change'))
+    expect(mode('dedicated:auto').checked).toBe(true); expect(mode('shared').checked).toBe(false)
+    // Without a read the automatic dedicated choice stays unavailable, as its list entry does.
+    expect(mode('dedicated:auto').disabled).toBe(true)
+    submit(); await tick(); expect(send).not.toHaveBeenCalled()
+    mode('shared').checked = true; mode('shared').dispatchEvent(new Event('change'))
+    expect(list.value).toBe('shared'); expect(mode('dedicated:auto').checked).toBe(false)
+    submit(); await tick()
+    expect(send).toHaveBeenCalledTimes(1); expect(body.planId).toBe(other); expect(body.ipAssignment).toEqual({ mode: 'shared' })
+    expect(mode('shared').checked).toBe(true); expect(mode('shared').disabled).toBe(false)
+    expect(get<HTMLInputElement>('input[name="planId"]:checked').value).toBe(other)
   })
   it('omits absent optional owner/shell controls while retaining the creation key', async () => {
     let body: Record<string, unknown> = {}

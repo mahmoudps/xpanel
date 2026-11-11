@@ -83,10 +83,10 @@ export async function runComposedAcceptance({ output, filter } = {}) {
         try {
           const response = await page.goto(host.baseUrl + spec.route + '?lang=' + locale + '&theme=' + theme, { waitUntil: 'networkidle' })
           assert.equal(response.status(), 200)
-          await page.locator('[data-composed-route]').waitFor({ state: 'visible' })
+          await page.locator('[data-v2-panel-page], [data-composed-route]').waitFor({ state: 'visible' })
           await page.evaluate(() => document.fonts.ready)
           result.geometry = await page.evaluate(() => {
-            const parent = document.querySelector('[data-composed-route]')
+            const parent = document.querySelector('[data-v2-panel-page], [data-composed-route]')
             const rectangle = element => { const r = element.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height } }
             const rtl = document.documentElement.dir === 'rtl'
             const glyphEdge = element => {
@@ -104,16 +104,16 @@ export async function runComposedAcceptance({ output, filter } = {}) {
               return { kind: control ? 'control' : 'fact', tag: value.tagName, id: value.id, text, label: l, value: v, gap: v.top - l.bottom, edge_delta: Math.abs((rtl ? l.right : l.left) - (rtl ? v.right : v.left)), label_glyph_edge_delta: Math.abs(glyphEdge(label) - (rtl ? l.right : l.left)), value_glyph_edge_delta: control ? null : text.length ? Math.abs((rtl ? v.right : v.left) - glyphEdge(value)) : null, control_content_edge: control ? contentEdge : null, disabled: control ? value.matches(':disabled') : null, readonly: control ? value.readOnly === true : null, associated: control ? value.labels?.length === 1 && value.labels[0] === label : null }
             }
             const mobileLabels = [...parent.querySelectorAll('.xp-composed-cell-label')].filter(label => label.checkVisibility())
-            const fields = [...parent.querySelectorAll('.xp-composed-field')].map(row => field(row.querySelector(':scope > dt, :scope > label'), row.querySelector(':scope > dd, :scope > input, :scope > select, :scope > textarea')))
+            const fields = [...parent.querySelectorAll('.v2-panel-extra__facts > div, .v2-panel-operation-facts > div, .v2-panel-extra .v2-field, .xp-composed-field')].filter(row => row.checkVisibility()).map(row => field(row.querySelector(':scope > dt, :scope > label'), row.querySelector(':scope > dd, :scope > input, :scope > select, :scope > textarea')))
             const facts = fields.filter(observation => observation.kind === 'fact')
             const mobileCells = mobileLabels.map(label => field(label, label.nextElementSibling))
-            const tables = [...parent.querySelectorAll('table')].map(table => {
+            const tables = [...parent.querySelectorAll('table')].filter(table => table.checkVisibility()).map(table => {
               const headers = [...table.querySelectorAll('th[scope="col"]')]
               const rows = [...table.querySelectorAll('tbody tr')].map(row => {
                 const cells = [...row.children]
-                const status = cells.length === 1 && cells[0].classList.contains('xp-composed-empty-cell') && cells[0].colSpan === headers.length
-                return { kind: status ? 'read-status' : 'data', widths: cells.length, column_span: cells.reduce((count, cell) => count + cell.colSpan, 0), cells: cells.map(td => ({ label: td.querySelector('.xp-composed-cell-label')?.textContent, value: td.querySelector('.xp-composed-cell-value')?.textContent, text: td.textContent.trim(), ...rectangle(td) })), header_value_edge_deltas: innerWidth > 600 && !status ? cells.map((td, index) => {
-                  const value = td.querySelector('.xp-composed-cell-value')
+                const status = cells.length === 1 && (cells[0].classList.contains('xp-composed-empty-cell') || cells[0].hasAttribute('colspan')) && cells[0].colSpan === headers.length
+                return { kind: status ? 'read-status' : 'data', widths: cells.length, column_span: cells.reduce((count, cell) => count + cell.colSpan, 0), cells: cells.map(td => ({ label: td.querySelector('.xp-composed-cell-label')?.textContent, value: td.querySelector('.xp-composed-cell-value')?.textContent ?? td.textContent.trim(), text: td.textContent.trim(), ...rectangle(td) })), header_value_edge_deltas: innerWidth > 600 && !status ? cells.map((td, index) => {
+                  const value = td.querySelector('.xp-composed-cell-value') ?? td
                   if (!headers[index] || !value) throw new Error('Data table cell lacks its header/value pair')
                   return Math.abs(glyphEdge(headers[index]) - glyphEdge(value))
                 }) : [], status_header_edge_delta: innerWidth > 600 && status ? Math.abs(glyphEdge(headers[0]) - glyphEdge(cells[0])) : null }
@@ -121,18 +121,20 @@ export async function runComposedAcceptance({ output, filter } = {}) {
               return { columns: headers.length, rows }
             })
             const interactive = [...parent.querySelectorAll('button,a,input,select,textarea')].filter(element => element.checkVisibility()).map(rectangle)
-            const majorChildren = [...parent.children]
+            const majorChildren = [...parent.children].filter(child => child.checkVisibility())
             const actualSectionGaps = majorChildren.slice(1).map((child, index) => rectangle(child).top - rectangle(majorChildren[index]).bottom)
-            const cards = [...parent.querySelectorAll('.xp-composed-card')].map(card => {
-              const children = [...card.children]
-              return { ...rectangle(card), padding: getComputedStyle(card).paddingInlineStart, gap: getComputedStyle(card).rowGap, actual_group_gaps: children.slice(1).map((child, index) => rectangle(child).top - rectangle(children[index]).bottom) }
+            const cards = [...parent.querySelectorAll('.v2-card, .xp-composed-card')].filter(card => card.checkVisibility()).map(card => {
+              const body = card.querySelector(':scope > .v2-card__body')
+              const children = [...card.children].filter(child => child.checkVisibility())
+              const bodyChildren = body ? [...body.children].filter(child => child.checkVisibility()) : []
+              return { ...rectangle(card), padding: getComputedStyle(card).paddingInlineStart, gap: getComputedStyle(card).rowGap, actual_group_gaps: [...children.slice(1).map((child, index) => rectangle(child).top - rectangle(children[index]).bottom), ...bodyChildren.slice(1).map((child, index) => rectangle(child).top - rectangle(bodyChildren[index]).bottom)] }
             })
             const stateGroups = [...parent.querySelectorAll('.xp-composed-state-group')].map(group => {
               const children = [...group.children]
               return children.slice(1).map((child, index) => rectangle(child).top - rectangle(children[index]).bottom)
             })
-            const fieldGroups = [...parent.querySelectorAll('.xp-composed-fields, .xp-composed-facts')].map(group => getComputedStyle(group).gap)
-            return { route: parent.dataset.composedRoute, state: parent.dataset.readState, document_width: document.documentElement.clientWidth, document_scroll: document.documentElement.scrollWidth, page: rectangle(parent), page_gap: getComputedStyle(parent).rowGap, actual_section_gap: actualSectionGaps[0], actual_section_gaps: actualSectionGaps, cards, state_groups: stateGroups, field_groups: fieldGroups, fields, facts, mobileCells, tables, interactive, ascii_digits: !/[\u0660-\u0669\u06f0-\u06f9]/.test(parent.textContent), mutations: parent.querySelectorAll('form,[data-terminal-form],[data-custom-config-form]').length }
+            const fieldGroups = [...parent.querySelectorAll('.v2-panel-extra__fields, .v2-panel-extra__facts, .v2-panel-operation-facts, .xp-composed-fields, .xp-composed-facts')].filter(group => group.checkVisibility()).map(group => getComputedStyle(group).gap)
+            return { route: parent.dataset.v2PanelPage ?? parent.dataset.composedRoute, state: parent.dataset.readState ?? parent.querySelector('[data-server-info-status]')?.dataset.state ?? null, document_width: document.documentElement.clientWidth, document_scroll: document.documentElement.scrollWidth, page: rectangle(parent), page_gap: getComputedStyle(parent).rowGap, actual_section_gap: actualSectionGaps[0], actual_section_gaps: actualSectionGaps, cards, state_groups: stateGroups, field_groups: fieldGroups, fields, facts, mobileCells, tables, interactive, ascii_digits: !/[\u0660-\u0669\u06f0-\u06f9]/.test(parent.textContent), mutations: parent.querySelectorAll('form,[data-terminal-form],[data-custom-config-form]').length }
           })
           const geometry = result.geometry
           assert.equal(geometry.route, spec.route)
@@ -184,11 +186,12 @@ export async function runComposedAcceptance({ output, filter } = {}) {
           for (const target of geometry.interactive) assert.ok(target.width >= 44 && target.height >= 44, 'Interactive targets are at least 44px')
           assert.equal(geometry.ascii_digits, true)
           assert.equal(geometry.mutations, 0)
-          result.applied_font = await assertAppliedFont(page, '[data-composed-route] h1', locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans')
+          const headingSelector = await page.locator('[data-v2-panel-page] h1').count() ? '[data-v2-panel-page] h1' : '[data-composed-route] h1'
+          result.applied_font = await assertAppliedFont(page, headingSelector, locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans')
           await injectTestScript(page, axeSource)
-          result.accessibility = await page.evaluate(async () => (await axe.run('[data-composed-route]', { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'] } })).violations.map(violation => ({ id: violation.id, impact: violation.impact, targets: violation.nodes.map(node => node.target) })))
+          result.accessibility = await page.evaluate(async () => (await axe.run(document.querySelector('[data-v2-panel-page], [data-composed-route]'), { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'] } })).violations.map(violation => ({ id: violation.id, impact: violation.impact, targets: violation.nodes.map(node => node.target) })))
           assert.deepEqual(result.accessibility, [])
-          const region = page.locator('.xp-composed-scroll')
+          const region = page.locator('.v2-panel-obs-table:visible, .v2-panel-operation-table:visible, .v2-panel-extra__table:visible, .xp-composed-scroll:visible')
           if (await region.count()) { for (const table of await region.all()) { await table.focus(); assert.equal(await table.evaluate(element => document.activeElement === element), true) }; result.table_keyboard_focus = true }
           if (screenshots < 8 && (spec.bind !== 'soon' || screenshots < 2)) {
             const name = `representative-${screenshots}-${locale}-${width}.png`

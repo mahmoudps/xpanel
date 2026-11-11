@@ -58,7 +58,7 @@ describe('file manager confirmation dialog', () => {
     new Function('window', 'document', BROWSER_REALTIME_SCRIPT)(window, document)
     await tick()
     // The file workspace controller reports 1024-based sizes with IEC units.
-    expect(document.body.textContent).toContain('2.00 KiB')
+    expect(document.body.textContent).toContain('\u20662.00\u00a0KiB\u2069')
     expect(document.body.textContent).toContain('2026-10-22 14:05 UTC')
     expect(prompt).not.toHaveBeenCalled()
 

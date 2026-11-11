@@ -43,7 +43,7 @@ describe('one browser attachment collector for Send and Save draft', () => {
     boot(); choose([realFile()]); await tick()
     expect(readComposeAttachmentPayload(group())).toEqual([{ filename: 'invoice.bin', contentType: 'application/octet-stream', contentBase64: 'AP+ADQo=' }])
     expect(root.querySelector('[data-compose-attachment-list] bdi[dir="auto"]')!.textContent).toBe('invoice.bin')
-    expect(root.querySelector('[data-compose-attachment-list] bdi[dir="ltr"]')!.textContent).toBe('5 B')
+    expect(root.querySelector('[data-compose-attachment-list] bdi[dir="ltr"]')!.textContent).toBe('\u20665\u00a0B\u2069')
   })
   it('fails closed before binding and returns an immutable actual-byte snapshot after binding', async () => {
     expect(() => readComposeAttachmentPayload(group())).toThrow('ATTACHMENTS_UNBOUND')
@@ -53,7 +53,7 @@ describe('one browser attachment collector for Send and Save draft', () => {
     expect(Object.isFrozen(snapshot)).toBe(true); expect(Object.isFrozen(snapshot[0])).toBe(true)
     expect(document.body.innerHTML).not.toContain('AP+ADQo=')
     expect(document.querySelectorAll('[data-compose-attachment-remove]')).toHaveLength(1)
-    expect(document.querySelector('[data-compose-attachment-summary]')!.textContent).toBe('1 files · 5 B')
+    expect(document.querySelector('[data-compose-attachment-summary]')!.textContent).toBe('1 files · \u20665\u00a0B\u2069')
     expect(Object.getOwnPropertyDescriptor(group(), 'xpanelReadComposeAttachments')).toMatchObject({ writable: false, configurable: false, enumerable: false })
   })
   it('serializes all dependencies and never injects selected content as HTML or sends a request', () => {
@@ -145,8 +145,8 @@ describe('one browser attachment collector for Send and Save draft', () => {
     try {
       boot(); choose([realFile()]); await tick()
       const summary = document.querySelector('[data-compose-attachment-summary]')!
-      expect(summary.textContent).toBe('1 ملفات · 5 B'); expect([...summary.querySelectorAll('bdi[dir="ltr"]')].map(node => node.textContent)).toEqual(['1', '5 B'])
-      expect(document.querySelector('[data-compose-attachment-remove]')!.getAttribute('aria-label')).toBe('إزالة invoice.bin')
+      expect(summary.textContent).toBe('1 ملفات · \u20665\u00a0B\u2069'); expect([...summary.querySelectorAll('bdi[dir="ltr"]')].map(node => node.textContent)).toEqual(['1', '\u20665\u00a0B\u2069'])
+      expect(document.querySelector('[data-compose-attachment-remove]')!.getAttribute('aria-label')).toBe('إزالة \u2066invoice.bin\u2069')
     } finally { document.documentElement.lang = 'en'; document.documentElement.dir = 'ltr' }
   })
 })

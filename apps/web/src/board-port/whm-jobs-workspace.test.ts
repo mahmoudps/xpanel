@@ -25,7 +25,7 @@ describe('WHM jobs workspace renderer', () => {
     expect(html).toContain('lang="ar" dir="rtl"')
     expect(html).toContain('<h1>المهام</h1>')
     expect(html).toContain('لم يُقرأ سجل المهام')
-    expect(html).toContain('<bdi dir="ltr">system.packages</bdi>')
+    expect(html).toContain('\u2066system.packages\u2069.')
     expect(html).toContain('5 ثوانٍ')
     expect(html).not.toMatch(/[٠-٩۰-۹]/)
     expect(html).not.toMatch(/\b(?:Jobs|Job history|Cancel job)\b/)

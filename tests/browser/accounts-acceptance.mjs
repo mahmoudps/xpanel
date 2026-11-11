@@ -16,18 +16,17 @@ const creationFieldContract = [
   { id: 'new-acc-username', name: 'username', tag: 'INPUT', type: 'text', required: true },
   { id: 'new-acc-domain', name: 'primaryDomain', tag: 'INPUT', type: 'text', required: true },
   { id: 'new-acc-contact', name: 'contactEmail', tag: 'INPUT', type: 'email', required: false },
-  { id: 'new-acc-plan', name: 'planId', tag: 'SELECT', type: 'select-one', required: true },
   { id: 'new-acc-password', name: 'password', tag: 'INPUT', type: 'password', required: true },
   { id: 'new-acc-ipv4', name: 'ipAssignment', tag: 'SELECT', type: 'select-one', required: true },
   { id: 'new-acc-ipv6', name: 'ipv6', tag: 'INPUT', type: 'text', required: false },
 ]
 const nativeAccountHeaderContract = {
-  en: ['Account', 'Primary domain', 'Plan', 'Status', 'Actions'],
-  ar: ['الحساب', 'النطاق الأساسي', 'الخطة', 'الحالة', 'الإجراءات'],
+  en: ['Account', 'Primary domain', 'Status', 'Plan', 'Actions'],
+  ar: ['الحساب', 'النطاق الأساسي', 'الحالة', 'الخطة', 'الإجراءات'],
 }
 const accountHeaderContract = {
-  en: ['Select', ...nativeAccountHeaderContract.en.slice(0, 3), 'Owner', 'IP', 'Disk', 'Bandwidth', 'IO write cap', ...nativeAccountHeaderContract.en.slice(3)],
-  ar: ['اختيار', ...nativeAccountHeaderContract.ar.slice(0, 3), 'المالك', 'IP', 'القرص', 'نقل البيانات', 'سقف الكتابة على القرص', ...nativeAccountHeaderContract.ar.slice(3)],
+  en: ['Select', 'Account', 'Primary domain', 'Usage', 'Status', 'Plan', 'IO write cap', 'Actions'],
+  ar: ['تحديد', 'الحساب', 'النطاق الأساسي', 'الاستخدام', 'الحالة', 'الخطة', 'سقف الكتابة على القرص', 'الإجراءات'],
 }
 const states = ['en', 'ar'].flatMap(locale => ['light', 'dark'].flatMap(theme => [360, 768, 1440].flatMap(width => ['accounts', 'create'].map(screen => ({ id: screen + '-' + locale + '-' + theme + '-' + width, locale, theme, width, screen })))))
 const plan = defaultPlan({ id: 'fixture-plan', name: 'Standard', featureListId: 'fixture-features' })
@@ -105,20 +104,30 @@ async function fixture() {
   return { baseUrl: 'http://127.0.0.1:' + server.address().port, requests, releaseCreate: () => { const release = pendingCreate; pendingCreate = null; assert.ok(release, 'A delayed create response must actually be pending'); release() }, close: () => { pendingCreate?.(); return new Promise(resolve => server.close(resolve)) } }
 }
 
+async function openRowAction(page, username, action) {
+  await page.locator('[data-account-row="' + username + '"] button[popovertarget][aria-haspopup="menu"]').click()
+  await page.locator('#v2-account-' + username + '-menu [data-action="' + action + '"]').click()
+}
+
 async function geometry(page) {
   return page.evaluate(() => {
     const dialog = document.querySelector('[data-account-dialog]')
-    const fields = [...dialog.querySelectorAll('.xp-accounts__field')].filter(field => !field.hidden).map(field => {
+    const rtl = document.dir === 'rtl'
+    const fields = [...dialog.querySelectorAll('.v2-whm-accounts__identity > div, .v2-field')].filter(field => !field.hidden && field.checkVisibility()).map(field => {
       const label = field.querySelector('dt,label'), value = field.querySelector('dd,input,textarea')
-      const a = label.getBoundingClientRect(), b = value.getBoundingClientRect()
-      let glyphDelta = null
+      const labelRange = document.createRange(); labelRange.selectNodeContents(label)
+      const lg = labelRange.getBoundingClientRect(), b = value.getBoundingClientRect(), style = getComputedStyle(value)
+      let glyphDelta = null, edge = 0
       if (value.tagName === 'DD') {
-        const labelRange = document.createRange(), valueRange = document.createRange()
-        labelRange.selectNodeContents(label); valueRange.selectNodeContents(value)
-        const first = labelRange.getBoundingClientRect(), second = valueRange.getBoundingClientRect()
-        glyphDelta = document.dir === 'rtl' ? Math.abs(first.right - second.right) : Math.abs(first.left - second.left)
+        const valueRange = document.createRange(); valueRange.selectNodeContents(value)
+        const second = valueRange.getBoundingClientRect()
+        glyphDelta = rtl ? Math.abs(lg.right - second.right) : Math.abs(lg.left - second.left)
+        edge = rtl ? Math.abs(label.getBoundingClientRect().right - b.right) : Math.abs(label.getBoundingClientRect().left - b.left)
+      } else {
+        const painted = rtl ? b.right - parseFloat(style.borderRightWidth) - parseFloat(style.paddingRight) : b.left + parseFloat(style.borderLeftWidth) + parseFloat(style.paddingLeft)
+        edge = Math.abs((rtl ? lg.right : lg.left) - painted)
       }
-      return { label: label.textContent, gap: b.top - a.bottom, edge: document.dir === 'rtl' ? Math.abs(a.right - b.right) : Math.abs(a.left - b.left), glyphDelta }
+      return { label: label.textContent, gap: b.top - lg.bottom, edge, glyphDelta }
     })
     const controls = [...dialog.querySelectorAll('button,input,textarea')].filter(control => control.checkVisibility()).map(control => {
       const rect = control.getBoundingClientRect()
@@ -135,16 +144,28 @@ async function createAccountGate(page, host, state, result, destination, expect)
   const password = form.locator('[name="password"]')
   assert.equal(await password.getAttribute('type'), 'password')
   const submit = form.locator('button[type="submit"]')
-  const fields = await form.evaluate(form => [...form.querySelectorAll('.xp-accounts__field')].map(field => {
-    const label = field.querySelector('label'), value = field.querySelector('input,select')
-    const a = label.getBoundingClientRect(), b = value.getBoundingClientRect()
-    return {
-      id: value.id, name: value.name, tag: value.tagName, type: value.type, required: value.required,
-      labelFor: label.htmlFor, associatedLabels: value.labels.length,
-      labelAssociated: value.labels[0] === label && label.textContent.trim().length > 0,
-      gap: b.top - a.bottom, left: Math.abs(a.left - b.left), width: b.width, height: b.height,
-    }
-  }))
+  const planChoice = await form.evaluate(form => {
+    const radio = form.querySelector('#new-acc-plan input[name="planId"]')
+    const label = radio?.closest('label')
+    const r = label?.getBoundingClientRect()
+    return radio && label && r ? { id: radio.id, name: radio.name, type: radio.type, required: radio.required, checked: radio.checked, width: r.width, height: r.height } : null
+  })
+  assert.ok(planChoice && planChoice.id === 'new-acc-plan-0' && planChoice.name === 'planId' && planChoice.type === 'radio' && planChoice.required && planChoice.checked && planChoice.width >= 44 && planChoice.height >= 44)
+  const fields = await form.evaluate(form => {
+    const rtl = document.dir === 'rtl'
+    return [...form.querySelectorAll('.v2-field')].map(field => {
+      const label = field.querySelector(':scope > label'), value = document.getElementById(label.htmlFor)
+      const lr = document.createRange(); lr.selectNodeContents(label)
+      const lg = lr.getBoundingClientRect(), b = value.getBoundingClientRect(), s = getComputedStyle(value)
+      const painted = rtl ? b.right - parseFloat(s.borderRightWidth) - parseFloat(s.paddingRight) : b.left + parseFloat(s.borderLeftWidth) + parseFloat(s.paddingLeft)
+      return {
+        id: value.id, name: value.name, tag: value.tagName, type: value.type, required: value.required,
+        labelFor: label.htmlFor, associatedLabels: value.labels.length,
+        labelAssociated: value.labels[0] === label && label.textContent.trim().length > 0,
+        gap: b.top - lg.bottom, left: Math.abs((rtl ? lg.right : lg.left) - painted), width: b.width, height: b.height,
+      }
+    })
+  })
   assert.deepEqual(fields.map(({ id, name, tag, type, required }) => ({ id, name, tag, type, required })), creationFieldContract)
   for (const field of fields) {
     assert.equal(field.labelFor, field.id)
@@ -156,8 +177,8 @@ async function createAccountGate(page, host, state, result, destination, expect)
   await expect(contact).toHaveAttribute('autocomplete', 'email')
   await expect(contact).toHaveAttribute('inputmode', 'email')
   await expect(contact).toHaveAttribute('dir', 'ltr')
-  assert.ok(await form.evaluate(form => form.getBoundingClientRect().width <= 640.5), 'The single-column form stays within a readable desktop measure')
-  for (const field of fields) assert.ok(Math.abs(field.gap - 8) < 1 && field.left < 1 && field.width >= 44 && field.height >= 44)
+  assert.ok(await form.evaluate(form => form.getBoundingClientRect().width <= 1040), 'The form column stays within its desktop measure')
+  for (const field of fields) assert.ok(Math.abs(field.gap - 8) < 1 && field.left < 1 && field.width >= 44 && field.height >= 44, `Create field geometry ${field.id}: gap=${field.gap} left=${field.left}`)
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true)
   result.fields = fields
   await page.screenshot({ path: join(destination, 'screenshots/' + state.id + '-form.png'), fullPage: true })
@@ -205,7 +226,7 @@ async function createAccountGate(page, host, state, result, destination, expect)
   await expect(form.locator('[data-account-create-status]')).toHaveAttribute('data-state', 'pending')
   await expect(submit).toBeDisabled()
   await expect(password).toHaveValue('')
-  await expect(page.locator('#xp-toast-region')).toHaveCount(0)
+  await expect(page.locator('#xp-toast-region [data-toast-level]')).toHaveCount(0)
   await expect(form.locator('[name="username"]')).toHaveAttribute('readonly', '')
   await expect(form.locator('[name="username"]')).toHaveValue('newowner')
   result.requests = host.requests.slice(initial)
@@ -273,8 +294,8 @@ async function createAccountGate(page, host, state, result, destination, expect)
   result.requests = host.requests.slice(initial)
   assert.equal(result.requests.length, 4)
   result.unverified_precondition_requires_review = true
-
 }
+
 export async function runAccountsAcceptance({ output, filter } = {}) {
   assert.equal(process.versions.node, readFileSync(join(root, '.node-version'), 'utf8').trim())
   const destination = resolve(root, output || 'test-results/accounts-' + new Date().toISOString().replaceAll(':', '-'))
@@ -304,74 +325,81 @@ export async function runAccountsAcceptance({ output, filter } = {}) {
         if (state.screen === 'create') {
           await createAccountGate(page, host, state, result, destination, expect)
         } else {
-        const headers = await page.locator('.xp-accounts__table thead th').allTextContents()
-        const names = headers.map(text => text.trim())
-        assert.deepEqual(names, accountHeaderContract[state.locale])
-        assert.deepEqual([names[1], names[2], names[3], names[9], names[10]], nativeAccountHeaderContract[state.locale])
-        assert.equal(await page.locator('[data-account-row]').count(), 2)
-        await expect(page.locator('[data-account-dialog]')).not.toBeVisible()
-        result.fonts = await assertAppliedFont(page, 'h1', state.locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans')
-        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true)
-        await page.screenshot({ path: join(destination, 'screenshots/' + state.id + '-list.png'), fullPage: true })
-        const trigger = page.locator('[data-account-row="beta"] [data-action="terminate-account"]')
-        await trigger.click()
-        const dialog = page.locator('[data-account-dialog]'), input = dialog.locator('[data-type-to-confirm]'), submit = dialog.locator('[data-account-action-submit]'), cancel = dialog.locator('[data-account-action-cancel]')
-        await expect(dialog).toBeVisible()
-        await expect(dialog.locator('[data-account-dialog-username]')).toHaveText('beta')
-        await expect(dialog.locator('[data-account-dialog-domain]')).toHaveText('beta.example.test')
-        await expect(input).toBeFocused()
-        const initial = host.requests.length
-        await input.fill('alpha'); await input.press('Enter')
-        await expect(submit).toBeDisabled()
-        assert.equal(host.requests.length, initial)
-        await input.fill('beta')
-        await submit.focus(); await page.keyboard.press('Tab'); await expect(input).toBeFocused()
-        await page.keyboard.press('Shift+Tab'); await expect(submit).toBeFocused()
-        result.geometry = await geometry(page)
-        assert.equal(result.geometry.overflow, 0)
-        assert.equal(result.geometry.ascii, true)
-        assert.ok(result.geometry.dialog.left >= 15 && result.geometry.dialog.right <= state.width - 15)
-        assert.ok(Math.abs((result.geometry.dialog.top + result.geometry.dialog.bottom) / 2 - 450) < 1, 'The native dialog must be centered in the actual viewport')
-        assert.ok(result.geometry.fields.length >= 3)
-        for (const field of result.geometry.fields) { assert.ok(Math.abs(field.gap - 8) < 1, 'The actual field gap is 8px: ' + field.label); assert.ok(field.edge < 1); if (field.glyphDelta !== null) assert.ok(field.glyphDelta < 1) }
-        for (const control of result.geometry.controls) assert.ok(control.width >= 43.9 && control.height >= 43.9)
-        result.dialogFont = await assertAppliedFont(page, '[data-account-dialog-title]', state.locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans')
-        await page.screenshot({ path: join(destination, 'screenshots/' + state.id + '-dialog.png'), fullPage: true })
-        await page.keyboard.press('Escape'); await expect(dialog).not.toBeVisible(); await expect(trigger).toBeFocused()
-        await trigger.click(); await expect(input).toHaveValue('')
-        await input.fill('beta')
-        const deletion = page.waitForResponse(response => response.request().method() === 'DELETE')
-        await submit.click()
-        await page.evaluate(() => document.querySelector('[data-account-action-form]').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))
-        await deletion
-        await expect(dialog.locator('[data-account-action-status]')).toContainText(state.locale === 'ar' ? 'غير متاح' : 'unavailable')
-        await expect(input).toHaveValue('beta')
-        assert.equal(host.requests.length, initial + 1)
-        assert.deepEqual(host.requests.at(-1).body, { confirmUsername: 'beta' })
-        assert.equal(host.requests.at(-1).path, '/api/accounts/internal-beta')
-        assert.equal(host.requests.at(-1).content_type, 'application/json')
-        assert.equal(host.requests.at(-1).csrf, 'synthetic-ui-fixture-csrf')
-        await expect(page.locator('[data-account-row="beta"]')).toBeVisible()
-        await expect(page.locator('#xp-toast-region')).toHaveCount(0)
-        assert.equal(await dialog.innerText().then(text => text.includes('untrusted-private-host-message')), false)
-        await cancel.click()
-        await page.locator('[data-account-row="beta"] [data-action="unsuspend-account"]').click()
-        const unsuspend = page.waitForResponse(response => response.url().endsWith('/unsuspend'))
-        await submit.click(); await unsuspend
-        await expect(dialog.locator('[data-account-action-status]')).toContainText(state.locale === 'ar' ? 'تعذر' : 'could not be verified')
-        await cancel.click()
-        await page.locator('[data-account-row="alpha"] [data-action="suspend-account"]').click()
-        await dialog.locator('[name="reason"]').fill('Synthetic reason')
-        const suspension = page.waitForResponse(response => response.url().endsWith('/suspend'))
-        await submit.click(); await suspension
-        await expect(dialog.locator('[data-account-action-status]')).toHaveAttribute('data-state', 'pending')
-        await expect(submit).toBeDisabled()
-        await expect(page.locator('[data-account-row="alpha"] [data-account-status]')).toContainText(state.locale === 'ar' ? 'يلزم التحقق' : 'Verification required')
-        await cancel.click()
-        await expect(page.locator('[data-account-row="alpha"] summary')).toBeFocused()
-        await expect(page.locator('[data-account-row="alpha"] [data-account-status] .xp-badge')).toHaveAttribute('data-status', 'warn')
-        result.requests = host.requests.slice(initial)
-        assert.deepEqual(result.requests.map(request => request.method + ' ' + request.path), ['DELETE /api/accounts/internal-beta', 'POST /api/accounts/internal-beta/unsuspend', 'POST /api/accounts/internal-alpha/suspend'])
+          const headers = await page.locator('.v2-whm-accounts__table thead th').allTextContents()
+          const names = headers.map(text => text.trim())
+          assert.deepEqual(names, accountHeaderContract[state.locale])
+          assert.deepEqual([names[1], names[2], names[4], names[5], names[7]], nativeAccountHeaderContract[state.locale])
+          assert.equal(await page.locator('[data-account-row]').count(), 2)
+          const alphaCheckbox = page.locator('[data-account-row="alpha"] [data-account-selection]')
+          await expect(alphaCheckbox).not.toBeChecked()
+          await alphaCheckbox.click()
+          await expect(alphaCheckbox).toBeChecked()
+          await alphaCheckbox.click()
+          await expect(alphaCheckbox).not.toBeChecked()
+          await expect(page.locator('[data-account-dialog]')).not.toBeVisible()
+          result.fonts = await assertAppliedFont(page, 'h1', state.locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans')
+          assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true)
+          await page.screenshot({ path: join(destination, 'screenshots/' + state.id + '-list.png'), fullPage: true })
+          const trigger = page.locator('[data-account-row="beta"] button[popovertarget][aria-haspopup="menu"]')
+          await openRowAction(page, 'beta', 'terminate-account')
+          const dialog = page.locator('[data-account-dialog]'), input = dialog.locator('[data-type-to-confirm]'), submit = dialog.locator('[data-account-action-submit]'), cancel = dialog.locator('[data-account-action-cancel]')
+          await expect(dialog).toBeVisible()
+          await expect(dialog.locator('[data-account-dialog-username]')).toHaveText('beta')
+          await expect(dialog.locator('[data-account-dialog-domain]')).toHaveText('beta.example.test')
+          await expect(input).toBeFocused()
+          const initial = host.requests.length
+          await input.fill('alpha'); await input.press('Enter')
+          await expect(submit).toBeDisabled()
+          assert.equal(host.requests.length, initial)
+          await input.fill('beta')
+          await submit.focus(); await page.keyboard.press('Tab'); await expect(input).toBeFocused()
+          await page.keyboard.press('Shift+Tab'); await expect(submit).toBeFocused()
+          result.geometry = await geometry(page)
+          assert.equal(result.geometry.overflow, 0)
+          assert.equal(result.geometry.ascii, true)
+          assert.ok(result.geometry.dialog.left >= 15 && result.geometry.dialog.right <= state.width - 15)
+          assert.ok(Math.abs((result.geometry.dialog.top + result.geometry.dialog.bottom) / 2 - 450) < 1, 'The native dialog must be centered in the actual viewport')
+          assert.ok(result.geometry.fields.length >= 3)
+          for (const field of result.geometry.fields) { assert.ok(Math.abs(field.gap - 8) < 1, 'The actual field gap is 8px: ' + field.label + ' (' + field.gap + ')'); assert.ok(field.edge < 1, 'Edge alignment: ' + field.label + ' (' + field.edge + ')'); if (field.glyphDelta !== null) assert.ok(field.glyphDelta < 1) }
+          for (const control of result.geometry.controls) assert.ok(control.width >= 43.9 && control.height >= 43.9)
+          result.dialogFont = await assertAppliedFont(page, '[data-account-dialog-title]', state.locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans')
+          await page.screenshot({ path: join(destination, 'screenshots/' + state.id + '-dialog.png'), fullPage: true })
+          await page.keyboard.press('Escape'); await expect(dialog).not.toBeVisible(); await expect(trigger).toBeFocused()
+          await openRowAction(page, 'beta', 'terminate-account'); await expect(input).toHaveValue('')
+          await input.fill('beta')
+          const deletion = page.waitForResponse(response => response.request().method() === 'DELETE')
+          await submit.click()
+          await page.evaluate(() => document.querySelector('[data-account-action-form]').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))
+          await deletion
+          await expect(dialog.locator('[data-account-action-status]')).toContainText(state.locale === 'ar' ? 'غير متاح' : 'unavailable')
+          await expect(input).toHaveValue('beta')
+          assert.equal(host.requests.length, initial + 1)
+          assert.deepEqual(host.requests.at(-1).body, { confirmUsername: 'beta' })
+          assert.equal(host.requests.at(-1).path, '/api/accounts/internal-beta')
+          assert.equal(host.requests.at(-1).content_type, 'application/json')
+          assert.equal(host.requests.at(-1).csrf, 'synthetic-ui-fixture-csrf')
+          await expect(page.locator('[data-account-row="beta"]')).toBeVisible()
+          await expect(page.locator('#xp-toast-region [data-toast-level]')).toHaveCount(0)
+          assert.equal(await dialog.innerText().then(text => text.includes('untrusted-private-host-message')), false)
+          await cancel.click()
+          await openRowAction(page, 'beta', 'unsuspend-account')
+          const unsuspend = page.waitForResponse(response => response.url().endsWith('/unsuspend'))
+          await submit.click(); await unsuspend
+          await expect(dialog.locator('[data-account-action-status]')).toContainText(state.locale === 'ar' ? 'تعذر' : 'could not be verified')
+          await cancel.click()
+          await openRowAction(page, 'alpha', 'suspend-account')
+          await dialog.locator('[name="reason"]').fill('Synthetic reason')
+          const suspension = page.waitForResponse(response => response.url().endsWith('/suspend'))
+          await submit.click(); await suspension
+          await expect(dialog.locator('[data-account-action-status]')).toHaveAttribute('data-state', 'pending')
+          await expect(submit).toBeDisabled()
+          await expect(page.locator('[data-account-row="alpha"] [data-account-status]')).toContainText(state.locale === 'ar' ? 'يلزم التحقق' : 'Verification required')
+          await cancel.click()
+          await expect(page.locator('[data-account-row="alpha"] button[popovertarget][aria-haspopup="menu"]')).toBeFocused()
+          await expect(page.locator('[data-account-row="alpha"] [data-account-status]')).toHaveAttribute('data-state', 'verification-required')
+          await expect(page.locator('[data-account-row="alpha"] [data-account-status] .v2-pill--warn')).toBeVisible()
+          result.requests = host.requests.slice(initial)
+          assert.deepEqual(result.requests.map(request => request.method + ' ' + request.path), ['DELETE /api/accounts/internal-beta', 'POST /api/accounts/internal-beta/unsuspend', 'POST /api/accounts/internal-alpha/suspend'])
         }
         assert.deepEqual(result.page_errors, [])
         result.status = 'passed'

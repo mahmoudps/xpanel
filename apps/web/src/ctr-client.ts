@@ -59,6 +59,8 @@ function bindCtr(askDialog: Ask | undefined, parse: typeof readCtrView): void {
       account.replaceChildren(new Option(t('Host engines'), ''), ...list.map(row => new Option(row.username, row.username)))
       account.value = list.some(row => row.username === current) ? current : ''
       const total = (key: 'stacks' | 'services' | 'running'): string => String(list.reduce((sum, row) => sum + row[key], 0))
+      // Totals are written only from a read list: an unread or failed read keeps the totals' unread state.
+      if (!accounts) return
       if (field['total-accounts']) field['total-accounts'].textContent = String(list.length)
       if (field['total-stacks']) field['total-stacks'].textContent = total('stacks')
       if (field['total-services']) field['total-services'].textContent = total('services')

@@ -16,7 +16,8 @@ type SecurityProps = Parameters<UiTheme['slots']['accountSecurity']>[0]['securit
 
 function rootRecoveryHint(t: Translate): string {
   const [before, after] = t('An administrator with root SSH access can turn it off with {command}. Password sign-in works again afterwards.').split('{command}')
-  return `${escapeHtml(before ?? '')}<bdi class="v2-mono" dir="ltr">xpanel disable-2fa root --confirm</bdi>${escapeHtml(after ?? '')}`
+  const tokens = ['xpanel', 'disable-2fa', 'root', '--confirm'].map(tok => `<span class="v2-security__tok">${tok}</span>`).join(' ')
+  return `${escapeHtml(before ?? '')}<bdi class="v2-mono" dir="ltr">${tokens}</bdi>${escapeHtml(after ?? '')}`
 }
 
 export function renderV2AccountSecurityCard(props: SecurityProps): string {
@@ -88,7 +89,7 @@ export const v2SharedSlots: UiTheme['slots'] = Object.freeze({
   activityDrawer: renderV2ActivityDrawer, commandPalette: renderV2CommandPalette, reconcileBanner: renderV2ReconcileBanner,
 })
 
-export const V2_SLOTS_CSS = `.v2-security,.v2-security__stack,.v2-security__form{display:flex;flex-direction:column;gap:var(--space-3);min-inline-size:0}.v2-security{padding:var(--space-3)}.v2-security__field{display:flex;flex-direction:column;gap:var(--space-1);min-inline-size:0}.v2-security__field>label{padding-inline-start:12px}.v2-security__field>input{inline-size:100%;text-align:var(--v2-control-align,start)}.v2-security [data-auth-totp-qr]>svg{display:block;max-inline-size:100%;block-size:auto}
+export const V2_SLOTS_CSS = `.v2-security,.v2-security__stack,.v2-security__form{display:flex;flex-direction:column;gap:var(--space-3);min-inline-size:0}.v2-security{padding:var(--space-3)}.v2-security__tok{white-space:nowrap}.v2-security__field{display:flex;flex-direction:column;gap:var(--space-1);min-inline-size:0}.v2-security__field>:is(label,span){padding-inline:13px;font-size:13px;line-height:1.25;font-weight:600;text-box-trim:trim-end;text-box-edge:text}.v2-security :is(form,.v2-security__stack)>.v2-btn{place-self:start}.v2-security__field>input{inline-size:100%;text-align:var(--v2-control-align,start)}.v2-security [data-auth-totp-qr]>svg{display:block;max-inline-size:100%;block-size:auto}
 .v2-impersonation{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--space-2);padding:var(--space-2) var(--space-3);background:var(--warn-soft);border-block-end:1px solid var(--warn-line);color:var(--text)}.v2-impersonation>p{min-inline-size:0;overflow-wrap:anywhere}
 .v2-activity-list{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:var(--space-3)}.v2-activity-row{display:flex;flex-direction:column;gap:var(--space-2);padding-block-end:var(--space-3);border-block-end:1px solid var(--line)}.v2-activity-row>div:first-child{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--space-1)}.v2-activity-row dl{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-2)}.v2-activity-row dl>div{display:flex;flex-direction:column;gap:var(--space-1);min-inline-size:0}.v2-activity-row dt{font-size:12px;color:var(--muted)}.v2-activity-row dd{overflow-wrap:anywhere}
 .v2-global-reconcile{padding:var(--space-2) var(--space-3) 0}.v2-reconcile-connection{font-size:12px;color:var(--muted);padding-block-end:var(--space-1)}.v2-reconcile-facts{padding:var(--space-2);font-size:12px;overflow-wrap:anywhere}

@@ -2,7 +2,7 @@ import { system as systemRender } from '@xpanel/render'
 import type { CanonicalIoAnalyticsUnavailable } from '@xpanel/core'
 import type { ComposedContext } from '../composed/context.ts'
 import { canReadSelectedAccount } from '../composed/context.ts'
-import { escapeHtml, formatAsciiDate, formatAsciiNumber } from '../../tokens.ts'
+import { escapeHtml, formatAsciiBytes, formatAsciiDate, formatAsciiNumber } from '../../tokens.ts'
 import { localeDirection, translator } from '../../i18n.ts'
 type Copy = string
 type Usage = NonNullable<ComposedContext['usage']>
@@ -27,7 +27,7 @@ const numeric = (text: string): Value => ({ text, technical: true })
 const known = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0
 const count = (value: unknown): value is number => known(value) && Number.isSafeInteger(value)
 const number = (value: number): string => formatAsciiNumber(value, { useGrouping: false })
-const mib = (bytes: number): string => bytes > 0 && bytes < 1024 * 1024 ? `${number(bytes)} B` : `${number(Number((bytes / (1024 * 1024)).toFixed(2)))} MiB`
+const mib = (bytes: number): string => formatAsciiBytes(bytes)
 const unavailable: Copy = msgid('Unavailable')
 const unread: Copy = msgctxt('resources-board', 'Not read')
 const unmeasured: Copy = msgid('Not measured')

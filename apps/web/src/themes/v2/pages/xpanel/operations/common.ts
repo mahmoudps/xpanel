@@ -5,6 +5,7 @@ import { normalizeAsciiDigits } from '../../../../../display-format.ts'
 import { card, pageHeader } from '../../../components/index.ts'
 import { escapeHtml, hookAttrs, type HookAttributes } from '../../../html.ts'
 import { v2Messages } from '../../../messages.ts'
+import { phoneLabels } from '../settings/common.ts'
 
 /** These are current core admission decisions, independent of presentation. */
 export interface PanelOperationAuthority {
@@ -46,7 +47,7 @@ export function operationFacts(facts: readonly { label: string; valueHtml: strin
 }
 
 export function operationTable(id: string, title: string, heads: readonly string[], bodyHooks: HookAttributes, bodyHtml: string): string {
-  return `<div class="v2-panel-operation-table" role="region" tabindex="0" aria-labelledby="${escapeHtml(id)}-caption"><table id="${escapeHtml(id)}"><caption id="${escapeHtml(id)}-caption" class="v2-sr">${escapeHtml(title)}</caption><thead><tr>${heads.map(label => `<th scope="col">${escapeHtml(label)}</th>`).join('')}</tr></thead><tbody${hookAttrs(bodyHooks)}>${bodyHtml}</tbody></table></div>`
+  return `<div class="v2-panel-operation-table" role="region" tabindex="0" aria-labelledby="${escapeHtml(id)}-caption"><table id="${escapeHtml(id)}"${phoneLabels(heads)}><caption id="${escapeHtml(id)}-caption" class="v2-sr">${escapeHtml(title)}</caption><thead><tr>${heads.map(label => `<th scope="col">${escapeHtml(label)}</th>`).join('')}</tr></thead><tbody${hookAttrs(bodyHooks)}>${bodyHtml}</tbody></table></div>`
 }
 
 export const unreadRow = (columns: number, message: string): string => `<tr><td colspan="${columns}"><p role="status">${escapeHtml(message)}</p></td></tr>`

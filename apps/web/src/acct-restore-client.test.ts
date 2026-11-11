@@ -101,8 +101,8 @@ describe('restore-more client', () => {
       expect(q('[data-restore-more-steps]').textContent).not.toMatch(/[٠-٩]/)
       const unverified = { ...restored, results: [{ path: MESSAGE, bytes: 11, result: 'failed', reason: 'write-unknown', verificationRequired: true }], counts: { restored: 0, 'skipped-exists': 0, failed: 1, 'not-attempted': 0 }, verificationRequired: true }
       await open(server({ preview: () => ({ ...preview(), quota: { limitMb: 100, plannedBytes: 11, fits: true } }), restore: () => unverified }))
-      expect(q(`button[data-file="${FILE}"]`).getAttribute('aria-label')).toBe('فتح النسخة ' + FILE)
-      expect(q(`[data-restore-more-mailboxes] input[value="${BOX}"]`).getAttribute('aria-label')).toBe('تحديد ' + BOX)
+      expect(q(`button[data-file="${FILE}"]`).getAttribute('aria-label')).toBe('فتح النسخة \u2066' + FILE + '\u2069')
+      expect(q(`[data-restore-more-mailboxes] input[value="${BOX}"]`).getAttribute('aria-label')).toBe('تحديد \u2066' + BOX + '\u2069')
       await tickBox(BOX); await click(q('[data-restore-more-preview]'))
       expect(q('[data-restore-more-quota]').textContent).toBe('ضمن 100 MiB')
       const ack = q<HTMLInputElement>('[data-restore-more-ack]'); ack.checked = true; ack.dispatchEvent(new Event('change', { bubbles: true })); await tick()
