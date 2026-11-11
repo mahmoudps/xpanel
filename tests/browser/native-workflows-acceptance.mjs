@@ -240,7 +240,8 @@ async function verifyPresentation(page, state, selector, result, axeSource) {
   for (const group of g.groups) {
     if (group.fields.length > 1) assert.equal(group.gap, '16px', 'Field spacing stays 16px')
   }
-  result.font = await assertAppliedFont(page, 'h1', state.locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans')
+  const isV2 = await page.locator('[data-ui-theme="v2"]').count() > 0
+  result.font = await assertAppliedFont(page, 'h1', state.locale === 'ar' ? (isV2 ? 'IBM Plex Sans Arabic' : 'sans-serif') : 'IBM Plex Sans')
   await injectTestScript(page, axeSource)
   result.accessibility = await page.evaluate(async selector => (await axe.run(selector, { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'] } })).violations.map(item => ({ id: item.id, impact: item.impact, targets: item.nodes.map(node => node.target) })), selector)
   assert.deepEqual(result.accessibility, [])

@@ -56,7 +56,10 @@ ${status('preflight-summary', msgid('Preflight has not run. Every value is read 
 
   const progress = lifecycleCard(t, 'upgrade-progress', msgid('Upgrade job and progress'), `
 <div data-upgrade-progress-state="not-read">${status('progress', msgid('No upgrade job or progress observation has been read.'))}</div>
+<div class="v2-upgrade-progress"><div class="v2-upgrade-progress__head"><span data-upgrade-progress-label>${text(t, msgid('Not read'))}</span><bdi dir="ltr" data-upgrade-progress-pct>0%</bdi></div><div class="v2-upgrade-meter" role="progressbar" aria-label="${text(t, msgid('Upgrade progress'))}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" data-upgrade-progressbar><progress class="v2-upgrade-meter__native" max="100" value="0" data-upgrade-progress-native aria-hidden="true"></progress></div></div>
 <div class="v2-lifecycle__scroll" role="region" tabindex="0" aria-label="${text(t, msgid('Upgrade progress'))}"><table class="v2-lifecycle__table" data-phone-value="2"><caption class="v2-sr">${text(t, msgid('Upgrade progress'))}</caption><thead><tr><th scope="col">${text(t, msgid('Phase'))}</th><th scope="col">${text(t, msgid('State'))}</th></tr></thead><tbody data-upgrade-phases>${PHASES.map(([key, label]) => `<tr data-upgrade-phase="${key}"><th scope="row">${text(t, label)}</th><td data-upgrade-phase-state>${text(t, msgid('Not read'))}</td></tr>`).join('')}</tbody></table></div>
+<h3>${text(t, msgid('Upgrade log'))}</h3>
+<ol class="v2-upgrade-log" data-upgrade-log-list><li><span class="v2-upgrade-log__msg">${text(t, msgid('No upgrade log entries have been read.'))}</span></li></ol>
 ${actions(button('cancel-pending', msgid('Cancel pending upgrade')))}
 <p class="v2-muted">${text(t, msgid('The upgrade machine has no cancel step. Once handed off it finishes or rolls back on its own.'))}</p>
 `, { 'data-whm-detail-section': 'upgrade-job' })
@@ -80,7 +83,7 @@ ${lifecycleHeader(t, msgid('Upgrade'), '/whm/server/upgrade', msgctxt('theme:v2'
 <div class="v2-lifecycle__column" data-whm-upgrade-workspace data-upgrade-can-manage="${props.canRead && props.canManage}">
 ${status('banner', props.canRead ? msgid('Release state has not been read. Nothing has changed.') : msgctxt('theme:v2', 'Upgrade state is unavailable to this account. Nothing has changed.'))}
 ${release}
-<div class="v2-lifecycle__grid"><div class="v2-lifecycle__column">${preflight}${progress}${process}</div><aside class="v2-lifecycle__column" aria-label="${text(t, msgctxt('theme:v2', 'Upgrade behavior and recovery'))}">${health}${rollback}${boundaries}</aside></div>
+<div class="v2-lifecycle__grid"><div class="v2-lifecycle__column">${preflight}${progress}</div><aside class="v2-lifecycle__column" aria-label="${text(t, msgctxt('theme:v2', 'Upgrade behavior and recovery'))}">${process}${health}${rollback}${boundaries}</aside></div>
 ${history}${renderV2ServerOps(t, ['updates'], props.canRead && props.canManage)}
 </div></div>`
 }

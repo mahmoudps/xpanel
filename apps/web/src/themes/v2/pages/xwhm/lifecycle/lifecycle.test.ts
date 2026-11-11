@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { renderV2BackupDestinationsPage, renderV2BackupsPage, renderV2TransferPage, renderV2UpgradePage } from './index.ts'
+import { LIFECYCLE_PAGES_CSS } from './shared.ts'
 import { parseMarkup } from '../../../../markup.ts'
 import { translator } from '../../../../../i18n.ts'
 import { escapeHtml } from '../../../html.ts'
@@ -348,5 +349,26 @@ describe('v2 lifecycle board regions', () => {
     expect(templates.some(node => node.attrs.has('style'))).toBe(false)
     expect(transfer).toContain('<div data-transfer-review-results style="--c1:&#39;Source account&#39;')
     expect(renderV2UpgradePage(admitted)).toContain('<table class="v2-lifecycle__table" style="--c1:&#39;Check&#39;;--c2:&#39;Result&#39;;--c3:&#39;Observed&#39;" data-phone-value="2">')
+  })
+
+  it('mounts backup pending-changes bar, account policy table, restore points, transfer build preview and upgrade progress/log hooks', () => {
+    const backups = renderV2BackupsPage({ ...admitted, accounts: [{ username: 'alice', primaryDomain: 'alice.example' }] })
+    expect(backups).toContain('data-backup-pending-bar')
+    expect(backups).toContain('data-backup-account-policy-rows')
+    expect(backups).toContain('data-backup-restore-points-rows')
+    expect(backups).toContain('data-backup-restore-tab-points-rows')
+    expect(LIFECYCLE_PAGES_CSS).toContain('grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr))')
+    expect(LIFECYCLE_PAGES_CSS).toContain('.v2-lifecycle__field select{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}')
+
+    const transfer = renderV2TransferPage(admitted)
+    for (const kpi of ['source', 'accounts', 'conflicts', 'ready']) expect(transfer).toContain(`data-transfer-kpi="${kpi}"`)
+    expect(transfer).toContain('data-transfer-discovery-pills')
+    expect(transfer).toContain('data-transfer-build-rows')
+    expect(transfer).toContain('data-transfer-slice-box')
+
+    const upgrade = renderV2UpgradePage(admitted)
+    expect(upgrade).toContain('data-upgrade-progressbar')
+    expect(upgrade).toContain('data-upgrade-progress-pct')
+    expect(upgrade).toContain('data-upgrade-log-list')
   })
 })

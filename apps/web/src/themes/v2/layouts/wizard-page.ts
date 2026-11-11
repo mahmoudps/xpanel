@@ -67,11 +67,11 @@ export function wizardPage(t: Translate, props: WizardPageProps): string {
 
 export const WIZARD_LAYOUT_CSS = `.v2-wizard__steps{gap:var(--space-3);padding:var(--v2-panel-padding)}
 .v2-wizard__steps>.v2-facts dd{font-weight:600}
-.v2-wizard__head{display:flex;flex-direction:column;gap:var(--space-1);padding:var(--v2-panel-padding);border-bottom:1px solid var(--line)}
+.v2-wizard__head{display:flex;flex-direction:column;gap:var(--space-1);padding:var(--v2-panel-padding);border-bottom:1px solid var(--line);background:var(--subtle)}
 .v2-wizard__kicker{font-size:12px;font-weight:600;color:var(--accent)}
 .v2-wizard__body{display:flex;flex-direction:column;gap:var(--space-3);padding:var(--v2-panel-padding)}
 .v2-wizard__body>.v2-review{padding:0;border:0;box-shadow:none}
-.v2-wizard__foot{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px var(--space-2);margin-top:auto;padding:var(--space-2) var(--space-3);border-top:1px solid var(--line)}
+.v2-wizard__foot{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px var(--space-2);margin-top:auto;padding:12px var(--v2-panel-padding);border-top:1px solid var(--line);background:var(--subtle)}
 .v2-wizard__note{flex:1 1 280px;font-size:13px;color:var(--muted)}
 .v2-wizard__nav{display:flex;flex-wrap:wrap;gap:var(--space-1);margin-inline-start:auto}
 `

@@ -150,23 +150,25 @@ function failureNetworkDiagnostics(page) {
 
 async function fontGate(page, locale) {
   const result = await page.evaluate(async locale => {
-    const family = locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans'
+    const isV2 = document.documentElement.dataset.uiTheme === 'v2' || Boolean(document.querySelector('[data-ui-theme="v2"]'))
+    const family = locale === 'ar' ? (isV2 ? 'IBM Plex Sans Arabic' : 'sans-serif') : 'IBM Plex Sans'
     const text = locale === 'ar' ? 'الحساب 0123456789' : 'Account 0123456789'
     let ready = false
     await Promise.race([document.fonts.ready.then(() => { ready = true }), new Promise(resolve => setTimeout(resolve, 10000))])
     const faces = [...document.fonts].map(face => ({ family: face.family.replaceAll('"', '').replaceAll("'", ''), status: face.status }))
     const sources = performance.getEntriesByType('resource').filter(entry => entry.initiatorType === 'css' && /\.woff2(?:\?|$)/.test(entry.name)).map(entry => { const url = new URL(entry.name); return { origin: url.origin, pathname: url.pathname } })
-    return { ready, status: document.fonts.status, family, glyph_check: document.fonts.check(family === 'sans-serif' ? '14px sans-serif' : `14px "${family}"`, text), body_family: getComputedStyle(document.body).fontFamily, faces, page_origin: location.origin, sources }
+    return { ready, status: document.fonts.status, isV2, family, glyph_check: document.fonts.check(family === 'sans-serif' ? '14px sans-serif' : `14px "${family}"`, text), body_family: getComputedStyle(document.body).fontFamily, faces, page_origin: location.origin, sources }
   }, locale)
   assert.equal(result.ready, true, 'Font loading must finish within the recorded observation window')
   assert.equal(result.status, 'loaded')
-  if (locale === 'en') assert.ok(result.faces.some(face => face.family === result.family && face.status === 'loaded'), 'The expected downloadable English locale face must actually load')
+  if (result.family !== 'sans-serif') assert.ok(result.faces.some(face => face.family === result.family && face.status === 'loaded'), 'The expected downloadable locale face must actually load')
   assert.equal(result.glyph_check, true)
-  if (locale === 'ar') assert.equal(result.body_family, 'sans-serif', 'Arabic UI must select the literal generic sans-serif family')
+  if (result.family === 'sans-serif') assert.equal(result.body_family, 'sans-serif', 'Arabic UI must select the literal generic sans-serif family')
   else assert.ok(result.body_family.includes(result.family), 'The locale body must select its intended family')
   assert.deepEqual(result.faces.filter(face => face.status === 'error'), [])
-  assert.deepEqual(result.sources.filter(source => source.origin !== result.page_origin || !/^\/assets\/fonts\/IBMPlex(?:Sans|Mono)-[A-Za-z]+\.woff2$/.test(source.pathname)), [], 'Every web font must load from the panel origin')
+  assert.deepEqual(result.sources.filter(source => source.origin !== result.page_origin || !/^\/assets\/fonts\/IBMPlex(?:Sans(?:Arabic)?|Mono)-[A-Za-z]+\.woff2$/.test(source.pathname)), [], 'Every web font must load from the panel origin')
   if (locale === 'en') assert.ok(result.sources.some(source => source.pathname.startsWith('/assets/fonts/IBMPlexSans-')), 'The English locale must load its Plex Sans face from the panel origin')
+  if (locale === 'ar' && result.isV2) assert.ok(result.sources.some(source => source.pathname.startsWith('/assets/fonts/IBMPlexSansArabic-')), 'The v2 Arabic locale must load its Plex Sans Arabic face from the panel origin')
   // Home on a phone shows its level-1 heading as role=heading; the desktop h1 is then hidden.
   result.applied_ui = await assertAppliedFont(page, await page.locator('h1').first().isVisible() ? 'h1' : '[role="heading"][aria-level="1"]', result.family)
   return result
@@ -1020,7 +1022,7 @@ export async function measureAuditGeometry(page) {
       const box = rect(th)
       return { column: index, header_visible: box.width > 0 && box.height > 0 && !!labelGlyph, value_nonempty: !!value, value_kind: badge ? 'painted_badge_box' : 'actual_text_node_range', edge_delta: labelGlyph && content ? Math.abs(rtl ? labelGlyph.right - content.right : labelGlyph.left - content.left) : null }
     })
-    const technicalColumns = [0, 1, 3].map(index => {
+    const technicalColumns = (v2Page ? [1, 2, 5] : [0, 1, 3]).map(index => {
       const value = rows.map(row => v2Page ? row.cells[index] : row.cells[index]?.querySelector('.xp-audit-value')).find(element => element?.textContent.trim())
       const tokens = [...(value?.querySelectorAll('bdi[dir="ltr"]') ?? [])].filter(token => token.textContent.trim())
       return { column: index, tokens: tokens.length, isolated: tokens.length > 0 && tokens.every(token => getComputedStyle(token).direction === 'ltr' && getComputedStyle(token).unicodeBidi.includes('isolate')) }
@@ -1050,7 +1052,7 @@ export async function measureAuditGeometry(page) {
       controls: [...formElement.querySelectorAll('input:not([type="hidden"]),select,button[type="submit"],a[data-audit-clear]')].map(control => ({ id: control.id || (control.hasAttribute('data-audit-clear') ? 'filter-clear' : 'filter-submit'), tag: control.tagName, width: rect(control).width, height: rect(control).height })),
       pager_groups: pagerGroups.length, pager_links: pagerLinks.length, empty_pager_groups: pagerGroups.filter(group => !group.querySelector('a[href]')).length,
       record_sibling_gaps: rows.flatMap(row => [...row.cells].slice(1).map((cell, index) => Math.round(rect(cell).top - rect(row.cells[index]).bottom))),
-      record_padding: rows.filter(row => v2Page ? row.cells.length === 5 : row.querySelector('.xp-audit-value')).map(row => {
+      record_padding: rows.filter(row => v2Page ? row.cells.length === 7 : row.querySelector('.xp-audit-value')).map(row => {
         const outer = rect(row), first = rect(row.cells[0]), last = rect(row.cells[row.cells.length - 1]), border = getComputedStyle(row)
         return { top: Math.round(first.top - outer.top - parseFloat(border.borderTopWidth)), bottom: Math.round(outer.bottom - last.bottom - parseFloat(border.borderBottomWidth)), inline_start: Math.round(rtl ? outer.right - parseFloat(border.borderRightWidth) - first.right : first.left - outer.left - parseFloat(border.borderLeftWidth)), inline_end: Math.round(rtl ? first.left - outer.left - parseFloat(border.borderLeftWidth) : outer.right - parseFloat(border.borderRightWidth) - first.right) }
       }),
@@ -1122,12 +1124,12 @@ export function assertAuditGeometry(metrics, state) {
   assert.equal(Math.round(metrics.table_to_supplement), 24, 'The table and its detail supplement retain the 24px sibling-group gap')
   assert.ok(metrics.supplement_major_gaps.length > 0 && metrics.supplement_major_gaps.every(gap => Math.round(gap) === 32), 'Actual supplementary major sections retain 32px spacing')
   for (const [edge, gap] of Object.entries(metrics.padding)) assert.equal(Math.round(gap), expectedPadding, 'The actual audit card ' + edge + ' padding must be ' + expectedPadding + 'px')
-  assert.equal(metrics.desktop_columns.length, 5)
+  assert.equal(metrics.desktop_columns.length, metrics.is_v2 ? 7 : 5)
   assert.equal(metrics.technical_columns.length, 3)
   assert.ok(metrics.technical_columns.every(column => column.isolated), 'Actual date, actor and target values must retain LTR isolation')
   if (state.width <= 390) {
     if (metrics.is_v2) {
-      assert.equal(metrics.mobile_fields.length, 3)
+      assert.equal(metrics.mobile_fields.length, 5)
       for (const field of metrics.mobile_fields) {
         assert.equal(field.label_visible, true, 'Stacked v2 phone cells expose their column labels')
         assert.equal(field.value_nonempty, true)

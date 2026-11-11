@@ -278,7 +278,8 @@ try {
         check('restoring-unlimited-retains-clean-disabled-save', await page.locator('[data-native-plan-save]').isDisabled() && await page.locator('[data-plan-review-open]').isDisabled(), { saveDisabled: await page.locator('[data-native-plan-save]').isDisabled(), reviewDisabled: await page.locator('[data-plan-review-open]').isDisabled() })
         await page.locator('#v2-plan-tab-resources').click()
       }
-      outcome.heading_font = await assertAppliedFont(page, '#main-content h1', sample.locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans')
+      const isV2 = await page.locator('[data-ui-theme="v2"]').count() > 0
+      outcome.heading_font = await assertAppliedFont(page, '#main-content h1', sample.locale === 'ar' ? (isV2 ? 'IBM Plex Sans Arabic' : 'sans-serif') : 'IBM Plex Sans')
       check('no-page-console-errors-or-writes', outcome.page_errors.length === 0 && outcome.console_errors.length === 0 && outcome.mutations.length === 0, { page_errors: outcome.page_errors, console_errors: outcome.console_errors, mutations: outcome.mutations })
       outcome.status = outcome.checks.every(c => c.passed) ? 'passed' : 'failed'
     } catch (error) { outcome.status = 'failed'; outcome.error = { name: error.name, message: error.message, applied_font: error.appliedFontObservation } }

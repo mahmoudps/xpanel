@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Account, Certificate, Domain, ServiceUser } from '@xpanel/core'
-import type { PanelSurfaceProps } from '../../../../contract.ts'
+import type { PanelSurfaceProps, ThemeViewProps } from '../../../../contract.ts'
 import { matchesHook, parseMarkup, type HookSelector } from '../../../../markup.ts'
 import { V2_SECURITY_SLOT } from '../../../surfaces/slots.ts'
 import { renderV2PanelSettingsPage, V2_PANEL_SETTINGS_ROUTES } from './remaining.ts'
@@ -12,8 +12,8 @@ const user: ServiceUser = { id: '30000000-0000-4000-8000-000000000001', accountI
 const certificate: Certificate = { id: '40000000-0000-4000-8000-000000000001', accountId: account.id, names: [domain.name], source: 'acme', challenge: 'http-01', notAfter: '2027-01-01T00:00:00Z', autoRenew: true }
 const allowed: PanelSettingsAuthority = { canRead: true, canManage: true, relatedRoutes: new Set(V2_PANEL_SETTINGS_ROUTES) }
 const readonly: PanelSettingsAuthority = { canRead: true, canManage: false }
-const props = (activeRoute: string, extra: Partial<PanelSurfaceProps> = {}): PanelSurfaceProps => ({ activeRoute, locale: 'en', account, domains: [domain], serviceUsers: [user], certificates: [certificate], ...extra })
-const render = (route: string, authority: PanelSettingsAuthority = allowed, extra: Partial<PanelSurfaceProps> = {}): string => renderV2PanelSettingsPage(props(route, extra), authority)!
+const props = (activeRoute: string, extra: Partial<PanelSurfaceProps & ThemeViewProps> = {}): PanelSurfaceProps & ThemeViewProps => ({ activeRoute, locale: 'en', account, domains: [domain], serviceUsers: [user], certificates: [certificate], ...extra })
+const render = (route: string, authority: PanelSettingsAuthority = allowed, extra: Partial<PanelSurfaceProps & ThemeViewProps> = {}): string => renderV2PanelSettingsPage(props(route, extra), authority)!
 const nodes = (html: string, selector: HookSelector) => parseMarkup(html).filter(node => matchesHook(node, selector))
 // Presentation tabs only switch the visible panel; they carry no operation and stay usable on a locked page.
 const liveControls = (html: string) => parseMarkup(html).filter(node => node.template < 0 && ['input', 'textarea', 'select', 'button'].includes(node.tag) && node.attrs.get('role') !== 'tab')
@@ -340,6 +340,33 @@ describe('v2 remaining account workspaces', () => {
     expect(html).not.toContain('<img src=x')
     expect(html).toContain('<bdi dir="ltr" class="v2-mono">0-9</bdi>')
     expect(html).not.toMatch(/[\u0660-\u0669\u06f0-\u06f9]/)
+  })
+
+  it('renders live account security summary chips, tab counts and SSH open-session slot when self-auth is ready', () => {
+    const html = render('/security/account', allowed, {
+      authPersonal: {
+        state: 'ready',
+        canChangePassword: true,
+        canReadSessions: true,
+        canRevokeSessions: true,
+        canReadApiTokens: true,
+        canManageApiTokens: true,
+      },
+      accountSecuritySummary: {
+        totpEnabled: true,
+        activeSessions: 3,
+        apiTokens: 2,
+        sshKeys: 4,
+      },
+    })
+    expect(html).toContain('Enabled')
+    expect(html).toContain('Shell: jailed · SSH keys: 4')
+    expect(html).toMatch(/id="v2-security-tab-sessions"[^>]*>.*3/s)
+    expect(html).toMatch(/id="v2-security-tab-tokens"[^>]*>.*2/s)
+    expect(html).toMatch(/id="v2-security-tab-ssh"[^>]*>.*4/s)
+
+    const sshPage = render('/security/ssh', allowed)
+    expect(sshPage).toContain('data-ssh-open-sessions')
   })
 })
 

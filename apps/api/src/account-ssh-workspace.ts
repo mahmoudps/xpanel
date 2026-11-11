@@ -37,6 +37,7 @@ export function validateAccountSshView(raw: unknown, account: Account, status: A
   if (!Array.isArray(raw.keys) || raw.keys.length > 10_000 || !Array.isArray(raw.unrecognizedLines) || raw.unrecognizedLines.length > 100_000 || raw.unrecognizedLines.some(line => !int(line, 1))) return bad()
   for (const key of raw.keys) if (!object(key) || !int(key.line, 1) || !KEY_TYPES.has(key.type as string) || typeof key.fingerprint !== 'string' || !SSH_FINGERPRINT.test(key.fingerprint) || typeof key.comment !== 'string' || key.comment.length > 1025 || !(key.bits === null || int(key.bits, 1, 65536)) || typeof key.hasOptions !== 'boolean' || typeof key.allowed !== 'boolean') return bad()
   if (!int(raw.capacity.maxKeys, 1) || raw.capacity.used !== raw.keys.length || typeof login.enabled !== 'boolean' || !['none', 'jailed'].includes(login.accountShell as string) || !['none', 'jailed'].includes(login.planShell as string) || !(login.port === null || int(login.port, 1, 65535)) || login.source !== 'saved-configuration'
+    || !(raw.openSessions === undefined || object(raw.openSessions) && (raw.openSessions.state === 'read' && int(raw.openSessions.count, 0, 100_000) || raw.openSessions.state === 'unavailable' && raw.openSessions.count === null))
     || typeof capabilities.canAdd !== 'boolean' || typeof capabilities.canRemove !== 'boolean' || ![null, 'directory_unmanageable', 'capacity'].includes(capabilities.reason as string | null)
     || application.status !== status || application.nativeQualified !== false) return bad()
   return raw as unknown as AccountSshView

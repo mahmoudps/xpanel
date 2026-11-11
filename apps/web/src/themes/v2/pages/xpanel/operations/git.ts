@@ -2,7 +2,7 @@ import type { PanelSurfaceProps } from '../../../../contract.ts'
 import { escapeHtml } from '../../../html.ts'
 import { gitHistoryClientTemplates } from '../settings/utility-client-templates.ts'
 import { renderV2GitHistoryBrowser } from './gitweb.ts'
-import { deniedOperationAuthority, operationButton, operationCard, operationContext, operationFacts, operationField, operationPage, operationTable, unreadRow, type PanelOperationAuthority } from './common.ts'
+import { deniedOperationAuthority, operationButton, operationCard, operationContext, operationFacts, operationField, operationPage, operationSelect, operationTable, unreadRow, type PanelOperationAuthority } from './common.ts'
 
 /** Repository requests and revision/HEAD guards stay in the existing core controller. */
 export function renderV2AccountGitPage(props: PanelSurfaceProps, authority: PanelOperationAuthority = deniedOperationAuthority): string {
@@ -10,7 +10,7 @@ export function renderV2AccountGitPage(props: PanelSurfaceProps, authority: Pane
   props = { ...props, account }
   const unread = t(msgid('Not read'))
   const repositories = operationCard('v2-git-repositories', t(msgid('Your repositories')),
-    `${operationField('v2-git-repository', t(msgid('Repository')), `<select id="v2-git-repository" dir="ltr" data-git-repository disabled><option value="">${escapeHtml(t(msgid('Read the list first')))}</option></select>`)}
+    `${operationField('v2-git-repository', t(msgid('Repository')), operationSelect(`<select id="v2-git-repository" dir="ltr" data-git-repository disabled><option value="">${escapeHtml(t(msgid('Read the list first')))}</option></select>`))}
 <div class="v2-panel-operation-actions">${operationButton(t(msgid('Read repositories')), { 'data-git-refresh': true }, !canManage)}${operationButton(t(msgid('Read repository')), { 'data-git-inspect': true })}${operationButton(t(msgid('Remove from list')), { 'data-git-remove': true })}</div><p data-git-status role="status">${escapeHtml(t(msgid('Repositories have not been read.')))}</p>`,
     t(msgid('Manage up to 20 repositories within your home directory. Removing an entry keeps its files.')))
   const create = operationCard('v2-git-create', t(msgid('Create or clone')),
@@ -19,7 +19,7 @@ ${operationField('v2-git-url', t(msgid('Public HTTPS clone URL')), '<input id="v
 <p>${escapeHtml(t(msgid('The parent directory must exist. Use a new path. Credentials, SSH URLs, submodules and custom Git commands are not accepted. Large clones may exceed the 60-second limit.')))}</p><div class="v2-panel-operation-actions">${operationButton(t(msgid('Create repository')), { 'data-git-init': true })}${operationButton(t(msgid('Clone repository')), { 'data-git-clone': true })}</div>`)
   const details = operationCard('v2-git-details', t(msgid('Repository details')),
     `${operationFacts([{ label: t(msgid('Path')), valueHtml: '<bdi dir="ltr" data-git-selected>—</bdi>' }, { label: t(msgid('Current branch')), valueHtml: '<bdi dir="ltr" data-git-current>—</bdi>' }, { label: t(msgid('Working tree')), valueHtml: `<span data-git-tree>${escapeHtml(unread)}</span>` }, { label: t(msgid('Origin')), valueHtml: '<bdi dir="ltr" data-git-origin>—</bdi>' }])}
-${operationField('v2-git-branch', t(msgid('Existing branch')), '<select id="v2-git-branch" dir="ltr" data-git-branch disabled><option value="">—</option></select>')}<div class="v2-panel-operation-actions">${operationButton(t(msgid('Switch branch')), { 'data-git-checkout': true })}${operationButton(t(msgid('Pull fast-forward only')), { 'data-git-pull': true })}</div>
+${operationField('v2-git-branch', t(msgid('Existing branch')), operationSelect('<select id="v2-git-branch" dir="ltr" data-git-branch disabled><option value="">—</option></select>'))}<div class="v2-panel-operation-actions">${operationButton(t(msgid('Switch branch')), { 'data-git-checkout': true })}${operationButton(t(msgid('Pull fast-forward only')), { 'data-git-pull': true })}</div>
 <p>${escapeHtml(t(msgid('Switching and pulling require a clean working tree. Commit or discard your changes through your own Git workflow first.')))}</p>
 ${operationTable('v2-git-history', t(msgid('Recent commits')), [t(msgid('Commit')), t(msgid('Date')), t(msgid('Message'))], { 'data-git-history': true }, unreadRow(3, t(msgid('History has not been read.'))))}`)
   const deployment = operationCard('v2-git-deployment', t(msgid('Deployment tasks')), `<p>${escapeHtml(t(msgid('Deploy runs the deployment.tasks of .cpanel.yml at the current commit, inside your account jail. It needs shell access, a clean working tree and at least one commit.')))}</p>${operationFacts([{ label: t(msgid('Last deployed')), valueHtml: `<bdi dir="ltr" data-git-deployed>${escapeHtml(unread)}</bdi>` }])}<div class="v2-panel-operation-actions">${operationButton(t(msgid('Deploy')), { 'data-git-deploy': true })}</div><p>${escapeHtml(t(msgid('Git web access is unavailable.')))}</p>`)

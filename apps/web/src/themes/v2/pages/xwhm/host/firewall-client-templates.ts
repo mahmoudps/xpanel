@@ -6,7 +6,7 @@ export function renderV2WhmFirewallClientTemplates(labels?: Readonly<Record<'por
   const cell = (kind: keyof NonNullable<typeof labels>) => (name: string, index: number) => {
     const label = labels && t ? ` data-phone-label="${escapeHtml(t(labels[kind][index]!))}"` : ''
     return name === 'action' && kind !== 'prefix' ? `<td${label}><span class="v2-pill v2-pill--neutral"><span class="v2-pill__dot" aria-hidden="true"></span><span data-xp-slot="action"></span></span></td>`
-      : ['action', 'comment', 'reason', 'purpose', 'origin'].includes(name) ? `<td${label} data-xp-slot="${name}"></td>` : `<td${label}><bdi dir="ltr" data-xp-slot="${name}"></bdi></td>`
+      : ['action', 'comment', 'reason', 'purpose', 'origin'].includes(name) ? `<td${label} data-xp-slot="${name}"></td>` : `<td${label}><bdi class="v2-mono v2-num" dir="ltr" data-xp-slot="${name}"></bdi></td>`
   }
   const actions = '<td><div class="v2-host__actions" data-xp-action="actions"></div></td>'
   const rows = [['port', ['position', 'action', 'protocol', 'port', 'source', 'purpose', 'origin', 'comment']], ['ip', ['action', 'source', 'port', 'comment', 'added', 'expires']], ['forward', ['protocol', 'port', 'destination', 'source', 'comment']], ['prefix', ['name', 'action', 'entries', 'port', 'file', 'updated']], ['ban', ['address', 'reason', 'source', 'since', 'expires']]] as const

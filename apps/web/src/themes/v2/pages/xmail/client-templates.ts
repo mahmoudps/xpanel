@@ -41,47 +41,55 @@ export function v2MailClientTemplatesForHooks(hooks?: object): string {
 
 export const V2_MAIL_DYNAMIC_CSS = `.v2-mail-reading-fragment{display:contents}
 .v2-mail-attachment-row,.v2-mail-compose-attachments li{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2);min-inline-size:0}
-.v2-mail-attachments__download{display:flex;gap:var(--space-2);max-inline-size:100%;text-align:start;white-space:normal;padding:var(--space-1) 12px}
-.v2-mail-attachments__badge{display:grid;place-items:center;flex:none;inline-size:34px;block-size:34px;border-radius:8px;background:var(--subtle);font:600 10px var(--font-mono)}
+.v2-mail-attachments__download{display:flex;align-items:center;gap:12px;max-inline-size:100%;text-align:start;white-space:normal;padding:10px 14px;transition:background-color 140ms ease-out,border-color 140ms ease-out}
+.v2-mail-attachments__badge,.v2-mail-attachments [data-xp-slot=badge]{display:grid;place-items:center;flex:none;inline-size:36px;block-size:36px;border-radius:8px;border:1px solid var(--line);background:var(--subtle);color:var(--text-2);font:600 12px/1 var(--font-mono);text-transform:uppercase}
 .v2-mail-attachments__file{display:grid;gap:var(--space-1);min-inline-size:0;flex:1;overflow-wrap:anywhere;text-align:start}
-.v2-mail-attachments__size{font-variant-numeric:tabular-nums;color:var(--muted);font-size:12px}
+.v2-mail-attachments__size,.v2-mail-attachments [data-xp-slot=size],.v2-mail-compose-attachments [data-xp-slot=size]{display:block;font-variant-numeric:tabular-nums;color:var(--muted);font-size:12px;font-family:var(--font-mono)}
 .v2-mail-compose-attachments li>span{display:grid;gap:var(--space-1);flex:1;min-inline-size:0;overflow-wrap:anywhere}
 .v2-mail-compose-attachments li>span>span{display:block}
-.v2-mail-identities__row{display:grid;gap:var(--space-3);padding:var(--v2-panel-padding);border:1px solid var(--line);border-radius:var(--radius-control);min-inline-size:0}
+.v2-mail-identities__row{display:grid;gap:var(--space-3);padding:var(--v2-panel-padding);border:1px solid var(--line);border-radius:12px;background:var(--subtle);min-inline-size:0}
 .v2-mail-identities__row>header,.v2-mail-identities__actions,.v2-mail-folders__row-actions{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2)}
 .v2-mail-identities__row>header{justify-content:space-between}
 .v2-mail-identities__row dl{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,200px),1fr));gap:var(--space-2)}
 .v2-mail-identities__datum{display:flex;flex-direction:column;gap:var(--space-1);min-inline-size:0;text-align:start}
 .v2-mail-identities__datum dt{font-size:12px;color:var(--muted)}
+.v2-mail-identities__datum dd{font-size:14px;font-variant-numeric:tabular-nums}
 .v2-mail-identities__datum :is(dd,bdi){min-inline-size:0;overflow-wrap:anywhere;max-inline-size:100%;white-space:normal}
 .v2-mail-folders__name{display:grid;gap:var(--space-1);padding-inline-start:calc(var(--mail-folder-depth,0)*16px)}
-.v2-mail-search__result{display:grid;gap:var(--space-1);inline-size:100%;padding:var(--space-2);white-space:normal;text-align:start;justify-items:start;overflow-wrap:anywhere}
+.v2-mail-folders__name [data-xp-slot=raw]{font-family:var(--font-mono);font-size:12px;direction:ltr;unicode-bidi:isolate}
+.v2-mail-workspace [data-xp-slot=messages],.v2-mail-workspace [data-xp-slot=unseen],.v2-mail-workspace [data-xp-slot=date],.v2-mail-workspace [data-xp-slot=time],.v2-mail-workspace [data-xp-slot=dsn]{font-variant-numeric:tabular-nums}
+.v2-mail-workspace [data-xp-slot=dsn],.v2-mail-workspace [data-xp-slot=address]{font-family:var(--font-mono);direction:ltr;unicode-bidi:isolate}
+.v2-mail-search__result{display:grid;gap:var(--space-1);inline-size:100%;padding:12px 16px;border-radius:12px;white-space:normal;text-align:start;justify-items:start;overflow-wrap:anywhere;transition:background-color 140ms ease-out,border-color 140ms ease-out}
+.v2-mail-search__result>[data-xp-slot=date]{font-family:var(--font-mono);font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
 .v2-mail-search__result>[data-xp-slot=preview]{font-weight:400;color:var(--muted)}
-.v2-mail-filter-empty{margin:var(--space-3) 20px;padding:40px var(--space-3);border:1px dashed var(--line-strong);border-radius:var(--radius-card);color:var(--muted);font-size:13px;line-height:1.6;text-align:center}
+.v2-mail-filter-empty{margin:var(--space-3) var(--space-3);padding:40px var(--space-3);border:1px dashed var(--line-strong);border-radius:12px;color:var(--muted);font-size:13px;line-height:1.6;text-align:center}
 .v2-mail-move{position:relative}
-.v2-mail-move-menu{position:absolute;inset-block-start:50px;inset-inline-start:0;z-index:2;list-style:none;margin:0;padding:var(--space-1);min-inline-size:200px;max-inline-size:calc(100vw - 48px);border-radius:var(--radius-control);border:1px solid var(--line);background:var(--surface);box-shadow:0 12px 32px rgb(7 14 26/.18),0 2px 6px rgb(7 14 26/.08);display:flex;flex-direction:column;gap:2px}
-.v2-mail-move-menu button{inline-size:100%;min-block-size:44px;padding:0 12px;border:none;border-radius:var(--radius-chip);background:transparent;font:inherit;font-size:14px;text-align:start;color:var(--text);cursor:pointer}
+.v2-mail-move-menu{position:absolute;inset-block-start:calc(100% + 6px);inset-inline-start:0;z-index:20;list-style:none;margin:0;padding:6px;min-inline-size:220px;max-inline-size:calc(100vw - 32px);border-radius:12px;border:1px solid var(--line-strong);background:var(--surface);box-shadow:0 14px 34px rgb(7 14 26/.18),0 2px 8px rgb(7 14 26/.08);display:flex;flex-direction:column;gap:2px}
+.v2-mail-move-menu button{display:flex;align-items:center;inline-size:100%;min-inline-size:44px;min-block-size:44px;padding:8px 12px;border:none;border-radius:8px;background:transparent;font:inherit;font-size:14px;font-weight:500;text-align:start;color:var(--text);cursor:pointer;transition:background-color 140ms ease-out,color 140ms ease-out}
 .v2-mail-move-menu button:hover{background:var(--subtle)}
+.v2-mail-move-menu button:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
 [data-ui-theme="v2"] [data-mail-calendar-view] [data-calview-grid]{display:flex;flex-direction:column;min-inline-size:640px}
-.v2-mail-calview__row{display:grid;grid-template-columns:36px repeat(7,minmax(0,1fr))}
+.v2-mail-calview__row{display:grid;grid-template-columns:56px repeat(7,minmax(0,1fr))}
 .v2-mail-calview__head{display:flex;flex-direction:column;gap:var(--space-1);padding:var(--space-1);font-size:12px;font-weight:600;background:var(--subtle);border-inline-start:1px solid var(--line);min-inline-size:0}
 .v2-mail-calview__short{display:none}
 .v2-mail-calview__day{display:flex;flex-direction:column;gap:4px;min-block-size:128px;padding:var(--space-1);border-block-start:1px solid var(--line);border-inline-start:1px solid var(--line);min-inline-size:0;outline-offset:-2px}
 .v2-mail-calview__day[data-outside=true]{background:var(--sunken);color:var(--muted)}
 .v2-mail-calview__day[aria-current=date]{background:var(--accent-soft)}
 .v2-mail-calview__day[aria-selected=true]{box-shadow:inset 0 0 0 2px var(--focus)}
-.v2-mail-calview__date{font-size:12px;font-variant-numeric:tabular-nums}
-.v2-mail-calview__week,.v2-mail-calview__gutter{background:var(--subtle);padding:var(--space-1) 4px;font-size:10px;color:var(--muted);text-align:center}
-.v2-mail-calview__chip{display:flex;flex-wrap:wrap;align-items:start;gap:0 4px;border:1px solid var(--line);border-inline-start:3px solid var(--calview-chip,var(--accent));border-radius:4px;background:var(--surface);color:var(--text);padding:4px;min-inline-size:0;font-size:11px;line-height:1.4;text-align:start;overflow-wrap:anywhere;cursor:pointer}
+.v2-mail-calview__date{font-size:12px;font-weight:600;font-variant-numeric:tabular-nums}
+.v2-mail-calview__week,.v2-mail-calview__gutter{background:var(--subtle);padding:var(--space-1) 4px;font-size:12px;font-weight:500;font-variant-numeric:tabular-nums;color:var(--muted);text-align:center;white-space:nowrap}
+.v2-mail-calview__chip{display:flex;flex-wrap:wrap;align-items:center;gap:2px 6px;min-inline-size:44px;min-block-size:44px;border:1px solid var(--line);border-inline-start:3px solid var(--calview-chip,var(--accent));border-radius:8px;background:var(--surface);color:var(--text);padding:6px 8px;font-size:12px;font-variant-numeric:tabular-nums;line-height:1.4;text-align:start;overflow-wrap:anywhere;cursor:pointer;transition:background-color 140ms ease-out,border-color 140ms ease-out}
+.v2-mail-calview__chip:hover{background:var(--subtle)}
 .v2-mail-calview__chip>bdi{flex:none;white-space:nowrap;overflow-wrap:normal}
 .v2-mail-calview__chip>span:last-child{min-inline-size:0;overflow:hidden;text-overflow:ellipsis}
-.v2-mail-calview__more{font-size:11px;color:var(--muted)}
-.v2-mail-calview__swatch{inline-size:12px;block-size:12px;flex:none;border-radius:3px;background:var(--calview-chip,var(--accent))}
+.v2-mail-calview__more{font-size:12px;font-weight:500;font-variant-numeric:tabular-nums;color:var(--muted)}
+.v2-mail-calview__swatch{inline-size:12px;block-size:12px;flex:none;border-radius:4px;background:var(--calview-chip,var(--accent))}
 .v2-mail-calview__notes{white-space:pre-wrap;overflow-wrap:anywhere}
-[data-ui-theme="v2"] [data-calview-grid]:is([data-mode=week],[data-mode=day]) .v2-mail-calview__row{grid-template-columns:48px repeat(var(--calview-days,7),minmax(0,1fr))}
+[data-ui-theme="v2"] [data-calview-grid]:is([data-mode=week],[data-mode=day]) .v2-mail-calview__row{grid-template-columns:56px repeat(var(--calview-days,7),minmax(0,1fr))}
 [data-ui-theme="v2"] [data-calview-grid]:is([data-mode=week],[data-mode=day]) .v2-mail-calview__day{padding:0}
 [data-ui-theme="v2"] [data-calview-grid]:is([data-mode=week],[data-mode=day]) .v2-mail-calview__gutter{display:grid;grid-template-rows:repeat(24,40px);padding:0 4px}
-.v2-mail-calview__timeline{position:relative;block-size:960px;inline-size:100%;background:repeating-linear-gradient(to bottom,transparent 0,transparent 39px,var(--line) 39px,var(--line) 40px)}
-.v2-mail-calview__timeline>.v2-mail-calview__chip{position:absolute;inset-block-start:var(--calview-top);block-size:var(--calview-height);inset-inline-start:var(--calview-start);inline-size:var(--calview-width);overflow:hidden;min-block-size:12px}
-@media(max-width:600px){.v2-mail-calview__long{display:none}.v2-mail-calview__short{display:inline}.v2-mail-identities__row dl{grid-template-columns:minmax(0,1fr)}}
+.v2-mail-calview__timeline{position:relative;block-size:960px;inline-size:100%;background:repeating-linear-gradient(180deg,transparent 0,transparent 39px,var(--line) 39px,var(--line) 40px)}
+.v2-mail-calview__timeline>.v2-mail-calview__chip{position:absolute;inset-block-start:var(--calview-top);block-size:var(--calview-height);inset-inline-start:var(--calview-start);inline-size:var(--calview-width);overflow:hidden;min-block-size:24px;min-inline-size:0}
+@media(max-width:600px){.v2-mail-calview__long{display:none}.v2-mail-calview__short{display:inline}.v2-mail-identities__row dl{grid-template-columns:minmax(0,1fr)}.v2-mail-filter-empty{margin:var(--space-2)}}
+@media(prefers-reduced-motion:reduce){.v2-mail-attachments__download,.v2-mail-search__result,.v2-mail-move-menu button,.v2-mail-calview__chip{transition:none}}
 `

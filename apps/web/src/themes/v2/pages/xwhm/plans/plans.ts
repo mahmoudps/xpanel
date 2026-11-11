@@ -1,6 +1,6 @@
 import type { Plan } from '@xpanel/core'
 import type { Translate } from '../../../../../i18n.ts'
-import { formatAsciiRate } from '../../../../../display-format.ts'
+import { formatAsciiRate, formatDisplayDateTime } from '../../../../../display-format.ts'
 import type { WhmSurfaceProps } from '../../../../contract.ts'
 import { escapeHtml } from '../../../html.ts'
 import { renderV2PlanEditor } from './editor.ts'
@@ -19,10 +19,16 @@ export function renderV2WhmPlans(t: Translate, props: WhmSurfaceProps, authority
   const selected = selectedId ? plans?.find(plan => plan.id === selectedId) : undefined
   const requestedUnavailable = props.planEditorState?.kind === 'unavailable' || selectedId !== undefined && selected === undefined
   const accountCount = (plan: Plan): string => observedAccounts === undefined ? escapeHtml(t('Not read')) : technical(observedAccounts.filter(account => account.planId === plan.id).length)
+  const savedBy = (plan: Plan | undefined): string => {
+    if (!plan) return escapeHtml(t('Not read'))
+    if (!plan.updatedBy) return escapeHtml(t(msgid('Not recorded')))
+    const when = plan.updatedAt ? formatDisplayDateTime(plan.updatedAt) : '—'
+    return when !== '—' ? `${technical(plan.updatedBy)} · ${technical(when)}` : technical(plan.updatedBy)
+  }
   const allLabels = [t('Plan'), t('Disk'), t('Bandwidth / month'), t(msgctxt('theme:v2', 'Disk IO read / write')), t('Memory'), t('Processes'), t('Feature list'), t('Accounts'), t('Actions')]
   const rows = (plans ?? []).map(plan => ({ hooks: { 'data-plan-row': plan.name, 'data-list-row': true }, cellsHtml: [
     // The owner sits under the plan name so the table fits its card without sideways scroll.
-    `<div class="v2-plan-stack"><strong data-plan-name>${escapeHtml(plan.name)}</strong><small class="v2-muted">${escapeHtml(t('Owner'))} ${escapeHtml(plan.ownerId === null ? t('Root') : props.resellers?.find(owner => owner.id === plan.ownerId)?.username ?? t('Not read'))}</small></div>`,
+    `<div class="v2-plan-stack"><strong data-plan-name>${escapeHtml(plan.name)}</strong><small class="v2-muted">${escapeHtml(t('Owner'))} ${escapeHtml(plan.ownerId === null ? t('Root') : props.resellers?.find(owner => owner.id === plan.ownerId)?.username ?? t('Not read'))}</small><small class="v2-muted" data-plan-saved-by>${escapeHtml(t(msgid('Last saved by')))} ${savedBy(plan)}</small></div>`,
     limit(t, plan.resources.diskMb, 'MiB'), limit(t, plan.resources.bandwidthMbMonth, 'MiB'),
     `<div class="v2-plan-stack">${rate(t, plan.resources.ioReadBps)}${rate(t, plan.resources.ioWriteBps)}</div>`,
     limit(t, plan.resources.memoryMb, 'MiB'), limit(t, plan.resources.maxProcesses),
@@ -39,12 +45,12 @@ export function renderV2WhmPlans(t: Translate, props: WhmSurfaceProps, authority
   const impact = group('impact', t(msgctxt('theme:v2', 'Impact of changes')), table(t, 'impact', t('Plan impact'), [t('Plan'), t('Assigned accounts in the authorized snapshot'), t('Observed cap compliance')], impactRows, t(msgctxt('theme:v2', 'Plan assignments have not been read.')))
     + `<p>${escapeHtml(t(msgctxt('theme:v2', 'Assignments are desired state. Current usage and over-cap accounts have not been observed.')))}</p>`
     + table(t, 'assigned', t('Assigned accounts'), [t('Plan'), t('Account')], assignedRows, t(observedAccounts === undefined ? msgid('Account assignments have not been read.') : msgid('No assigned accounts were returned in this snapshot.'))))
-  const unsaved = group('unsaved', t('Unsaved changes'), `<p role="status">${escapeHtml(t(msgctxt('theme:v2', 'Review current values in the plan editor. A saved plan is not a comparison with its browser draft.')))}</p>${facts([{ label: t('Saved'), valueHtml: escapeHtml(selected?.name ?? t('Not read')) }, { label: t('Draft'), valueHtml: escapeHtml(t('Not read')) }])}`)
+  const unsaved = group('unsaved', t('Unsaved changes'), `<p role="status">${escapeHtml(t(msgctxt('theme:v2', 'Review current values in the plan editor. A saved plan is not a comparison with its browser draft.')))}</p>${facts([{ label: t('Saved'), valueHtml: escapeHtml(selected?.name ?? t('Not read')) }, { label: t(msgid('Last saved by')), valueHtml: savedBy(selected) }, { label: t('Draft'), valueHtml: escapeHtml(t('Not read')) }])}`)
   const applying = group('applying', t('How saving applies'),
     `<p>${escapeHtml(t('Saving records desired plan state and an audit event. Changes to host resource limits require the reconciler and host evidence; a stored plan alone does not establish that slices were updated.'))}</p>`
     + `<p>${escapeHtml(t('Caps govern later create requests. Lowering a cap must not remove existing files, sites, mailboxes or databases. A saved limit is separate from measured consumption.'))}</p>`)
   const dialog = `<dialog class="v2-plan-dialog" data-plan-delete-dialog aria-labelledby="plan-delete-title"><form method="dialog"><h2 id="plan-delete-title">${escapeHtml(t('Delete plan'))}</h2><p>${escapeHtml(t('Deleting a plan cannot be undone.'))}</p><p data-dialog-status role="status" hidden></p><div class="v2-plan-actions">${button(t('Cancel'), { 'data-dialog-cancel': true })}<button type="submit" class="v2-btn v2-btn--danger">${escapeHtml(t('Delete'))}</button></div></form></dialog>`
   const allPlans = group('all', t(msgctxt('theme:v2', 'All plans')), `<div class="v2-plan-filter" data-list-filter>${plans?.length ? filterBar({ search: { id: 'v2-plan-search', label: t('Search'), hooks: { 'data-list-filter-search': true } } }) : ''}${table(t, 'all', t(msgctxt('theme:v2', 'All plans')), allLabels, rows, t(plans === undefined ? msgid('Plans have not been read.') : msgid('No plans are available in this authorized snapshot.')))}<p class="v2-muted" data-list-filter-empty hidden>${escapeHtml(t('No loaded rows match these filters.'))}</p></div>`)
-  const title = page(t, route, t('Plans'), t('A plan sets each account’s resource limits. Choose Unlimited to remove a limit.'), `<div id="whm-plans" data-section="plans-feature-lists" class="v2-plan-stack">${group('picker', t('Plans'), picker, add)}<div class="v2-plan-columns v2-plan-columns--editor"><div class="v2-plan-main">${group('editor', selected ? t(msgctxt('theme:v2', 'Edit plan: {name}'), { name: selected.name }) : t('Create plan'), (selected ? `<p class="v2-muted v2-plan-owner">${escapeHtml(t('Owner'))} ${escapeHtml(selected.ownerId === null ? t('Root') : props.resellers?.find(owner => owner.id === selected.ownerId)?.username ?? t('Not read'))} · ${accountCount(selected)} ${escapeHtml(t('Accounts'))}</p>` : '') + editor)}${applying}</div><aside class="v2-plan-aside">${unsaved}${impact}</aside></div>${allPlans}${dialog}</div>`, planReadable(props, authority, route))
+  const title = page(t, route, t('Plans'), t('A plan sets each account’s resource limits. Choose Unlimited to remove a limit.'), `<div id="whm-plans" data-section="plans-feature-lists" class="v2-plan-stack">${group('picker', t('Plans'), picker, add)}<div class="v2-plan-columns v2-plan-columns--editor"><div class="v2-plan-main">${group('editor', selected ? t(msgctxt('theme:v2', 'Edit plan: {name}'), { name: selected.name }) : t('Create plan'), (selected ? `<p class="v2-muted v2-plan-owner">${escapeHtml(t('Owner'))} ${escapeHtml(selected.ownerId === null ? t('Root') : props.resellers?.find(owner => owner.id === selected.ownerId)?.username ?? t('Not read'))} · ${accountCount(selected)} ${escapeHtml(t('Accounts'))} · ${escapeHtml(t(msgid('Last saved by')))} ${savedBy(selected)}</p>` : '') + editor)}</div><aside class="v2-plan-aside">${unsaved}${impact}${applying}</aside></div>${allPlans}${dialog}</div>`, planReadable(props, authority, route))
   return title
 }

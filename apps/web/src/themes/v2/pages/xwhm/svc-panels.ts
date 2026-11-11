@@ -17,20 +17,26 @@ export const WHM_SVC_CSS = `.v2-svc{display:flex;flex-direction:column;gap:32px;
 .v2-svc__grid>.v2-field:has(textarea){grid-column:1/-1}
 .v2-svc__grid>div,.v2-svc__grid dd{display:flex;flex-direction:column;gap:8px;min-inline-size:0;text-align:start;overflow-wrap:break-word}
 .v2-svc__grid dt{font-size:13px;color:var(--muted)}
-.v2-svc__grid dd{align-items:flex-start}
+.v2-svc__grid dd{align-items:flex-start;font-weight:500;font-variant-numeric:tabular-nums}
 .v2-svc dl.v2-svc__grid{grid-template-columns:repeat(auto-fill,minmax(min(200px,calc(50% - 8px)),1fr))}
-.v2-svc__check{display:flex;align-items:flex-start;gap:8px;min-block-size:var(--target)}
+.v2-svc__check{display:flex;align-items:center;gap:10px;min-block-size:var(--target);cursor:pointer}
 .v2-svc__check>input{flex:none;margin:0}
 .v2-svc :is(input:not([type=checkbox]),select,textarea){inline-size:100%;min-inline-size:0}
 .v2-svc textarea{min-block-size:96px}
 .v2-svc__actions{display:flex;flex-wrap:wrap;align-items:center;gap:16px}
-.v2-svc__scroll{max-inline-size:100%;overflow:auto;min-inline-size:0}
-.v2-svc :is(th,td){text-align:start;vertical-align:top;padding:12px 16px;overflow-wrap:break-word}
+.v2-svc .v2-btn{min-inline-size:var(--target);min-block-size:var(--target)}
+.v2-svc__scroll{max-inline-size:100%;overflow:auto;min-inline-size:0;border:1px solid var(--line);border-radius:var(--radius-notice);background:var(--surface)}
+.v2-svc__scroll>table{inline-size:100%;border-collapse:collapse}
+.v2-svc :is(th,td){text-align:start;vertical-align:middle;padding:12px 16px;overflow-wrap:break-word}
+.v2-svc th{font-size:12px;font-weight:600;color:var(--muted);background:var(--subtle);border-block-end:1px solid var(--line)}
+.v2-svc td{border-block-end:1px solid var(--line);font-variant-numeric:tabular-nums}
+.v2-svc tbody tr:last-child>:is(th,td){border-block-end:0}
 .v2-svc td>button{margin-inline-end:8px}
-@media(max-width:600px){${phoneRows('.v2-svc .v2-svc__scroll>table')}
+@media(max-width:600px){.v2-svc__scroll{border:0;border-radius:0;background:transparent}
+${phoneRows('.v2-svc .v2-svc__scroll>table')}
 .v2-svc .v2-svc__scroll>table>tbody>tr:nth-child(n)>:nth-child(n){overflow-wrap:break-word}
 .v2-svc__scroll:has(td[colspan])::before{content:attr(aria-label);display:block;margin-block-end:8px;font-size:13px;color:var(--muted)}.v2-svc__scroll td[colspan]{padding-inline:0;font-weight:600}}
-.v2-svc__status{color:var(--muted)}
+.v2-svc__status{font-size:13px;color:var(--muted)}
 ${whmPolish('.v2-svc')}`
 
 /** V2 drawing of the services and security centre panels of one route; the shared schema decides the content. */

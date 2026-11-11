@@ -227,6 +227,8 @@ export const validatePlanFile = (v: unknown): Plan => {
     shell: p.shell,
     defaultMailboxQuotaMb: p.defaultMailboxQuotaMb,
     ...(p.enforceBandwidth !== undefined && { enforceBandwidth: p.enforceBandwidth }),
+    ...(p.updatedAt !== undefined && { updatedAt: assertIsoDate(p.updatedAt, 'updatedAt').toISOString() }),
+    ...(p.updatedBy !== undefined && { updatedBy: assertLine(p.updatedBy, 128, 'updatedBy') }),
   }
 }
 

@@ -189,6 +189,18 @@ describe('validatePlan', () => {
   it('rejects non-objects', () => {
     expect(code(() => validatePlan(null as unknown as Plan, root))).toBe('VALIDATION')
   })
+
+  it('preserves valid updatedBy and updatedAt metadata and rejects malformed values', () => {
+    const saved = validatePlan({
+      ...defaultPlan(),
+      updatedBy: 'root',
+      updatedAt: '2026-11-11T09:15:00.000Z',
+    }, root)
+    expect(saved.updatedBy).toBe('root')
+    expect(saved.updatedAt).toBe('2026-11-11T09:15:00.000Z')
+    expect(code(() => validatePlan({ ...defaultPlan(), updatedBy: '   ' }, root))).toBe('VALIDATION')
+    expect(code(() => validatePlan({ ...defaultPlan(), updatedAt: 'not-a-date' }, root))).toBe('VALIDATION')
+  })
 })
 
 describe('assertCapAvailable', () => {

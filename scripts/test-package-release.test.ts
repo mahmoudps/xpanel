@@ -214,7 +214,7 @@ describe('H01 release artifact packager & pre-unpack verifier (A26, A28, A59)', 
       supplementaryGroups: 'xpanel-agent',
       umask: '0007',
       noNewPrivileges: 'yes',
-      execStart: '/usr/bin/node --max-old-space-size=96 --max-semi-space-size=1 /opt/xpanel/apps/api/src/main.ts',
+      execStart: '/usr/bin/node --max-old-space-size=160 --max-semi-space-size=2 /opt/xpanel/apps/api/src/main.ts',
     })
   })
 
@@ -425,12 +425,12 @@ describe('H01 release artifact packager & pre-unpack verifier (A26, A28, A59)', 
     expect(err.detail.path).toBe('helpers/account-files/xpanel-account-files.c')
   })
 
-  it('ships every vendored web font byte for byte with its license and notice', async () => {
+  it('ships every vendored web font byte for byte with its license and notice', () => {
     const workspace = resolve(import.meta.dirname, '..'), directory = 'apps/web/src/vendor/plex'
     const vendored = readdirSync(join(workspace, directory)).map(name => `${directory}/${name}`).sort()
-    expect(vendored).toHaveLength(9)
+    expect(vendored).toHaveLength(13)
     expect(REQUIRED_ROOT_FILES.filter(path => path.startsWith(`${directory}/`)).sort()).toEqual(vendored)
-    const built = await buildReleaseArtifact({ sourceRoot: makeSourceFixture(), outputDir: makeTempDir(), createTarball: false })
+    const built = signedReleaseFixture!
     for (const path of vendored) expect(readFileSync(join(built.stagingDir, path)).equals(readFileSync(join(workspace, path))), path).toBe(true)
   })
 

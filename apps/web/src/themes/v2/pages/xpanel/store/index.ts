@@ -27,9 +27,9 @@ export function renderV2PanelStorePage(props: PanelSurfaceProps, authority: Pane
   } else if (canonical === '/software/store/install') {
     const steps = `<ol class="v2-panel-settings__steps">${[msgctxt('theme:v2', 'Application'), msgid('Installation target'), msgid('Review'), msgid('Result')].map((copy, i) => `<li${i === 1 ? ' aria-current="step"' : ''}><b>${i + 1}</b><span>${esc(t(copy))}</span></li>`).join('')}</ol>`
     body = steps + section('v2-store-install-target', t(msgid('Installation target')), fields(field('v2-store-domain', t(msgid('Domain')), select('v2-store-domain', '', (c.domains ?? []).map(domain => [domain.name, domain.name])))
-      + field('v2-store-directory', t(msgid('Directory')), input('v2-store-directory', '', 'text', ' dir="ltr" maxlength="512"'))
-      + field('v2-store-database', t(msgid('Database')), input('v2-store-database', '', 'text', ' dir="ltr" maxlength="64"'))
-      + field('v2-store-admin', t(msgctxt('theme:v2', 'Application administrator')), input('v2-store-admin', '', 'text', ' dir="ltr" autocomplete="off"')) + field('v2-store-password', t(msgid('Password')), input('v2-store-password', '', 'password', ' dir="ltr" autocomplete="new-password"'))))
+      + field('v2-store-directory', t(msgid('Directory')), input('v2-store-directory', '', 'text', ' class="v2-mono" dir="ltr" maxlength="512"'))
+      + field('v2-store-database', t(msgid('Database')), input('v2-store-database', '', 'text', ' class="v2-mono" dir="ltr" maxlength="64"'))
+      + field('v2-store-admin', t(msgctxt('theme:v2', 'Application administrator')), input('v2-store-admin', '', 'text', ' class="v2-mono" dir="ltr" autocomplete="off"')) + field('v2-store-password', t(msgid('Password')), input('v2-store-password', '', 'password', ' dir="ltr" autocomplete="new-password"'))))
       + section('v2-store-install-review', t(msgid('Review')), facts([msgid('Application'), msgid('Version'), msgid('Domain'), msgid('Directory'), msgid('Database')].map(copy => ({ label: t(copy), valueHtml: esc(t(msgid('Not read'))) })))
         + check('v2-store-install-ack', t(msgctxt('theme:v2', 'I reviewed the target and requested permissions.'))), actions(button(t(msgid('Cancel'))) + button(t(msgid('Install application')), undefined, true, true)))
   } else if (canonical === '/software/store/progress') {

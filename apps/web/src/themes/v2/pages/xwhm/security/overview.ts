@@ -9,10 +9,10 @@ export function renderV2WhmSecurityOverview(input: WhmObservationInput): string 
   const summaries = `<section class="v2-kpi-row" aria-label="${esc(t(msgctxt('theme:v2', 'Security advisor')))}">${([['all', msgid('Checks')], ['observed-ok', msgctxt('whm-security-client', 'Observed')], ['attention', msgid('Warnings')], ['unavailable', msgid('Not verified')]] as const).map(([state, label]) => kpiCard({ label: t(label), value: '—', note: t(msgid('Not read')), headingLevel: 2, valueHooks: { 'data-whm-security-count': state } }).replace(' v2-kpi__value--text', '')).join('')}</section>`
   // The state filter is a radio group read by page CSS; no controller is involved.
   const filter = `<div class="v2-observation__filter" role="radiogroup" aria-label="${esc(t(msgid('State')))}">${([['all', msgid('All')], ['observed-ok', msgctxt('whm-security-client', 'Observed')], ['attention', msgctxt('whm-security-client', 'Review')], ['unavailable', msgid('Unavailable')]] as const).map(([state, label], index) => `<label><input type="radio" name="v2-security-state" value="${state}"${index === 0 ? ' checked' : ''}${canRead ? '' : ' disabled'}><span>${esc(t(label))}</span></label>`).join('')}</div>`
-  const factTemplates = xpTemplate('whm-security-fact-technical', '<div><dt data-xp-slot="label"></dt><dd><bdi class="v2-mono" dir="ltr" data-xp-slot="value"></bdi></dd></div>') + xpTemplate('whm-security-fact-text', '<div><dt data-xp-slot="label"></dt><dd><span data-xp-slot="value"></span></dd></div>')
+  const factTemplates = xpTemplate('whm-security-fact-technical', '<div><dt data-xp-slot="label"></dt><dd><bdi class="v2-mono v2-num" dir="ltr" data-xp-slot="value"></bdi></dd></div>') + xpTemplate('whm-security-fact-text', '<div><dt data-xp-slot="label"></dt><dd><span data-xp-slot="value"></span></dd></div>')
   const evidence = `<div class="v2-observation__groups" data-whm-security-evidence>${help(t, msgid('Checks show individual host observations. No overall security score or capability qualification is inferred. Configuration values are labeled separately.'))}<dl class="v2-observation__facts" data-whm-security-configuration></dl>${filter}${table(t, msgid('Security observations have not been read'), [msgid('Check'), msgid('State'), msgid('Observed value')], { 'data-whm-security-check-rows': true })}<p class="v2-observation__filter-empty">${esc(t(msgid('No loaded rows match these filters.')))}</p>${actions(button(t, msgid('Read security observations'), { 'data-whm-security-refresh': true }))}${status(t, msgid('Security observations have not been read.'), { 'data-whm-security-status': true })}${factTemplates}</div>`
   const compilerFacts = ([['restriction', msgid('Compilers')], ['host-state', msgid('Host state')], ['commands', msgid('Restricted commands')], ['group', msgid('Compiler group')], ['hook', msgid('Re-apply after package updates')], ['updated', msgid('Last saved (UTC)')], ['reconcile', msgid('Last apply request')], ['observed-at', msgid('Observed at (UTC)')]] as const)
-    .map(([key, label]) => `<div><dt>${esc(t(label))}</dt><dd><bdi data-sec-field="${key}">${esc(t(msgid('Not read')))}</bdi></dd></div>`).join('')
+    .map(([key, label]) => `<div><dt>${esc(t(label))}</dt><dd><bdi class="v2-num" data-sec-field="${key}">${esc(t(msgid('Not read')))}</bdi></dd></div>`).join('')
   const notConnected = help(t, msgid('This setting has no connected host operation. No changes have been applied.'))
   const policyField = (key: string, label: string, extra = ' min="1" dir="ltr"'): string => {
     const id = `v2-sign-in-${key.replaceAll('.', '-')}`
@@ -20,8 +20,22 @@ export function renderV2WhmSecurityOverview(input: WhmObservationInput): string 
   }
   const jump = `<nav class="v2-observation__jump" aria-label="${esc(t(msgid('On this page')))}">${([['security-access', msgid('Access')], ['security-mfa', msgid('Two-factor for root')], ['security-lockout', msgid('Sign-in lockout')], ['security-passwords', msgid('Password strength and sessions')], ['security-tokens', msgctxt('approved-xwhm', 'API tokens')], ['security-waf', msgid('Nginx web application firewall')], ['security-php-functions', msgid('Dangerous PHP functions')], ['security-compiler', msgctxt('approved-xwhm', 'Compiler lock')]] as const)
     .map(([id, label]) => `<a href="#v2-observation-${id}">${esc(t(label))}</a>`).join('')}</nav>`
-  // Panel access owns these settings and this page receives no saved value for them: stated as not read, with no control.
-  const access = section(t, 'security-access', msgid('Access'), `<dl class="v2-observation__facts">${[msgctxt('approved-xwhm', 'Secret entrance path'), msgid('IP allowlists')].map(label => `<div><dt>${esc(t(label))}</dt><dd>${esc(t(msgid('Not read')))}</dd></div>`).join('')}</dl>`
+  const panelAccess = (canRead || frameRead(input)) ? input.panelAccessSummary : undefined
+  const entranceValue = !panelAccess
+    ? esc(t(msgid('Not read')))
+    : panelAccess.state === 'invalid'
+      ? esc(t(msgid('Invalid policy file')))
+      : panelAccess.entrancePath
+        ? `<bdi class="v2-mono" dir="ltr">${esc(panelAccess.entrancePath)}</bdi>${panelAccess.entranceListeners.length ? ` · <bdi class="v2-mono" dir="ltr">${esc(panelAccess.entranceListeners.join(', '))}</bdi>` : ''}`
+        : esc(t(msgid('Off')))
+  const allowlistValue = !panelAccess
+    ? esc(t(msgid('Not read')))
+    : panelAccess.state === 'invalid'
+      ? esc(t(msgid('Invalid policy file')))
+      : panelAccess.listeners.xpanel === 0 && panelAccess.listeners.xwhm === 0 && panelAccess.listeners.xmail === 0
+        ? esc(t(msgid('Open (0 rules)')))
+        : `<bdi class="v2-mono v2-num" dir="ltr">${esc(`xWHM: ${panelAccess.listeners.xwhm}, xPanel: ${panelAccess.listeners.xpanel}, xMail: ${panelAccess.listeners.xmail}`)}</bdi>`
+  const access = section(t, 'security-access', msgid('Access'), `<dl class="v2-observation__facts" data-security-panel-access><div><dt>${esc(t(msgctxt('approved-xwhm', 'Secret entrance path')))}</dt><dd data-panel-access-entrance>${entranceValue}</dd></div><div><dt>${esc(t(msgid('IP allowlists')))}</dt><dd class="v2-num" data-panel-access-allowlists>${allowlistValue}</dd></div></dl>`
       + actions(link(t, msgid('Regenerate entrance path'), '/whm/security/panel-access') + link(t, msgid('IP allowlists'), '/whm/security/panel-access')) + help(t, msgctxt('theme:v2', 'These settings are read and changed on Panel access.')))
   const mfa = section(t, 'security-mfa', msgid('Two-factor for root'), help(t, msgid('Enrollment is optional. Existing authentication factors are preserved; development does not force enrollment.'))
       + actions(link(t, msgid('Password and authenticator'), '/whm/security/sign-in')))
@@ -44,7 +58,7 @@ export function renderV2WhmSecurityOverview(input: WhmObservationInput): string 
   )
   const saveBar = `<div class="v2-observation__savebar">${status(t, canRead ? msgid('Nothing has been read yet.') : msgid('This page requires an authorized administrator. Nothing was read or changed.'), { 'data-sign-in-status': true }, canRead ? 'unread' : 'unavailable')}${actions(button(t, msgid('Refresh'), { 'data-sign-in-refresh': true }, canRead) + button(t, msgid('Save sign-in policy'), { 'data-sign-in-save': true }, false, true))}</div>`
   // WHM cPHulk, Password Strength Configuration and session lifetimes, painted by the sign-in policy client from GET /api/server/sec/sign-in.
-  const columns = `<div class="v2-observation__columns" data-sign-in-policy data-sign-in-can-read="${canRead}" data-sign-in-can-manage="${canManage}"><div class="v2-observation__groups">${access}${lockout}</div><div class="v2-observation__groups">${mfa}${locked}${passwords}</div>${saveBar}</div>`
+  const columns = `<div class="v2-observation__columns" data-sign-in-policy data-sign-in-can-read="${canRead}" data-sign-in-can-manage="${canManage}"><div class="v2-observation__groups">${access}${mfa}${passwords}</div><div class="v2-observation__groups">${locked}${lockout}</div>${saveBar}</div>`
   const body = summaries + section(t, 'security-evidence', msgctxt('theme:v2', 'Advisor findings'), evidence) + jump + columns
     + section(t, 'security-tokens', msgctxt('approved-xwhm', 'API tokens'), fields(field(t, 'v2-security-token-name', msgid('Name'), inputControl('v2-security-token-name', {}))
       + field(t, 'v2-security-token-addresses', msgid('Allowed addresses'), area('v2-security-token-addresses', {}, ' dir="ltr"'))

@@ -5,7 +5,7 @@ import { notice } from '../../../components/index.ts'
 import { tabPanel, tabs } from '../../../components/tabs.ts'
 import { escapeHtml } from '../../../html.ts'
 import {
-  databaseContext, dbButton, dbCard, dbEmptyRow, dbFacts, dbField, dbPage, dbTable,
+  databaseContext, dbButton, dbCard, dbEmptyRow, dbFacts, dbField, dbPage, dbSelect, dbTable,
   NO_DATABASE_AUTHORITY, relatedDatabasePage, technical, type DatabasePageAuthority, type DatabasePageProps,
 } from './common.ts'
 import { renderV2DbWizard } from './wizard.ts'
@@ -20,8 +20,7 @@ export function renderV2MariaDbPage(props: DatabasePageProps, authority: Databas
     && user.grants.every(grant => ids.has(grant.databaseId))) : undefined
   const active = databases?.filter(database => !database.trashedAt)
   const trash = databases?.filter(database => database.trashedAt)
-  const prefix = account ? `${account.username}_` : unread
-  const fixedPrefix = technical(prefix)
+  const fixedPrefix = account ? technical(`${account.username}_`) : escapeHtml(unread)
   const options = (values: readonly string[]): string => values.map(value =>
     `<label class="v2-db-check"><input type="checkbox" name="privileges" value="${escapeHtml(value)}" disabled>${technical(value)}</label>`).join('')
   const readNotice = !canRead && !canReadDatabaseFacts ? notice(t, { tone: 'warn', text: t(msgctxt('theme:v2', 'Database access is unavailable for this session. No saved configuration was read.')) }) : ''
@@ -31,10 +30,10 @@ export function renderV2MariaDbPage(props: DatabasePageProps, authority: Databas
 <p data-db-application>${escapeHtml(t('Database service, grants and connections remain unverified.'))}</p>
 <p class="v2-db-notes">${escapeHtml(t('Plan caps, disk usage and live connection readings have not been loaded; no values are inferred from configuration.'))}</p>`)
   const summary = dbFacts([
-    { label: t('Databases'), valueHtml: technical(active === undefined ? unread : active.length) },
-    { label: t('Database users'), valueHtml: technical(users === undefined ? unread : users.length) },
+    { label: t('Databases'), valueHtml: active === undefined ? escapeHtml(unread) : technical(active.length) },
+    { label: t('Database users'), valueHtml: users === undefined ? escapeHtml(unread) : technical(users.length) },
     { label: t('Size on disk'), valueHtml: escapeHtml(unread) },
-    { label: t(msgctxt('theme:v2', 'In trash')), valueHtml: technical(trash === undefined ? unread : trash.length) },
+    { label: t(msgctxt('theme:v2', 'In trash')), valueHtml: trash === undefined ? escapeHtml(unread) : technical(trash.length) },
   ], { 'data-db-counts': true })
   const databaseRows = active === undefined ? dbEmptyRow(7, t('Records have not been read.')) : active.length === 0
     ? dbEmptyRow(7, t(msgctxt('theme:v2', 'No saved databases. Create a database configuration to begin.')))
@@ -46,7 +45,7 @@ export function renderV2MariaDbPage(props: DatabasePageProps, authority: Databas
 <p>${escapeHtml(t('Fixed account prefix:'))} ${fixedPrefix}</p>
 ${dbField('v2-db-create-name', t('Database name suffix'), '<input id="v2-db-create-name" name="name" type="text" dir="ltr" required maxlength="64" autocomplete="off" spellcheck="false" disabled>')}
 <p data-db-full-name>${escapeHtml(t('Enter a suffix. The trusted account prefix is added without changing the text you type.'))}</p>
-<div class="v2-db-fields" data-db-field-group>${dbField('v2-db-collation', t('Collation'), `<select id="v2-db-collation" disabled><option>${escapeHtml(unread)}</option>${['utf8mb4_unicode_ci', 'utf8mb4_unicode_520_ci', 'utf8mb4_general_ci', 'latin1_swedish_ci'].map(value => `<option>${value}</option>`).join('')}</select>`)}${dbField('v2-db-charset', t('Character set'), `<input id="v2-db-charset" value="${escapeHtml(unread)}" disabled>`)}</div>
+<div class="v2-db-fields" data-db-field-group>${dbField('v2-db-collation', t('Collation'), dbSelect(`<select id="v2-db-collation" disabled><option>${escapeHtml(unread)}</option>${['utf8mb4_unicode_ci', 'utf8mb4_unicode_520_ci', 'utf8mb4_general_ci', 'latin1_swedish_ci'].map(value => `<option>${value}</option>`).join('')}</select>`))}${dbField('v2-db-charset', t('Character set'), `<input id="v2-db-charset" value="${escapeHtml(unread)}" disabled>`)}</div>
 <p class="v2-db-notes">${escapeHtml(t('Character set and collation selection are unavailable; no stored values are inferred.'))}</p>
 <p>${escapeHtml(t('Save the database first, then create a user below with an optional initial grant to that saved database.'))}</p>
 <div class="v2-db-actions">${dbButton(t('Create database configuration'), { 'data-db-create-submit': true }, { submit: true, primary: true, disabled: true })}${dbButton(t('Clear database draft'), { 'data-db-clear': true }, { disabled: true })}</div></form>`)
@@ -62,14 +61,14 @@ ${dbField('v2-db-create-name', t('Database name suffix'), '<input id="v2-db-crea
 <div class="v2-db-fields" data-db-field-group>${dbField('v2-dbu-create-name', t('Database user name'), '<input id="v2-dbu-create-name" name="name" type="text" dir="ltr" required maxlength="256" autocomplete="off" spellcheck="false" disabled>')}${dbField('v2-dbu-create-password', t('Password'), '<input id="v2-dbu-create-password" name="password" type="password" dir="ltr" autocomplete="new-password" minlength="8" maxlength="256" required disabled>')}</div>
 <p class="v2-db-notes">${escapeHtml(t('The server accepts a suffix or an already prefixed user name. Passwords must be 8 to 256 characters; they are never included in workspace snapshots.'))}</p>
 <div class="v2-db-actions">${dbButton(t('Generate password locally'), { 'data-dbu-generate': true }, { disabled: true })}${dbButton(t('Show password'), { 'data-dbu-reveal': true }, { disabled: true })}</div>
-${dbField('v2-dbu-initial-database', t('Optional initial grant on database'), `<select id="v2-dbu-initial-database" name="databaseId" dir="ltr" disabled><option value="">${escapeHtml(t('No initial grant'))}</option></select>`)}
+${dbField('v2-dbu-initial-database', t('Optional initial grant on database'), dbSelect(`<select id="v2-dbu-initial-database" name="databaseId" dir="ltr" disabled><option value="">${escapeHtml(t('No initial grant'))}</option></select>`))}
 <fieldset data-dbu-initial-privileges hidden><legend>${escapeHtml(t('Initial privileges on this database only'))}</legend><div class="v2-db-options" data-db-field-group>${['ALL PRIVILEGES', 'SELECT', 'INSERT', 'UPDATE', 'DELETE'].map(privilege => `<label class="v2-db-check"><input type="checkbox" name="privileges" value="${privilege}"${privilege === 'ALL PRIVILEGES' ? '' : ' checked'} disabled>${technical(privilege)}</label>`).join('')}</div></fieldset>
 <p>${escapeHtml(t('With no initial grant, the new user has no database access. An initial grant is stored atomically with user creation. This does not verify a MariaDB connection.'))}</p>
 <div class="v2-db-actions">${dbButton(t('Create user configuration'), { 'data-dbu-create-submit': true }, { submit: true, primary: true, disabled: true })}${dbButton(t('Clear user draft'), { 'data-dbu-clear': true }, { disabled: true })}</div><p data-dbu-secret-note role="status" aria-live="polite"></p></form>
 <section class="v2-db-notes" aria-labelledby="v2-dbu-create-preview-title"><h3 id="v2-dbu-create-preview-title">${escapeHtml(t(msgctxt('theme:v2', 'Will run')))}</h3><pre class="v2-db-code" data-v2-db-sql-preview="create-user"><code>${escapeHtml(unread)}</code></pre><p>${escapeHtml(t(msgctxt('theme:v2', 'No generated SQL preview has been read. Saving configuration does not verify a live SQL command.')))}</p></section>`)
   const overviewColumns = ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'CREATE', 'ALTER']
   const otherAdvanced = DB_PRIVILEGES.filter(privilege => privilege !== 'ALL PRIVILEGES' && !overviewColumns.includes(privilege) && !['DROP', 'INDEX', 'REFERENCES'].includes(privilege)).length
-  const overview = dbCard('privilege-overview', t(msgctxt('theme:v2', 'Privileges by user')), `${dbField('v2-db-overview-database', t('Database'), `<select id="v2-db-overview-database" data-db-overview-database dir="ltr" disabled><option value="">${escapeHtml(unread)}</option></select>`)}
+  const overview = dbCard('privilege-overview', t(msgctxt('theme:v2', 'Privileges by user')), `${dbField('v2-db-overview-database', t('Database'), dbSelect(`<select id="v2-db-overview-database" data-db-overview-database dir="ltr" disabled><option value="">${escapeHtml(unread)}</option></select>`))}
 <p class="v2-db-notes">${escapeHtml(t(msgctxt('theme:v2', 'The privilege matrix has not been read. The grant editor below reviews saved privileges for one owned user and database.')))}</p>
 ${dbTable('v2-db-privilege-overview', t(msgctxt('theme:v2', 'Privileges by user')), [t('User'), ...overviewColumns, t(msgctxt('theme:v2', 'Other'))], dbEmptyRow(8, unread), { 'data-db-overview-rows': true })}
 <ul class="v2-db-legend" aria-label="${escapeHtml(t(msgctxt('theme:v2', 'Legend')))}"><li><span class="v2-db-legend__mark v2-db-legend__mark--granted" aria-hidden="true">✓</span>${escapeHtml(t(msgctxt('theme:v2', 'Granted')))}</li><li><span class="v2-db-legend__mark" aria-hidden="true">−</span>${escapeHtml(t(msgctxt('theme:v2', 'Not granted')))}</li><li>${escapeHtml(t(msgctxt('theme:v2', '{count, plural, one {Other counts DROP, INDEX, REFERENCES and # advanced privilege.} other {Other counts DROP, INDEX, REFERENCES and # advanced privileges.}}'), { count: otherAdvanced }))}</li></ul>`)
@@ -77,14 +76,14 @@ ${dbTable('v2-db-privilege-overview', t(msgctxt('theme:v2', 'Privileges by user'
   const advanced = DB_PRIVILEGES.filter(privilege => privilege !== 'ALL PRIVILEGES' && !basic.includes(privilege))
   const privileges = dbCard('privileges', t('Privileges'), `<form data-db-advanced-privileges data-db-grant-form class="v2-db-form">
 <p>${escapeHtml(t('Choose an owned user and an active owned database. Only this database’s saved grant is changed; service access remains unverified.'))}</p>
-<div class="v2-db-fields" data-db-field-group>${dbField('v2-db-grant-user', t('Database user'), `<select id="v2-db-grant-user" name="userId" dir="ltr" disabled><option value="">${escapeHtml(t('Choose a user'))}</option></select>`)}${dbField('v2-db-grant-database', t('Database'), `<select id="v2-db-grant-database" name="databaseId" dir="ltr" disabled><option value="">${escapeHtml(t('Choose an active database'))}</option></select>`)}</div>
+<div class="v2-db-fields" data-db-field-group>${dbField('v2-db-grant-user', t('Database user'), dbSelect(`<select id="v2-db-grant-user" name="userId" dir="ltr" disabled><option value="">${escapeHtml(t('Choose a user'))}</option></select>`))}${dbField('v2-db-grant-database', t('Database'), dbSelect(`<select id="v2-db-grant-database" name="databaseId" dir="ltr" disabled><option value="">${escapeHtml(t('Choose an active database'))}</option></select>`))}</div>
 <p data-db-grant-current>${escapeHtml(t('Choose both targets to read their saved grant.'))}</p><fieldset><legend>${escapeHtml(t('Privileges on this database only'))}</legend><div class="v2-db-options" data-db-field-group>${options(['ALL PRIVILEGES', ...basic])}</div>
 ${dbButton(t('Show {count} advanced privileges', { count: advanced.length }), { 'data-db-grant-advanced-toggle': true }, { disabled: true }).replace(' data-db-grant-advanced-toggle', ' aria-controls="v2-db-grant-advanced" aria-expanded="false" data-db-grant-advanced-toggle')}
 <div id="v2-db-grant-advanced" data-db-grant-advanced class="v2-db-options" hidden>${options(advanced)}</div></fieldset>
 <section class="v2-db-notes"><h3>${escapeHtml(t('Desired grants'))}</h3><p data-db-grant-preview>${escapeHtml(t('No grant change is drafted.'))}</p></section>
 <p>${escapeHtml(t('Saving compares the captured saved privileges under the server’s writer lease. A changed grant requires review; Refresh preserves your draft. Use Discard drafts and reload to start from reviewed metadata. Empty privileges do not revoke a grant in this workflow.'))}</p>
 <div class="v2-db-actions">${dbButton(t('Discard changes'), { 'data-db-grant-discard': true }, { disabled: true })}${dbButton(t('Save privileges'), { 'data-db-grant-save': true }, { submit: true, primary: true, disabled: true })}</div></form>`)
-  const password = dbCard('password', t('Change user password'), `<div data-db-password-reset><div class="v2-db-fields">${dbField('v2-dbu-reset-user', t('User'), `<select id="v2-dbu-reset-user" dir="ltr" data-db-reset-user disabled><option value="">${escapeHtml(unread)}</option></select>`)}${dbField('v2-dbu-reset-password', t('New password'), '<input id="v2-dbu-reset-password" type="password" autocomplete="new-password" data-db-reset-password disabled>')}</div>${dbButton(t('Change password'), { 'data-db-reset-save': true }, { disabled: true })}</div>`)
+  const password = dbCard('password', t('Change user password'), `<div data-db-password-reset><div class="v2-db-fields">${dbField('v2-dbu-reset-user', t('User'), dbSelect(`<select id="v2-dbu-reset-user" dir="ltr" data-db-reset-user disabled><option value="">${escapeHtml(unread)}</option></select>`))}${dbField('v2-dbu-reset-password', t('New password'), '<input id="v2-dbu-reset-password" type="password" autocomplete="new-password" data-db-reset-password disabled>')}</div>${dbButton(t('Change password'), { 'data-db-reset-save': true }, { disabled: true })}</div>`)
   const trashRows = trash === undefined ? dbEmptyRow(4, t('Records have not been read.')) : trash.length === 0
     ? dbEmptyRow(4, t(msgctxt('theme:v2', 'No databases are in the saved trash.')))
     : trash.map(database => `<tr data-database-id="${escapeHtml(database.id)}"><td>${technical(database.name)}</td><td><time datetime="${escapeHtml(database.trashedAt!)}">${technical(formatDisplayDateTime(database.trashedAt))}</time></td><td>${escapeHtml(unread)}</td><td><div class="v2-db-actions">${dbButton(t('Restore'), { 'data-db-restore-action': database.id }, { disabled: true })}${dbButton(t('Drop permanently'), { 'data-db-row-action': 'drop', 'data-db-row-name': database.name }, { disabled: true })}</div></td></tr>`).join('')

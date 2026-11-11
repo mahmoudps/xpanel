@@ -186,6 +186,16 @@ describe('strict persisted transfer workspace loopback boundary', () => {
     expect(current.session.local).toEqual({ usernames: [], domains: [], uids: [], plans: [] })
     current = await f.step(current, 'review')
     expect(current.session.state).toBe('reviewed'); expect(current.digest).toMatch(/^[0-9a-f]{64}$/)
+    const enriched = await (await f.request('/api/transfers/sessions/' + current.session.id)).json() as Record<string, unknown>
+    expect(enriched.summary).toMatchObject({ state: 'reviewed', foundCount: 1, selectedCount: 1, readyCount: 1 })
+    expect(enriched.discovery).toMatchObject({ accountsFound: 1, selected: 1 })
+    expect(enriched.buildPreview).toEqual([expect.objectContaining({
+      source: 'alice',
+      target: 'alice',
+      uid: 20000,
+      uidMode: 'allocated-on-create',
+      slice: 'xpanel-20000.slice',
+    })])
     const before = await f.bytes(); expect((await f.patch(current, 'run', { digest: current.digest })).status).toBe(412); expect(await f.bytes()).toBe(before)
   })
   it('starts a live session from a linked server only, and the review it confirms says live', async () => {

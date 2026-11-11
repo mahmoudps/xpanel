@@ -102,6 +102,8 @@ export const assertDatabaseTransaction = (tx: SqlRunner): void => {
   verify()
 }
 
+export const isActiveDatabaseTransaction = (runner: SqlRunner): boolean => activeTransactions.has(runner)
+
 /** Only a genuine, active transaction on a verified strict connection is accepted. */
 export const assertStrictDurableTransaction = (tx: SqlRunner): void => {
   getStrictDatabaseIdentity(tx)

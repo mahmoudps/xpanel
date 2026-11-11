@@ -94,8 +94,10 @@ export function renderMailCalendarPage(value: MailWorkspaceInput): string {
 export const MAIL_ORGANIZER_CSS = `.v2-organizer__toolbar{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--space-2)}
 .v2-organizer__toolbar [role=group]{display:flex;flex-wrap:wrap;gap:var(--space-1)}
 .v2-organizer__calendar{display:grid;gap:var(--space-3);min-inline-size:0}
-.v2-organizer__scroll{overflow:auto;max-block-size:760px;min-inline-size:0;border:1px solid var(--line);border-radius:var(--radius-control)}
+.v2-organizer__scroll{overflow:auto;max-block-size:760px;min-inline-size:0;border:1px solid var(--line);border-radius:12px}
 .v2-organizer__calendar [data-calview-detail]{padding:var(--v2-panel-padding)}
-.v2-organizer__toolbar [aria-pressed=true]{background:var(--accent-soft);border-color:var(--accent-line)}
+.v2-organizer__calendar :is(.v2-mail-calview__week,.v2-mail-calview__gutter,.v2-mail-calview__chip,.v2-mail-calview__more){font-size:12px}
+.v2-organizer__calendar [data-calview-grid][data-mode=month] .v2-mail-calview__row{grid-template-columns:56px repeat(7,minmax(0,1fr))}
+.v2-organizer__toolbar [aria-pressed=true]{background:var(--accent-soft);border-color:var(--accent-line);color:var(--accent);font-weight:600}
 @media(min-width:1100px){.v2-organizer__calendar:has(>[data-calview-detail]:not([hidden])){grid-template-columns:minmax(0,1fr) minmax(280px,360px);align-items:start}}
 `

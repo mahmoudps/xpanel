@@ -1,4 +1,4 @@
-import type { PanelSurfaceProps } from '../../../../contract.ts'
+import type { PanelSurfaceProps, ThemeViewProps } from '../../../../contract.ts'
 import { renderV2PanelAdvancedPage } from '../advanced/index.ts'
 import { renderV2SiteSettingsPage } from '../domains/site-settings.ts'
 import { renderV2WebDiskPage } from '../files/web-disk.ts'
@@ -21,7 +21,7 @@ export const V2_PANEL_SETTINGS_ROUTES: readonly string[] = Object.freeze([
 ])
 
 /** A missing route remains missing: core must provide its own body instead of an outage fallback. */
-export function renderV2PanelSettingsPage(props: PanelSurfaceProps, authority: PanelSettingsAuthority = NO_SETTINGS_AUTHORITY): string | undefined {
+export function renderV2PanelSettingsPage(props: PanelSurfaceProps & ThemeViewProps, authority: PanelSettingsAuthority = NO_SETTINGS_AUTHORITY): string | undefined {
   if (props.activeRoute === '/files/web-disk') return renderV2WebDiskPage(props, authority)
   if (props.activeRoute === '/domains/site-settings') return renderV2SiteSettingsPage(props, authority)
   return renderV2PanelSecurityPage(props, authority) ?? renderV2PanelAdvancedPage(props, authority)

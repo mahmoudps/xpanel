@@ -23,10 +23,12 @@ export function bulkBar(t: Translate, props: BulkBarProps): string {
   return `<div class="v2-bulk" role="region" aria-label="${escapeHtml(t(msgctxt('theme:v2', 'Bulk actions')))}"${props.hidden ? ' hidden' : ''}${hookAttrs(props.hooks)}><span class="v2-bulk__count v2-num" role="status">${escapeHtml(props.countLabel)}</span><span class="v2-bulk__actions">${actions}${clear}</span></div>`
 }
 
-export const BULK_BAR_CSS = `.v2-bulk{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-1) var(--space-2);padding:var(--space-1) var(--space-2);background:var(--accent-soft);border-block:1px solid var(--accent-line)}
+export const BULK_BAR_CSS = `.v2-bulk{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--space-1) var(--space-2);padding:10px var(--v2-panel-padding);background:var(--accent-soft);border-block:1px solid var(--accent-line)}
 .v2-bulk__count{font-size:13px;font-weight:600;color:var(--accent)}
-.v2-bulk__actions{display:inline-flex;flex-wrap:wrap;gap:var(--space-1)}
+.v2-bulk__actions{display:inline-flex;flex-wrap:wrap;gap:var(--space-1);margin-inline-start:auto}
 .v2-bulk .v2-btn{font-size:13px;padding:0 14px}
 .v2-bulk .v2-bulk__warn{border-color:var(--warn-line);color:var(--warn)}
+.v2-bulk .v2-bulk__warn:hover{border-color:var(--warn);background:var(--warn-soft);color:var(--warn)}
 .v2-bulk .v2-bulk__bad{border-color:var(--bad-line);color:var(--bad)}
+.v2-bulk .v2-bulk__bad:hover{border-color:var(--bad);background:var(--bad-soft);color:var(--bad)}
 `

@@ -714,7 +714,7 @@ export const renderSystemdApiUnit = (nodeBin = '/usr/bin/node', layout: ProgramL
     'EnvironmentFile=/etc/xpanel/runtime.env',
     'EnvironmentFile=/etc/xpanel/api.env',
     // Node 26 grows the young generation to ~56 MB on its own; beside a 96 MB old space that keeps V8 marking without pause.
-    `ExecStart=${nodeBin} --max-old-space-size=96 --max-semi-space-size=1 ${programRoot(layout)}/apps/api/src/main.ts`,
+    `ExecStart=${nodeBin} --max-old-space-size=160 --max-semi-space-size=2 ${programRoot(layout)}/apps/api/src/main.ts`,
     'Restart=always',
     'RestartSec=2',
     'UMask=0007',

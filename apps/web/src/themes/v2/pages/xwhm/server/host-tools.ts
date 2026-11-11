@@ -7,18 +7,24 @@ import { whmPolish } from '../monitoring/common.ts'
 
 export const WHM_HOST_TOOLS_ROUTES = ['/whm/server/cron', '/whm/server/terminal', '/whm/server/networking', '/whm/server/setup', '/whm/services/more', '/whm/software/php', '/whm/monitoring/logs'] as const
 export const WHM_HOST_TOOLS_CSS = `.v2-host-tools,.v2-host-tools__form{display:flex;flex-direction:column;gap:var(--space-3);min-inline-size:0}
+.v2-host-tools .v2-btn{min-inline-size:var(--target);min-block-size:var(--target);transition:background-color 140ms ease-out,border-color 140ms ease-out,color 140ms ease-out,box-shadow 140ms ease-out,opacity 140ms ease-out,transform 140ms ease-out}
+@media(prefers-reduced-motion:reduce){.v2-host-tools .v2-btn,.v2-host-tools__scroll tbody tr{transition:none}}
 .v2-host-tools :is(p,dl,dd,pre){margin:0}
 .v2-host-tools__fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-2);min-inline-size:0}
 .v2-host-tools dl.v2-host-tools__fields>div{display:flex;flex-direction:column;gap:var(--space-1);min-inline-size:0}
+.v2-host-tools dl.v2-host-tools__fields dt{font-size:12px;color:var(--muted)}
+.v2-host-tools [data-host-tool-fact],.v2-host-tools__scroll td{font-variant-numeric:tabular-nums}
 .v2-host-tools__fields textarea{inline-size:100%;box-sizing:border-box}
 .v2-host-tools__actions,.v2-host-tools [data-host-tool-row-actions]{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-1)}
 .v2-host-tools__actions{gap:var(--space-2)}
 .v2-host-tools__check{display:flex;align-items:center;gap:var(--space-1);min-block-size:var(--target)}
 .v2-host-tools__scroll{overflow:auto;min-inline-size:0;max-inline-size:100%}
+@media(min-width:601px){.v2-host-tools__scroll{border:1px solid var(--line);border-radius:var(--radius-notice);background:var(--surface)}.v2-host-tools__scroll tbody tr:last-child>:is(th,td){border-block-end:0}.v2-host-tools__scroll tbody tr{transition:background-color 140ms ease-out}.v2-host-tools__scroll tbody tr:hover{background:var(--subtle)}}
 .v2-host-tools__scroll table{inline-size:100%;border-collapse:collapse}
 .v2-host-tools__scroll :is(th,td){padding:12px 16px;text-align:start;vertical-align:top;overflow-wrap:anywhere;border-block-end:1px solid var(--line)}
-.v2-host-tools pre{max-block-size:320px;overflow:auto;padding:var(--space-2);border:1px solid var(--line);border-radius:8px;white-space:pre-wrap;overflow-wrap:anywhere}
-.v2-host-tools code{display:block;overflow-wrap:anywhere}
+.v2-host-tools__scroll thead th{background:var(--subtle);font-size:12px;font-weight:600;color:var(--muted);white-space:normal;overflow-wrap:normal;word-break:normal}
+.v2-host-tools pre{max-block-size:320px;overflow:auto;padding:var(--space-2);border:1px solid var(--line);border-radius:var(--radius-notice);background:var(--code);color:var(--code-text);font-size:13px;font-variant-numeric:tabular-nums;white-space:pre-wrap;overflow-wrap:anywhere}
+.v2-host-tools code{display:block;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
 .v2-host-tools [hidden]{display:none!important}
 ${whmPolish('.v2-host-tools')}@media(max-width:600px){.v2-host-tools__fields{grid-template-columns:minmax(0,1fr)}}
 `

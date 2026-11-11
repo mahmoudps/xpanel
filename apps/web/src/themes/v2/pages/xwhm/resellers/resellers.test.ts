@@ -104,4 +104,17 @@ describe('v2 reseller family', () => {
     expect(html).toContain('dir="ltr"')
     expect(html).not.toMatch(/[\u0660-\u0669\u06f0-\u06f9]/)
   })
+
+  it('renders reseller createdAt and lastSignInAt when supplied and Never when lastSignInAt is null', () => {
+    const neverSigned = renderV2WhmResellers(t, props({
+      resellers: [{ ...reseller, createdAt: '2026-10-01T08:15:00.000Z', lastSignInAt: null }],
+    }), authority)
+    expect(neverSigned).toContain('2026-10-01 08:15 UTC')
+    expect(neverSigned).toContain('Never')
+
+    const signedIn = renderV2WhmResellers(t, props({
+      resellers: [{ ...reseller, createdAt: '2026-10-01T08:15:00.000Z', lastSignInAt: '2026-11-11T07:45:00.000Z' }],
+    }), authority)
+    expect(signedIn).toContain('2026-11-11 07:45 UTC')
+  })
 })

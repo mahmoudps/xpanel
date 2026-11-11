@@ -100,7 +100,7 @@ const fieldErrors = <K extends string>(
   return errors
 }
 
-const PLAN_KEYS: readonly string[] = ['id', 'name', 'ownerId', 'featureListId', 'resources', 'caps', 'dedicatedIp', 'shell', 'defaultMailboxQuotaMb', 'enforceBandwidth']
+const PLAN_KEYS: readonly string[] = ['id', 'name', 'ownerId', 'featureListId', 'resources', 'caps', 'dedicatedIp', 'shell', 'defaultMailboxQuotaMb', 'enforceBandwidth', 'updatedAt', 'updatedBy']
 
 /** A name no new plan may take; a plan saved under it before it was reserved stays readable. */
 export const isReservedPlanName = (name: string): boolean => RESERVED_PLAN_NAMES.includes(name.toLowerCase())
@@ -127,6 +127,12 @@ export const storedPlanErrors = (plan: unknown): string[] => {
   errors.push(...fieldErrors('caps', PLAN_CAP_RULES, plan.caps))
   if (typeof plan.dedicatedIp !== 'boolean') errors.push('dedicatedIp must be a boolean')
   if (plan.enforceBandwidth !== undefined && typeof plan.enforceBandwidth !== 'boolean') errors.push('enforceBandwidth must be a boolean')
+  if (plan.updatedAt !== undefined && (typeof plan.updatedAt !== 'string' || !Number.isFinite(Date.parse(plan.updatedAt)))) {
+    errors.push('updatedAt must be an ISO 8601 timestamp')
+  }
+  if (plan.updatedBy !== undefined && (typeof plan.updatedBy !== 'string' || plan.updatedBy.trim().length === 0 || plan.updatedBy.length > 128)) {
+    errors.push('updatedBy must be a non-empty actor name')
+  }
   if (plan.shell !== 'none' && plan.shell !== 'jailed') errors.push('shell must be "none" or "jailed"')
   const mq = plan.defaultMailboxQuotaMb
   if (!isLimit(mq, 1) || (!isUnlimited(mq) && mq > MAX_DISK_MB)) {
@@ -202,6 +208,8 @@ const clonePlan = (p: Plan): Plan => ({
   shell: p.shell,
   defaultMailboxQuotaMb: p.defaultMailboxQuotaMb,
   ...(p.enforceBandwidth !== undefined && { enforceBandwidth: p.enforceBandwidth }),
+  ...(p.updatedAt !== undefined && { updatedAt: p.updatedAt }),
+  ...(p.updatedBy !== undefined && { updatedBy: p.updatedBy }),
 })
 
 const holdsAcl = (reseller: Reseller, acl: Reseller['acl'][number]): boolean => Array.isArray(reseller.acl) && reseller.acl.includes(acl)

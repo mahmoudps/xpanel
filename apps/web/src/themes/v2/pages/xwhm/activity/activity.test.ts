@@ -25,10 +25,56 @@ describe('v2 WHM activity board regions', () => {
 
   it('shows a designed empty state for an empty page and a not-read state without a read', () => {
     const empty = render('/whm/audit', { ...admitted, auditEntries: [] })
-    expect(empty).toMatch(/<td colspan="5"><div class="v2-state v2-state--empty">.*?<h3>No audit entries yet<\/h3>/s)
+    expect(empty).toMatch(/<td colspan="7"><div class="v2-state v2-state--empty">.*?<h3>No audit entries yet<\/h3>/s)
     const unread = render('/whm/audit')
-    expect(unread).toMatch(/<td colspan="5"><div class="v2-state v2-state--empty">.*?<h3>Not read<\/h3><\/div>/s)
+    expect(unread).toMatch(/<td colspan="7"><div class="v2-state v2-state--empty">.*?<h3>Not read<\/h3><\/div>/s)
     expect(unread).not.toContain('No audit entries yet')
+  })
+
+  it('renders audit sequence numbers, client IP column and SHA-256 hash-chain status', () => {
+    const html = render('/whm/audit', {
+      ...admitted,
+      auditChain: { status: 'verified', entriesVerified: 2, totalEntries: 2, lastSeq: 12, brokenAtSeq: null },
+      auditEntries: [
+        { ...entry('a', 'ok'), seq: 12, ip: '203.0.113.10', entryHash: 'b'.repeat(64) },
+        { ...entry('b', 'ok'), seq: 11, ip: null },
+      ] as WhmObservationInput['auditEntries'],
+    })
+    expect(html).toContain('data-audit-chain data-chain-status="verified"')
+    expect(html).toContain('SHA-256 hash chain verified (2 entries)')
+    expect(html).toContain('#12')
+    expect(html).toContain('203.0.113.10')
+    expect(html).toContain('<td data-audit-ip>—</td>')
+  })
+
+  it('renders generation step timeline on /whm/jobs when generations are supplied', () => {
+    const html = render('/whm/jobs', {
+      ...admitted,
+      generations: [{
+        generationId: 7,
+        at: '2026-10-29T12:00:00.000Z',
+        actor: 'root',
+        summary: '+2 / ~1 / -0 files',
+        stateChecksum: 'd'.repeat(64),
+        filesCount: 3,
+        durationMs: 420,
+        status: 'active',
+        testedAt: '2026-10-29T12:00:00.180Z',
+        activatedAt: '2026-10-29T12:00:00.420Z',
+        steps: [
+          { step: 'built', status: 'done', at: '2026-10-29T12:00:00.000Z', durationMs: 40 },
+          { step: 'tested', status: 'done', at: '2026-10-29T12:00:00.180Z', durationMs: 180 },
+          { step: 'activated', status: 'done', at: '2026-10-29T12:00:00.420Z', durationMs: 240 },
+        ],
+      }],
+    })
+    expect(html).toContain('data-whm-generation-timeline')
+    expect(html).toContain('data-generation-timeline-row="7"')
+    expect(html).toContain('data-generation-step="built"')
+    expect(html).toContain('data-generation-step="tested"')
+    expect(html).toContain('data-generation-step="activated"')
+    expect(html).toContain('(180 ms)')
+    expect(html).toContain('(240 ms)')
   })
 
   it('marks only the active generation as good', () => {

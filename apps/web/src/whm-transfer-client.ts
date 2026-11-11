@@ -20,11 +20,18 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
   const display = (value: unknown): string => String(value ?? '').replace(/[\u0660-\u0669\u06f0-\u06f9]/g, digit => String(digit.charCodeAt(0) - (digit.charCodeAt(0) >= 0x06f0 ? 0x06f0 : 0x0660)))
   const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
   const states = ['created', 'connected', 'inventoried', 'selected', 'reviewed', 'applying', 'completed', 'failed', 'cancelled']
-  type Entry = { session: Record<string, unknown>; revision: string; review: Record<string, unknown> | null; digest: string | null; results: Record<string, unknown>; running: boolean; stopRequested: boolean }
+  type BuildItem = { source: string; target: string; uid: number; uidMode: string; slice: string; vhost: string; php: string; plan: string; sliceUnit: string }
+  type Entry = {
+    session: Record<string, unknown>; revision: string; review: Record<string, unknown> | null; digest: string | null; results: Record<string, unknown>; running: boolean; stopRequested: boolean
+    summary: Record<string, unknown> | null; discovery: Record<string, unknown> | null; buildPreview: BuildItem[]
+  }
   const parseEntry = (value: unknown): Entry => {
     if (!object(value) || !object(value.session) || typeof value.session.id !== 'string' || !uuid.test(value.session.id) || !states.includes(String(value.session.state)) || typeof value.revision !== 'string' || !/^[0-9a-f]{64}$/.test(value.revision) || !object(value.session.auth) || !object(value.session.selection)) throw new Error('invalid_transfer_state')
+    const buildPreview: BuildItem[] = Array.isArray(value.buildPreview) ? value.buildPreview.flatMap(raw => object(raw) && typeof raw.source === 'string' && typeof raw.target === 'string' && typeof raw.uid === 'number' && typeof raw.slice === 'string' && typeof raw.vhost === 'string' && typeof raw.php === 'string'
+      ? [{ source: raw.source, target: raw.target, uid: raw.uid, uidMode: typeof raw.uidMode === 'string' ? raw.uidMode : 'allocated-on-create', slice: raw.slice, vhost: raw.vhost, php: raw.php, plan: typeof raw.plan === 'string' ? raw.plan : '', sliceUnit: typeof raw.sliceUnit === 'string' ? raw.sliceUnit : '' }] : []) : []
     return { session: value.session, revision: value.revision, review: object(value.review) ? value.review : null, digest: typeof value.digest === 'string' && /^[0-9a-f]{64}$/.test(value.digest) ? value.digest : null,
-      results: object(value.results) ? value.results : {}, running: value.running === true, stopRequested: value.stopRequested === true }
+      results: object(value.results) ? value.results : {}, running: value.running === true, stopRequested: value.stopRequested === true,
+      summary: object(value.summary) ? value.summary : null, discovery: object(value.discovery) ? value.discovery : null, buildPreview }
   }
   const stateLabel = (state: string): string => {
     const copy: Record<string, string> = { created: msgid('Source review saved'), connected: msgid('Source connection observed'), inventoried: msgid('Inventory read'), selected: msgid('Selection saved'), reviewed: msgid('Review ready'), applying: msgid('Transfer running'), completed: msgid('Transfer finished'), failed: msgid('Failed'), cancelled: msgctxt('whm-transfer-client', 'Cancelled') }
@@ -361,6 +368,77 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
       paintResolution()
       const reviewed = Array.isArray(selected?.review?.accounts) ? selected.review.accounts : []
       table(reviewBox, 'transfer-review', reviewed.filter(object).map(item => ({ source: item.source, target: item.target, plan: item.plan, domains: Array.isArray(item.domains) ? item.domains.join(', ') : '', mailboxes: item.mailboxes })))
+      const kpiSource = root.querySelector<HTMLElement>('[data-transfer-kpi="source"]')
+      const kpiAccounts = root.querySelector<HTMLElement>('[data-transfer-kpi="accounts"]')
+      const kpiConflicts = root.querySelector<HTMLElement>('[data-transfer-kpi="conflicts"]')
+      const kpiReady = root.querySelector<HTMLElement>('[data-transfer-kpi="ready"]')
+      if (kpiSource) kpiSource.textContent = selected ? sourceLabel(selected.session) + ' · ' + stateLabel(String(selected.session.state)) : t('No saved sessions')
+      if (kpiAccounts) {
+        const foundCount = typeof selected?.summary?.foundCount === 'number' ? selected.summary.foundCount : Array.isArray(inventory.accounts) ? inventory.accounts.length : null
+        const selCount = typeof selected?.summary?.selectedCount === 'number' ? selected.summary.selectedCount : Array.isArray(selection.accounts) ? selection.accounts.length : null
+        const selBytes = typeof selected?.summary?.selectedDiskBytes === 'number' ? selected.summary.selectedDiskBytes : null
+        kpiAccounts.textContent = !selected ? t('No saved sessions') : foundCount === null ? t(msgctxt('whm-transfer-client', 'Not read')) : t('{selected} of {found}', { selected: selCount ?? 0, found: foundCount }) + (selBytes !== null ? ' · ' + formatAsciiBytes(selBytes) : '')
+      }
+      if (kpiConflicts) {
+        const totalConf = typeof selected?.summary?.conflictCount === 'number' ? selected.summary.conflictCount : object(selected?.session.inventory) ? conflicts.length : null
+        const unresolved = typeof selected?.summary?.unresolvedConflictCount === 'number' ? selected.summary.unresolvedConflictCount : null
+        kpiConflicts.textContent = !selected ? t('No saved sessions') : totalConf === null ? t(msgctxt('whm-transfer-client', 'Not read')) : totalConf === 0 ? t('None') : unresolved !== null && unresolved > 0 ? t('{total} ({unresolved} unresolved)', { total: totalConf, unresolved }) : t('{total} resolved', { total: totalConf })
+      }
+      if (kpiReady) {
+        const readyCount = typeof selected?.summary?.readyCount === 'number' ? selected.summary.readyCount : selected?.review ? reviewed.length : null
+        kpiReady.textContent = !selected ? t('No saved sessions') : readyCount !== null ? t('{count, plural, one {# account} other {# accounts}}', { count: readyCount }) : t('Build review first')
+      }
+      const discoveryPills = root.querySelector<HTMLElement>('[data-transfer-discovery-pills]')
+      if (discoveryPills) {
+        discoveryPills.replaceChildren()
+        const disc = selected?.discovery
+        if (disc && typeof disc.accountsFound === 'number') {
+          const items = [
+            t('{count} found', { count: Number(disc.accountsFound) }),
+            t('{count} selected', { count: Number(disc.selected ?? 0) }),
+            t('{count} domains', { count: Number(disc.domains ?? 0) }),
+            t('{count} databases', { count: Number(disc.databases ?? 0) }),
+            t('{count} mailboxes', { count: Number(disc.mailboxes ?? 0) }),
+            formatAsciiBytes(Number(disc.totalDiskBytes ?? 0)),
+            t('{count} conflicts', { count: Number(disc.conflicts ?? 0) }),
+            ...(Number(disc.skipped ?? 0) > 0 ? [t('{count} skipped', { count: Number(disc.skipped) })] : []),
+          ]
+          for (const label of items) { const li = document.createElement('li'); li.textContent = label; discoveryPills.append(li) }
+          discoveryPills.hidden = false
+        } else {
+          discoveryPills.hidden = true
+        }
+      }
+      const buildRows = root.querySelector<HTMLElement>('[data-transfer-build-rows]')
+      const sliceBox = root.querySelector<HTMLElement>('[data-transfer-slice-box]')
+      const sliceLabel = root.querySelector<HTMLElement>('[data-transfer-slice-label]')
+      const sliceUnit = root.querySelector<HTMLElement>('[data-transfer-slice-unit]')
+      if (buildRows) {
+        buildRows.replaceChildren()
+        const previewItems = selected?.buildPreview ?? []
+        if (!previewItems.length) {
+          const tr = document.createElement('tr'), td = document.createElement('td')
+          td.colSpan = 6; td.textContent = !selected ? t('No saved sessions.') : t('Select accounts and build review to preview destination UID, systemd slice, vhost and PHP pool.')
+          tr.append(td); buildRows.append(tr)
+          if (sliceBox) sliceBox.hidden = true
+        } else {
+          for (const item of previewItems) {
+            const tr = document.createElement('tr')
+            const cell = (val: string): HTMLTableCellElement => { const td = document.createElement('td'), b = document.createElement('bdi'); b.dir = 'ltr'; b.className = 'v2-mono'; b.textContent = val; td.append(b); return td }
+            const uidLabel = 'uid ' + String(item.uid) + (item.uidMode === 'created' ? ' (' + t('created') + ')' : ' (' + t('allocated on create') + ')')
+            tr.append(cell(item.source), cell(item.target), cell(uidLabel), cell(item.slice), cell(item.vhost), cell(item.php))
+            buildRows.append(tr)
+          }
+          const first = previewItems[0]!
+          if (sliceBox && sliceLabel && sliceUnit && first.sliceUnit) {
+            sliceLabel.textContent = t('Systemd slice unit preview for {account} (plan {plan})', { account: first.target, plan: first.plan || '-' })
+            sliceUnit.textContent = first.sliceUnit
+            sliceBox.hidden = false
+          } else if (sliceBox) {
+            sliceBox.hidden = true
+          }
+        }
+      }
       const fillApproved = (key: 'transfer-identities' | 'transfer-progress' | 'transfer-plans', values: TransferRow[]): void => {
         const hook = { 'transfer-identities': 'data-transfer-inventory-rows', 'transfer-progress': 'data-transfer-progress-rows', 'transfer-plans': 'data-transfer-plan-rows' }[key]
         fillBody(pageRoot.querySelector('[' + hook + ']'), key === 'transfer-identities' ? 'transfer-inventory' : key, values, t('No observed records are available for this saved session.'))

@@ -4,7 +4,7 @@ import { v2Messages } from '../../../messages.ts'
 import { card, kpiCard } from '../../../components/index.ts'
 import type { IconName } from '../../../icons.ts'
 import { escapeHtml } from '../../../html.ts'
-import { listFilter, listFilterEmpty, missingServiceAccount, phoneLabels, serviceButton, serviceFacts, serviceField, serviceHeader, type PanelServiceAuthority } from './common.ts'
+import { listFilter, listFilterEmpty, missingServiceAccount, phoneLabels, serviceButton, serviceFacts, serviceField, serviceHeader, serviceSelect, type PanelServiceAuthority } from './common.ts'
 
 export function renderV2CronPage(props: PanelSurfaceProps, authority: PanelServiceAuthority = { canManage: false }): string {
   const t = v2Messages.translator(props.locale ?? 'en')
@@ -43,7 +43,7 @@ export function renderV2CronPage(props: PanelSurfaceProps, authority: PanelServi
     ['0 0,12 * * *', t('Twice a day')], ['0 0 * * *', t('Every day')],
     ['0 0 * * 0', t('Every Sunday')], ['0 0 1 * *', t('On the 1st of the month')], ['', t('Custom schedule')],
   ]
-  const preset = serviceField('v2-cron-preset', t('Common schedules'), `<select id="v2-cron-preset" data-cron-preset disabled>${presetValues.map(([value, label]) => `<option value="${value}">${escapeHtml(label!)}</option>`).join('')}</select>`)
+  const preset = serviceField('v2-cron-preset', t('Common schedules'), serviceSelect(`<select id="v2-cron-preset" data-cron-preset disabled>${presetValues.map(([value, label]) => `<option value="${value}">${escapeHtml(label!)}</option>`).join('')}</select>`))
   const schedule = `<fieldset><legend>${escapeHtml(t('Schedule'))}</legend>${preset}<div class="v2-panel-service__five">${field('minute', t('Minute'), { value: '*/5', maxLength: 32 })}${field('hour', t('Hour'), { value: '*', maxLength: 32 })}${field('day', t('Day'), { value: '*', maxLength: 32 })}${field('month', t('Month'), { value: '*', maxLength: 32 })}${field('weekday', t('Weekday'), { value: '*', maxLength: 32 })}</div></fieldset>`
   const command = serviceField('v2-cron-command', t('Command to run'), `<textarea id="v2-cron-command" class="v2-mono" data-cron-field="command" dir="ltr" rows="4" maxlength="4096" spellcheck="false" disabled></textarea>`)
   const limit = serviceField('v2-cron-unlimited', t('Runtime limit'), `<label class="v2-check"><input id="v2-cron-unlimited" type="checkbox" data-cron-unlimited checked disabled>${escapeHtml(t('Unlimited'))}</label>`)

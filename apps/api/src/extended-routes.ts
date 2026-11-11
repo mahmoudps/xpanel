@@ -48,6 +48,9 @@ import { sameContacts } from './mail/dav-store.ts'
 import { createAccountCollaborationRoutes } from './account-collaboration-workspace.ts'
 import { parseCalendarWorkspaceIcs, renderCalendarWorkspaceIcs } from './mail/calendar-ics.ts'
 import { createWhmBackupWorkspaceRoutes } from './backup-workspace.ts'
+import { listAccountBackups } from '../../agent/src/account-backup.ts'
+import { defaultBackupArchiveRoot } from '../../agent/src/acct-backup-runs.ts'
+import { parseBackupArchiveName } from '../../agent/src/acct-backup-plan.ts'
 import { createTransferWorkspaceRoutes } from './transfer-workspace.ts'
 import type { TransferWorkspacePorts } from './transfer-workspace.ts'
 import { createTransferSourceDiscovery } from './acct-transfer-discovery.ts'
@@ -639,6 +642,17 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
     store: helpers.store, requireCaller: helpers.requireCaller, assertRoot: helpers.assertRoot, emitAudit: helpers.emitAudit,
     read: key => ext.readOrDefault<unknown | null>(key, null),
     publish: (key, value, lease) => atomicWriteJson(join(ext.baseDir, key), value, 0o640, () => lease.assertFencingToken()),
+    discoverLocalArchives: async accounts => {
+      const root = defaultBackupArchiveRoot()
+      const discovered = await Promise.all(accounts.map(async account => {
+        const items = await listAccountBackups(root, account).catch(() => [])
+        return items.flatMap(item => {
+          const parsed = parseBackupArchiveName(account.username + '/' + item.file)
+          return parsed ? [{ username: account.username, file: item.file, bytes: item.bytes, createdAt: parsed.createdAt }] : []
+        })
+      }))
+      return discovered.flat().sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    },
     ...(helpers.backupDestinationHost ? { destinationHost: helpers.backupDestinationHost } : {}),
   })
   const handleTransferWorkspaceRoute = createTransferWorkspaceRoutes(helpers, { discover: createTransferSourceDiscovery({ readToken: id => readTransferCredentialToken(helpers.store, id) }),

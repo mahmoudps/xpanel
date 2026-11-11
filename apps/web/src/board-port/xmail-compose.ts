@@ -14,6 +14,10 @@ const FILTERS_ROUTE = '/mail/settings/filters'
 const PORT_CSS = `.xp-board-port{line-height:normal;font-size:16px;font-kerning:auto;font-feature-settings:normal;font-synthesis:weight style small-caps;-webkit-font-smoothing:antialiased}
 .xp-board-port a{color:light-dark(#1D5BD6,var(--xp-accent))}.xp-board-port a:hover{color:light-dark(#1546A8,var(--xp-accent-hover))}
 .xp-board-port :focus-visible{outline:2px solid light-dark(#1D5BD6,var(--xp-accent));outline-offset:2px}
+.xp-board-port :is([data-mail-format],[data-mail-action],nav a){transition:background-color 140ms ease-out,border-color 140ms ease-out,color 140ms ease-out}
+.xp-board-port [data-mail-format]:hover:not([aria-pressed="true"]){background:light-dark(#EEF0F3,var(--xp-bg-surface))!important}
+.xp-board-port nav a:not([aria-current="page"]):hover{background:light-dark(#F3F7FE,var(--xp-bg-elevated))}
+@media(prefers-reduced-motion:reduce){.xp-board-port :is([data-mail-format],[data-mail-action],nav a){transition:none}}
 .xp-board-port p{max-inline-size:none}
 @media(min-width:960px){.xp-board-port[data-mail-layout="reference"] [data-xp-sidebar]{flex:0 0 200px!important;inline-size:200px;position:static;block-size:auto;overflow:visible}}
 .xp-board-port [data-mail-recip-box] > ul:empty{display:none!important}

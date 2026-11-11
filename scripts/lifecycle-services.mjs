@@ -506,7 +506,7 @@ export function parsePreparedInstallUnitFile(unit, receipt, text) {
   equal('Service.Type',['simple']); equal('Service.User',[role === 'agent' ? 'root':'xpanel'])
   equal('Service.Group',[role === 'agent' ? 'xpanel-agent':'xpanel'])
   equal('Service.SupplementaryGroups',[role === 'agent' ? 'xpanel':'xpanel-agent'])
-  equal('Service.ExecStart',[receipt.runtime.nodePath+(role === 'agent'?' --max-old-space-size=64':' --max-old-space-size=96 --max-semi-space-size=1')+' '+working+'/apps/'+role+'/src/main.ts'])
+  equal('Service.ExecStart',[receipt.runtime.nodePath+(role === 'agent'?' --max-old-space-size=64':' --max-old-space-size=160 --max-semi-space-size=2')+' '+working+'/apps/'+role+'/src/main.ts'])
   equal('Service.Restart',['always']); equal('Service.RestartSec',['2']); equal('Service.UMask',['0007'])
   const environmentFiles = role === 'agent' ? ['/etc/xpanel/runtime.env'] : ['/etc/xpanel/runtime.env','/etc/xpanel/api.env']
   equal('Service.EnvironmentFile',environmentFiles)

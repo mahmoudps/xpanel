@@ -79,7 +79,7 @@ export const WHM_OBSERVATION_CSS = `${IDENTITY_ROWS_CSS}
 .v2-observation :is(h2,h3,p,dl,dd,pre,fieldset,ul,ol){margin:0}
 .v2-observation :is(.v2-card,.v2-card__body){gap:24px}
 .v2-observation__groups{display:flex;flex-direction:column;gap:24px;min-inline-size:0}
-.v2-observation__columns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px;align-items:start;min-inline-size:0}
+.v2-observation__columns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px;align-items:stretch;min-inline-size:0}
 .v2-observation__columns--wide-end{grid-template-columns:minmax(0,2fr) minmax(0,3fr)}
 .v2-observation__jump{display:flex;flex-wrap:wrap;gap:8px}
 .v2-observation__jump>a{display:inline-flex;align-items:center;justify-content:center;min-block-size:var(--target);min-inline-size:var(--target);padding-inline:12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--text-2);font-size:13px;font-weight:500;text-decoration:none}
@@ -92,11 +92,12 @@ export const WHM_OBSERVATION_CSS = `${IDENTITY_ROWS_CSS}
 .v2-observation:is([data-whm-detail-route="/whm/security"],[data-whm-detail-route="/whm/security/ssh"])>.v2-kpi-row{grid-template-columns:repeat(4,minmax(0,1fr))}
 .v2-observation__facts>div,.v2-observation .v2-field{display:flex;flex-direction:column;gap:8px;min-inline-size:0;text-align:start}
 .v2-observation__facts dt{font-size:13px;color:var(--muted)}
-.v2-observation__facts dd{overflow-wrap:anywhere;text-align:start}
+.v2-observation__facts dd{font-weight:500;font-variant-numeric:tabular-nums;overflow-wrap:anywhere;unicode-bidi:plaintext;text-align:var(--v2-control-align,match-parent)}
 .v2-observation__facts>div:only-child{grid-column:1/-1}
 .v2-observation [data-panel-access] .v2-observation__facts{grid-template-columns:repeat(auto-fill,minmax(min(100%,280px),1fr))}
 .v2-observation__actions{display:flex;flex-wrap:wrap;align-items:center;gap:16px}
-.v2-observation__check{display:flex;align-items:flex-start;gap:8px;min-block-size:var(--target)}
+.v2-observation .v2-btn{min-inline-size:var(--target);min-block-size:var(--target)}
+.v2-observation__check{display:flex;align-items:center;gap:10px;min-block-size:var(--target);cursor:pointer}
 .v2-observation__check>input{flex:none;margin:0}
 .v2-observation__check+.v2-observation__check{margin-block-start:-16px}
 .v2-observation__fields>.v2-observation__check{margin-block-start:0}
@@ -105,22 +106,28 @@ export const WHM_OBSERVATION_CSS = `${IDENTITY_ROWS_CSS}
 .v2-observation .v2-field [dir=ltr]{text-align:var(--v2-control-align,start)}
 .v2-observation__scroll{max-inline-size:100%;overflow:auto;min-inline-size:0}
 .v2-observation :is(th,td){text-align:start;vertical-align:top;padding:12px 16px;overflow-wrap:anywhere}
+.v2-observation td{font-variant-numeric:tabular-nums}
 .v2-observation tr:has(button)>:is(th,td){vertical-align:middle}
-@media(min-width:601px){.v2-observation [data-whm-ssh-key-rows] td:nth-child(2){white-space:nowrap}.v2-observation [data-whm-ssh-key-rows] td:nth-child(3){overflow-wrap:break-word}}
+@media(min-width:601px){.v2-observation__scroll{border:1px solid var(--line);border-radius:var(--radius-notice);background:var(--surface)}.v2-observation__scroll thead th{background:var(--subtle)}.v2-observation__scroll tbody tr:last-child>:is(th,td){border-block-end:0}.v2-observation [data-whm-ssh-key-rows] td:nth-child(2){white-space:nowrap}.v2-observation [data-whm-ssh-key-rows] td:nth-child(3){overflow-wrap:break-word}}
 .v2-panel-access__code{white-space:pre-wrap;overflow-wrap:anywhere}
-.v2-observation__log{max-block-size:480px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;padding:16px;border:1px solid var(--line);border-radius:var(--radius-control);background:var(--code);color:var(--code-text);font:13px/1.6 var(--font-mono)}
+.v2-observation__log{max-block-size:480px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;padding:16px;border:1px solid var(--line);border-radius:var(--radius-notice);background:var(--code);color:var(--code-text);font:13px/1.6 var(--font-mono);font-variant-numeric:tabular-nums}
 .v2-observation__list{display:flex;flex-direction:column;gap:16px;list-style:none;padding:0;min-inline-size:0}
+.v2-observation :is([data-whm-server-health-empty],[data-whm-repair-empty],[data-whm-alerts-results]>li:only-child:not([class])){padding:16px;border:1px dashed var(--line);border-radius:var(--radius-notice);background:var(--subtle);font-size:13px;color:var(--muted)}
+.v2-observation [data-whm-repair-removals]:not([hidden]){padding:16px;border:1px solid var(--bad-line);border-radius:var(--radius-notice);background:var(--bad-soft)}
 .v2-observation__charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));gap:16px}
 .v2-observation [data-whm-alerts-form] .v2-observation__check{white-space:nowrap}
+.v2-observation [data-whm-alerts-threshold]{max-inline-size:120px;font-variant-numeric:tabular-nums}
 @media(min-width:1101px){.v2-observation__charts:has(>:nth-child(5):last-child){grid-template-columns:repeat(6,minmax(0,1fr))}
 .v2-observation__charts:has(>:nth-child(5):last-child)>*{grid-column:span 2}
 .v2-observation__charts:has(>:nth-child(5):last-child)>:nth-child(n+4){grid-column:span 3}}
 .v2-observation__job-progress{display:flex;gap:8px;align-items:center;min-inline-size:128px}
 .v2-observation__job-progress>.v2-bar{flex:1 1 auto;min-inline-size:64px}
-.v2-observation__chart{display:flex;flex-direction:column;gap:8px;min-inline-size:0;padding:16px;border:1px solid var(--line);border-radius:var(--radius-control)}
+.v2-observation__chart{display:flex;flex-direction:column;gap:8px;min-inline-size:0;padding:16px;border:1px solid var(--line);border-radius:var(--radius-notice);background:var(--subtle)}
+.v2-observation__chart>figcaption{font-size:13px;font-weight:600;color:var(--text)}
+.v2-observation__chart>[data-whm-monitoring-chart-state]{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
 .v2-observation details>summary{min-block-size:var(--target);align-content:center;cursor:pointer;font-weight:600}
 .v2-observation details[open]>:not(summary){margin-block-start:16px}
-.v2-observation fieldset{padding:16px;border:1px solid var(--line);border-radius:var(--radius-control);min-inline-size:0}
+.v2-observation fieldset{display:flex;flex-direction:column;gap:16px;padding:16px;border:1px solid var(--line);border-radius:var(--radius-notice);background:var(--subtle);min-inline-size:0}
 .v2-observation fieldset>legend{padding-inline:8px;font-weight:600}
 .v2-observation[data-whm-detail-route="/whm/security"]:has(tr[data-check-state])>.v2-kpi-row .v2-kpi__note{display:none}
 .v2-observation__filter{display:inline-flex;flex-wrap:wrap;align-self:flex-start;gap:4px;padding:4px;border-radius:var(--radius-control);background:var(--sunken)}
@@ -147,7 +154,8 @@ export const WHM_OBSERVATION_CSS = `${IDENTITY_ROWS_CSS}
 @media(min-width:1101px){.v2-observation__facts:not(.v2-observation__columns .v2-observation__facts):is(:has(>:nth-child(4):last-child),:has(>:nth-child(7):last-child),:has(>:nth-child(8):last-child)){grid-template-columns:repeat(4,minmax(0,1fr))}.v2-observation__facts:not(.v2-observation__columns .v2-observation__facts,[data-panel-access] .v2-observation__facts):is(:has(>:nth-child(5):last-child),:has(>:nth-child(10):last-child)){grid-template-columns:repeat(5,minmax(0,1fr))}}
 @media(min-width:601px){.v2-observation table:has(>thead>tr>:nth-child(9)) :is(th,td){padding-inline:10px}.v2-observation table:has(>thead>tr>:nth-child(9)) td{overflow-wrap:break-word}
 .v2-observation[data-whm-detail-route="/whm/monitoring/processes"] table:has(>[data-whm-monitoring-rows]) td:not(:nth-child(3),:nth-child(9)){white-space:nowrap}.v2-observation[data-whm-detail-route="/whm/monitoring/processes"] table:has(>[data-whm-monitoring-rows]) td:nth-child(9){overflow-wrap:anywhere}}
-${whmPolish('.v2-observation')}@media(max-width:1100px){.v2-observation__columns{grid-template-columns:minmax(0,1fr)}.v2-observation:is([data-whm-detail-route="/whm/security"],[data-whm-detail-route="/whm/security/ssh"])>.v2-kpi-row{grid-template-columns:repeat(2,minmax(0,1fr))}}
+${whmPolish('.v2-observation')}@media(prefers-reduced-motion:no-preference){.v2-observation :is(.v2-btn,.v2-observation__jump>a,.v2-observation__filter>label){transition:background-color 140ms ease-out,border-color 140ms ease-out,color 140ms ease-out,box-shadow 140ms ease-out,opacity 140ms ease-out,transform 140ms ease-out}}
+@media(max-width:1100px){.v2-observation__columns{grid-template-columns:minmax(0,1fr)}.v2-observation:is([data-whm-detail-route="/whm/security"],[data-whm-detail-route="/whm/security/ssh"])>.v2-kpi-row{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:600px){.v2-observation:is([data-whm-detail-route^="/whm/security"],[data-whm-detail-route^="/whm/monitoring"],[data-whm-detail-route="/whm/audit"]) .v2-observation__scroll td:nth-child(n+3):not([colspan]){grid-column:1/-1;display:flex;justify-content:space-between;gap:16px;text-align:end}
 .v2-observation:is([data-whm-detail-route^="/whm/security"],[data-whm-detail-route^="/whm/monitoring"],[data-whm-detail-route="/whm/audit"]) .v2-observation__scroll td:nth-child(n+3):not([colspan])::before{flex:none;font-size:13px;color:var(--muted);text-align:start}
 .v2-observation:is([data-whm-detail-route^="/whm/security"],[data-whm-detail-route^="/whm/monitoring"],[data-whm-detail-route="/whm/audit"]) .v2-observation__scroll td:nth-child(3):not([colspan])::before{content:var(--v2-col-3)}

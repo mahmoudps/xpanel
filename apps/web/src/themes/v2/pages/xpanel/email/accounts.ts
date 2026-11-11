@@ -68,8 +68,8 @@ function createMailbox(t: Translate, props: EmailAccountsPageProps): string {
 
 function accountFacts(t: Translate, props: EmailAccountsPageProps): string {
   const facts = [
-    { label: t('Account'), value: props.account?.username ?? t('Not read'), technical: true },
-    { label: t('Primary domain'), value: props.account?.primaryDomain ?? t('Not read'), technical: true },
+    { label: t('Account'), value: props.account?.username ?? t('Not read'), technical: !!props.account },
+    { label: t('Primary domain'), value: props.account?.primaryDomain ?? t('Not read'), technical: !!props.account },
     { label: t('Plan'), value: props.plan?.name ?? t('Not read'), technical: false },
   ]
   return card({ title: t('Account and plan'), titleId: 'v2-email-account-title', bodyHtml: `<dl class="v2-email-facts">${facts.map(item => `<div><dt>${escapeHtml(item.label)}</dt><dd>${item.technical ? technical(item.value) : escapeHtml(item.value)}</dd></div>`).join('')}</dl>` })
@@ -149,11 +149,20 @@ export function renderV2EmailAccountsPage(t: Translate, props: EmailAccountsPage
 }
 
 export const EMAIL_ACCOUNTS_CSS = `.v2-email-accounts{min-inline-size:0}
+.v2-email-accounts h1{font-size:26px;line-height:1.2}
+.v2-email-accounts .v2-card h2{font-size:16px;line-height:1.3}
+.v2-email-accounts .v2-drawer h2,.v2-email-dialog h2{margin:0;font-size:18px;line-height:1.3}
+.v2-email-accounts .v2-card h3{font-size:14px;line-height:1.4}
+.v2-email-accounts .v2-field,.v2-email-dialog .v2-field{gap:var(--space-1)}
+.v2-email-accounts .v2-field>label,.v2-email-dialog .v2-field>label{padding-inline:13px;font-size:13px;line-height:1.25;font-weight:600}
+.v2-email-accounts .v2-field__help,.v2-email-dialog .v2-field__help{font-size:13px;line-height:1.5;color:var(--muted)}
 .v2-email-accounts .v2-email-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(200px,100%),1fr));gap:var(--space-2)}
 .v2-email-facts>div{display:flex;flex-direction:column;gap:var(--space-1);min-inline-size:0}
 .v2-email-accounts .v2-field>label,.v2-email-facts dt{text-box-trim:trim-end;text-box-edge:text}
 .v2-email-facts dt{font-size:12px;color:var(--muted)}
 .v2-email-facts dd{margin:0;font-size:13px;overflow-wrap:anywhere;text-box-trim:trim-start;text-box-edge:text}
+.v2-email-accounts :is(.v2-num,.v2-kpi__value,.v2-kpi__unit,.v2-email-facts dd,#v2-email-users td,.v2-count){font-variant-numeric:tabular-nums}
+.v2-email-accounts .v2-btn,.v2-email-dialog .v2-btn{min-inline-size:44px;min-block-size:44px;transition-property:background-color,border-color,color,box-shadow,opacity,transform;transition-duration:140ms;transition-timing-function:ease-out}
 @media(min-width:601px){.v2-email-accounts #v2-email-users{min-inline-size:880px!important}.v2-email-accounts #v2-email-users th{white-space:normal}.v2-email-accounts #v2-email-users :is(th,td):not(:first-child){padding-inline-start:8px}.v2-email-accounts #v2-email-users :is(th,td):not(:last-child){padding-inline-end:8px}.v2-email-accounts .v2-email-row-actions .v2-btn{padding-inline:10px;font-size:13px}}
 .v2-email-accounts .v2-email-row-actions{display:grid;grid-template-columns:repeat(2,max-content);justify-content:start;gap:var(--space-1)}
 .v2-email-accounts .v2-split{flex-direction:column;align-items:stretch}.v2-email-accounts .v2-split>*{flex:none;align-self:stretch;inline-size:100%;min-inline-size:0}
@@ -162,8 +171,8 @@ export const EMAIL_ACCOUNTS_CSS = `.v2-email-accounts{min-inline-size:0}
 .v2-email-accounts .v2-drawer .v2-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(260px,100%),1fr));gap:var(--space-2) var(--space-3);align-items:start}
 .v2-email-accounts .v2-drawer .v2-form>:is(.v2-email-actions,[data-mailbox-status],.v2-notice){grid-column:1/-1}
 .v2-email-accounts .v2-card p.v2-muted{font-size:13px;line-height:1.6}
-.v2-email-filter{display:flex;flex-wrap:wrap;gap:4px;padding:4px;border-radius:10px;background:var(--sunken)}
-.v2-email-filter>label{position:relative;display:inline-flex;align-items:center;justify-content:center;gap:6px;min-block-size:var(--target);min-inline-size:var(--target);padding:0 12px;border:1px solid transparent;border-radius:8px;font-size:13px;color:var(--text-2);cursor:pointer}
+.v2-email-filter{display:flex;flex-wrap:wrap;gap:4px;padding:4px;border-radius:12px;background:var(--sunken)}
+.v2-email-filter>label{position:relative;display:inline-flex;align-items:center;justify-content:center;gap:6px;min-block-size:var(--target);min-inline-size:var(--target);padding:0 12px;border:1px solid transparent;border-radius:8px;font-size:13px;color:var(--text-2);cursor:pointer;transition-property:background-color,border-color,color,box-shadow,opacity,transform;transition-duration:140ms;transition-timing-function:ease-out}
 .v2-email-filter input{position:absolute;inset:0;inline-size:100%;block-size:100%;margin:0;opacity:0;cursor:pointer}
 .v2-email-filter>label:has(input:checked){border-color:var(--line);background:var(--surface);color:var(--text);font-weight:600;box-shadow:var(--shadow)}
 .v2-email-filter>label:has(input:focus-visible){outline:2px solid var(--accent-fill);outline-offset:2px}
@@ -189,9 +198,12 @@ export const EMAIL_ACCOUNTS_CSS = `.v2-email-accounts{min-inline-size:0}
 .v2-email-dialog{padding:var(--space-3);border:1px solid var(--line-strong);border-radius:var(--radius-card);background:var(--surface);color:var(--text);inline-size:min(560px,calc(100% - 32px));max-block-size:calc(100dvh - 32px);overflow:auto}
 .v2-email-dialog::backdrop{background:var(--scrim)}
 .v2-email-dialog .v2-form{gap:var(--space-3)}
-.v2-email-dialog [data-dialog-status]:not([hidden]),.v2-email-accounts [data-mailbox-status]:not([hidden]){padding:var(--space-2);border:1px solid var(--bad-line);border-radius:var(--radius-control);background:var(--bad-soft);color:var(--bad);overflow-wrap:anywhere}
+.v2-email-dialog [data-dialog-status]:not([hidden]),.v2-email-accounts [data-mailbox-status]:not([hidden]){padding:var(--space-2);border:1px solid var(--bad-line);border-radius:12px;background:var(--bad-soft);color:var(--bad);overflow-wrap:anywhere}
 .v2-email-accounts #v2-email-users th:nth-child(3){min-inline-size:104px}.v2-email-accounts #v2-email-users th:nth-child(5){min-inline-size:80px}
+.v2-email-accounts:dir(rtl) *,[data-ui-theme="v2"] [dir=rtl] .v2-email-accounts *{letter-spacing:0}
+@media(prefers-reduced-motion:reduce){.v2-email-accounts .v2-btn,.v2-email-dialog .v2-btn,.v2-email-filter>label{transition-duration:0ms}}
 @media(min-width:1760px){.v2-email-accounts .v2-split{flex-direction:row;align-items:flex-start}.v2-email-accounts .v2-split>:first-child{flex:1 1 0;inline-size:auto}.v2-email-accounts .v2-split>:not(:first-child){flex:0 0 400px;inline-size:400px;align-self:flex-start}}
+@media(max-width:640px){.v2-email-accounts .v2-card:not(.v2-card--flush),.v2-email-accounts .v2-kpi,.v2-email-dialog{padding:var(--space-2)}}
 @media(max-width:600px){.v2-email-accounts .v2-kpi-row{grid-template-columns:repeat(2,minmax(0,1fr))}.v2-email-accounts .v2-kpi-row>.v2-kpi:last-child:nth-child(odd){grid-column:1/-1}.v2-email-how{grid-template-columns:minmax(0,1fr)}.v2-email-filter{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.v2-email-filter>label{min-block-size:var(--target);justify-content:center}.v2-email-accounts #v2-email-users tr>td:is(:first-child,:nth-child(2)):not([colspan]),.v2-email-accounts #v2-email-users tr>td:has(>.v2-email-fact){grid-column:1/-1!important;grid-row:auto!important;justify-self:stretch!important;text-align:start!important}.v2-email-fact{display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-2)}.v2-email-fact::before{content:attr(data-label);font-size:12px;color:var(--muted)}.v2-email-accounts .v2-email-row-actions{display:flex}.v2-email-accounts .v2-cell-lead,.v2-email-accounts .v2-cell-lead__text{min-inline-size:0}.v2-email-accounts .v2-cell-lead__text>bdi{white-space:normal;overflow-wrap:anywhere}.v2-email-dialog{padding:var(--space-2)}.v2-email-accounts .v2-email-actions>.v2-btn{flex:1 1 auto}}
 @media(min-width:901px){.v2-email-accounts #v2-email-users{table-layout:fixed;min-inline-size:0!important}.v2-email-accounts #v2-email-users th:nth-child(1){inline-size:27%}.v2-email-accounts #v2-email-users th:nth-child(2){inline-size:12%}.v2-email-accounts #v2-email-users th:nth-child(3){inline-size:9%}.v2-email-accounts #v2-email-users th:nth-child(4){inline-size:14%}.v2-email-accounts #v2-email-users th:nth-child(5){inline-size:9%}.v2-email-accounts #v2-email-users th:nth-child(6){inline-size:29%}}
 @media(min-width:901px){.v2-email-accounts #v2-email-users td{overflow-wrap:anywhere}.v2-email-accounts #v2-email-users .v2-cell-lead{min-inline-size:0}}

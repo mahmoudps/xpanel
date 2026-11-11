@@ -116,15 +116,15 @@ export function dashboardPage(t: Translate, props: DashboardPageProps): string {
 
 // Checks sit in a grid of bordered tiles; a tile that needs attention takes its tone on the border.
 export const DASHBOARD_LAYOUT_CSS = `.v2-status-list{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(min(280px,100%),1fr));gap:var(--space-2)}
-.v2-status-item{display:flex;flex-wrap:wrap;align-content:flex-start;gap:12px;padding:20px var(--space-2);border-radius:var(--radius-notice);border:1px solid var(--line)}
-.v2-status-item[data-state=warn]{border-color:var(--warn-line)}
-.v2-status-item[data-state=bad]{border-color:var(--bad-line)}
+.v2-status-item{display:flex;flex-wrap:wrap;align-content:flex-start;gap:12px;padding:20px var(--space-2);border-radius:var(--radius-notice);border:1px solid var(--line);background:var(--surface)}
+.v2-status-item[data-state=warn]{border-color:var(--warn-line);background:color-mix(in srgb,var(--warn-soft) 45%,var(--surface))}
+.v2-status-item[data-state=bad]{border-color:var(--bad-line);background:color-mix(in srgb,var(--bad-soft) 45%,var(--surface))}
 ${stateTones('.v2-status-item', 'data-state', { ok: 'ok', warn: 'warn', bad: 'bad', info: 'info', neutral: 'neutral' })}
 .v2-status-item [data-empty]{display:none}
 .v2-status-item__main{flex:1 1 0;min-width:0;display:flex;flex-direction:column;gap:4px}
 .v2-status-item__title{display:flex;flex-wrap:wrap;align-items:center;gap:4px var(--space-1)}
 .v2-status-item__main>p{font-size:13px;line-height:1.6;color:var(--text-2)}
-.v2-status-item__metric{flex-basis:100%;display:flex;flex-wrap:wrap;justify-content:space-between;gap:var(--space-1);padding:12px var(--space-2);border-radius:var(--radius-chip);background:var(--subtle);font-size:13px;color:var(--muted)}
+.v2-status-item__metric{flex-basis:100%;display:flex;flex-wrap:wrap;justify-content:space-between;gap:var(--space-1);padding:10px 12px;border-radius:var(--radius-chip);border:1px solid var(--line);background:var(--subtle);font-size:13px;color:var(--muted)}
 .v2-status-item__metric>.v2-num{font-weight:600;color:var(--text)}
 .v2-card:has(>.v2-card__body>.v2-meters){gap:var(--space-3)}
 .v2-card__head:has(>.v2-card__actions>.v2-legend){align-items:flex-end}

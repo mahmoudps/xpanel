@@ -155,4 +155,10 @@ describe('SSH host projection', { tags: ['unit'] }, () => {
     expect(() => projectSshCounters({ ...counters, today: { accepted: -1, failed: 0, complete: true } })).toThrow()
     expect(() => projectSshCounters({ ...counters, service: { active: 'x y', substate: null, enabled: null } })).toThrow()
   })
+
+  it('projects observed and unavailable openSessions truthfully and rejects negative counts', () => {
+    expect(projectSshCounters({ ...counters, openSessions: { state: 'read', count: 3 } }).openSessions).toEqual({ state: 'read', count: 3 })
+    expect(projectSshCounters({ ...counters, openSessions: { state: 'unavailable', count: null } }).openSessions).toEqual({ state: 'unavailable', count: null })
+    expect(() => projectSshCounters({ ...counters, openSessions: { state: 'read', count: -1 } })).toThrow()
+  })
 })

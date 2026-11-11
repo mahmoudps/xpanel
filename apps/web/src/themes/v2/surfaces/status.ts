@@ -45,7 +45,10 @@ export function renderV2Status(props: StatusPageModel & ThemeViewProps): string 
   })
 }
 
-export const V2_STATUS_CSS = `.v2-status-card{display:flex;flex-direction:column;gap:var(--space-3);inline-size:min(100%,720px);margin-inline:auto;padding:var(--space-3)}
-.v2-status-code{font:600 40px var(--font-mono);color:var(--muted)}.v2-status-actions{display:flex;flex-wrap:wrap;gap:var(--space-2)}.v2-status-actions:empty{display:none}
-.v2-status-standalone{display:flex;flex-direction:column;min-block-size:100dvh}.v2-status-header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--space-2);padding:var(--space-3);background:var(--surface);border-block-end:1px solid var(--line)}.v2-status-main{flex:1;display:grid;align-content:center;padding:var(--space-4) var(--space-3)}
-@media(max-width:600px){.v2-status-card,.v2-status-header{padding:var(--space-2)}.v2-status-main{padding:var(--space-4) var(--space-2)}}`
+export const V2_STATUS_CSS = `.v2-status-card{display:flex;flex-direction:column;gap:var(--space-2);inline-size:min(100%,680px);margin-inline:auto;padding:var(--space-4);border-color:var(--line-strong);box-shadow:0 12px 32px rgba(7,14,26,.1),0 2px 6px rgba(7,14,26,.05)}
+.v2-status-code{align-self:flex-start;padding:4px 12px;border-radius:var(--radius-chip);border:1px solid var(--accent-line);background:var(--accent-soft);font:600 24px/1.2 var(--font-mono);color:var(--accent)}
+.v2-status-card>p:not(.v2-status-code){color:var(--text-2);line-height:1.6}
+.v2-status-card [data-status-notice]{padding:12px var(--space-2);border-radius:var(--radius-control);border:1px solid var(--line);background:var(--subtle);font-size:13px}
+.v2-status-actions{display:flex;flex-wrap:wrap;gap:var(--space-1);padding-block-start:var(--space-1)}.v2-status-actions:empty{display:none}
+.v2-status-standalone{display:flex;flex-direction:column;min-block-size:100dvh;background:var(--bg)}.v2-status-header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--space-2);min-block-size:68px;padding:12px clamp(16px,3vw,32px);background:var(--surface);border-block-end:1px solid var(--line)}.v2-status-header>strong{font-size:18px;letter-spacing:-.01em}.v2-status-header>.v2-mono{font-size:13px;color:var(--muted)}.v2-status-main{flex:1;display:grid;align-content:center;padding:var(--space-4) var(--space-3)}
+@media(max-width:600px){.v2-status-card{padding:var(--space-3) var(--space-2)}.v2-status-main{padding:var(--space-3) var(--space-2)}}`

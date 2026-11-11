@@ -7,10 +7,17 @@ import type { BackupDestinationHost, BackupLifecycleDestination, BackupScheduler
 import { backupDestinationTargetDigest } from '../../../packages/core/src/backup-destination.ts'
 
 export type BackupWorkspaceStorageKey = 'backups/destinations.json' | 'backups/schedule.json' | 'backups/snapshots.json'
+export interface DiscoveredBackupRestorePoint {
+  username: string
+  file: string
+  bytes: number
+  createdAt: string
+}
 export interface WhmBackupWorkspacePorts extends Pick<ExtendedRouteHelpers, 'store' | 'requireCaller' | 'assertRoot' | 'emitAudit'> {
   read: (key: BackupWorkspaceStorageKey) => Promise<unknown | null>
   publish: (key: Exclude<BackupWorkspaceStorageKey, 'backups/snapshots.json'>, value: unknown, lease: WriterLease) => Promise<void>
   destinationHost?: BackupDestinationHost
+  discoverLocalArchives?: (accounts: readonly { id: string; username: string; uid: number; home: string; status: string }[]) => Promise<DiscoveredBackupRestorePoint[]>
 }
 const application = (scheduler: BackupSchedulerObservation) => ({ status: 'configuration_only', nativeApplied: false, remoteConnectionVerified: false, ...scheduler }) as const
 const kinds = ['s3', 'sftp', 'rsync', 'backblaze', 'ftp', 'local'] as const
@@ -181,17 +188,28 @@ export function createWhmBackupWorkspaceRoutes(ports: WhmBackupWorkspacePorts) {
     if (workspace && url.search) return invalid('backup workspace does not accept selectors')
     if (method === 'GET') {
       const lease = await ports.store.getWriterLock().acquire()
-      let read: { schedule: BackupScheduleConfig | null; body: Record<string, unknown> }
+      let read: { schedule: BackupScheduleConfig | null; body: Record<string, unknown>; accountsForDiscovery?: { id: string; username: string; uid: number; home: string; status: string }[] }
       try {
         const fresh = await ports.requireCaller(request)
         await ports.assertRoot(fresh, 'backups.configuration')
         if (fresh.principal.id !== caller.principal.id || fresh.sessionId !== caller.sessionId || fresh.apiTokenId !== caller.apiTokenId) return fail('FORBIDDEN', 'backup authorization changed', { stateChanged: false })
         const current = await load()
-        read = { schedule: current.schedule, body: readWorkspace ? { ...current, snapshots: snapshotMetadata(await ports.read('backups/snapshots.json')), accounts: (await ports.store.listAccounts()).map(account => ({ id: account.id, username: account.username, primaryDomain: account.primaryDomain, status: account.status })) }
-          : destinationsRoute ? { destinations: current.destinations, revision: current.revision } : { schedule: current.schedule ?? defaults, persisted: current.schedule !== null, revision: current.revision } }
+        if (readWorkspace) {
+          const allAccounts = await ports.store.listAccounts()
+          read = {
+            schedule: current.schedule,
+            accountsForDiscovery: allAccounts.map(account => ({ id: account.id, username: account.username, uid: account.uid, home: account.home, status: account.status })),
+            body: { ...current, snapshots: snapshotMetadata(await ports.read('backups/snapshots.json')), accounts: allAccounts.map(account => ({ id: account.id, username: account.username, uid: account.uid, primaryDomain: account.primaryDomain, status: account.status })) },
+          }
+        } else {
+          read = { schedule: current.schedule, body: destinationsRoute ? { destinations: current.destinations, revision: current.revision } : { schedule: current.schedule ?? defaults, persisted: current.schedule !== null, revision: current.revision } }
+        }
       } finally { await lease.release() }
+      const restorePoints = readWorkspace && ports.discoverLocalArchives && read.accountsForDiscovery
+        ? await ports.discoverLocalArchives(read.accountsForDiscovery).catch(() => [])
+        : undefined
       // The agent timer is observed after the lease is released, so a slow host reply never holds the configuration writer.
-      return json({ ...read.body, application: application(await observeBackupScheduler(ports, caller, read.schedule)) })
+      return json({ ...read.body, ...(restorePoints !== undefined ? { restorePoints } : {}), application: application(await observeBackupScheduler(ports, caller, read.schedule)) })
     }
     if (destinationsRoute && method !== 'POST' && method !== 'DELETE' && method !== 'PATCH' || scheduleRoute && method !== 'PUT') return json({ detail: 'method not allowed', code: 'METHOD_NOT_ALLOWED' }, 405)
     const body = await readBody(request), expected = body.expectedRevision

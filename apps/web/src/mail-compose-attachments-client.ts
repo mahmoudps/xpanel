@@ -103,6 +103,30 @@ export function bindMailComposeAttachments(_askDialog: unknown): void {
       updateControls()
       group.dispatchEvent(new CustomEvent('xpanel:compose-attachments-state', { bubbles: true, detail: { state: root.dataset.composeAttachmentState, count: state.files.length } }))
     }
+    const updateSizeMeter = () => {
+      const meter = root.querySelector<HTMLElement>('[data-compose-size-meter]')
+      if (!meter) return
+      const limitBytes = Number(meter.dataset.sizeLimitBytes) || composeAttachmentLimits.maxRequestBytes
+      const limitLabel = meter.dataset.sizeLimitLabel || formatClientBytes(limitBytes)
+      const toVal = group.querySelector<HTMLInputElement>('#compose-to')?.value ?? ''
+      const ccVal = group.querySelector<HTMLInputElement>('#compose-cc')?.value ?? ''
+      const bccVal = group.querySelector<HTMLInputElement>('#compose-bcc')?.value ?? ''
+      const subjVal = group.querySelector<HTMLInputElement>('#compose-subject')?.value ?? ''
+      const bodyNode = group.querySelector<HTMLTextAreaElement | HTMLElement>('#compose-body')
+      const bodyVal = bodyNode && 'value' in bodyNode ? bodyNode.value : (bodyNode?.textContent ?? '')
+      const hasAny = state.files.length > 0 || Boolean(toVal || ccVal || bccVal || subjVal || bodyVal)
+      const usedBytes = hasAny
+        ? new TextEncoder().encode(JSON.stringify({
+          to: toVal, cc: ccVal, bcc: bccVal, subject: subjVal, text: bodyVal,
+          ...(state.files.length > 0 ? { attachments: state.files } : {}),
+        })).byteLength
+        : 0
+      meter.dataset.tone = usedBytes > limitBytes ? 'bad' : usedBytes >= limitBytes * 0.8 ? 'warn' : 'ok'
+      const textEl = meter.querySelector<HTMLElement>('[data-compose-size-meter-text]')
+      if (textEl) textEl.textContent = formatClientBytes(usedBytes) + ' / ' + limitLabel
+      const bar = meter.querySelector<HTMLProgressElement>('[data-compose-size-meter-progress]')
+      if (bar) bar.value = Math.min(limitBytes, usedBytes)
+    }
     const render = () => {
       list.replaceChildren()
       if (summary) {
@@ -120,6 +144,7 @@ export function bindMailComposeAttachments(_askDialog: unknown): void {
         remove.addEventListener('click', () => { if (!enabled() || sending() || state.pending) return; state.files = Object.freeze(state.files.filter((_, current) => current !== index)); render(); announce() })
         list.append(row)
       })
+      updateSizeMeter()
     }
     opener.addEventListener('click', () => { if (enabled() && !sending() && !state.pending) input.click() })
     input.addEventListener('change', () => {
@@ -160,6 +185,7 @@ export function bindMailComposeAttachments(_askDialog: unknown): void {
       if (records.some(record => record.attributeName === 'data-compose-attachment-enabled' || record.attributeName === 'data-compose-mailbox')) announce()
       else updateControls()
     })
+    group.addEventListener('input', () => updateSizeMeter())
     const sendButton = group.querySelector<HTMLElement>('[data-mail-send]')
     if (sendButton) observer.observe(sendButton, { attributes: true, attributeFilter: ['data-mail-send-busy'] })
     observer.observe(root, { attributes: true, attributeFilter: ['data-compose-attachment-enabled'] })

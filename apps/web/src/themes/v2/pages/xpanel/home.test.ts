@@ -309,4 +309,27 @@ describe('v2 home registered personal navigation', () => {
     const nodes = parseMarkup(renderV2PanelHome(props({ catalog: [] })))
     expect(nodes.some(node => node.attrs.has('data-tool-capability'))).toBe(false)
   })
+
+  it('renders the applied generation timestamp and TLS certificate renewal strip when supplied', () => {
+    const soonIso = new Date(Date.now() + 7 * 86_400_000).toISOString()
+    const html = renderV2PanelHome(props({
+      generationId: 18,
+      generationActivatedAt: '2026-11-11T08:30:00.000Z',
+      certificates: [{
+        id: 'cert-1',
+        accountId: account.id,
+        names: [domain.name],
+        source: 'acme',
+        challenge: 'http-01',
+        notAfter: soonIso,
+        autoRenew: true,
+      }],
+      autoSsl: { state: 'active', nextRunAt: '2026-11-12T03:00:00.000Z', lastRunAt: null, renewDays: 30 },
+    }))
+    expect(html).toContain('data-home-generation')
+    expect(html).toContain('Applied in generation #18 · 2026-11-11 08:30 UTC')
+    expect(html).toContain('data-cert-renewal-strip')
+    expect(html).toContain('1 expiring within 30 days · 0 healthy')
+    expect(html).toContain('Next AutoSSL renewal check: 2026-11-12 03:00 UTC')
+  })
 })

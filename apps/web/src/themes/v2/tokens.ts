@@ -14,7 +14,7 @@ export const V2_TOKENS_CSS = `${ROOT}{color-scheme:light;\
 --nav:#0B1A33;--nav-2:#14284B;--nav-line:#1E3560;--nav-text:#C3CEDF;--nav-muted:#8796AE;--nav-strong:#FFFFFF;--nav-ok:#7FD8AC;--nav-focus:#84A9FA;\
 --code:#0B1424;--code-text:#D5DEEB;--code-muted:#8796AE;--chart-2:#0E8F7E;\
 --shadow:0 1px 2px rgba(14,23,38,.05),0 1px 3px rgba(14,23,38,.04);--scrim:rgba(7,14,26,.48);--focus:#1D5BD6;\
---font-sans:'IBM Plex Sans',system-ui,sans-serif;--font-mono:'IBM Plex Mono',ui-monospace,Consolas,'Liberation Mono',sans-serif;\
+--font-sans:'IBM Plex Sans','IBM Plex Sans Arabic',system-ui,sans-serif;--font-mono:'IBM Plex Mono','IBM Plex Sans Arabic',ui-monospace,Consolas,'Liberation Mono',sans-serif;\
 --space-1:8px;--space-2:16px;--space-3:24px;--space-4:32px;\
 --radius-card:14px;--radius-notice:12px;--radius-control:10px;--radius-chip:8px;--radius-pill:999px;--target:44px}
 ${ROOT}[data-theme="dark"]{color-scheme:dark;\
@@ -25,6 +25,6 @@ ${ROOT}[data-theme="dark"]{color-scheme:dark;\
 --bad:#F47067;--bad-soft:rgba(244,112,103,.13);--bad-line:rgba(244,112,103,.38);\
 --nav:#070E1A;--nav-2:#14213A;--nav-line:#1F2D44;--nav-text:#BAC6D8;--nav-muted:#7E8CA3;\
 --code:#070E1A;--code-muted:#7E8CA3;--chart-2:#3CC4AE;--shadow:0 1px 2px rgba(0,0,0,.35);--scrim:rgba(0,0,0,.6);--focus:#84A9FA}
-${ROOT}:lang(ar){--font-sans:sans-serif}
-${ROOT} [lang="ar"]{font-family:sans-serif}
+${ROOT}:lang(ar){--font-sans:'IBM Plex Sans Arabic','IBM Plex Sans',system-ui,sans-serif}
+${ROOT} [lang="ar"]{font-family:'IBM Plex Sans Arabic','IBM Plex Sans',system-ui,sans-serif}
 `

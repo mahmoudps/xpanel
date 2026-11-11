@@ -109,7 +109,7 @@ export const LOG_LAYOUT_CSS = `.v2-follow{display:inline-flex}
 .v2-follow>span{display:none}
 ${STATE('following')} .v2-follow__following,${STATE('paused')} .v2-follow__paused,${STATE('stopped')} .v2-follow__stopped{display:inline-flex}
 .v2-log .v2-btn[aria-pressed="true"]{border-color:var(--accent-line);background:var(--accent-soft);color:var(--accent)}
-.v2-log__band{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;padding:var(--space-1) var(--space-3);border-top:1px solid var(--line);background:var(--subtle);font-size:13px;color:var(--text-2)}
+.v2-log__band{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;padding:10px var(--v2-panel-padding);border-top:1px solid var(--line);background:var(--subtle);font-size:13px;color:var(--text-2)}
 .v2-log__band>p{flex:1 1 320px;min-width:0}
 .v2-log__dot{width:8px;height:8px;border-radius:50%;background:var(--muted)}
 ${STATE('following')} .v2-log__band{background:var(--ok-soft)}
@@ -121,7 +121,7 @@ ${STATE('following')} .v2-log__dot{background:var(--ok)}
 .v2-log__toggle:hover{background:var(--accent-soft)}
 .v2-log__toggle[aria-expanded="true"]>.v2-icon{transform:rotate(90deg)}
 .v2-log__details:has([data-xp-slot=details][hidden]){display:none}
-.v2-log__stream tbody .v2-log__details>td,.v2-log__stream tbody .v2-log__details:hover>td{padding:0 var(--space-3) var(--space-2);border-top:0;background:var(--subtle)}
+.v2-log__stream tbody .v2-log__details>td,.v2-log__stream tbody .v2-log__details:hover>td{padding:0 var(--v2-panel-padding) var(--space-2);border-top:0;background:var(--subtle)}
 .v2-log__detail{display:flex;flex-wrap:wrap;align-items:flex-start;gap:var(--space-2) var(--space-3);padding:var(--space-2);border-radius:var(--radius-notice);border:1px solid var(--line);background:var(--surface)}
 .v2-log__facts{flex:2 1 420px;min-width:0;margin:0;padding:var(--space-2);border-radius:var(--radius-control);background:var(--surface);border:1px solid var(--line);display:grid;grid-template-columns:repeat(auto-fit,minmax(min(180px,100%),1fr));gap:var(--space-2);font-size:12px;line-height:1.6}
 .v2-log__fact{display:flex;flex-direction:column;gap:var(--space-1);min-width:0}

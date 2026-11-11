@@ -113,7 +113,8 @@ export const COMMON_LAYOUT_CSS = `.v2-layout{display:flex;flex-direction:column;
 .v2-facts>div{display:flex;flex-direction:column;gap:var(--space-1);min-width:0;font-size:13px}
 .v2-facts dt{color:var(--muted);text-box-trim:trim-end;text-box-edge:text}
 .v2-facts dd{text-align:start;overflow-wrap:anywhere;text-box-trim:trim-start;text-box-edge:text}
-.v2-inset{padding:var(--space-2) var(--space-3) var(--space-3)}
-.v2-card--flush>.v2-card__body>.v2-tabs{padding-inline:var(--space-3)}
-.v2-foot{display:flex;flex-wrap:wrap;justify-content:space-between;gap:var(--space-1) var(--space-2);padding:var(--space-2) var(--space-3);border-top:1px solid var(--line);font-size:12px;color:var(--muted)}
+.v2-inset{padding:var(--space-2) var(--v2-panel-padding) var(--v2-panel-padding)}
+.v2-card--flush>.v2-card__body>.v2-tabs{padding-inline:var(--v2-panel-padding)}
+.v2-foot{display:flex;flex-wrap:wrap;justify-content:space-between;gap:var(--space-1) var(--space-2);padding:12px var(--v2-panel-padding);border-top:1px solid var(--line);font-size:12px;color:var(--muted)}
+@media(max-width:959px){.v2-aside{max-width:none}}
 `

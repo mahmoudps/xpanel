@@ -47,6 +47,8 @@ export interface MailMessageItem {
   receivedAt: string
   sizeKb?: number
   unread: boolean
+  flagged?: boolean
+  hasRemoteImages?: boolean
   /** Absent when the message was not authenticated by this server. */
   dkimPass?: boolean
   spfPass?: boolean
@@ -89,6 +91,7 @@ export interface MailSurfaceProps {
   identitySpf?: string
   /** Saved message size limit, labelled by the caller. Absent when settings were never saved. */
   identitySize?: string
+  identitySizeBytes?: number
   folderCounts?: Array<{ folder: string; total: number; unread: number }>
   composeDraft?: { to: string; cc: string; subject: string; body: string }
   actionState?: AsyncActionBannerProps

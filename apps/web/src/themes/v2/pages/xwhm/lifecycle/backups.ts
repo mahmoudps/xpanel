@@ -10,7 +10,7 @@ import { lifecycleButton, lifecycleCard, lifecycleField, lifecycleHeader, lifecy
 export interface V2BackupsPageProps extends LifecycleAccess {
   readonly activeRoute?: '/whm/backups' | '/whm/backups/restore'
   /** Core supplies only accounts this caller may access. */
-  readonly accounts?: readonly { readonly username: string; readonly primaryDomain: string }[]
+  readonly accounts?: readonly { readonly username: string; readonly uid?: number; readonly primaryDomain: string }[]
 }
 
 /** Backup configuration and recovery keep separate observation hooks and retain unread states until a real read. */
@@ -33,7 +33,11 @@ export function renderV2BackupsPage(props: V2BackupsPageProps): string {
   const accountChoices = authorizedAccounts === undefined
     ? `<p role="status">${text(t, msgid('The account list has not been read.'))}</p>`
     : authorizedAccounts.length ? '' : `<p role="status">${text(t, msgid('No accounts were returned by the authorized read.'))}</p>`
-  const accounts = `${actions(button('all-accounts', msgid('All accounts')) + button('selected-accounts', msgid('Selected accounts')))}${accountChoices}<div class="v2-lifecycle__choices" data-backup-account-choices>${(authorizedAccounts ?? []).map((account, index) => `<label class="v2-lifecycle__choice" for="v2-backup-account-${index}"><input id="v2-backup-account-${index}" type="checkbox" disabled><span><strong><bdi dir="ltr">${escapeHtml(account.username)}</bdi></strong><span><bdi dir="ltr">${escapeHtml(account.primaryDomain)}</bdi></span></span></label>`).join('')}</div>`
+  const policyBar = `<div class="v2-backup-policy-bar"><div class="v2-backup-policy-filters" role="group" aria-label="${text(t, msgid('Filter accounts in policy'))}"><button type="button" class="v2-btn" data-backup-policy-filter="all" aria-pressed="true" disabled>${text(t, msgid('All'))}</button><button type="button" class="v2-btn" data-backup-policy-filter="included" aria-pressed="false" disabled>${text(t, msgid('Included'))}</button><button type="button" class="v2-btn" data-backup-policy-filter="excluded" aria-pressed="false" disabled>${text(t, msgid('Excluded'))}</button></div></div>`
+  const policyTable = table(msgid('Accounts in the backup policy'), [msgid('Included'), msgid('Account'), msgid('Primary domain'), msgid('Retention'), msgid('Last copy'), msgid('Status')], 'account-policy-rows', msgid('The account policy table has not been read.'), 6)
+  const accounts = `${actions(button('all-accounts', msgid('All accounts')) + button('selected-accounts', msgid('Selected accounts')))}${accountChoices}<div class="v2-lifecycle__choices" data-backup-account-choices>${(authorizedAccounts ?? []).map((account, index) => `<label class="v2-lifecycle__choice" for="v2-backup-account-${index}"><input id="v2-backup-account-${index}" type="checkbox" disabled><span><strong><bdi dir="ltr">${escapeHtml(account.username)}</bdi></strong><span><bdi dir="ltr">${escapeHtml(account.primaryDomain)}</bdi></span></span></label>`).join('')}</div>${policyBar}${policyTable}`
+
+  const pendingBar = `<div class="v2-backup-pending" data-backup-pending-bar data-dirty="false"><div class="v2-backup-pending__meta"><p class="v2-backup-pending__summary" role="status" data-backup-pending-summary>${text(t, msgid('Saved policy state has not been read.'))}</p><ul class="v2-backup-pending__diff" data-backup-pending-diff hidden></ul></div>${actions(button('refresh', msgid('Read saved configuration')) + button('discard-schedule', msgid('Discard changes')) + button('save-schedule', msgid('Save configuration'), true))}</div>`
 
   const schedule = lifecycleCard(t, 'backup-schedule', msgctxt('theme:v2', 'Schedule and retention'), `
 <p data-backup-unread-note>${text(t, msgctxt('theme:v2', 'Saved schedule and retention have not been read. No scheduling or native archive verification is assumed.'))}</p>
@@ -49,10 +53,15 @@ ${group(msgid('Retention'), fields(input('daily-copies', msgid('Daily copies'), 
 ${group(msgid('What to include'), `<div class="v2-lifecycle__choices">${choice('include-home', msgid('Home directories'), msgid('Account files with ownership and permissions preserved'))}${choice('include-databases', msgid('Databases'), msgid('A consistent backup for each selected database'))}${choice('include-mail', msgid('Mail'), msgid('Maildirs, forwarders and filters'))}${choice('include-dns', msgid('DNS zones'), msgid('Exported zone records'))}${choice('include-control', msgid('Control database snapshot'), msgid('Desired state and audit recovery data'))}</div>`)}
 ${group(msgid('Accounts'), accounts)}
 ${status('configuration-status', msgid('No configuration has been saved from this view. Selecting individual accounts must not silently include newly created accounts.'))}
-${actions(button('refresh', msgid('Read saved configuration')) + button('discard-schedule', msgid('Discard changes')) + button('save-schedule', msgid('Save configuration'), true))}
+${pendingBar}
 <section class="v2-lifecycle__group"><h3>${text(t, msgid('Destinations'))}</h3><div class="v2-lifecycle__choices" data-backup-destination-choices></div></section>
 ${status('workspace-status', msgid('Saved configuration has not been read.'))}
 `, { 'data-backup-section': 'configuration', 'data-backup-saved-policy': true })
+
+  const restorePoints = lifecycleCard(t, 'backup-restore-points', msgid('Restore points'), `
+<p data-backup-restore-points-note>${text(t, msgid('Discovered archive restore points have not been read.'))}</p>
+${table(msgid('Discovered restore points, newest first'), [msgid('Created'), msgid('Type'), msgid('Contents'), msgid('Size'), msgid('Stored on'), msgid('Status'), msgid('Actions')], 'restore-points-rows', msgid('No archive restore points have been discovered yet.'), 6)}
+`)
 
   const runs = lifecycleCard(t, 'backup-runs', msgid('Runs'), `
 <p>${text(t, msgid('Run history and the saved retention policy have not been read.'))}</p>
@@ -64,6 +73,7 @@ ${actions(button('run-now', msgid('Run backup now'), true) + button('restore-run
 
   const restore = lifecycleCard(t, 'backup-restore', msgid('Restore accounts'), `
 <p>${text(t, msgid('Pick a run, an account, then the parts to bring back.'))}</p>
+${table(msgid('Discovered restore points'), [msgid('Created'), msgid('Type'), msgid('Contents'), msgid('Size'), msgid('Stored on'), msgid('Status'), msgid('Actions')], 'restore-tab-points-rows', msgid('No archive restore points have been discovered yet.'), 6)}
 <ol class="v2-lifecycle__steps" aria-label="${text(t, msgid('Restore steps'))}">${[msgid('Run'), msgid('Account'), msgid('Parts and difference')].map((label, index) => `<li data-backup-restore-step="${index + 1}"${index === 0 ? ' aria-current="step"' : ''}><span aria-hidden="true">${index + 1}</span><span>${text(t, label)}</span></li>`).join('')}</ol>
 <section class="v2-lifecycle__group" aria-labelledby="v2-backup-run-choice"><h3 id="v2-backup-run-choice">${text(t, msgid('Run'))}</h3><div role="radiogroup" aria-labelledby="v2-backup-run-choice" data-backup-restore-runs>${status('restore-runs-observation', msgid('Run dates, types, sizes and partial-copy state have not been read.'))}</div></section>
 ${input('restore-search', msgid('Find an account in this run'), 'search', '', props.canRead && props.canManage)}
@@ -112,7 +122,7 @@ ${navigation}
 <section class="v2-lifecycle__column" data-approved-whm-backups data-backup-destination-editor="manager" data-backup-can-read="${props.canRead && props.canManage}" data-backup-manage="${props.canRead && props.canManage}" data-backup-read-state="${props.canRead ? 'unread' : 'denied'}" data-backup-native="unavailable" aria-label="${text(t, msgid('Server backups'))}">
 <p id="whm-backup-layout-unavailable" class="v2-lifecycle__status" role="status">${text(t, props.canRead ? msgid('Server-wide run history, restore differences, scheduling and remote destinations have not been loaded. Their controls stay unavailable; no result or saved configuration is assumed.') : msgid('This workspace requires an authorized root account.'))}</p>
 ${v2WhmBackupClientTemplates()}${summary}
-${panel('settings', `${schedule}<div class="v2-lifecycle__column" role="group" aria-label="${text(t, msgctxt('theme:v2', 'Backup destinations and recovery'))}">${destinations}${archive}</div>`)}
+${panel('settings', `${schedule}<div class="v2-lifecycle__column" role="group" aria-label="${text(t, msgctxt('theme:v2', 'Backup destinations and recovery'))}">${destinations}${archive}</div>${restorePoints}`)}
 ${panel('restore', `${restore}${rules}`)}
 ${panel('runs', runs)}
 </section></div>`

@@ -1,4 +1,4 @@
-import type { PanelSurfaceProps } from '../../../../contract.ts'
+import type { PanelSurfaceProps, ThemeViewProps } from '../../../../contract.ts'
 import { renderV2WebDirectivePage } from '../advanced/directives.ts'
 import { NO_SETTINGS_AUTHORITY, type PanelSettingsAuthority } from '../settings/common.ts'
 import { renderV2AccountSecurityPage } from './account.ts'
@@ -10,7 +10,7 @@ export { renderV2AccountSecurityPage, renderV2CertificateFilesPage, renderV2Cert
 export type { PanelSettingsAuthority } from '../settings/common.ts'
 export { PANEL_SETTINGS_CSS as PANEL_SECURITY_CSS } from '../settings/common.ts'
 
-export function renderV2PanelSecurityPage(props: PanelSurfaceProps, authority: PanelSettingsAuthority = NO_SETTINGS_AUTHORITY): string | undefined {
+export function renderV2PanelSecurityPage(props: PanelSurfaceProps & ThemeViewProps, authority: PanelSettingsAuthority = NO_SETTINGS_AUTHORITY): string | undefined {
   switch (props.activeRoute) {
     case '/security/account': return renderV2AccountSecurityPage(props, authority)
     case '/security/ssl/issue': return renderV2CertificateIssuePage(props, authority)

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { Principal } from '@xpanel/core'
 import { v2Messages } from '../../../messages.ts'
 import { renderV2WhmOverview } from './index.ts'
+import { renderV2WhmSecurityOverview } from '../security/overview.ts'
 
 const t = v2Messages.translator('en')
 const principal: Principal = { kind: 'root', id: 'internal-root', username: 'operator' }
@@ -64,5 +65,35 @@ describe('v2 server overview observations', () => {
     expect(html).toContain('2026-10-29T18:05:00Z')
     for (const internal of ['private-ledger-id', 'private.unrecognized.code', '7fe33780-3d88-4ea3-bc66-c633ac39c141', 'mbx0123456789abcdef', 'not-rendered']) expect(html).not.toContain(internal)
     expect(renderV2WhmOverview(t, { ...base, auditEntries: [] })).toContain('No audit entries yet')
+  })
+
+  it('renders the dashboard TLS certificate renewal strip and live panel-access policy snapshot on /whm/security', () => {
+    const healthyIso = new Date(Date.now() + 60 * 86_400_000).toISOString()
+    const overview = renderV2WhmOverview(t, {
+      ...base,
+      certificates: [{
+        accountId: 'acct-1',
+        names: ['host.example.test'],
+        notAfter: healthyIso,
+      }],
+      autoSsl: { state: 'active', nextRunAt: '2026-11-12T04:00:00.000Z', lastRunAt: null, renewDays: 30 },
+    })
+    expect(overview).toContain('data-cert-renewal-strip')
+    expect(overview).toContain('1 TLS certificates healthy (0 expiring within 30 days)')
+    expect(overview).toContain('Next AutoSSL renewal check: 2026-11-12 04:00 UTC')
+
+    const secOverview = renderV2WhmSecurityOverview({
+      locale: 'en',
+      observationAuthority: { presentation: 'live', canRead: true, canManage: true },
+      panelAccessSummary: {
+        state: 'read',
+        entrancePath: '/gate-secret',
+        entranceListeners: ['xwhm'],
+        listeners: { xwhm: 2, xpanel: 1, xmail: 0 },
+      },
+    })
+    expect(secOverview).toContain('data-panel-access-entrance')
+    expect(secOverview).toContain('/gate-secret')
+    expect(secOverview).toContain('xWHM: 2, xPanel: 1, xMail: 0')
   })
 })

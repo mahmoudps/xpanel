@@ -248,6 +248,7 @@ export const policyForRequest = (pathname: string, method: string): RoutePolicy 
   if (/^\/api\/webmail\/inbox\/[1-9]\d*$/.test(pathname) && method === 'GET') return { resource: 'webmail', acl: 'edit-account', toolIds: ['webmail-message-read'] }
   if (/^\/api\/webmail\/inbox\/[1-9]\d*$/.test(pathname) && method === 'DELETE') return { resource: 'webmail', acl: 'edit-account', toolIds: ['webmail-message-read'] }
   if (/^\/api\/webmail\/inbox\/[1-9]\d*\/move$/.test(pathname) && method === 'POST') return { resource: 'webmail', acl: 'edit-account', toolIds: ['webmail-message-read'] }
+  if (/^\/api\/webmail\/inbox\/[1-9]\d*\/flag$/.test(pathname) && (method === 'POST' || method === 'PATCH')) return { resource: 'webmail', acl: 'edit-account', toolIds: ['webmail-message-read'] }
   if (pathname === '/api/webmail/send' && method === 'POST') return { resource: 'webmail', acl: 'edit-account', toolIds: ['webmail-compose'] }
   if (pathname === '/api/webmail/drafts' && method === 'POST') return { resource: 'webmail', acl: 'edit-account', toolIds: ['webmail-compose'] }
   if (pathname === '/api/webmail/track-delivery' && method === 'GET') return { resource: 'webmail', acl: 'edit-account', toolIds: ['webmail-track-delivery'] }

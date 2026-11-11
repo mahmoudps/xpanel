@@ -25,15 +25,16 @@ async function fontGate(page, locale) {
   const result = await page.evaluate(async locale => {
     let ready = false
     await Promise.race([document.fonts.ready.then(() => { ready = true }), new Promise(resolve => setTimeout(resolve, 10000))])
-    const family = locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans'
+    const isV2 = document.documentElement.dataset.uiTheme === 'v2' || Boolean(document.querySelector('[data-ui-theme="v2"]'))
+    const family = locale === 'ar' ? (isV2 ? 'IBM Plex Sans Arabic' : 'sans-serif') : 'IBM Plex Sans'
     const faces = [...document.fonts].map(face => ({ family: face.family.replaceAll('"', '').replaceAll("'", ''), status: face.status }))
-    return { ready, family, faces, body_family: getComputedStyle(document.body).fontFamily, glyph_check: document.fonts.check(family === 'sans-serif' ? '14px sans-serif' : '14px "' + family + '"', locale === 'ar' ? 'الحساب 0123456789' : 'Account 0123456789') }
+    return { ready, isV2, family, faces, body_family: getComputedStyle(document.body).fontFamily, glyph_check: document.fonts.check(family === 'sans-serif' ? '14px sans-serif' : '14px "' + family + '"', locale === 'ar' ? 'الحساب 0123456789' : 'Account 0123456789') }
   }, locale)
   assert.equal(result.ready, true, 'Font loading must settle within the observation window')
   assert.equal(result.glyph_check, true)
-  if (locale === 'ar') assert.equal(result.body_family, 'sans-serif')
+  if (result.family === 'sans-serif') assert.equal(result.body_family, 'sans-serif')
   else assert.ok(result.body_family.includes(result.family))
-  for (const family of locale === 'ar' ? [] : [result.family]) assert.ok(result.faces.some(face => face.family === family && face.status === 'loaded'), 'The actual downloadable font must load: ' + family)
+  for (const family of result.family === 'sans-serif' ? [] : [result.family]) assert.ok(result.faces.some(face => face.family === family && face.status === 'loaded'), 'The actual downloadable font must load: ' + family)
   assert.ok(result.faces.some(face => face.family === 'IBM Plex Mono' && ['loaded', 'unloaded'].includes(face.status)), 'The downloadable mono font must be registered without error')
   assert.deepEqual(result.faces.filter(face => face.status === 'error'), [])
   return result
@@ -395,10 +396,11 @@ export async function runMailLayoutAcceptance({ output, filter } = {}) {
         outcome.fonts = await fontGate(page, state.locale)
         if (!probeControls) probeControls = await quotaProbeControls(page)
         outcome.applied_fonts = {}
+        const uiFamily = state.locale === 'ar' ? (isV2 ? 'IBM Plex Sans Arabic' : 'sans-serif') : 'IBM Plex Sans'
         const brandCheck = isV2
-          ? ['brand', state.width >= 960 ? '.v2-side .v2-brand__name' : '.v2-top__brand', state.locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans', 'ordinary']
+          ? ['brand', state.width >= 960 ? '.v2-side .v2-brand__name' : '.v2-top__brand', uiFamily, 'ordinary']
           : ['brand', '[data-mail-layout="reference"] > header > a:first-of-type > span:last-child', 'IBM Plex Mono', 'mail-wordmark']
-        for (const [role, selector, family, typographyRole] of [brandCheck, ['heading', state.screen === 'inbox' ? '#list-title' : '#compose-title', state.locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans', 'ordinary']]) {
+        for (const [role, selector, family, typographyRole] of [brandCheck, ['heading', state.screen === 'inbox' ? '#list-title' : '#compose-title', uiFamily, 'ordinary']]) {
           try { outcome.applied_fonts[role] = await assertAppliedFont(page, selector, family, { role: typographyRole }) }
           catch (error) { if (error.appliedFontObservation) outcome.applied_fonts[role] = error.appliedFontObservation; throw error }
         }

@@ -83,16 +83,79 @@ describe('v2 host page authorization and observations', () => {
     expect(html).not.toContain('Until 2027-12-31')
   })
 
-  it('builds the defaults card from saved facts and states the unsourced pool settings as not read, without controls', () => {
-    const saved = renderV2WhmPhp({ ...root, serverSettings: { defaultPhpVersion: '8.4' } as HostPageProps['serverSettings'], domains: [{ php: { handler: 'cgi' } }, { php: { handler: 'fpm' } }] as unknown as HostPageProps['domains'] })
+  it('builds the defaults card from saved facts and exposes global PHP-FPM pool defaults and controls', () => {
+    const saved = renderV2WhmPhp({
+      ...root,
+      serverSettings: { defaultPhpVersion: '8.4' } as HostPageProps['serverSettings'],
+      domains: [{ php: { handler: 'cgi' } }, { php: { handler: 'fpm' } }] as unknown as HostPageProps['domains'],
+      fpmPoolCount: 3,
+      fpmPoolDefaults: { mode: 'ondemand', maxChildren: 16, processIdleTimeoutSec: 12, startServers: 2, minSpareServers: 1, maxSpareServers: 4, maxRequests: 800 },
+    })
     expect(saved).toContain('data-php-default-saved="saved"'); expect(saved).toContain('1 of 2 saved domains use CGI.')
+    expect(saved).toContain('data-whm-php-pools-count'); expect(saved).toContain('>3<')
+    expect(saved).toContain('data-whm-php-pool-fact="mode">ondemand<')
+    expect(saved).toContain('data-whm-php-pool-fact="maxChildren">16<')
+    expect(saved).toContain('data-whm-php-pool-fact="processIdleTimeoutSec">12s<')
+    expect(saved).toContain('data-whm-php-saved-pm>ondemand<')
     const unread = renderV2WhmPhp(root)
     expect(unread).toContain('data-php-default-saved="unread"')
     const pool = unread.slice(unread.indexOf('id="v2-host-php-pool-heading"'), unread.indexOf('v2-php-configure-heading'))
-    expect(pool).not.toMatch(/<input|<button|<select/)
-    expect(pool).toContain('<dt>Process manager</dt><dd>Not read</dd>')
-    expect(pool.match(/<dt>pm\.[a-z_]+<\/dt><dd>Not read<\/dd>/g)).toHaveLength(6)
+    for (const name of ['php-pool-mode', 'php-pool-max-children', 'php-pool-idle-timeout', 'php-pool-start-servers', 'php-pool-min-spare', 'php-pool-max-spare', 'php-pool-max-requests']) {
+      expect(pool).toContain(`name="${name}"`)
+    }
+    expect(pool).toContain('data-php-action="apply-pool"')
+    expect(pool).toContain('data-php-action="discard-pool"')
+    expect(pool).toContain('<dt>Process manager</dt><dd><span data-whm-php-pool-fact="mode">Not read</span></dd>')
+    expect(pool.match(/data-whm-php-pool-fact="(?:maxChildren|processIdleTimeoutSec|startServers|minSpareServers|maxSpareServers|maxRequests)">Not read<\/span>/g)).toHaveLength(6)
     expect(pool.match(/class="v2-php-mode"/g)).toHaveLength(3)
+  })
+
+  it('renders staged firewall ruleset diff, lockout verdict, and apply step states when supplied', () => {
+    const html = renderV2WhmFirewall({
+      ...root,
+      firewallRules: [{ id: 'default-panel', kind: 'port', action: 'accept', protocol: 'tcp', port: '2087', source: null, forwardTo: null, list: null, comment: 'xWHM', enabled: true }],
+      firewallPolicy: { enabled: true, blockPing: false },
+      firewallStaged: {
+        baseRevision: 'a'.repeat(64),
+        updatedAt: '2026-11-11T10:00:00Z',
+        actor: 'root',
+        stale: false,
+        currentRuleCount: 1,
+        proposedRuleCount: 2,
+        counts: { added: 1, changed: 0, removed: 0, moved: false },
+        lockout: { checked: true, passed: true, blockingRuleId: null, message: null },
+        valid: true,
+        errors: [],
+        items: [{
+          change: 'added',
+          id: 'r2',
+          position: 2,
+          kind: 'port',
+          action: 'accept',
+          match: 'TCP 8443',
+          source: '198.51.100.0/24',
+          comment: 'API',
+          beforeAction: null,
+          beforeMatch: null,
+          beforeSource: null,
+          lockoutCheck: 'pass',
+        }],
+      },
+      firewallApplySteps: [
+        { id: 'lockout-check', state: 'done' },
+        { id: 'apply-generation', state: 'current' },
+        { id: 'session-readback', state: 'upcoming' },
+        { id: 'confirm-or-revert', state: 'upcoming' },
+      ],
+    })
+    expect(html).toContain('1 staged')
+    expect(html).toContain('TCP 8443')
+    expect(html).toContain('198.51.100.0/24')
+    expect(html).toContain('data-firewall-step="lockout-check"')
+    expect(html).toContain('data-step-status="done"')
+    expect(html).toContain('data-firewall-action="apply-staged"')
+    expect(HOST_PAGES_CSS).toContain('.v2-host[data-whm-detail-route="/whm/security/firewall"] .v2-host__split{grid-template-columns:minmax(0,1.25fr) minmax(320px,1fr)}')
+    expect(HOST_PAGES_CSS).toContain('[data-whm-firewall-panel=port] :is(th,td){padding-inline:6px}')
   })
 
   it('retains qualified capability-unavailable layouts without leaking observations', () => {

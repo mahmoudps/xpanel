@@ -2,7 +2,7 @@ import { isToolAuthorized, tools as defaultCatalog } from '@xpanel/catalog'
 import { htaccessClientTemplates } from '../advanced/directive-client-templates.ts'
 import type { PanelSurfaceProps } from '../../../../contract.ts'
 import { card } from '../../../components/index.ts'
-import { actions, area, button, deniedPage, esc, facts, field, fields, link, note, page, section, select, settingsContext, split, status, table, unreadRow, NO_SETTINGS_AUTHORITY, type PanelSettingsAuthority } from '../settings/common.ts'
+import { actions, area, button, deniedPage, esc, facts, field, fields, link, note, page, pair, section, select, settingsContext, split, status, table, unreadRow, NO_SETTINGS_AUTHORITY, type PanelSettingsAuthority } from '../settings/common.ts'
 
 export function renderV2PanelHtaccessPage(props: PanelSurfaceProps, authority: PanelSettingsAuthority = NO_SETTINGS_AUTHORITY): string {
   const c = settingsContext(props, authority), { t } = c, title = t(msgid('.htaccess editor')), description = t(msgid('Edit site rules and validate before replacing the saved file.'))
@@ -33,7 +33,7 @@ export function renderV2PanelHtaccessPage(props: PanelSurfaceProps, authority: P
     + table('v2-htaccess-version-table', t(msgid('Kept versions')), [t(msgid('Saved at (UTC)')), t(msgid('Actor')), t(msgid('Bytes')), t(msgid('State')), t(msgid('Action'))], unreadRow(5, t(msgid('Kept versions have not been read.'))), { 'data-htaccess-versions': true }))
   const save = section('v2-htaccess-save', t(msgid('What a save does')), `<ol class="v2-panel-ht-steps">${[msgid('Checks the current domain, authorization and file revision.'), msgid('Keeps the current file before any replacement.'), msgid('Validates the candidate with the protected Apache parser.'), msgid('Writes the actual file and checks the authoritative site through loopback.'), msgid('Restores the kept content after a failed check only while the written candidate still matches. An unsafe or uncertain outcome stops further writes.')].map(copy => `<li>${esc(t(copy))}</li>`).join('')}</ol>`
     + (canManage ? '' : note(t(msgctxt('theme:v2', 'This route is not qualified for file changes. The editor and workflow remain visible, but no file operation is started.')))))
-  return page(props, authority, '/software/htaccess', title, description, context + split(editor + test + changes + versions, php + save) + apply + htaccessClientTemplates(), { 'data-htaccess-workspace': true, 'data-htaccess-account': (c.account?.id ?? ''), 'data-htaccess-manage': String(canManage), 'data-wiring': canManage ? 'connected' : 'soon' })
+  return page(props, authority, '/software/htaccess', title, description, context + split(editor + test, php + save) + pair(changes, versions) + apply + htaccessClientTemplates(), { 'data-htaccess-workspace': true, 'data-htaccess-account': (c.account?.id ?? ''), 'data-htaccess-manage': String(canManage), 'data-wiring': canManage ? 'connected' : 'soon' })
 }
 
 const H = '.v2-panel-settings[data-htaccess-workspace]'
@@ -59,8 +59,8 @@ ${H} .v2-card__body>ul{list-style:none;padding:0;font-size:13px;color:var(--mute
 ${H} ol.v2-panel-ht-steps{list-style:none;padding:0;counter-reset:ht-step;gap:12px}
 ${H} ol.v2-panel-ht-steps>li{counter-increment:ht-step;display:grid;grid-template-columns:24px minmax(0,1fr);gap:12px;font-size:13px;line-height:1.5;color:var(--text-2)}
 ${H} ol.v2-panel-ht-steps>li::before{content:counter(ht-step);display:flex;align-items:center;justify-content:center;inline-size:24px;block-size:24px;border-radius:50%;background:var(--sunken);color:var(--text-2);font-size:12px;font-weight:600;font-variant-numeric:tabular-nums}
-${H} .v2-field>span[id]{font-size:12px;font-weight:600;color:var(--muted)}
+${H} .v2-field>span[id]{font-size:13px;font-weight:600;color:var(--muted);padding-inline:13px}
 @media(max-width:1000px){${H} .v2-panel-settings__split{grid-template-columns:minmax(0,1fr)}}
 @media(max-width:700px){${H} .v2-panel-ht-context{grid-template-columns:minmax(0,1fr)}${H} .v2-panel-ht-toolbar>.v2-field{max-inline-size:none}${H} .v2-panel-ht-apply .v2-panel-settings__actions,${H} .v2-panel-ht-apply .v2-panel-settings__actions>button{flex:1 1 auto}${H} .v2-settings-code-editor>:is(pre,textarea){block-size:320px}}
-.v2-panel-settings .v2-settings-code-editor{display:grid;grid-template-columns:48px minmax(0,1fr);border:1px solid var(--line);border-radius:var(--radius-control);overflow:hidden;direction:ltr}.v2-panel-settings .v2-settings-code-editor>pre{padding:12px 4px;text-align:end;user-select:none;background:var(--sunken);color:var(--muted);font-family:var(--font-mono);white-space:pre;block-size:420px}.v2-panel-settings .v2-settings-code-editor>textarea{border:0;border-radius:0;padding:12px;white-space:pre;overflow:auto;block-size:420px}
+.v2-panel-settings .v2-settings-code-editor{display:grid;grid-template-columns:48px minmax(0,1fr);border:1px solid var(--line);border-radius:12px;overflow:hidden;direction:ltr}.v2-panel-settings .v2-settings-code-editor>pre{padding:12px 4px;text-align:end;user-select:none;background:var(--sunken);color:var(--muted);font-family:var(--font-mono);font-variant-numeric:tabular-nums;white-space:pre;block-size:420px}.v2-panel-settings .v2-settings-code-editor>textarea{border:0;border-radius:0;padding:12px;white-space:pre;overflow:auto;block-size:420px}
 .v2-panel-settings .v2-settings-code-editor>:is(pre,textarea){margin:0;font-family:var(--font-mono);font-size:13px;line-height:20px;padding-block:12px}.v2-panel-settings .v2-settings-code-editor>textarea{text-align:start}`

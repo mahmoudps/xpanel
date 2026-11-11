@@ -1,15 +1,15 @@
 import type { PanelSurfaceProps } from '../../../../contract.ts'
 import { alternateLocales, languageName, localeDirection, LOCALES } from '../../../../../i18n.ts'
 import { tabs, tabPanel } from '../../../components/tabs.ts'
-import { actions, button, deniedPage, esc, facts, field, fields, input, link, note, page, pair, section, settingsContext, split, status, table, technical, unreadRow, NO_SETTINGS_AUTHORITY, type PanelSettingsAuthority } from './common.ts'
+import { actions, button, deniedPage, esc, facts, field, fields, input, link, note, page, pair, section, select as selectControl, settingsContext, split, status, table, technical, unreadRow, NO_SETTINGS_AUTHORITY, type PanelSettingsAuthority } from './common.ts'
 
 /** Controls of personal-preferences-client.ts; language and notices stay on their own tabs. */
 function personalPreferences(t: ReturnType<typeof settingsContext>['t'], parts: 'language' | 'notices', interactive: boolean): string {
-  const select = (id: string, hook: string, label: string, options: string): string => field(id, label, `<select id="${id}" ${hook} disabled>${options}</select>`)
+  const select = (id: string, hook: string, label: string, options: readonly (readonly [string, string])[]): string => field(id, label, selectControl(id, '', options, ` ${hook}`))
   const check = (key: string, label: string): string => `<label class="v2-panel-settings__check"><input type="checkbox" data-personal-notify="${key}" disabled><span>${esc(label)}</span></label>`
   const body = parts === 'language'
-    ? select('v2-personal-locale', 'data-personal-locale', t(msgid('Interface language')), `<option value="">${esc(t(msgid('Browser default')))}</option>${LOCALES.map(info => `<option value="${info.tag}">${esc(languageName(info.tag, info.tag))}</option>`).join('')}`)
-    : select('v2-personal-position', 'data-personal-position', t(msgid('Where notices appear')), ([['top-right', msgid('Top right')], ['top-left', msgid('Top left')], ['bottom-right', msgid('Bottom right')], ['bottom-left', msgid('Bottom left')], ['center', msgid('Center')]] as const).map(([value, label]) => `<option value="${value}">${esc(t(label))}</option>`).join(''))
+    ? select('v2-personal-locale', 'data-personal-locale', t(msgid('Interface language')), [['', t(msgid('Browser default'))], ...LOCALES.map(info => [info.tag, languageName(info.tag, info.tag)] as const)])
+    : select('v2-personal-position', 'data-personal-position', t(msgid('Where notices appear')), ([['top-right', msgid('Top right')], ['top-left', msgid('Top left')], ['bottom-right', msgid('Bottom right')], ['bottom-left', msgid('Bottom left')], ['center', msgid('Center')]] as const).map(([value, label]) => [value, t(label)] as const))
       + `<fieldset><legend>${esc(t(msgid('Show on Home')))}</legend><div class="v2-panel-settings__checks">${check('disk', t(msgid('Disk space warnings')))}${check('bandwidth', t(msgid('Bandwidth warnings')))}${check('announcements', t(msgid('Provider announcements')))}</div></fieldset>`
   return section(`v2-personal-${parts}`, t(msgid('Personal preferences')), `${fields(body)}${status(t(msgid('Preferences have not been read.')), { 'data-personal-status': true })}`, button(t(msgid('Save')), { 'data-personal-save': true }, true, true), interactive ? { 'data-personal-preferences': true } : undefined)
 }
@@ -27,7 +27,7 @@ function accountLanguageBody(props: PanelSurfaceProps, authority: PanelSettingsA
   const c = settingsContext(props, authority), { t } = c
   const choices = section('v2-language-choice', t(msgid('Current language')), facts([{ label: t(msgid('Language')), valueHtml: esc(languageName(c.locale, c.locale)) }, { label: t(msgid('Direction')), valueHtml: technical(localeDirection(c.locale).toUpperCase()) }, { label: t(msgid('Digits')), valueHtml: technical('0-9') }])
     + note(t(msgid('Use the workspace language control to change the interface language.'))), actions(alternateLocales(c.locale).map(locale => linksAllowed ? link(locale.name, '/preferences/language?' + new URLSearchParams({ lang: locale.tag, ...(props.theme ? { theme: props.theme } : {}) })) : button(locale.name)).join('')))
-  const example = section('v2-language-values', t(msgctxt('theme:v2', 'Text and technical values')), facts([{ label: t(msgid('Domain')), valueHtml: technical(c.account?.primaryDomain ?? t(msgid('Not read'))) }, { label: t(msgid('Username')), valueHtml: technical(c.account?.username ?? t(msgid('Not read'))) }]) + note(t(msgctxt('theme:v2', 'Names, dates, references and numbers remain aligned beneath their labels. Technical values keep their own reading direction.'))))
+  const example = section('v2-language-values', t(msgctxt('theme:v2', 'Text and technical values')), facts([{ label: t(msgid('Domain')), valueHtml: c.account ? technical(c.account.primaryDomain) : esc(t(msgid('Not read'))) }, { label: t(msgid('Username')), valueHtml: c.account ? technical(c.account.username) : esc(t(msgid('Not read'))) }]) + note(t(msgctxt('theme:v2', 'Names, dates, references and numbers remain aligned beneath their labels. Technical values keep their own reading direction.'))))
   return pair(choices, example) + personalPreferences(t, 'language', true)
 }
 
@@ -75,7 +75,7 @@ export function renderV2ServiceUsersPage(props: PanelSurfaceProps, authority: Pa
   const check = (hook: string, label: string): string => `<label class="v2-panel-settings__check"><input type="checkbox" ${hook} disabled><span>${esc(label)}</span></label>`
   const help = section('v2-service-user-access', t(msgid('Add or edit a user')), note(t(msgid('One login for the services you turn on, with the same password. These users cannot sign in to this panel.')))
     + fields(field('v2-service-user-local', t(msgid('Username')), input('v2-service-user-local', '', 'text', ' dir="ltr" autocomplete="off" spellcheck="false" maxlength="64" data-service-user-local'))
-      + field('v2-service-user-domain', t(msgid('Domain')), `<select id="v2-service-user-domain" dir="ltr" data-service-user-domain disabled><option value="">${esc(t(msgid('Choose a domain')))}</option></select>`)
+      + field('v2-service-user-domain', t(msgid('Domain')), selectControl('v2-service-user-domain', '', [['', t(msgid('Choose a domain'))]], ' dir="ltr" data-service-user-domain'))
       + field('v2-service-user-password', t(msgid('Password')), input('v2-service-user-password', '', 'password', ' dir="ltr" autocomplete="new-password" data-service-user-password'))
       + field('v2-service-user-quota', t(msgid('Mailbox quota (MiB)')), input('v2-service-user-quota', '', 'number', ' dir="ltr" min="1" step="1" data-service-user-quota'))
       + field('v2-service-user-dir', t(msgid('FTP and Web Disk folder, relative to home')), input('v2-service-user-dir', '', 'text', ' dir="ltr" autocomplete="off" spellcheck="false" maxlength="240" data-service-user-dir')))

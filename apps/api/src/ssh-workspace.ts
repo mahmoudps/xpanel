@@ -29,10 +29,19 @@ const unverified = (): never => fail('PRECONDITION_FAILED', 'the SSH host read c
 const review = (): never => fail('SERVICE_UNAVAILABLE', 'the SSH change outcome requires review', { stateChanged: true, verificationRequired: true, unknownOutcome: true })
 
 export interface SshCountView { accepted: number; failed: number; complete: boolean }
+export type SshOpenSessionsProjected = { state: 'read'; count: number } | { state: 'unavailable'; count: null }
 const countOf = (value: unknown): SshCountView => object(value) && count(value.accepted) && count(value.failed) && typeof value.complete === 'boolean' ? { accepted: value.accepted, failed: value.failed, complete: value.complete } : unverified()
-export function projectSshCounters(value: unknown): { observedAt: string; service: { active: string | null; substate: string | null; enabled: string | null }; today: SshCountView; total: SshCountView } {
+const openSessionsOf = (value: unknown): SshOpenSessionsProjected | undefined => {
+  if (value === undefined) return undefined
+  if (!object(value)) return unverified()
+  if (value.state === 'read' && count(value.count)) return { state: 'read', count: value.count }
+  if (value.state === 'unavailable' && value.count === null) return { state: 'unavailable', count: null }
+  return unverified()
+}
+export function projectSshCounters(value: unknown): { observedAt: string; service: { active: string | null; substate: string | null; enabled: string | null }; today: SshCountView; total: SshCountView; openSessions?: SshOpenSessionsProjected } {
   if (!object(value) || typeof value.observedAt !== 'string' || !Number.isFinite(Date.parse(value.observedAt)) || !object(value.service) || ![value.service.active, value.service.substate, value.service.enabled].every(stateText)) return unverified()
-  return { observedAt: value.observedAt, service: { active: value.service.active as string | null, substate: value.service.substate as string | null, enabled: value.service.enabled as string | null }, today: countOf(value.today), total: countOf(value.total) }
+  const openSessions = openSessionsOf(value.openSessions)
+  return { observedAt: value.observedAt, service: { active: value.service.active as string | null, substate: value.service.substate as string | null, enabled: value.service.enabled as string | null }, today: countOf(value.today), total: countOf(value.total), ...(openSessions ? { openSessions } : {}) }
 }
 export function projectSshPrepared(value: unknown): { access: SshAccessFacts; portInUse: boolean | null } {
   const access = object(value) ? value.access : null

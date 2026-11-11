@@ -100,7 +100,7 @@ export function barChart(props: BarChartProps): string {
   return `<figure class="v2-chart v2-chart--bars" dir="ltr"><svg role="img" aria-label="${escapeHtml(props.label)}" viewBox="0 0 ${n * slot} ${H}" preserveAspectRatio="none" style="block-size:${props.height ?? 120}px"><path d="M0 ${H}H${n * slot}" stroke="var(--line)" vector-effect="non-scaling-stroke"/>${rects}</svg><div class="v2-chart__x v2-num" aria-hidden="true">${props.bars.map(bar => `<span>${escapeHtml(bar.label)}</span>`).join('')}</div></figure>`
 }
 
-export const CHART_CSS = `.v2-chart{display:flex;flex-direction:column;gap:var(--space-2);margin:0;min-width:0}
+export const CHART_CSS = `.v2-chart{display:flex;flex-direction:column;gap:var(--space-2);min-width:0}
 .v2-chart__plot{display:flex;gap:var(--space-1)}
 .v2-chart__y{display:flex;flex-direction:column;justify-content:space-between;font-size:11px;color:var(--muted);text-align:end}
 .v2-chart__area{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:var(--space-1)}

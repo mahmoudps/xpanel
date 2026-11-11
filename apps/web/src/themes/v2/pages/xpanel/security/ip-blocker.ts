@@ -1,7 +1,7 @@
 import type { PanelSurfaceProps } from '../../../../contract.ts'
 import { actions, button, esc, field, fields, input, note, page, section, split, settingsContext, status, table, unreadRow, NO_SETTINGS_AUTHORITY, type PanelSettingsAuthority } from '../settings/common.ts'
 
-const cell = (slot: string): string => `<td><bdi dir="ltr" class="v2-mono" data-xp-slot="${slot}"></bdi></td>`
+const cell = (slot: string): string => `<td><bdi dir="ltr" class="v2-mono v2-num" data-xp-slot="${slot}"></bdi></td>`
 /** Theme-owned records the account edge controller fills. */
 export const v2AccountEdgeTemplates = (): string => `<template data-xp-template="ip-blocker-row"><tr>${cell('entry')}${cell('first')}${cell('last')}<td><button type="button" class="v2-btn" data-xp-action="remove" disabled><span data-xp-slot="remove-label"></span></button></td></tr></template><template data-xp-template="ip-blocker-empty"><tr><td colspan="4" data-xp-slot="message"></td></tr></template>`
 
@@ -14,7 +14,7 @@ export function renderV2IpBlockerPage(props: PanelSurfaceProps, authority: Panel
     + '<p class="v2-field__error" id="v2-ipb-error" data-ipb-error hidden></p>'
     + actions(button(t(msgid('Add')), { 'data-ipb-add': true }, true, true) + button(t(msgid('Read blocked addresses')), { 'data-ipb-refresh': true }))
     + status(t(msgid('The blocked addresses have not been read.')), { 'data-ipb-status': true }))
-  const list = section('v2-ipb-list', t(msgid('Currently blocked addresses')), `<p data-ipb-count>${esc(t(msgid('Not read')))}</p>`
+  const list = section('v2-ipb-list', t(msgid('Currently blocked addresses')), `<p class="v2-num" data-ipb-count>${esc(t(msgid('Not read')))}</p>`
     + table('v2-ipb-table', t(msgid('Currently blocked addresses')), [t(msgid('Server setting')), t(msgid('First address')), t(msgid('Last address')), t(msgid('Actions'))], unreadRow(4, t(msgid('Not read.'))), { 'data-ipb-rows': true }))
   const limits = section('v2-ipb-limits', t(msgid('Limits of this page')), `<ul>${[msgid('At most 1000 blocks per account. Loopback addresses that the server uses to reach its own sites cannot be blocked.'), msgid('Behind a CDN or another proxy, the edge sees the visitor address only when the server trusts that proxy (Trusted proxies). Otherwise the proxy address is what is blocked.'), msgid('A host name is resolved once, when it is added. Later changes to its addresses are not followed.')].map(copy => `<li>${esc(t(copy))}</li>`).join('')}</ul>`)
   return page(props, authority, '/security/ip-blocker', title, description, split(add, limits) + list + v2AccountEdgeTemplates(), { 'data-ip-blocker': true, 'data-ipb-account': c.account?.id ?? '', 'data-ipb-manage': String(c.editable) })
@@ -24,7 +24,7 @@ export function renderV2IpBlockerPage(props: PanelSurfaceProps, authority: Panel
 export function renderV2EdgeCacheSection(props: PanelSurfaceProps, authority: PanelSettingsAuthority = NO_SETTINGS_AUTHORITY): string {
   const c = settingsContext(props, authority), { t } = c
   return section('v2-edge-cache', t(msgid('Response cache for your sites')), note(t(msgid('Purging drops every cached response of your sites at once: the next visit to each page asks your site again. Turning the cache off sends every request to your sites.')))
-    + `<dl class="v2-panel-settings__facts"><div><dt>${esc(t(msgid('Cache')))}</dt><dd data-edge-cache-state>${esc(t(msgid('Not read')))}</dd></div><div><dt>${esc(t(msgid('Last purge')))}</dt><dd><bdi dir="ltr" data-edge-cache-purged>${esc(t(msgid('Not read')))}</bdi></dd></div></dl>`
+    + `<dl class="v2-panel-settings__facts"><div><dt>${esc(t(msgid('Cache')))}</dt><dd data-edge-cache-state>${esc(t(msgid('Not read')))}</dd></div><div><dt>${esc(t(msgid('Last purge')))}</dt><dd><bdi dir="ltr" class="v2-num" data-edge-cache-purged>${esc(t(msgid('Not read')))}</bdi></dd></div></dl>`
     + status(t(msgid('The cache settings have not been read.')), { 'data-edge-cache-status': true }),
     actions(button(t(msgid('Purge cache')), { 'data-edge-cache-purge': true }, true, true) + button(t(msgid('Turn the cache off')), { 'data-edge-cache-toggle': true })),
     { 'data-edge-cache': true, 'data-ec-account': c.account?.id ?? '', 'data-ec-manage': String(c.editable) })

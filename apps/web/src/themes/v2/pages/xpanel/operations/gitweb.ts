@@ -1,6 +1,6 @@
 import type { Translate } from '../../../../../i18n.ts'
 import { escapeHtml } from '../../../html.ts'
-import { operationButton, operationCard, operationField, operationTable } from './common.ts'
+import { operationButton, operationCard, operationField, operationSelect, operationTable } from './common.ts'
 
 /** Read-only history browser; account-gitweb-client.ts owns the behaviour. The repository comes from the page's own selector. */
 export function renderV2GitHistoryBrowser(t: Translate, canRead: boolean): string {
@@ -12,7 +12,7 @@ export function renderV2GitHistoryBrowser(t: Translate, canRead: boolean): strin
   const row = (columns: number): string => `<tr><td colspan="${columns}">${empty}</td></tr>`
   return `<div data-account-gitweb data-gitweb-can-read="${canRead}">${operationCard('v2-git-history-browser', t(msgid('History browser')),
     `<template data-xp-template="gitweb-action"><button type="button" class="v2-btn"><span data-xp-slot="label"></span></button></template>
-<div class="v2-panel-operation-fields">${operationField('v2-gitweb-rev', t(msgid('Revision')), '<select id="v2-gitweb-rev" dir="ltr" data-gitweb-rev disabled><option value="HEAD">HEAD</option></select>')}${operationField('v2-gitweb-search-kind', t(msgid('Search in')), `<select id="v2-gitweb-search-kind" data-gitweb-search-kind disabled>${options}</select>`)}${operationField('v2-gitweb-search-text', t(msgid('Search for')), '<input id="v2-gitweb-search-text" dir="ltr" maxlength="200" autocomplete="off" spellcheck="false" data-gitweb-search-text disabled>')}</div>
+<div class="v2-panel-operation-fields">${operationField('v2-gitweb-rev', t(msgid('Revision')), operationSelect('<select id="v2-gitweb-rev" dir="ltr" data-gitweb-rev disabled><option value="HEAD">HEAD</option></select>'))}${operationField('v2-gitweb-search-kind', t(msgid('Search in')), operationSelect(`<select id="v2-gitweb-search-kind" data-gitweb-search-kind disabled>${options}</select>`))}${operationField('v2-gitweb-search-text', t(msgid('Search for')), '<input id="v2-gitweb-search-text" dir="ltr" maxlength="200" autocomplete="off" spellcheck="false" data-gitweb-search-text disabled>')}</div>
 <div class="v2-panel-operation-actions">${operationButton(t(msgid('Show history')), { 'data-gitweb-log': true })}${operationButton(t(msgid('Show files')), { 'data-gitweb-tree': true })}${operationButton(t(msgid('Show branches and tags')), { 'data-gitweb-refs': true })}${operationButton(t(msgid('Search')), { 'data-gitweb-search': true })}</div>
 <p data-gitweb-status role="status">${text(msgid('Choose a repository, then what to read.'))}</p>
 <div data-gitweb-panel="log" hidden>${operationTable('v2-gitweb-log', t(msgid('Commits, newest first')), [t(msgid('Commit')), t(msgid('Date')), t(msgid('Author')), t(msgid('Message'))], { 'data-gitweb-log-rows': true }, row(4))}<div class="v2-panel-operation-actions">${operationButton(t(msgid('Show older commits')), { 'data-gitweb-more': true })}</div></div>

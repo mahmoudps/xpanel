@@ -95,9 +95,9 @@ function reconciler(t: Translate, props: WhmSurfaceProps): string {
   const knownDrift = integer(props.driftCount ?? undefined)
   const inSync = knownDrift && props.driftCount === 0 && gen !== undefined
   const check = (value: { ok: boolean; at: string } | undefined): string => value ? t(value.ok ? 'Passed' : 'Failed') : t('Not read')
-  const rows = [
-    { label: 'nginx -t', value: check(props.hostSample?.nginxTest) },
-    { label: 'apachectl configtest', value: check(props.hostSample?.apacheTest) },
+  const rows: { label: string; value: string; mono?: boolean }[] = [
+    { label: 'nginx -t', value: check(props.hostSample?.nginxTest), mono: true },
+    { label: 'apachectl configtest', value: check(props.hostSample?.apacheTest), mono: true },
     { label: t('Rollback target'), value: integer(props.rollbackGenerationId) ? String(props.rollbackGenerationId) : t('Not read') },
     { label: t(msgctxt('theme:v2', 'Last drift check')), value: props.driftCheckedAt ? formatDisplayDateTime(props.driftCheckedAt) : t('Not read') },
   ]
@@ -107,7 +107,7 @@ function reconciler(t: Translate, props: WhmSurfaceProps): string {
   // "Desired = applied" is stated only for a read drift count of zero; otherwise the tile names the generation alone.
   const generation = inSync ? tile(t(msgctxt('theme:v2', 'Desired = applied')), `${gen} = ${gen}`) : tile(t('Active generation'), gen === undefined ? '\u2014' : String(gen))
   return card({ title: t('Reconciler'), titleId: 'v2-whm-reconciler', actionsHtml: statusPill(state),
-    bodyHtml: `<p class="v2-muted">${escapeHtml(t(msgctxt('theme:v2', 'Changes are applied as tested configuration generations.')))}</p><div class="v2-whm-overview__tiles">${generation}${tile(t('Drift'), knownDrift ? String(props.driftCount) : '\u2014', { warn: knownDrift && props.driftCount !== 0 })}</div><dl class="v2-whm-overview__rows">${rows.map(row => `<div><dt>${escapeHtml(row.label)}</dt><dd class="v2-mono">${ltr(row.value)}</dd></div>`).join('')}</dl><p class="v2-muted" role="status">${escapeHtml(knownDrift ? t(msgctxt('theme:v2', 'This is the last supplied observation.')) : t(msgctxt('theme:v2', 'The applied state has not been read.')))}</p>`,
+    bodyHtml: `<p class="v2-muted">${escapeHtml(t(msgctxt('theme:v2', 'Changes are applied as tested configuration generations.')))}</p><div class="v2-whm-overview__tiles">${generation}${tile(t('Drift'), knownDrift ? String(props.driftCount) : '\u2014', { warn: knownDrift && props.driftCount !== 0 })}</div><dl class="v2-whm-overview__rows">${rows.map(row => `<div><dt>${row.mono ? `<span class="v2-mono">${ltr(row.label)}</span>` : escapeHtml(row.label)}</dt><dd class="v2-mono v2-num">${ltr(row.value)}</dd></div>`).join('')}</dl><p class="v2-muted v2-whm-overview__reconciler-note" role="status">${escapeHtml(knownDrift ? t(msgctxt('theme:v2', 'This is the last supplied observation.')) : t(msgctxt('theme:v2', 'The applied state has not been read.')))}</p>`,
     footerHtml: canOpenRegisteredRoute('/whm/audit', props.visibility) ? `<a href="/whm/audit">${escapeHtml(t(msgctxt('theme:v2', 'View generations')))}</a>` : undefined,
   })
 }
@@ -171,6 +171,46 @@ function auditEvents(t: Translate, props: WhmSurfaceProps): string {
   })
 }
 
+function certificateRenewalStrip(t: Translate, props: WhmSurfaceProps, canOpenTls: boolean): string {
+  const certs = props.certificates
+  const autoSsl = props.autoSsl
+  if (certs === undefined && autoSsl === undefined) return ''
+  const nowMs = Date.now()
+  const windowMs = 30 * 86_400_000
+  const seen = new Set<string>()
+  let healthy = 0
+  let expiringSoon = 0
+  let expired = 0
+  for (const cert of certs ?? []) {
+    const key = `${[...cert.names].sort().join(',')}|${cert.notAfter}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    const exp = Date.parse(cert.notAfter)
+    if (!Number.isFinite(exp)) continue
+    if (exp <= nowMs) expired++
+    else if (exp - nowMs <= windowMs) expiringSoon++
+    else healthy++
+  }
+  const tone: Tone = expired > 0 ? 'bad' : expiringSoon > 0 ? 'warn' : certs !== undefined ? 'ok' : 'info'
+  const lead = certs === undefined
+    ? t(msgid('TLS certificate renewal'))
+    : expired > 0 || expiringSoon > 0
+      ? t(msgid('{expiring} expiring within 30 days · {healthy} healthy'), { expiring: expired + expiringSoon, healthy })
+      : t(msgid('{healthy} TLS certificates healthy (0 expiring within 30 days)'), { healthy })
+  const nextRun = autoSsl?.nextRunAt ? formatDisplayDateTime(autoSsl.nextRunAt) : '—'
+  const text = autoSsl?.state === 'active' && nextRun !== '—'
+    ? t(msgid('Next AutoSSL renewal check: {at}'), { at: nextRun })
+    : autoSsl?.state === 'disabled'
+      ? t(msgid('AutoSSL automatic renewal is disabled.'))
+      : t(msgid('AutoSSL renewal schedule has not been verified on this host.'))
+  return `<div data-cert-renewal-strip>${notice(t, {
+    tone,
+    lead,
+    text,
+    ...(canOpenTls ? { action: { label: t('SSL/TLS'), href: '/whm/tls' } } : {}),
+  })}</div>`
+}
+
 /** Body renderer; the surface owner supplies the v2 shell and core document slots once. */
 export function renderV2WhmOverview(t: Translate, props: WhmSurfaceProps): string {
   const principal = props.visibility?.principal ?? props.principal
@@ -181,44 +221,54 @@ export function renderV2WhmOverview(t: Translate, props: WhmSurfaceProps): strin
     ? notice(t, { tone: 'info', lead: t(msgctxt('theme:v2', 'Upgrade {version} is available.'), { version: props.availableVersion }),
       text: t(msgctxt('theme:v2', 'This server runs {version}.'), { version: props.version }),
       ...(open('/whm/server/upgrade') ? { action: { label: t('Review the upgrade'), href: '/whm/server/upgrade' } } : {}) }) : ''
+  const certStrip = principal.kind === 'root' ? certificateRenewalStrip(t, props, open('/whm/tls')) : ''
   const jobs = card({ title: t(msgctxt('theme:v2', 'Background jobs')), titleId: 'v2-whm-background-jobs',
     bodyHtml: `<div class="v2-whm-overview__unread" role="status">${emptyState({ icon: 'clock', title: t('Not read'), text: t(msgctxt('theme:v2', 'Background jobs have not been read.')),
       ...(open('/whm/jobs') ? { actionHtml: `<a class="v2-btn" href="/whm/jobs">${escapeHtml(t(msgctxt('theme:v2', 'View jobs')))}</a>` } : {}) })}</div>`,
   })
   const audit = open('/whm/audit') ? auditEvents(t, props) : ''
-  return `<div class="v2-layout v2-whm-overview" data-whm-overview>${pageHeader(t, { breadcrumb: [{ label: t('Home') }, { label: t('Dashboard') }], route: '/whm', title: t('Server dashboard'), description: t(msgctxt('theme:v2', 'The reconciler, accounts, resources and services.')), actionsHtml: actions })}${upgrade}${renderV2WhmHome(t)}${resources(t, props)}<div class="v2-whm-overview__primary">${history(t, props)}${reconciler(t, props)}</div><div class="v2-whm-overview__secondary">${open('/whm/services') ? services(t, props) : ''}<div class="v2-stack">${open('/whm/accounts') ? accountsCard(t, props) : ''}${jobs}</div></div>${hostFacts(t, props)}${audit}</div>`
+  return `<div class="v2-layout v2-whm-overview" data-whm-overview>${pageHeader(t, { breadcrumb: [{ label: t('Home') }, { label: t('Dashboard') }], route: '/whm', title: t('Server dashboard'), description: t(msgctxt('theme:v2', 'The reconciler, accounts, resources and services.')), actionsHtml: actions })}${upgrade}${certStrip}${renderV2WhmHome(t)}${resources(t, props)}<div class="v2-whm-overview__primary">${history(t, props)}${reconciler(t, props)}</div><div class="v2-whm-overview__secondary">${open('/whm/services') ? services(t, props) : ''}<div class="v2-stack">${open('/whm/accounts') ? accountsCard(t, props) : ''}${jobs}</div></div>${hostFacts(t, props)}${audit}</div>`
 }
 
-export const WHM_OVERVIEW_CSS = `.v2-whm-overview>.v2-kpi-row{grid-template-columns:repeat(auto-fit,minmax(min(200px,100%),1fr))}
-.v2-whm-overview__primary{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:var(--space-3)}
-.v2-whm-overview__secondary{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:var(--space-3)}
+export const WHM_OVERVIEW_CSS = `.v2-whm-overview{gap:var(--space-4)}
+.v2-whm-overview>.v2-kpi-row{grid-template-columns:repeat(auto-fit,minmax(min(200px,100%),1fr))}
+.v2-whm-overview :is(.v2-card__actions,.v2-card__footer)>a:not(.v2-btn){display:inline-flex;align-items:center;min-inline-size:var(--target);min-block-size:var(--target);font-size:13px;font-weight:600;transition:color 140ms ease-out}
+.v2-whm-overview :is(.v2-chart__x,.v2-chart__y){font-size:12px;font-variant-numeric:tabular-nums}
+.v2-whm-overview [data-cert-renewal-strip],.v2-whm-overview .v2-whm-overview__service .v2-mono,.v2-whm-overview #v2-whm-audit-table time,.v2-whm-overview #v2-whm-host-facts dd{font-variant-numeric:tabular-nums}
+.v2-whm-overview__primary{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:var(--space-3);align-items:stretch}
+.v2-whm-overview__secondary{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:var(--space-3);align-items:stretch}
 .v2-whm-overview__ranges{display:flex;gap:var(--space-1)}
-.v2-whm-overview__primary>.v2-card>.v2-card__body{flex:1 1 auto}
-.v2-whm-overview__chart{flex:1 1 auto;min-block-size:220px;display:grid;place-items:center;padding:var(--space-3);border:1px dashed var(--line);border-radius:var(--radius-control);color:var(--muted);text-align:center}
-.v2-whm-overview__tiles{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-1)}
+.v2-whm-overview__primary>.v2-card>.v2-card__body,.v2-whm-overview__secondary>.v2-card>.v2-card__body{flex:1 1 auto}
+.v2-whm-overview__secondary>.v2-stack{display:flex;flex-direction:column;gap:var(--space-3);min-inline-size:0}
+.v2-whm-overview__secondary>.v2-stack>.v2-card:last-child{flex:1 1 auto}
+.v2-whm-overview__secondary>.v2-stack>.v2-card:last-child>.v2-card__body{flex:1 1 auto;justify-content:center}
+.v2-whm-overview__reconciler-note{margin-block-start:auto}
+.v2-whm-overview__chart{flex:1 1 auto;min-block-size:220px;display:grid;place-items:center;padding:var(--space-3);border:1px dashed var(--line);border-radius:var(--radius-notice);color:var(--muted);text-align:center}
+.v2-whm-overview__tiles{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-2)}
 .v2-whm-overview__tiles--auto{grid-template-columns:repeat(auto-fit,minmax(0,1fr))}
-.v2-whm-overview__tile{display:flex;flex-direction:column;gap:4px;min-inline-size:0;padding:12px var(--space-2);border:1px solid var(--line);border-radius:var(--radius-control);background:var(--subtle);color:var(--text);text-decoration:none}
+.v2-whm-overview__tile{display:flex;flex-direction:column;justify-content:center;gap:4px;min-inline-size:var(--target);min-block-size:var(--target);padding:12px var(--space-2);border:1px solid var(--line);border-radius:var(--radius-control);background:var(--subtle);color:var(--text);text-decoration:none;transition:background-color 140ms ease-out,border-color 140ms ease-out}
 .v2-whm-overview__tile:is(a){background:var(--surface)}.v2-whm-overview__tile:is(a):hover{background:var(--subtle);border-color:var(--line-strong)}
 .v2-whm-overview__tile>span{font-size:12px;color:var(--muted);overflow-wrap:anywhere}
-@media(max-width:400px){.v2-whm-overview__tile{padding-inline:var(--space-1)}}
-.v2-whm-overview__tile>strong{font-size:20px;font-weight:600;overflow-wrap:anywhere}
+@media(max-width:400px){.v2-whm-overview__tile{padding-inline:12px}.v2-whm-overview__tiles{gap:var(--space-1)}}
+.v2-whm-overview__tile>strong{font-size:20px;font-weight:600;line-height:1.25;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
 .v2-whm-overview__tile>strong[data-tone=warn]{color:var(--warn)}
 .v2-whm-overview__rows{margin:0;display:flex;flex-direction:column}
 .v2-whm-overview__rows>div{display:flex;justify-content:space-between;align-items:center;gap:var(--space-2);min-block-size:var(--target);border-block-start:1px solid var(--line);font-size:13px}
-.v2-whm-overview__rows dt{color:var(--text-2)}.v2-whm-overview__rows dd{margin:0;font-weight:600;text-align:end;overflow-wrap:anywhere}
-.v2-whm-overview__sub{margin:0;font-size:13px;font-weight:600;color:var(--text-2)}
+.v2-whm-overview__rows dt{color:var(--text-2)}.v2-whm-overview__rows dd{margin:0;font-weight:600;font-variant-numeric:tabular-nums;text-align:end;overflow-wrap:anywhere}
+.v2-whm-overview__sub{margin:0;font-size:14px;font-weight:600;color:var(--text-2)}
 .v2-whm-overview__attention{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
 .v2-whm-overview__attention>li{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-1) var(--space-2);min-block-size:56px;padding-block:var(--space-1);border-block-start:1px solid var(--line);font-size:13px}
 .v2-whm-overview__attention>li>span{flex:1 1 200px;color:var(--warn)}
 .v2-whm-overview__services{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;border-block-start:1px solid var(--line)}
-.v2-whm-overview__services>li{padding:10px var(--space-3);border-block-end:1px solid var(--line)}
+.v2-whm-overview__services>li{padding:12px var(--space-3);border-block-end:1px solid var(--line)}
 .v2-whm-overview__services>li:last-child{border-block-end:0}
 .v2-whm-overview__service{display:flex;align-items:center;justify-content:space-between;gap:var(--space-2)}
 .v2-whm-overview__service>span:first-child{display:flex;flex-direction:column;gap:2px;font-size:14px;min-inline-size:0;overflow-wrap:anywhere}
-.v2-whm-overview__unread>.v2-state--empty{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;justify-items:start;gap:2px 12px;padding:var(--space-2);text-align:start}
+.v2-whm-overview__unread>.v2-state--empty{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;justify-items:start;gap:4px 12px;padding:var(--space-2);border-radius:var(--radius-notice);text-align:start}
 .v2-whm-overview__unread .v2-state__icon{grid-row:1/3}
 .v2-whm-overview__unread :is(h2,h3,p){grid-column:2}
 .v2-whm-overview__unread .v2-btn{grid-column:3;grid-row:1/3}
+@media(prefers-reduced-motion:reduce){.v2-whm-overview__tile,.v2-whm-overview :is(.v2-card__actions,.v2-card__footer)>a:not(.v2-btn){transition:none}}
 @media(max-width:1050px){.v2-whm-overview__primary,.v2-whm-overview__secondary{grid-template-columns:1fr}}
-@media(max-width:600px){.v2-whm-overview__unread .v2-btn{grid-column:1/-1;grid-row:auto;justify-self:stretch;margin-block-start:var(--space-1)}.v2-whm-overview__services>li{padding:10px var(--space-2)}.v2-whm-overview>.v2-kpi-row{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:640px){.v2-whm-overview{gap:var(--space-3)}.v2-whm-overview__unread .v2-btn{grid-column:1/-1;grid-row:auto;justify-self:stretch;margin-block-start:var(--space-1)}.v2-whm-overview__services>li{padding:10px var(--space-2)}.v2-whm-overview>.v2-kpi-row{grid-template-columns:repeat(2,minmax(0,1fr))}}
 `

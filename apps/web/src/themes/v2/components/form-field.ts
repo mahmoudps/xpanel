@@ -73,12 +73,12 @@ export const switchRow = (props: SwitchRowProps): string =>
 
 export const FORM_FIELD_CSS = `.v2-form{display:flex;flex-direction:column;gap:var(--space-2)}
 .v2-field{display:flex;flex-direction:column;gap:var(--space-1);min-width:0}
-.v2-field>label:not(:has(>input)){padding-inline:13px;font-size:13px;line-height:1.25;font-weight:600;text-box-trim:trim-end;text-box-edge:text}
-.v2-field :is(input,select,textarea):not([type=checkbox],[type=radio]){inline-size:100%;text-align:match-parent;text-align:-webkit-match-parent}
+.v2-field>label:not(:has(>input)),.v2-field>.v2-field__label{padding-inline:13px;font-size:13px;line-height:1.25;font-weight:600;text-box-trim:trim-end;text-box-edge:text}
+.v2-field :is(input,select,textarea):not([type=checkbox],[type=radio]){inline-size:100%}
 .v2-field__unit{display:flex;align-items:center;gap:var(--space-1)}
 .v2-field__unit>input{flex:1 1 auto;min-width:0}
 .v2-field__unit>span{flex:none;min-inline-size:48px;font-size:13px;color:var(--text-2)}
-.v2-field__help{font-size:12px;color:var(--muted)}
+.v2-field__help,.v2-switch-row__text>:nth-child(2){font-size:12px;color:var(--muted)}
 .v2-field__change{font-size:12px;color:var(--accent)}
 .v2-field__error{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--bad)}
 .v2-switch-row{display:flex;align-items:center;justify-content:space-between;gap:var(--space-2);min-height:var(--target);cursor:pointer}
@@ -86,5 +86,4 @@ export const FORM_FIELD_CSS = `.v2-form{display:flex;flex-direction:column;gap:v
 .v2-switch-row__label{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-1)}
 .v2-switch-row__change{padding:2px var(--space-1);border-radius:var(--radius-pill);background:var(--accent-soft);color:var(--accent);font-size:11px;font-weight:600}
 .v2-switch-row__text>:first-child{font-weight:600}
-.v2-switch-row__text>:nth-child(2){font-size:12px;color:var(--muted)}
 `

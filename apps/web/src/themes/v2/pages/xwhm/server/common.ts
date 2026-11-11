@@ -73,38 +73,60 @@ export type AdminView = ReturnType<typeof adminContext>
 
 export function adminStyles(scope: '.v2-server-page' | '.v2-panel-page'): string {
   return `${scope},${scope} .v2-admin-stack{display:flex;flex-direction:column;gap:var(--space-4);min-inline-size:0}
+${scope} .v2-btn{min-inline-size:var(--target);min-block-size:var(--target)}
+${scope} :is(.v2-btn,.v2-admin-list>li>a,details>summary){transition:background-color 140ms ease-out,border-color 140ms ease-out,color 140ms ease-out,box-shadow 140ms ease-out,opacity 140ms ease-out,transform 140ms ease-out}
+${scope} .v2-admin-table tbody tr{transition:background-color 140ms ease-out}
+@media(prefers-reduced-motion:reduce){${scope} :is(.v2-btn,.v2-admin-list>li>a,details>summary,.v2-admin-table tbody tr){transition:none}}
 ${scope} .v2-admin-form{display:flex;flex-direction:column;gap:var(--space-3);min-inline-size:0}
 ${scope} .v2-card__body{gap:var(--space-3)}
+${scope} section.v2-card:not(:has(>.v2-card__body)){display:flex;flex-direction:column;gap:var(--space-3);padding:var(--v2-panel-padding)}
+${scope} section.v2-card>h2{margin:0;font-size:16px;line-height:1.4;font-weight:600}
+${scope} section.v2-card>h3,${scope} .v2-admin-subgroup>h3{margin:0;font-size:14px;line-height:1.45;font-weight:600}
 ${scope} :is(p,dl,dd,fieldset,ul,ol,pre){margin:0}
-${scope} .v2-admin-columns{display:grid;grid-template-columns:minmax(0,1.75fr) minmax(240px,1fr);gap:var(--space-3);align-items:start}
+${scope} .v2-admin-columns{display:grid;grid-template-columns:minmax(0,1.75fr) minmax(240px,1fr);gap:var(--space-3);align-items:stretch}
+@media(min-width:901px){${scope} .v2-admin-columns>div:has(>.v2-admin-form){display:flex;flex-direction:column}${scope} .v2-admin-columns>div>.v2-admin-form{flex:1}${scope} .v2-admin-columns>.v2-card,${scope} .v2-admin-columns>.v2-admin-stack>:nth-last-child(1 of .v2-card:not([hidden])),${scope} .v2-admin-columns>div>.v2-admin-form>.v2-card:last-child{flex:1;display:flex;flex-direction:column}${scope} .v2-admin-columns>.v2-card>.v2-card__body,${scope} .v2-admin-columns>.v2-admin-stack>:nth-last-child(1 of .v2-card:not([hidden]))>.v2-card__body,${scope} .v2-admin-columns>div>.v2-admin-form>.v2-card:last-child>.v2-card__body{flex:1}}
 ${scope} .v2-admin-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-2)}
 ${scope} .v2-admin-field{display:flex;flex-direction:column;gap:var(--space-1);min-inline-size:0;text-align:start}
 ${scope} dl.v2-admin-fields{grid-template-columns:repeat(auto-fill,minmax(min(200px,calc(50% - 8px)),1fr))}
+${scope} dl.v2-admin-fields dt{font-size:12px;color:var(--muted)}
 ${scope} .v2-admin-field>label:not(.v2-admin-choice){padding-inline:13px;font-size:13px;line-height:1.25;font-weight:600;color:var(--text-2)}
-${scope} .v2-admin-field dd{margin:0;overflow-wrap:anywhere}
+${scope} :is(.v2-admin-field,.v2-field)>:is(p,.v2-field__help){font-size:13px;line-height:1.45;color:var(--muted)}
+${scope} .v2-admin-field dd{margin:0;overflow-wrap:anywhere;unicode-bidi:plaintext;font-variant-numeric:tabular-nums}
 ${scope} .v2-admin-field :is(input,select,textarea){inline-size:100%;min-inline-size:0;max-inline-size:100%;box-sizing:border-box}
 ${scope} :is(input,textarea)[dir=ltr]{text-align:var(--v2-control-align,start);unicode-bidi:isolate}
-${scope} :is(bdi,time,code){unicode-bidi:isolate;overflow-wrap:anywhere}
+${scope} :is(bdi,time,code){unicode-bidi:isolate;overflow-wrap:break-word}
 ${scope} .v2-admin-actions{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2)}
 ${scope} .v2-admin-choice{display:flex;align-items:center;gap:var(--space-1);min-block-size:var(--target)}
-${scope} fieldset{display:flex;flex-direction:column;gap:var(--space-2);border:1px solid var(--line);border-radius:var(--radius-control);padding:var(--space-2);min-inline-size:0}
-${scope} legend{padding-inline:var(--space-1);font-weight:600}
+${scope} fieldset{display:flex;flex-direction:column;gap:var(--space-2);border:1px solid var(--line);border-radius:var(--radius-notice);background:var(--subtle);padding:var(--space-2);min-inline-size:0}
+${scope} legend{padding-inline:var(--space-1);font-size:14px;font-weight:600}
+${scope} details{border:1px solid var(--line);border-radius:var(--radius-notice);background:var(--surface)}
+${scope} details>summary{display:flex;align-items:center;justify-content:space-between;gap:var(--space-2);min-block-size:var(--target);padding-inline:var(--space-2);font-size:14px;font-weight:600;cursor:pointer;border-radius:inherit}
+${scope} details>summary:hover{background:var(--subtle)}
+${scope} details[open]>summary{border-block-end:1px solid var(--line);border-end-start-radius:0;border-end-end-radius:0}
+${scope} details>:not(summary){padding:var(--space-2)}
 ${scope} .v2-admin-table{overflow:auto;min-inline-size:0;max-inline-size:100%}
+@media(min-width:601px){${scope} .v2-admin-table{border:1px solid var(--line);border-radius:var(--radius-notice);background:var(--surface)}${scope} .v2-admin-table tbody tr:last-child>:is(th,td){border-block-end:0}${scope} .v2-admin-table tbody tr:hover{background:var(--subtle)}}
 ${scope} .v2-admin-table table{inline-size:100%;min-inline-size:480px;border-collapse:collapse}
-${scope} .v2-admin-table :is(th,td){padding:12px 16px;text-align:start;vertical-align:top;overflow-wrap:anywhere;border-block-end:1px solid var(--line)}
-@media(min-width:1280px){${scope} .v2-admin-table :is(th,td){overflow-wrap:break-word}}
-${scope} .v2-admin-table :is(th,td):first-child{padding-inline-start:var(--v2-panel-padding)}
-${scope} .v2-admin-table :is(th,td):last-child{padding-inline-end:var(--v2-panel-padding)}
+${scope} .v2-admin-table :is(th,td){padding:12px 16px;text-align:start;vertical-align:top;border-block-end:1px solid var(--line)}
+${scope} .v2-admin-table thead th{background:var(--subtle);font-size:12px;font-weight:600;color:var(--muted)}
+${scope} .v2-admin-table th{white-space:normal;overflow-wrap:normal;word-break:normal}
+${scope} .v2-admin-table td{overflow-wrap:break-word;font-variant-numeric:tabular-nums}
+${scope} .v2-admin-table :is(th,td):first-child{padding-inline-start:var(--space-2)}
+${scope} .v2-admin-table :is(th,td):last-child{padding-inline-end:var(--space-2)}
 ${scope} .v2-admin-table :is(bdi,time,code){font-family:var(--font-mono);font-variant-numeric:tabular-nums}
-${scope} .v2-admin-list{display:flex;flex-direction:column;gap:var(--space-2);padding-inline-start:var(--space-3)}
+${scope} [data-ip-pool-count]{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+${scope} .v2-admin-list{display:flex;flex-direction:column;gap:var(--space-1);padding-inline-start:var(--space-3)}
+${scope} .v2-admin-list>li>a{display:inline-flex;align-items:center;min-inline-size:var(--target);min-block-size:var(--target)}
 ${scope} .v2-admin-subgroup{display:flex;flex-direction:column;gap:var(--space-3)}
-${scope} .v2-admin-secret{display:block;min-block-size:var(--target);padding:var(--space-2);border:1px solid var(--line-strong);border-radius:var(--radius-control);background:var(--sunken);font-family:var(--font-mono);overflow-wrap:anywhere;user-select:all}
-${scope} pre{padding:var(--space-2);border-radius:var(--radius-control);background:var(--code);color:var(--code-text);white-space:pre-wrap;overflow-wrap:anywhere;max-block-size:360px;overflow:auto}
+${scope} .v2-admin-secret{display:block;min-block-size:var(--target);padding:var(--space-2);border:1px solid var(--line-strong);border-radius:var(--radius-notice);background:var(--sunken);font-family:var(--font-mono);font-variant-numeric:tabular-nums;overflow-wrap:anywhere;user-select:all}
+${scope} pre{padding:var(--space-2);border:1px solid var(--line);border-radius:var(--radius-notice);background:var(--code);color:var(--code-text);font-size:13px;font-variant-numeric:tabular-nums;white-space:pre-wrap;overflow-wrap:anywhere;max-block-size:360px;overflow:auto}
 ${scope} [hidden]{display:none!important}
-${whmPolish(scope)}@media(max-width:900px){${scope} .v2-admin-columns{grid-template-columns:minmax(0,1fr)}}
+${whmPolish(scope)}@media(max-width:900px){${scope} .v2-admin-columns{grid-template-columns:minmax(0,1fr);align-items:start}}
 @media(max-width:600px){${scope} div.v2-admin-fields{grid-template-columns:minmax(0,1fr)}
-${scope} .v2-admin-table table:not(:has([data-setting-row]),#v2-panel-token-scopes) td:nth-child(n+3):not([colspan])::before{flex:0 1 auto;max-inline-size:50%;font-size:13px;color:var(--muted);text-align:start;font-family:var(--font-sans)}
-${scope} .v2-admin-table table:not(:has([data-setting-row]),#v2-panel-token-scopes) td:nth-child(n+3):not([colspan],:empty){display:flex;justify-content:space-between;align-items:baseline;gap:16px;text-align:end}
+${scope} .v2-admin-table tr>td:nth-child(2):has(form,input,select,textarea){grid-column:1/-1;grid-row:auto;justify-self:stretch;text-align:start}
+${scope} .v2-admin-table table:not(:has([data-setting-row]),#v2-panel-token-scopes) td:nth-child(n+3):not([colspan])::before{flex:0 0 auto;max-inline-size:50%;font-size:13px;color:var(--muted);text-align:start;font-family:var(--font-sans);overflow-wrap:normal;word-break:normal}
+${scope} .v2-admin-table table:not(:has([data-setting-row]),#v2-panel-token-scopes) td:nth-child(n+3):not([colspan],:empty){grid-column:1/-1;display:flex;justify-content:space-between;align-items:baseline;gap:16px;text-align:end}
+${scope} .v2-admin-table table:not(:has([data-setting-row]),#v2-panel-token-scopes) td:nth-child(n+3):not([colspan],:empty)>*{min-inline-size:0}
 ${[3, 4, 5, 6, 7, 8, 9, 10].map(n => `${scope} .v2-admin-table table:not(:has([data-setting-row]),#v2-panel-token-scopes) td:nth-child(${n}):not([colspan],:empty)::before{content:var(--v2-col-${n})}`).join('\n')}}
 `
 }

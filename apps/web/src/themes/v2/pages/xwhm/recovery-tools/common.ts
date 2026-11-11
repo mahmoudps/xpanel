@@ -7,7 +7,7 @@ import { phoneRows, type PhoneRow } from '../lifecycle/shared.ts'
 
 /** Marks a recovery table for the two-column phone rows: which cell is the row name and which value sits opposite it.
  *  These pages carry no style attribute, so the row templates name their other cells with data-phone-label. */
-export const phoneTable = (tableHtml: string, phone: PhoneRow): string => tableHtml.replace('<table>', () => `<table${phone.value ? ` data-phone-value="${phone.value}"` : ''}${phone.name ? ` data-phone-name="${phone.name}"` : ''}>`)
+export const phoneTable = (tableHtml: string, phone: PhoneRow): string => tableHtml.replace(/<table(?:\s+data-phone-labels)?>/, () => `<table${phone.value ? ` data-phone-value="${phone.value}"` : ''}${phone.name ? ` data-phone-name="${phone.name}"` : ''}>`)
 
 /** The column name a stacked phone cell shows above its value; absent without a translator. */
 export const phoneLabel = (t: Translate | undefined, label: string): string => t ? ` data-phone-label="${escapeHtml(t(label))}"` : ''
@@ -34,7 +34,8 @@ export function restoreMoreTemplates(t?: Translate): string {
 }
 
 export const WHM_RECOVERY_TOOLS_CSS = WHM_ACCOUNT_TOOLS_CSS + `
-.v2-recovery__grid{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:var(--space-3);align-items:start;min-inline-size:0}
+.v2-recovery__grid{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:var(--space-3);align-items:stretch;min-inline-size:0}
+.v2-recovery__grid>.v2-card,.v2-recovery__grid>.v2-recovery__column>.v2-card:last-child{flex:1 1 auto}
 .v2-recovery__column,.v2-recovery__group{display:flex;flex-direction:column;gap:var(--space-3);min-inline-size:0}
 .v2-recovery__steps{display:flex;flex-wrap:wrap;list-style:none;padding:0;gap:var(--space-2)}
 .v2-recovery__steps>li{display:flex;flex:1 1 150px;align-items:center;gap:var(--space-1);color:var(--muted)}
@@ -44,15 +45,16 @@ export const WHM_RECOVERY_TOOLS_CSS = WHM_ACCOUNT_TOOLS_CSS + `
 .v2-recovery__rules{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));gap:12px 24px;list-style:none;padding:0;font-size:13px;line-height:1.6;color:var(--text-2)}
 .v2-recovery__rules>li{display:flex;align-items:flex-start;gap:8px}
 .v2-recovery__rules>li>.v2-icon{flex:none;margin-block-start:2px;color:var(--ok)}
-.v2-recovery__steps{gap:8px 16px;padding:12px 16px;border:1px solid var(--line);border-radius:var(--radius-control);background:var(--sunken);font-size:13px}
+.v2-recovery__steps{gap:8px 16px;padding:12px 16px;border:1px solid var(--line);border-radius:var(--radius-notice);background:var(--sunken);font-size:13px}
 .v2-recovery__steps>li:not(:last-child)::after{content:"";flex:1 1 16px;min-inline-size:16px;block-size:1px;background:var(--line-strong)}
 .v2-recovery__step-number{background:var(--surface)}
 .v2-recovery-tools>p[role=status]:not([data-state=failed],[data-state=error]),.v2-recovery-tools>[data-acct-convert-empty]{padding:12px 16px;border:1px solid var(--line);border-radius:var(--radius-notice);background:var(--sunken);color:var(--text-2);font-size:13px;line-height:1.6}
 .v2-recovery-tools>[data-acct-convert-empty]{display:flex;flex-direction:column;gap:8px;border-style:dashed;background:transparent;text-align:center;align-items:center;padding:24px 16px}
 .v2-recovery-tools .v2-card__body>.v2-account-tool__field{max-inline-size:480px}
 .v2-recovery-tools :is(.v2-account-tool__facts,.v2-account-tool__fields){grid-template-columns:repeat(auto-fill,minmax(min(100%,220px),1fr))}
+.v2-recovery-tools .v2-account-tool__facts dd{font-variant-numeric:tabular-nums}
 .v2-recovery__steps>li{flex-basis:120px}
-.v2-recovery-tools .v2-account-tool__scroll{border:1px solid var(--line);border-radius:var(--radius-control)}
+.v2-recovery-tools .v2-account-tool__scroll{border:1px solid var(--line);border-radius:var(--radius-notice)}
 .v2-recovery-tools table{inline-size:100%;border-collapse:collapse}
 .v2-recovery-tools thead th{white-space:nowrap;overflow-wrap:normal}
 .v2-recovery-tools td[colspan]{padding:24px 16px;text-align:center;color:var(--muted)}

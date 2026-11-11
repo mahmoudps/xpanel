@@ -18,18 +18,25 @@ export function v2WhmDiagnosticTemplates(): string {
     + xpTemplate('whm-diagnostic-alert-delivery-empty', '<tr><td colspan="5" data-xp-slot="message"></td></tr>')
 }
 
-export const WHM_DIAGNOSTIC_CLIENT_CSS = `.v2-diagnostic__account{display:flex;align-items:flex-start;gap:var(--space-2);padding:var(--v2-panel-padding);border:1px solid var(--line);border-radius:var(--radius-control);min-inline-size:0}
+export const WHM_DIAGNOSTIC_CLIENT_CSS = `.v2-diagnostic__account{display:flex;align-items:flex-start;gap:var(--space-2);padding:var(--v2-panel-padding);border:1px solid var(--line);border-radius:var(--radius-notice);background:var(--surface);min-inline-size:0}
 .v2-diagnostic__account>details{flex:1 1 auto;min-inline-size:0}
+.v2-diagnostic__account summary{display:flex;align-items:center;min-block-size:var(--target);cursor:pointer}
 .v2-diagnostic__selection{flex:none;display:flex;align-items:center;min-block-size:var(--target)}
 .v2-diagnostic__head,.v2-diagnostic__badges,.v2-diagnostic__actions{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-1) var(--space-2);min-inline-size:0}
 .v2-diagnostic__head{justify-content:space-between}
+.v2-diagnostic__actions .v2-btn{min-inline-size:var(--target);min-block-size:var(--target)}
 .v2-diagnostic__list,.v2-diagnostic__children{display:flex;flex-direction:column;gap:var(--space-2);padding:0;list-style:none;min-inline-size:0}
 .v2-diagnostic__children{padding-inline-start:var(--space-2);border-inline-start:2px solid var(--line)}
 .v2-diagnostic__children>li{display:flex;flex-direction:column;gap:var(--space-1);min-inline-size:0}
-.v2-diagnostic__item{display:flex;flex-direction:column;gap:var(--space-1);padding:var(--v2-panel-padding);border:1px solid var(--line);border-radius:var(--radius-control);min-inline-size:0}
+.v2-diagnostic__item{display:flex;flex-direction:column;gap:var(--space-1);padding:var(--v2-panel-padding);border:1px solid var(--line);border-radius:var(--radius-notice);background:var(--surface);min-inline-size:0}
 .v2-diagnostic__item[data-state=problem],.v2-diagnostic__account[data-state=problem]{border-color:var(--bad-line)}
-.v2-diagnostic__evidence{max-block-size:240px;overflow:auto;padding:var(--space-2);border:1px solid var(--line);border-radius:var(--radius-control);background:var(--code);color:var(--code-text);font:13px/1.6 var(--font-mono);white-space:pre-wrap;overflow-wrap:anywhere;text-align:start}
-.v2-diagnostic__scroll{max-inline-size:100%;overflow:auto;min-inline-size:0}
+.v2-diagnostic__item[data-state=warning],.v2-diagnostic__account[data-state=warning]{border-color:var(--warn-line)}
+.v2-diagnostic__evidence{max-block-size:240px;overflow:auto;padding:var(--space-2);border:1px solid var(--line);border-radius:var(--radius-notice);background:var(--code);color:var(--code-text);font:13px/1.6 var(--font-mono);font-variant-numeric:tabular-nums;white-space:pre-wrap;overflow-wrap:anywhere;text-align:start}
+.v2-diagnostic__scroll{max-inline-size:100%;overflow:auto;min-inline-size:0;border:1px solid var(--line);border-radius:var(--radius-notice);background:var(--surface)}
+.v2-diagnostic__scroll>table{inline-size:100%;border-collapse:collapse}
 .v2-diagnostic__scroll :is(th,td){padding:12px 16px;text-align:start;vertical-align:top;overflow-wrap:anywhere}
+.v2-diagnostic__scroll th{font-size:12px;font-weight:600;color:var(--muted);background:var(--subtle);border-block-end:1px solid var(--line)}
+.v2-diagnostic__scroll td{border-block-end:1px solid var(--line);font-variant-numeric:tabular-nums}
+.v2-diagnostic__scroll tbody tr:last-child>:is(th,td){border-block-end:0}
 .v2-observation [data-whm-repair-start][data-severity=danger]{background:var(--bad);border-color:var(--bad);color:var(--surface)}
 `

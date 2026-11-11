@@ -149,3 +149,74 @@ describe('reachable metadata datetime external sources', () => {
     } finally { document.body.replaceChildren(); delete (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest }
   })
 })
+
+describe('mail folder star toggle, older-messages pagination and remote-image loading', () => {
+  it('toggles message star via /flag, appends older messages via offset pagination, and loads sanitized remote images', async () => {
+    const firstPage = [
+      { ...message(10, 'Latest body', 800), flagged: false, hasRemoteImages: true },
+      { ...message(9, 'Previous body', 800), flagged: true, hasRemoteImages: false },
+    ]
+    const olderPage = [
+      { ...message(8, 'Older body', 800), flagged: false, hasRemoteImages: false },
+    ]
+    let currentFlag = false
+    const calls: Array<{ method: string; path: string; body: unknown }> = []
+    const workspace = createMailFolderWorkspace({
+      mailbox,
+      folder: 'INBOX',
+      confirm: async () => true,
+      send: async (method, path, body) => {
+        calls.push({ method, path, body })
+        const url = new URL(path, 'http://fixture.test')
+        if (method === 'POST' && url.pathname.endsWith('/10/flag')) {
+          const req = body as { folder: string; uidValidity: number; flagged: boolean }
+          currentFlag = req.flagged
+          return { ok: true, mailbox, folder: req.folder, uid: 10, uidValidity: 800, flagged: currentFlag, stateChanged: true }
+        }
+        if (method === 'GET' && url.pathname === '/api/webmail/inbox') {
+          const offset = Number(url.searchParams.get('offset') ?? '0')
+          if (offset === 2) {
+            return { mailbox, folder: 'INBOX', complete: true, capabilities: { move: true, flag: true }, messages: olderPage, total: 3, offset: 2, hasMore: false, nextOffset: null }
+          }
+          return {
+            mailbox, folder: 'INBOX', complete: true, capabilities: { move: true, flag: true },
+            messages: [{ ...firstPage[0]!, flagged: currentFlag }, firstPage[1]!],
+            total: 3, offset: 0, hasMore: true, nextOffset: 2,
+          }
+        }
+        if (method === 'GET' && url.pathname.endsWith('/10')) {
+          const remote = url.searchParams.get('remoteImages') === '1'
+          return {
+            mailbox,
+            folder: 'INBOX',
+            message: {
+              ...firstPage[0]!,
+              flagged: currentFlag,
+              ...(remote ? { remoteImages: [{ src: 'https://cdn.example.test/banner.png', alt: 'Banner' }] } : {}),
+            },
+          }
+        }
+        throw new Error('unexpected ' + method + ' ' + path)
+      },
+    })
+    await workspace.refresh()
+    expect(workspace.state.total).toBe(3)
+    expect(workspace.state.hasMore).toBe(true)
+    await workspace.open(10)
+    expect(workspace.state.message?.flagged).toBe(false)
+
+    await workspace.toggleFlag(10)
+    expect(workspace.state.message?.flagged).toBe(true)
+    expect(workspace.state.messages.find(item => item.uid === 10)?.flagged).toBe(true)
+
+    await workspace.loadRemoteImages()
+    expect(workspace.state.message?.remoteImages).toEqual([{ src: 'https://cdn.example.test/banner.png', alt: 'Banner' }])
+
+    await workspace.loadOlder()
+    expect(workspace.state.messages.map(item => item.uid)).toEqual([10, 9, 8])
+    expect(workspace.state.hasMore).toBe(false)
+    expect(calls.some(c => c.method === 'POST' && c.path === '/api/webmail/inbox/10/flag')).toBe(true)
+    expect(calls.some(c => c.method === 'GET' && c.path.includes('remoteImages=1'))).toBe(true)
+    expect(calls.some(c => c.method === 'GET' && c.path.includes('offset=2'))).toBe(true)
+  })
+})

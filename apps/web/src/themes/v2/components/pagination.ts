@@ -32,7 +32,7 @@ export function pagination(t: Translate, props: PaginationProps): string {
   return `<nav class="v2-pagination" aria-label="${escapeHtml(t(msgctxt('theme:v2', 'Pagination')))}"${hookAttrs(props.hooks)}><span class="v2-num">${escapeHtml(props.summary)}</span><span class="v2-pagination__controls">${size}${control(props.previous, t('Previous page'), 'chevLeft')}${control(props.next, t('Next page'), 'chevRight')}</span></nav>`
 }
 
-export const PAGINATION_CSS = `.v2-pagination{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--space-1) var(--space-2);padding:var(--space-1) var(--space-2);padding-inline-start:20px;border-top:1px solid var(--line);font-size:13px;color:var(--text-2)}
+export const PAGINATION_CSS = `.v2-pagination{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--space-1) var(--space-2);padding:12px var(--v2-panel-padding);border-top:1px solid var(--line);font-size:13px;color:var(--text-2)}
 .v2-pagination__controls{display:inline-flex;align-items:center;gap:var(--space-1)}
 .v2-pagination select{font-size:13px}
 `

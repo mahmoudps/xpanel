@@ -1,3 +1,4 @@
+import { DEFAULT_FPM } from '@xpanel/core'
 import { escapeHtml, xpTemplate } from '../../../html.ts'
 import { tabs, tabPanel } from '../../../components/tabs.ts'
 import { renderV2HostTools } from '../server/host-tools.ts'
@@ -16,10 +17,10 @@ export function renderV2WhmPhp(props: HostPageProps): string {
   const unread = t(msgid('Not read'))
   const savedDomains = readable ? props.domains : undefined
   const accounts = readable ? props.accounts : undefined
-  const select = (name: string, label: string, choices: readonly { value: string; label: string }[] = []): string =>
+  const select = (name: string, label: string, choices: readonly { value: string; label: string; selected?: boolean }[] = []): string =>
     formField({ id: `v2-${name}`, label: t(label), control: { kind: 'select', name, disabled: true, dir: 'ltr', options: choices } })
-  const input = (name: string, label: string, type: 'text' | 'number' = 'text'): string =>
-    formField({ id: `v2-php-${name}`, label: t(label), control: { kind: 'input', name, type, disabled: true, mono: true, dir: 'ltr' } })
+  const input = (name: string, label: string, type: 'text' | 'number' = 'text', value?: string | number): string =>
+    formField({ id: `v2-php-${name}`, label: t(label), control: { kind: 'input', name, type, disabled: true, mono: true, dir: 'ltr', ...(value !== undefined ? { value: String(value) } : {}) } })
   const button = (name: string, label: string, danger = false): string => hostButton(t(label), { 'data-php-action': name }, { disabled: true, danger })
   const scope = (key: string) => ({ 'data-whm-detail-section': key })
   // Phone rows name each stacked value with its column header.
@@ -33,11 +34,13 @@ export function renderV2WhmPhp(props: HostPageProps): string {
     + xpTemplate('whm-php-version-action', '<button type="button" class="v2-btn" disabled><span data-xp-slot="content"></span></button>')
     + xpTemplate('whm-php-version-remove', '<button type="button" class="v2-btn v2-btn--danger" disabled><span data-xp-slot="content"></span></button>')
     + xpTemplate('whm-php-version-tab', '<button type="button" role="tab" disabled><bdi class="v2-mono" dir="ltr" data-xp-slot="content"></bdi></button>')
+  const poolDefaults = readable ? props.fpmPoolDefaults : undefined
+  const poolCount = readable ? props.fpmPoolCount : undefined
   const summary = `<div class="v2-kpi-row">${[
     { label: t(msgid('Host')), value: readable ? props.hostname ?? unread : unread, icon: 'server' as const },
     { label: t(msgctxt('theme:v2', 'Default for new domains')), value: readable ? props.serverSettings?.defaultPhpVersion ?? unread : unread, icon: 'code' as const, valueHooks: { 'data-whm-php-default': true, 'data-php-default-known': readable && !!props.serverSettings?.defaultPhpVersion } },
     { label: t(msgid('Domains')), value: savedDomains ? String(savedDomains.length) : unread, icon: 'globe' as const },
-    { label: t(msgctxt('theme:v2', 'FPM pools')), value: unread, icon: 'layers' as const },
+    { label: t(msgctxt('theme:v2', 'FPM pools')), value: poolCount !== undefined ? String(poolCount) : unread, icon: 'layers' as const, valueHooks: { 'data-whm-php-pools-count': true } },
   ].map(item => kpiCard({ ...item, note: t(msgctxt('theme:v2', 'Saved configuration does not establish running pool state.')) })).join('')}</div>`
   const runtime = `<div class="v2-host__groups" data-whm-php-workspace data-php-version-layout="table" data-php-can-read="${readable}">
 <div class="v2-host__actions">${hostButton(t(msgid('Read PHP inventory')), { 'data-whm-php-refresh': true }, { disabled: !readable })}</div>
@@ -62,15 +65,43 @@ ${hostTable(t, 'php-versions', t(msgid('Installed PHP versions')), [t(msgid('Ver
     ['PHP-FPM', 'Apache', t(msgid('Per-account pool'))], ['CGI / suexec', 'Apache', t(msgid('Account UID'))], ['suPHP', 'Apache', t(msgid('Account UID'))], ['lsphp', 'OpenLiteSpeed', t(msgid('Account external app'))],
   ].map(([handler, engine, identity]) => ({ cellsHtml: [technical(handler), escapeHtml(identity!), technical(engine), escapeHtml(unread), escapeHtml(unread), escapeHtml(unread)] })), t(msgid('No records have been read.')), { 'data-whm-php-handler-rows': true }) + '</div>'
   + `<p>${escapeHtml(t(msgctxt('theme:v2', 'Handler availability has not been read. A saved assignment does not establish runtime compatibility.')))}</p>`)
-  // Global pool settings have no source and no write operation: the card states each value as not read and offers no control.
   const modes = [['ondemand', msgctxt('theme:v2', 'Workers start when a request arrives and stop when idle.')], ['dynamic', msgctxt('theme:v2', 'Keeps a few spare workers ready and adds more under load.')], ['static', msgctxt('theme:v2', 'Keeps a fixed number of workers in memory at all times.')]] as const
-  const pool = hostCard('php-pool', t(msgctxt('theme:v2', 'PHP-FPM process manager')), `<p>${escapeHtml(t(msgctxt('theme:v2', 'Each account pool runs inside its account slice. The server pool defaults are further down this page.')))}</p>${hostFacts([{ label: t(msgid('Process manager')), valueHtml: escapeHtml(unread) }])}<dl class="v2-php-modes__grid">${modes.map(([value, text]) => `<div class="v2-php-mode"><dt><bdi class="v2-mono" dir="ltr">${value}</bdi></dt><dd class="v2-muted">${escapeHtml(t(text))}</dd></div>`).join('')}</dl><h3>${escapeHtml(t(msgctxt('theme:v2', 'Pool settings')))}</h3>${hostFacts(['pm.max_children', 'pm.process_idle_timeout', 'pm.start_servers', 'pm.min_spare_servers', 'pm.max_spare_servers', 'pm.max_requests'].map(name => ({ label: name, valueHtml: escapeHtml(unread) })))}<p role="status">${escapeHtml(t(msgctxt('theme:v2', 'Global pool settings have no connected write operation in this workspace.')))}</p>`)
+  const poolFact = (key: string, val: string | number | undefined): string =>
+    val === undefined ? `<span data-whm-php-pool-fact="${key}">${escapeHtml(unread)}</span>` : `<bdi class="v2-mono" dir="ltr" data-whm-php-pool-fact="${key}">${escapeHtml(String(val))}</bdi>`
+  const poolValues = poolDefaults ?? DEFAULT_FPM
+  const poolFields = `<div class="v2-host__fields">${
+    select('php-pool-mode', msgid('Process manager'), modes.map(([value]) => ({ value, label: value, selected: value === poolValues.mode })))
+  }${input('php-pool-max-children', 'pm.max_children', 'number', poolValues.maxChildren)
+  }${input('php-pool-idle-timeout', 'pm.process_idle_timeout', 'number', poolValues.processIdleTimeoutSec)
+  }${input('php-pool-start-servers', 'pm.start_servers', 'number', poolValues.startServers)
+  }${input('php-pool-min-spare', 'pm.min_spare_servers', 'number', poolValues.minSpareServers)
+  }${input('php-pool-max-spare', 'pm.max_spare_servers', 'number', poolValues.maxSpareServers)
+  }${input('php-pool-max-requests', 'pm.max_requests', 'number', poolValues.maxRequests)
+  }</div><div class="v2-host__actions">${button('discard-pool', msgid('Discard'))}${button('apply-pool', msgid('Test and apply'))}</div>`
+  const pool = hostCard('php-pool', t(msgctxt('theme:v2', 'PHP-FPM process manager')), `<p>${escapeHtml(t(msgctxt('theme:v2', 'Each account pool runs inside its account slice. Inherited pools use these server-wide defaults unless overridden per domain.')))}</p>${
+    hostFacts([{ label: t(msgid('Process manager')), valueHtml: poolFact('mode', poolDefaults?.mode) }])
+  }<dl class="v2-php-modes__grid">${modes.map(([value, text]) => `<div class="v2-php-mode"><dt><bdi class="v2-mono" dir="ltr">${value}</bdi></dt><dd class="v2-muted">${escapeHtml(t(text))}</dd></div>`).join('')}</dl><h3>${escapeHtml(t(msgctxt('theme:v2', 'Pool settings')))}</h3>${
+    hostFacts([
+      { label: 'pm.max_children', valueHtml: poolFact('maxChildren', poolDefaults?.maxChildren) },
+      { label: 'pm.process_idle_timeout', valueHtml: poolFact('processIdleTimeoutSec', poolDefaults ? `${poolDefaults.processIdleTimeoutSec}s` : undefined) },
+      { label: 'pm.start_servers', valueHtml: poolFact('startServers', poolDefaults?.startServers) },
+      { label: 'pm.min_spare_servers', valueHtml: poolFact('minSpareServers', poolDefaults?.minSpareServers) },
+      { label: 'pm.max_spare_servers', valueHtml: poolFact('maxSpareServers', poolDefaults?.maxSpareServers) },
+      { label: 'pm.max_requests', valueHtml: poolFact('maxRequests', poolDefaults?.maxRequests) },
+    ])
+  }${poolFields}${note}`, scope('php-pool'))
   const extensions = hostCard('php-extensions', t(msgid('Extensions per version')), `${select('php-extension-version', msgid('Extensions for PHP version'))}${hostTable(t, 'php-extensions', t(msgid('Extensions per version')), [t(msgid('Extension')), t(msgid('Package')), t(msgid('Purpose')), t(msgid('Enabled'))], [], t(msgid('No selected version has been read.')))}${note}`, scope('php-extensions'))
   const common = `<div class="v2-host__fields">${INI_FIELDS.map(name => input(name, name)).join('')}${formField({ id: 'v2-php-display-errors', label: 'display_errors', control: { kind: 'input', disabled: true, mono: true, dir: 'ltr', hooks: { 'data-php-display-errors': true }, placeholder: unread } })}</div><div class="v2-host__actions">${button('discard-ini', msgid('Discard'))}${button('apply-ini', msgid('Test and apply'))}</div>`
   const file = formField({ id: 'v2-php-ini', label: t(msgid('File contents')), control: { kind: 'textarea', name: 'php-ini', disabled: true, rows: 12, mono: true, dir: 'ltr' } }) + `<p role="status">${escapeHtml(t(msgctxt('theme:v2', 'The managed file has not been read.')))}</p>`
   const editor = `<div class="v2-host__groups" data-php-editor-modes data-presentation-tabs="panels">${tabs({ label: t(msgid('Editor mode')), tabs: [{ id: 'v2-php-common-tab', label: t(msgid('Common settings')), panelId: 'v2-php-common-panel', selected: true, hooks: { 'data-presentation-tab': 'common' } }, { id: 'v2-php-file-tab', label: t(msgid('Edit file')), panelId: 'v2-php-file-panel', selected: false, hooks: { 'data-presentation-tab': 'file' } }] })}${tabPanel({ id: 'v2-php-common-panel', tabId: 'v2-php-common-tab', sectionSpacing: true, bodyHtml: common })}${tabPanel({ id: 'v2-php-file-panel', tabId: 'v2-php-file-tab', sectionSpacing: true, hidden: true, bodyHtml: file })}</div>`
   const configuration = hostCard('php-configure', t(msgctxt('theme:v2', 'Global php.ini')), `<div class="v2-host__fields">${select('php-version', msgid('Version'))}</div>${editor}${note}`, scope('php-configure'))
-  const effective = hostCard('php-effective', t(msgctxt('theme:v2', 'Saved and effective values')), hostTable(t, 'php-effective', t(msgctxt('theme:v2', 'Saved and effective values')), [t(msgid('Setting')), t(msgid('Saved')), t(msgctxt('theme:v2', 'Effective in pools'))], [...INI_FIELDS, 'display_errors', 'pm'].map(name => ({ cellsHtml: [technical(name), escapeHtml(unread), labelled(t(msgctxt('theme:v2', 'Effective in pools')), escapeHtml(unread))] })), unread)
+  const effective = hostCard('php-effective', t(msgctxt('theme:v2', 'Saved and effective values')), hostTable(t, 'php-effective', t(msgctxt('theme:v2', 'Saved and effective values')), [t(msgid('Setting')), t(msgid('Saved')), t(msgctxt('theme:v2', 'Effective in pools'))], [...INI_FIELDS, 'display_errors', 'pm'].map(name => ({ cellsHtml: [
+    technical(name),
+    name === 'pm'
+      ? (poolDefaults ? `<bdi class="v2-mono" dir="ltr" data-whm-php-saved-pm>${escapeHtml(poolDefaults.mode)}</bdi>` : `<span data-whm-php-saved-pm>${escapeHtml(unread)}</span>`)
+      : `<span data-whm-php-saved-ini="${escapeHtml(name)}">${escapeHtml(unread)}</span>`,
+    labelled(t(msgctxt('theme:v2', 'Effective in pools')), escapeHtml(unread)),
+  ] })), unread)
     + `<p role="status">${escapeHtml(t(msgctxt('theme:v2', 'Effective pool values have not been read. No php.ini setting is presented as verified in a running application.')))}</p>`)
   const preview = hostCard('php-ini-preview', t(msgid('Preview of php.ini')), `<div class="v2-php-ini-preview" role="region" tabindex="0" aria-label="${escapeHtml(t(msgid('Preview of php.ini')))}"><p>${escapeHtml(unread)}</p></div><p role="status">${escapeHtml(t(msgctxt('theme:v2', 'The managed file has not been read.')))}</p><div class="v2-host__actions">${hostButton(t(msgid('Copy php.ini')), { 'data-php-ini-copy': true }, { disabled: true })}</div>`)
   const functions = hostCard('php-functions', t(msgid('Dangerous functions')), `<p>${escapeHtml(t(msgctxt('theme:v2', 'Only root grants per-account exceptions. Saved exceptions and active runtime policy are separate observations.')))}</p>
@@ -85,7 +116,9 @@ ${hostTable(t, 'php-versions', t(msgid('Installed PHP versions')), [t(msgid('Ver
 }
 
 /** PHP-only composition rules; the route asset owner appends this to the existing host stylesheet. */
-export const WHM_PHP_CSS = `.v2-host[data-whm-detail-route="/whm/software/php"] .v2-php-config-split{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:var(--space-3);align-items:start}
+export const WHM_PHP_CSS = `.v2-host[data-whm-detail-route="/whm/software/php"] .v2-php-config-split{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:var(--space-3);align-items:stretch}
+.v2-host[data-whm-detail-route="/whm/software/php"] :is(.v2-php-config-split,.v2-php-install-split)>.v2-card,.v2-host[data-whm-detail-route="/whm/software/php"] .v2-php-config-split>.v2-host__stack>.v2-card:last-child{flex:1 1 auto}
+.v2-host[data-whm-detail-route="/whm/software/php"] .v2-php-config-split>.v2-host__stack>.v2-card:last-child>.v2-card__body{display:flex;flex-direction:column;flex:1 1 auto}
 .v2-host[data-whm-detail-route="/whm/software/php"] table:has(>tbody[data-whm-php-version-entries]){min-inline-size:860px}
 .v2-host[data-whm-detail-route="/whm/software/php"] .v2-php-config-split table{min-inline-size:0}
 .v2-host[data-whm-detail-route="/whm/software/php"] .v2-php-config-split :is(th,td){white-space:normal;padding-inline:8px}
@@ -94,22 +127,23 @@ export const WHM_PHP_CSS = `.v2-host[data-whm-detail-route="/whm/software/php"] 
 .v2-host[data-whm-detail-route="/whm/software/php"] .v2-php-binary>div,.v2-host[data-whm-detail-route="/whm/software/php"] .v2-php-packages{display:flex;flex-direction:column;gap:var(--space-1);min-inline-size:0}
 .v2-host[data-whm-detail-route="/whm/software/php"] .v2-php-binary dt{font-size:12px;color:var(--muted)}
 .v2-host[data-whm-detail-route="/whm/software/php"] .v2-php-version-actions{display:flex;flex-wrap:wrap;gap:var(--space-2);align-items:start}
-.v2-host[data-whm-detail-route="/whm/software/php"] .v2-php-extension-switch{display:flex;align-items:center;gap:var(--space-1);min-block-size:var(--target)}
+.v2-host[data-whm-detail-route="/whm/software/php"] .v2-php-extension-switch{display:flex;align-items:center;gap:var(--space-1);min-inline-size:var(--target);min-block-size:var(--target)}
 .v2-host[data-whm-detail-route="/whm/software/php"] .v2-php-extension-switch input{flex:none;accent-color:var(--accent-fill)}
-.v2-host[data-whm-detail-route="/whm/software/php"] table bdi,.v2-host[data-whm-detail-route="/whm/software/php"] .v2-php-packages bdi{font-family:var(--font-mono)}
-.v2-host[data-whm-detail-route="/whm/software/php"] [data-php-default-known]{font-family:var(--font-mono);direction:ltr;unicode-bidi:isolate}
+.v2-host[data-whm-detail-route="/whm/software/php"] table bdi,.v2-host[data-whm-detail-route="/whm/software/php"] .v2-php-packages bdi{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+.v2-host[data-whm-detail-route="/whm/software/php"] :is([data-whm-php-pool-fact],[data-whm-php-pools-count],.v2-kpi__value){font-variant-numeric:tabular-nums}
+.v2-host[data-whm-detail-route="/whm/software/php"] [data-php-default-known]{font-family:var(--font-mono);font-variant-numeric:tabular-nums;direction:ltr;unicode-bidi:isolate}
 .v2-host[data-whm-detail-route="/whm/software/php"] [data-php-version-tabs]{flex-wrap:nowrap;overflow-x:auto}
 .v2-host[data-whm-detail-route="/whm/software/php"] .v2-php-version-actions>p{flex-basis:100%;font-size:13px;color:var(--muted)}
 .v2-host[data-whm-detail-route="/whm/software/php"] .v2-php-packages>p{font-size:13px;color:var(--warn)}
 .v2-host[data-whm-detail-route="/whm/software/php"] [data-php-lifecycle=active] .v2-php-lifecycle{color:var(--ok);background:var(--ok-soft)}
 .v2-host[data-whm-detail-route="/whm/software/php"] [data-php-lifecycle=security] .v2-php-lifecycle{color:var(--warn);background:var(--warn-soft)}
 .v2-host[data-whm-detail-route="/whm/software/php"] [data-php-lifecycle=end-of-life] .v2-php-lifecycle{color:var(--bad);background:var(--bad-soft)}
-.v2-host[data-whm-detail-route="/whm/software/php"] .v2-php-ini-preview{min-block-size:160px;padding:var(--space-2);border:1px solid var(--line);border-radius:var(--radius-control);background:var(--sunken)}
+.v2-host[data-whm-detail-route="/whm/software/php"] .v2-php-ini-preview{flex:1 1 auto;min-block-size:160px;padding:var(--space-2);border:1px solid var(--line);border-radius:var(--radius-notice);background:var(--sunken)}
 .v2-host[data-whm-detail-route="/whm/software/php"] .v2-php-exceptions-layout{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--space-3);align-items:start}
 .v2-host[data-whm-detail-route="/whm/software/php"] .v2-php-exceptions-layout:has(.v2-php-exception-editor[open]){grid-template-columns:minmax(0,1.618fr) minmax(0,1fr)}
 .v2-host[data-whm-detail-route="/whm/software/php"] .v2-php-exception-editor>aside{padding-block-start:var(--space-2)}
 .v2-host[data-whm-detail-route="/whm/software/php"] .v2-kpi:first-child .v2-kpi__value>:first-child{font:600 16px/1.4 var(--font-mono);letter-spacing:0;overflow-wrap:anywhere;min-inline-size:0}
-.v2-host[data-whm-detail-route="/whm/software/php"] .v2-php-install-split{display:grid;grid-template-columns:minmax(0,1.618fr) minmax(0,1fr);gap:var(--space-3);align-items:start}
+.v2-host[data-whm-detail-route="/whm/software/php"] .v2-php-install-split{display:grid;grid-template-columns:minmax(0,1.618fr) minmax(0,1fr);gap:var(--space-3);align-items:stretch}
 .v2-host[data-whm-detail-route="/whm/software/php"] .v2-php-default{display:flex;flex-direction:column;gap:8px}
 .v2-host[data-whm-detail-route="/whm/software/php"] .v2-php-default__label{font-size:13px;font-weight:600}
 .v2-host[data-whm-detail-route="/whm/software/php"] .v2-php-segment{display:flex;gap:4px;padding:4px;border-radius:10px;background:var(--sunken)}
@@ -121,7 +155,9 @@ export const WHM_PHP_CSS = `.v2-host[data-whm-detail-route="/whm/software/php"] 
 .v2-host[data-whm-detail-route="/whm/software/php"] .v2-php-mode{display:flex;flex-direction:column;align-items:flex-start;gap:8px;padding:16px;border:1px solid var(--line);border-radius:12px;background:var(--surface)}
 .v2-host[data-whm-detail-route="/whm/software/php"] .v2-php-mode bdi{font-size:14px;font-weight:600}
 .v2-host[data-whm-detail-route="/whm/software/php"] .v2-php-modes__grid+h3{margin-block-start:8px}
-.v2-host[data-whm-detail-route="/whm/software/php"] summary{padding-block:12px;cursor:pointer}
+.v2-host[data-whm-detail-route="/whm/software/php"] details{padding-inline:var(--space-2);border:1px solid var(--line);border-radius:var(--radius-notice);background:var(--subtle)}
+.v2-host[data-whm-detail-route="/whm/software/php"] details[open]{padding-block-end:var(--space-2)}
+.v2-host[data-whm-detail-route="/whm/software/php"] summary{min-block-size:var(--target);padding-block:10px;align-content:center;font-weight:600;cursor:pointer}
 .v2-host[data-whm-detail-route="/whm/software/php"] input.v2-mono:placeholder-shown{font-family:inherit}
 @media(max-width:960px){.v2-host[data-whm-detail-route="/whm/software/php"] .v2-php-install-split{grid-template-columns:minmax(0,1fr)}}
 @media(max-width:960px){.v2-host[data-whm-detail-route="/whm/software/php"] .v2-php-exceptions-layout:has(.v2-php-exception-editor[open]){grid-template-columns:minmax(0,1fr)}}

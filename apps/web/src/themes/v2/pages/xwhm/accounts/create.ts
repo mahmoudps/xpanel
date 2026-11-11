@@ -73,7 +73,7 @@ function observations(t: Translate, props: WhmSurfaceProps, plans: WhmSurfacePro
   const steps = ['Reserve account identity and assign UID', 'Prepare private home and filesystem quotas', 'Prepare resource slice and plan limits', 'Prepare web virtual host and PHP handler', 'Prepare DNS zone and mail domain', 'Apply configuration and verify the target host']
   const progress = `<p data-account-creation-observation role="status">${escapeHtml(t(msgctxt('theme:v2', 'No account-creation operation has been observed.')))}</p><ol class="v2-whm-create__progress" data-account-creation-progress>${steps.map((label, index) => `<li data-account-creation-step="${index + 1}"><span>${escapeHtml(t(label))}</span><span class="v2-muted" data-account-creation-step-state>${escapeHtml(t('Not observed'))}</span></li>`).join('')}</ol><button type="button" class="v2-btn" data-account-create-another data-create-route="${escapeHtml(createRoute)}" disabled>${escapeHtml(t('Create another account'))}</button>`
   const artifacts = ['Linux user', 'Home', 'Slice', 'Apache vhost', 'Nginx server', 'PHP-FPM pool', 'DNS zone', 'Mail domain', 'Databases']
-  return `<aside class="v2-whm-create__aside" data-approved-account-create-status aria-label="${escapeHtml(t(msgctxt('theme:v2', 'Creation result')))}">${accountReview(t, props, plans)}${card({ title: t('Creation progress'), titleId: 'v2-whm-create-progress', bodyHtml: progress })}${card({ title: t('What will be created'), titleId: 'v2-whm-create-artifacts', bodyHtml: `<p>${escapeHtml(t(msgctxt('theme:v2', 'Expected components, not completed resources. The server allocates identities and paths.')))}</p>${factList(artifacts.map(label => ({ label: t(label), value: t('Not observed') })))}${['slice', 'apache', 'nginx'].map(key => formField({ id: `v2-create-config-${key}`, label: t(msgctxt('theme:v2', 'Configuration preview: {kind}'), { kind: key }), help: t(msgctxt('theme:v2', 'Candidate configuration has not been read.')), control: { kind: 'textarea', dir: 'ltr', mono: true, readonly: true, disabled: true, rows: 4 } })).join('')}` })}</aside>`
+  return `<aside class="v2-whm-create__aside" data-approved-account-create-status aria-label="${escapeHtml(t(msgctxt('theme:v2', 'Creation result')))}">${accountReview(t, props, plans)}${card({ title: t('Creation progress'), titleId: 'v2-whm-create-progress', bodyHtml: progress })}${card({ title: t('What will be created'), titleId: 'v2-whm-create-artifacts', bodyHtml: `<p>${escapeHtml(t(msgctxt('theme:v2', 'Expected components, not completed resources. The server allocates identities and paths.')))}</p>${factList(artifacts.map(label => ({ label: t(label), value: t('Not observed') })))}${['slice', 'apache', 'nginx'].map(key => formField({ id: `v2-create-config-${key}`, label: t(msgctxt('theme:v2', 'Configuration preview: {kind}'), { kind: key }), help: t(msgctxt('theme:v2', 'Candidate configuration has not been read.')), control: { kind: 'textarea', dir: 'ltr', mono: true, readonly: true, disabled: true, rows: 5 } })).join('')}` })}</aside>`
 }
 
 /** Native create-controller hooks are preserved; server allocation and results remain authoritative. */
@@ -89,8 +89,13 @@ export function renderV2WhmAccountCreate(t: Translate, props: WhmSurfaceProps, a
 }
 
 export const WHM_ACCOUNT_CREATE_CSS = `@media(max-width:600px){.v2-whm-create .v2-table tr:has(>td[data-phone-label])>th{grid-column:1/-1}.v2-whm-create .v2-table tr>td[data-phone-label]:nth-child(n){grid-column:1/-1;grid-row:auto;display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-2);justify-self:stretch}.v2-whm-create td[data-phone-label]::before{content:attr(data-phone-label);font-size:13px;color:var(--muted)}}
-.v2-whm-create__columns{display:grid;grid-template-columns:minmax(0,1fr) 320px;align-items:start;gap:var(--space-3)}
+.v2-whm-create .v2-btn,.v2-whm-create__steps a{min-inline-size:var(--target);min-block-size:var(--target)}
+.v2-whm-create :is(.v2-btn,.v2-whm-create__steps a,.v2-whm-create__choice){transition:background-color 140ms ease-out,border-color 140ms ease-out,color 140ms ease-out,box-shadow 140ms ease-out,opacity 140ms ease-out,transform 140ms ease-out}
+@media(prefers-reduced-motion:reduce){.v2-whm-create :is(.v2-btn,.v2-whm-create__steps a,.v2-whm-create__choice){transition:none}}
+.v2-whm-create .v2-num,.v2-whm-create .v2-table td,.v2-whm-create__preview dd,.v2-whm-create__aside .v2-facts dd,.v2-whm-create [data-account-ip-address]{font-variant-numeric:tabular-nums}
+.v2-whm-create__columns{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(340px,1fr);align-items:stretch;gap:var(--space-3)}
 .v2-whm-create__form,.v2-whm-create__aside{display:flex;flex-direction:column;gap:var(--space-3);min-inline-size:0}
+@media(min-width:1241px){.v2-whm-create__aside>.v2-card:last-child,.v2-whm-create__form>.v2-whm-create__section:last-child{flex:1}.v2-whm-create__aside>.v2-card:last-child{display:flex;flex-direction:column}.v2-whm-create__aside>.v2-card:last-child>.v2-card__body{flex:1}}
 .v2-whm-create__section{display:flex;flex-direction:column;gap:var(--space-3);padding:var(--space-3);margin:0;border:1px solid var(--line);border-radius:var(--radius-card);background:var(--surface);box-shadow:var(--shadow);min-inline-size:0}
 .v2-whm-create__section>legend{float:inline-start;inline-size:100%;padding:0;margin:0}
 .v2-whm-create__section>:is(legend,h2){font-size:16px;line-height:1.4;font-weight:600}
@@ -100,8 +105,8 @@ export const WHM_ACCOUNT_CREATE_CSS = `@media(max-width:600px){.v2-whm-create .v
 .v2-whm-create__password>input{flex:1 1 200px;min-inline-size:0}
 .v2-whm-create__steps{padding:var(--space-2) var(--space-3);border:1px solid var(--line);border-radius:var(--radius-card);background:var(--surface);box-shadow:var(--shadow)}
 .v2-whm-create__steps>ol{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(180px,100%),1fr));list-style:none;padding:0;margin:0;gap:var(--space-1) var(--space-2)}
-.v2-whm-create__steps a{display:flex;align-items:center;gap:12px;min-block-size:var(--target);border-radius:var(--radius-control);color:var(--text);font-size:14px;font-weight:600;text-decoration:none}
-.v2-whm-create__steps a:hover{color:var(--accent)}
+.v2-whm-create__steps a{display:flex;align-items:center;gap:12px;padding-inline:var(--space-1);border-radius:var(--radius-control);color:var(--text);font-size:14px;font-weight:600;text-decoration:none}
+.v2-whm-create__steps a:hover{background:var(--subtle);color:var(--accent)}
 .v2-whm-create__steps a>span{flex:none;display:grid;place-items:center;inline-size:28px;block-size:28px;border-radius:50%;background:var(--accent-soft);color:var(--accent);font-size:13px}
 .v2-whm-create__choices,.v2-whm-create__preview{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-2)}
 .v2-whm-create__choices--fit{grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}
@@ -122,10 +127,12 @@ export const WHM_ACCOUNT_CREATE_CSS = `@media(max-width:600px){.v2-whm-create .v
 .v2-whm-create__preview>div{gap:var(--space-1)}
 .v2-whm-create__choice small{font-size:12px;line-height:1.5;color:var(--muted)}
 .v2-whm-create__preview dt{font-size:12px;color:var(--muted)}
-.v2-whm-create__preview dd{margin:0;font-size:13px;overflow-wrap:anywhere}
+.v2-whm-create__preview dd{margin:0;font-size:13px;overflow-wrap:anywhere;unicode-bidi:plaintext}
 .v2-whm-create .v2-field>label,.v2-whm-create__preview dt,.v2-whm-create__aside .v2-facts dt{text-box-trim:trim-end;text-box-edge:text}
 .v2-whm-create__preview dd,.v2-whm-create__aside .v2-facts dd{text-box-trim:trim-start;text-box-edge:text}
 .v2-whm-create .v2-table-scroll{border:1px solid var(--line);border-radius:var(--radius-notice)}
+.v2-whm-create #v2-create-plan .v2-table-scroll{max-block-size:320px;overflow-y:auto}
+.v2-whm-create #v2-create-plan thead th{position:sticky;inset-block-start:0;z-index:1}
 .v2-whm-create :is(td,th){text-align:start}
 .v2-whm-create__form :is([data-create-owner-capacity],[data-create-plan-preview]){display:flex;flex-direction:column;gap:var(--space-2);padding:var(--space-2);border:1px solid var(--line);border-radius:var(--radius-notice);background:var(--subtle)}
 .v2-whm-create__form [data-create-plan-preview]>.v2-whm-create__preview{grid-template-columns:repeat(auto-fit,minmax(min(100px,100%),1fr))}
@@ -133,22 +140,23 @@ export const WHM_ACCOUNT_CREATE_CSS = `@media(max-width:600px){.v2-whm-create .v
 .v2-whm-create__form :is([data-create-owner-capacity],[data-create-plan-preview])>p{font-size:13px}
 .v2-whm-create__form [data-create-plan-preview]>p:empty{display:none}
 .v2-whm-create__review{display:flex;flex-direction:column;gap:var(--space-1);padding-block-start:12px;border-block-start:1px solid var(--line);min-inline-size:0}
-.v2-whm-create__review>h3{font-size:13px;font-weight:600}
+.v2-whm-create__review>h3{font-size:14px;line-height:1.45;font-weight:600}
 .v2-whm-create__review>.v2-whm-create__preview,.v2-whm-create__aside .v2-facts{display:flex;flex-direction:column;gap:6px}
 .v2-whm-create__review>.v2-whm-create__preview>div,.v2-whm-create__aside .v2-facts>div{flex-direction:row;align-items:baseline;justify-content:space-between;gap:var(--space-2)}
-.v2-whm-create__aside :is(.v2-whm-create__preview,.v2-facts) dt{flex:none;font-size:12px;color:var(--muted)}
-.v2-whm-create__aside :is(.v2-whm-create__preview,.v2-facts) dd{font-size:13px;text-align:end}
+.v2-whm-create__aside :is(.v2-whm-create__preview,.v2-facts) dt{flex:0 1 auto;min-inline-size:0;font-size:12px;color:var(--muted)}
+.v2-whm-create__aside :is(.v2-whm-create__preview,.v2-facts) dd{min-inline-size:0;font-size:13px;text-align:end;overflow-wrap:anywhere;unicode-bidi:plaintext}
 .v2-whm-create__aside .v2-card__body>p{font-size:13px;color:var(--muted)}
 .v2-whm-create__checks{display:flex;flex-direction:column;list-style:none;margin:0;padding:0}
 .v2-whm-create__checks>li{display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding-block:10px;font-size:13px}
 .v2-whm-create__checks>li+li{border-block-start:1px solid var(--line)}
-.v2-whm-create__checks>li>span:first-child{font-weight:600}
-.v2-whm-create__checks>li>span:last-child{font-size:12px;text-align:end}
+.v2-whm-create__checks>li>span:first-child{min-inline-size:0;font-weight:600}
+.v2-whm-create__checks>li>span:last-child{min-inline-size:0;font-size:12px;text-align:end;overflow-wrap:anywhere}
 .v2-whm-create__progress{display:flex;flex-direction:column;gap:12px;margin:0;padding-inline-start:24px;font-size:13px}
 .v2-whm-create__progress>li{padding-inline-start:var(--space-1)}
 .v2-whm-create__progress>li::marker{color:var(--muted);font-variant-numeric:tabular-nums}
 .v2-whm-create__progress>li>span{display:block}
 .v2-whm-create__progress>li>span+span{font-size:12px}
-@media(max-width:1240px){.v2-whm-create__columns{grid-template-columns:minmax(0,1fr)}.v2-whm-create__aside{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr));align-items:start}}
-@media(max-width:600px){.v2-whm-create__section{padding:var(--space-2)}.v2-whm-create__steps{padding:var(--space-1) var(--space-2)}.v2-whm-create__choices,.v2-whm-create__preview{grid-template-columns:minmax(0,1fr)}.v2-whm-create__actions>.v2-btn,.v2-whm-create__password>.v2-btn{flex:1 1 auto}}
+@media(max-width:1240px){.v2-whm-create__columns{grid-template-columns:minmax(0,1fr);align-items:start}.v2-whm-create__aside{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr));align-items:start}}
+@media(max-width:640px){.v2-whm-create__section{padding:var(--space-2)}.v2-whm-create__steps{padding:var(--space-1) var(--space-2)}}
+@media(max-width:600px){.v2-whm-create__choices,.v2-whm-create__preview{grid-template-columns:minmax(0,1fr)}.v2-whm-create__actions>.v2-btn,.v2-whm-create__password>.v2-btn{flex:1 1 auto}}
 `

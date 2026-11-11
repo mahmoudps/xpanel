@@ -101,6 +101,9 @@ export const MONO = "'IBM Plex Mono', monospace"
 const PORT_CSS = `.xp-board-port{line-height:normal;font-size:16px;font-kerning:auto;font-feature-settings:normal;font-synthesis:weight style small-caps;-webkit-font-smoothing:antialiased}
 .xp-board-port a{color:light-dark(#1D5BD6,var(--xp-accent,#1D5BD6))}.xp-board-port a:hover{color:light-dark(#1546A8,var(--xp-accent-hover,#1546A8))}
 .xp-board-port :focus-visible{outline:2px solid light-dark(#1D5BD6,var(--xp-border-focus,#1D5BD6));outline-offset:2px}
+.xp-board-port :is([data-tool] > a,nav a,[data-action="logout"]){transition:background-color 140ms ease-out,border-color 140ms ease-out,color 140ms ease-out}
+.xp-board-port [data-tool] > a:hover{background-color:light-dark(#F3F7FE,var(--xp-bg-elevated,#F3F7FE))}
+@media(prefers-reduced-motion:reduce){.xp-board-port :is([data-tool] > a,nav a,[data-action="logout"]){transition:none}}
 .xp-board-port p{max-inline-size:none}
 [data-home-desktop] [aria-labelledby="info-title"]{padding:var(--xp-space-card,24px)!important;gap:var(--xp-space-group,24px)!important}
 [data-home-desktop] [aria-labelledby="info-title"] dl{gap:var(--xp-space-field,16px)}
@@ -868,7 +871,7 @@ const homeControls = (model: { locale: Locale; theme?: 'dark' | 'light'; realtim
 
 const sideMeter = (label: string, value: string, pct: number, rtl: boolean): string => {
   const shown = rtl ? `<bdi dir="ltr" style="color: light-dark(#344054,var(--xp-text-secondary,#344054)); font-weight: 500; font-variant-numeric: tabular-nums">${escapeHtml(value)}</bdi>` : `<span style="color: light-dark(#344054,var(--xp-text-secondary,#344054)); font-weight: 500; font-variant-numeric: tabular-nums">${escapeHtml(value)}</span>`
-  return `<div style="display: flex; flex-direction: column; gap: 5px"><div style="display: flex; justify-content: space-between; gap: 8px; font-size: 12px"><span style="color: light-dark(#475467,var(--xp-text-secondary,#475467))">${escapeHtml(label)}</span>${shown}</div><div aria-hidden="true" style="height: 6px; border-radius: 3px; background: light-dark(#E9ECF1,var(--xp-border,#E9ECF1)); overflow: hidden"><div style="width: ${pct}%; height: 6px; border-radius: 3px; background: #1D5BD6"></div></div></div>`
+  return `<div style="display: flex; flex-direction: column; gap: 5px"><div style="display: flex; justify-content: space-between; gap: 8px; font-size: 12px"><span style="color: light-dark(#475467,var(--xp-text-secondary,#475467))">${escapeHtml(label)}</span>${shown}</div><div aria-hidden="true" style="height: 6px; border-radius: 3px; background: light-dark(#E9ECF1,var(--xp-border,#E9ECF1)); overflow: hidden"><div style="width: ${pct}%; height: 6px; border-radius: 3px; background: light-dark(#1D5BD6,var(--xp-accent,#1D5BD6))"></div></div></div>`
 }
 
 export const renderDesktop = (model: HomeDesktopModel): string => {

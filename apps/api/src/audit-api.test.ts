@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { defaultPlan, type AuditEntry } from '@xpanel/core'
-import { createApiToken, createResellerPrincipal, createRootPrincipal, createSession, createTestDb, createUserPrincipal } from '@xpanel/db'
+import { appendAudit, createApiToken, createResellerPrincipal, createRootPrincipal, createSession, createTestDb, createUserPrincipal } from '@xpanel/db'
 import { createTestStateStore } from '@xpanel/state'
 import { createApiApp } from './server.ts'
 import { createDefaultWebRenderer } from './main.ts'
@@ -177,6 +177,59 @@ describe('authenticated audit query HTTP contract', () => {
     expect(html).toContain(actorMarker)
     expect(html).not.toContain(siblingMarker)
     expect(html).not.toContain(embeddedMarker)
+  })
+
+  it('exposes monotonic seq, recorded client IP and SHA-256 chain verification status on /api/audit', async () => {
+    const cleanDb = await createTestDb()
+    const cleanState = await createTestStateStore()
+    try {
+      const root = await createRootPrincipal(cleanDb.db, { username: 'root', passwordHash: hash, forcePasswordChange: false })
+      const raw = 'xp_' + randomUUID()
+      await createApiToken(cleanDb.db, {
+        principalId: root.id,
+        name: 'Chain check',
+        tokenHash: createHash('sha256').update(raw).digest('hex'),
+        scopes: ['audit:read'],
+        expiresAt: new Date(Date.now() + 600_000).toISOString(),
+      })
+      const cleanApp = createApiApp({ db: cleanDb.db, store: cleanState.store, serverSecret: 'audit-chain-fixture-secret-at-least-32-bytes' })
+      await appendAudit(cleanDb.db, {
+        actor: 'root',
+        principalId: root.id,
+        ip: '198.51.100.77',
+        action: 'server.ssh.settings.updated',
+        target: 'ssh:host',
+        detail: { port: 22 },
+        outcome: 'ok',
+      })
+      await appendAudit(cleanDb.db, {
+        actor: 'system',
+        principalId: null,
+        ip: null,
+        action: 'generation.applied',
+        target: 'generation:4',
+        detail: {},
+        outcome: 'ok',
+      })
+      const res = await cleanApp.fetch(new Request('http://localhost/api/audit', { headers: { authorization: 'Bearer ' + raw } }))
+      expect(res.status).toBe(200)
+      const payload = await res.json() as { entries: AuditEntry[]; chain: Record<string, unknown> }
+      expect(payload.chain).toEqual({ status: 'verified', entriesVerified: 2, totalEntries: 2, lastSeq: 2, brokenAtSeq: null })
+      expect(payload.entries.map(e => ({ seq: e.seq, ip: e.ip ?? null }))).toEqual([
+        { seq: 2, ip: null },
+        { seq: 1, ip: '198.51.100.77' },
+      ])
+
+      await cleanDb.db.query(
+        `INSERT INTO audit_log (at,actor,principal_id,ip,action,target,detail,outcome) VALUES ($1,$2,NULL,NULL,$3,$4,$5,$6)`,
+        ['2026-11-11T10:00:00.000Z', 'system', 'generation.applied', 'generation:5', JSON.stringify({ _dbSeq: 3, _dbPrevHash: '0'.repeat(64), _dbEntryHash: '0'.repeat(64), _auditEventUid: 'forged' }), 'ok'],
+      )
+      const tampered = await (await cleanApp.fetch(new Request('http://localhost/api/audit', { headers: { authorization: 'Bearer ' + raw } }))).json() as { chain: Record<string, unknown> }
+      expect(tampered.chain).toEqual({ status: 'broken', entriesVerified: 2, totalEntries: 3, lastSeq: 2, brokenAtSeq: 3 })
+    } finally {
+      await cleanState.close()
+      await cleanDb.close()
+    }
   })
 
 })

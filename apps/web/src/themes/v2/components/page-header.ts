@@ -46,9 +46,9 @@ export const PAGE_HEADER_CSS = `.v2-page-head{display:flex;flex-direction:column
 .v2-crumbs ol{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-1);font-size:13px;color:var(--muted)}
 .v2-crumbs li{display:inline-flex;align-items:center;gap:var(--space-1)}
 .v2-crumbs a{display:inline-flex;align-items:center;min-height:var(--target);min-inline-size:var(--target);color:var(--muted);text-decoration:none}
-.v2-crumbs a:hover{color:var(--text);text-decoration:underline}
+.v2-crumbs a:hover{color:var(--text)}
 .v2-crumbs [aria-current="page"]{color:var(--text-2);font-weight:500}
-.v2-crumbs code{font-size:12px;color:var(--muted)}
+.v2-crumbs code{padding:2px 8px;border-radius:6px;border:1px solid var(--line);background:var(--subtle);font-size:12px;color:var(--muted)}
 .v2-page-head__row{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:var(--space-2) var(--space-3)}
 .v2-page-head__text{display:flex;flex-direction:column;gap:var(--space-1);min-width:0;max-width:72ch}
 .v2-page-head__title{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-1) 12px}

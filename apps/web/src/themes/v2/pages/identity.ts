@@ -11,26 +11,36 @@ import { v2Messages } from '../messages.ts'
  */
 type Family = 'v2-observation' | 'v2-panel-settings'
 /** On a phone a row stays two columns: its name and details, opposite its action. */
-export const IDENTITY_ROWS_CSS = `.v2-identity-rows table th,.v2-identity-rows table td:last-child:not(:first-child){overflow-wrap:normal;white-space:nowrap}
-@media(max-width:600px){.v2-identity-rows thead{display:block;block-size:0;overflow:hidden}.v2-identity-rows table,.v2-identity-rows tbody{display:block}.v2-identity-rows tbody tr{display:grid;grid-template-columns:minmax(0,1fr) fit-content(40%);gap:8px 16px;padding:12px 16px}.v2-identity-rows tbody tr+tr{border-block-start:1px solid var(--line)}.v2-identity-rows table tbody td{display:block;grid-column:1;padding:0;border:0}.v2-identity-rows table tbody td:last-child:not(:first-child){grid-column:2;grid-row:1}}`
+export const IDENTITY_ROWS_CSS = `.v2-card[data-sec-workspace] :is(dd,td){font-variant-numeric:tabular-nums}
+.v2-card[data-sec-workspace] .v2-btn{min-inline-size:var(--target);min-block-size:var(--target)}
+.v2-card[data-sec-workspace] .v2-identity-pair{grid-template-columns:repeat(2,minmax(0,1fr))}
+.v2-card[data-sec-workspace] [data-sec-status]{font-size:13px;color:var(--muted)}
+.v2-card[data-sec-workspace] [data-sec-result]:not([hidden]){padding:12px 16px;border:1px solid var(--line);border-radius:var(--radius-notice);background:var(--subtle);font-size:13px}
+.v2-card[data-sec-workspace] :is(.v2-observation__scroll,.v2-panel-settings__table){border:1px solid var(--line);border-radius:var(--radius-notice);background:var(--surface);overflow:auto}
+.v2-card[data-sec-workspace] :is(.v2-observation__scroll,.v2-panel-settings__table) tbody tr:last-child>:is(th,td){border-block-end:0}
+.v2-identity-rows table th,.v2-identity-rows table td:last-child:not(:first-child){overflow-wrap:normal;white-space:nowrap}
+@media(max-width:640px){.v2-card[data-sec-workspace] .v2-identity-pair{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:600px){.v2-identity-rows thead{display:block;block-size:0;overflow:hidden}.v2-identity-rows table,.v2-identity-rows tbody{display:block}.v2-identity-rows tbody tr{display:grid;grid-template-columns:minmax(0,1fr) fit-content(40%);gap:8px 16px;padding:12px 16px}.v2-identity-rows tbody tr:has(>td[colspan]){grid-template-columns:minmax(0,1fr)}.v2-identity-rows tbody tr+tr{border-block-start:1px solid var(--line)}.v2-identity-rows table tbody td{display:block;grid-column:1;padding:0;border:0}.v2-identity-rows table tbody td:last-child:not(:first-child){grid-column:2;grid-row:1}}`
 interface Ui { readonly t: Translate; readonly p: Family; readonly read: boolean; readonly manage: boolean }
+const LTR_FACTS = new Set(['host', 'group', 'observed-at', 'updated', 'count', 'client', 'redirect-uris'])
 
 const control = (id: string, key: string, type = 'text', extra = ''): string => `<input id="${esc(id)}" type="${esc(type)}" data-sec-input="${esc(key)}"${extra} disabled>`
 const field = (ui: Ui, id: string, label: string, body: string, help?: string): string => `<div class="v2-field"><label for="${esc(id)}">${esc(ui.t(label))}</label>${body}${help ? `<p class="v2-muted">${esc(ui.t(help))}</p>` : ''}</div>`
-const fields = (ui: Ui, body: string): string => `<div class="${ui.p}__fields">${body}</div>`
+const fields = (ui: Ui, body: string, extra = ''): string => `<div class="${ui.p}__fields${extra ? ` ${extra}` : ''}">${body}</div>`
 const actions = (ui: Ui, body: string): string => `<div class="${ui.p}__actions">${body}</div>`
 const button = (ui: Ui, label: string, action: string, primary = false, enabled = false): string =>
   `<button type="button" class="v2-btn${primary ? ' v2-btn--primary' : ''}" data-sec-action="${esc(action)}"${enabled ? '' : ' disabled'}>${esc(ui.t(label))}</button>`
 const help = (ui: Ui, text: string, hooks?: HookAttributes): string => `<p class="v2-muted"${hookAttrs(hooks)}>${esc(ui.t(text))}</p>`
 const check = (ui: Ui, label: string, key: string): string => `<label class="${ui.p}__check"><input type="checkbox" data-sec-input="${esc(key)}" disabled><span>${esc(ui.t(label))}</span></label>`
 const facts = (ui: Ui, items: readonly (readonly [string, string])[]): string =>
-  `<dl class="${ui.p}__facts">${items.map(([key, label]) => `<div><dt>${esc(ui.t(label))}</dt><dd><bdi data-sec-field="${esc(key)}">${esc(ui.t(msgid('Not read')))}</bdi></dd></div>`).join('')}</dl>`
+  `<dl class="${ui.p}__facts">${items.map(([key, label]) => `<div><dt>${esc(ui.t(label))}</dt><dd><bdi${LTR_FACTS.has(key) ? ' dir="ltr"' : ''} data-sec-field="${esc(key)}">${esc(ui.t(msgid('Not read')))}</bdi></dd></div>`).join('')}</dl>`
 const select = (ui: Ui, id: string, key: string, placeholder: string): string => `<span class="v2-select"><select id="${esc(id)}" data-sec-input="${esc(key)}" disabled><option value="">${esc(ui.t(placeholder))}</option></select></span>`
 const table = (ui: Ui, title: string, columns: readonly string[], rows: string): string =>
   `<div class="${ui.p === 'v2-observation' ? 'v2-observation__scroll' : 'v2-panel-settings__table'}${columns.length > 2 ? ' v2-identity-rows' : ''}" role="region" tabindex="0" aria-label="${esc(ui.t(title))}"><table><caption class="v2-sr">${esc(ui.t(title))}</caption><thead><tr>${columns.map(label => `<th scope="col">${esc(ui.t(label))}</th>`).join('')}</tr></thead><tbody data-sec-rows="${esc(rows)}"><tr><td colspan="${columns.length}">${esc(ui.t(msgid('Not read')))}</td></tr></tbody></table></div>`
 const workspace = (ui: Ui, page: string, title: string, body: string): string => card({
   title: ui.t(title), titleId: `v2-identity-${page}`,
-  bodyHtml: body + actions(ui, button(ui, msgid('Refresh'), 'refresh', false, ui.read))
+  actionsHtml: button(ui, msgid('Refresh'), 'refresh', false, ui.read),
+  bodyHtml: body
     + `<p role="status" data-state="${ui.read ? 'unread' : 'unavailable'}" data-sec-status>${esc(ui.t(ui.read ? msgid('Nothing has been read yet.') : msgid('This page requires an authorized administrator. Nothing was read or changed.')))}</p><p role="status" data-sec-result hidden></p>` + v2SecClientTemplates(ui.p === 'v2-panel-settings' ? 'identity-panel' : 'identity-whm'),
   hooks: { 'data-sec-workspace': true, 'data-sec-page': page, 'data-sec-can-read': String(ui.read), 'data-sec-can-manage': String(ui.read && ui.manage) },
 })
@@ -78,7 +88,7 @@ export function renderV2IdentityCards(props: IdentityCardsProps): string {
   const root = props.principalKind === 'root' && props.surface === 'xwhm'
   // One row per pair: a shared grid would split a question from its answer.
   const questions = [1, 2, 3].map(n => fields(ui, field(ui, `v2-identity-question-${n}`, msgid('Question'), control(`v2-identity-question-${n}`, `question-${n}`, 'text', ' dir="auto" maxlength="200" list="v2-identity-question-suggestions"'))
-    + field(ui, `v2-identity-answer-${n}`, msgid('Answer'), control(`v2-identity-answer-${n}`, `answer-${n}`, 'password', ' dir="auto" maxlength="200" autocomplete="off"')))).join('')
+    + field(ui, `v2-identity-answer-${n}`, msgid('Answer'), control(`v2-identity-answer-${n}`, `answer-${n}`, 'password', ' dir="auto" maxlength="200" autocomplete="off"')), 'v2-identity-pair')).join('')
   const policy = root ? workspace(ui, 'security-policy', msgid('Verified-address sign-in'),
     help(ui, msgid('When this is on, a user who set security questions and signs in from an address they have not verified must answer them. Users with two-factor authentication are not asked.'))
     + facts(ui, [['policy-state', msgid('Policy')], ['updated', msgid('Last saved (UTC)')]])

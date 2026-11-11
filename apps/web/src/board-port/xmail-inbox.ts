@@ -13,6 +13,11 @@ const FONT_AR = "sans-serif"
 const PORT_CSS = `.xp-board-port{line-height:normal;font-size:16px;font-kerning:auto;font-feature-settings:normal;font-synthesis:weight style small-caps;-webkit-font-smoothing:antialiased}
 .xp-board-port a{color:light-dark(#1D5BD6,var(--xp-accent))}.xp-board-port a:hover{color:light-dark(#1546A8,var(--xp-accent-hover))}
 .xp-board-port :focus-visible{outline:2px solid light-dark(#1D5BD6,var(--xp-accent));outline-offset:2px}
+.xp-board-port :is([data-mail-open],[data-mail-filter],[data-mail-reply],[data-mail-action],nav a){transition:background-color 140ms ease-out,border-color 140ms ease-out,color 140ms ease-out,box-shadow 140ms ease-out}
+.xp-board-port [data-mail-open]:hover:not([aria-current="true"]){background:light-dark(#F8F9FB,var(--xp-bg-elevated))!important}
+.xp-board-port [data-mail-move] button{cursor:pointer}.xp-board-port [data-mail-move] button:hover{background:light-dark(#F3F7FE,var(--xp-bg-elevated))!important}
+.xp-board-port nav a:not([aria-current="page"]):hover{background:light-dark(#F3F7FE,var(--xp-bg-elevated))}
+@media(prefers-reduced-motion:reduce){.xp-board-port :is([data-mail-open],[data-mail-filter],[data-mail-reply],[data-mail-action],nav a){transition:none}}
 .xp-board-port[data-board-port="xmail-inbox"][data-locale="ar"] nav > a[data-nav-route="/mail/compose"]{font-size:14px!important;font-weight:600!important;line-height:normal!important;min-inline-size:auto}
 .xp-board-port p{max-inline-size:none}
 .xp-board-port [data-mail-refresh-status]{margin:0;padding:var(--xp-space-field,16px);font-size:14.5px;line-height:1.75}
@@ -188,7 +193,7 @@ const readingMarkup = (card: MailCard, model: InboxModel): string => {
       return `<ul style="margin: 0; padding-inline-start: 20px; max-width: 68ch; display: flex; flex-direction: column; gap: 4px">${block.list.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`
     }
     if (block.pre !== undefined) {
-      return `<pre dir="auto" style="margin: 0; padding: 12px 14px; border-radius: 10px; border: 1px solid #E2E6EC; background: #F8F9FB; color: #101828; font-family: ${MONO}; font-size: 12.5px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere"><bdi dir="auto">${escapeHtml(block.pre)}</bdi></pre>`
+      return `<pre dir="auto" style="margin: 0; padding: 12px 14px; border-radius: 10px; border: 1px solid light-dark(#E2E6EC,var(--xp-border)); background: light-dark(#F8F9FB,var(--xp-bg-elevated)); color: light-dark(#101828,var(--xp-text-primary)); font-family: ${MONO}; font-size: 12.5px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere"><bdi dir="auto">${escapeHtml(block.pre)}</bdi></pre>`
     }
     const pending = card.bodyPending ? ' data-mail-body="pending"' : ''
     return `<p${pending} dir="auto" style="margin: 0; max-width: 68ch; white-space: pre-line"><bdi dir="auto">${escapeHtml(block.p ?? '')}</bdi></p>`
@@ -307,7 +312,7 @@ const INBOX_SOURCE = `
       filters[i].style.background = on ? 'light-dark(#FFFFFF,var(--xp-bg-surface))' : 'transparent'
       filters[i].style.color = on ? 'light-dark(#101828,var(--xp-text-primary))' : 'light-dark(#475467,var(--xp-text-secondary))'
       filters[i].style.fontWeight = on ? '600' : '500'
-      filters[i].style.boxShadow = on ? '0 1px 2px rgba(16, 24, 40, 0.08)' : 'none'
+      filters[i].style.boxShadow = on ? 'var(--xp-shadow-sm, 0 1px 2px rgba(16, 24, 40, 0.08))' : 'none'
     }
   }
   var paint = function (readOnly) {
@@ -530,7 +535,7 @@ const INBOX_SOURCE = `
         menu.id = 'move-list'
         menu.setAttribute('data-mail-move', 'true')
         menu.setAttribute('aria-label', text('data-move-label'))
-        menu.style.cssText = 'position:absolute;top:50px;inset-inline-start:0;z-index:2;list-style:none;margin:0;padding:6px;min-width:200px;border-radius:10px;border:1px solid light-dark(#E2E6EC,var(--xp-border));background:light-dark(#FFFFFF,var(--xp-bg-surface));box-shadow:0 8px 24px rgba(16, 24, 40, 0.12);display:flex;flex-direction:column;gap:2px'
+        menu.style.cssText = 'position:absolute;top:50px;inset-inline-start:0;z-index:2;list-style:none;margin:0;padding:6px;min-width:200px;border-radius:10px;border:1px solid light-dark(#E2E6EC,var(--xp-border-strong));background:light-dark(#FFFFFF,var(--xp-bg-surface));box-shadow:var(--xp-shadow-md,0 8px 24px rgba(16, 24, 40, 0.12));display:flex;flex-direction:column;gap:2px'
         targets.forEach(function (folder) {
           var id = folder && typeof folder === 'object' ? String(folder.id || '') : String(folder || '')
           var label = folder && typeof folder === 'object' ? String(folder.label || id) : String(folder || '')
@@ -541,7 +546,7 @@ const INBOX_SOURCE = `
           button.setAttribute('data-folder', id)
           button.setAttribute('data-folder-label', label)
           button.textContent = label
-          button.style.cssText = 'width:100%;min-height:40px;padding:0 12px;border-radius:8px;border:none;background:transparent;color:light-dark(#101828,var(--xp-text-primary));font-family:inherit;font-size:14px;text-align:start'
+          button.style.cssText = 'width:100%;min-height:44px;padding:0 12px;border-radius:8px;border:none;background:transparent;color:light-dark(#101828,var(--xp-text-primary));font-family:inherit;font-size:14px;text-align:start'
           li.appendChild(button)
           menu.appendChild(li)
         })
@@ -876,7 +881,7 @@ export const renderInbox = (model: InboxModel): string => {
   const mailbox = `<bdi dir="ltr">${escapeHtml(model.mailbox)}</bdi>`
   const quota = tech(model.quotaText, rtl)
   const filterBtn = (key: string, label: string, on: boolean): string =>
-    `<button type="button" data-mail-filter="${key}" aria-pressed="${on ? 'true' : 'false'}" style="min-height: 44px; min-width: 44px; padding: 0 12px; border-radius: 8px; border: none; background: ${on ? 'light-dark(#FFFFFF,var(--xp-bg-surface))' : 'transparent'}; color: ${on ? 'light-dark(#101828,var(--xp-text-primary))' : 'light-dark(#475467,var(--xp-text-secondary))'}; font-family: inherit; font-size: 13px; font-weight: ${on ? '600' : '500'}; box-shadow: ${on ? '0 1px 2px rgba(16, 24, 40, 0.08)' : 'none'}">${escapeHtml(label)}</button>`
+    `<button type="button" data-mail-filter="${key}" aria-pressed="${on ? 'true' : 'false'}" style="min-height: 44px; min-width: 44px; padding: 0 12px; border-radius: 8px; border: none; background: ${on ? 'light-dark(#FFFFFF,var(--xp-bg-surface))' : 'transparent'}; color: ${on ? 'light-dark(#101828,var(--xp-text-primary))' : 'light-dark(#475467,var(--xp-text-secondary))'}; font-family: inherit; font-size: 13px; font-weight: ${on ? '600' : '500'}; box-shadow: ${on ? 'var(--xp-shadow-sm, 0 1px 2px rgba(16, 24, 40, 0.08))' : 'none'}">${escapeHtml(label)}</button>`
   const listEmpty = model.folderEmpty
     ? `<div data-mail-empty-list="true" style="display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 40px 24px; text-align: center"><h2 style="margin: 0; font-size: 16px; font-weight: 600">${translator(model.locale)('No messages in this folder.')}</h2><p style="margin: 0; font-size: 13px; color: light-dark(#5D6B7E,var(--xp-text-muted)); line-height: 1.6; max-width: 280px">${translator(model.locale)(msgctxt('xmail-inbox', 'Nothing in this folder is waiting to be read.'))}</p></div>`
     : ''

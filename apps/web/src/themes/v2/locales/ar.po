@@ -7,10 +7,20 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "X-Message-Format: ICU MessageFormat\n"
 
-#: apps/web/src/themes/v2/shell/shell.ts
+#: apps/web/src/themes/v2/shell/activity-control.ts
 msgctxt "theme:v2"
 msgid "{count, plural, =0 {Notifications, none unread} one {Notifications, # unread} other {Notifications, # unread}}"
 msgstr "{count, plural, =0 {الإشعارات، لا شيء غير مقروء} one {الإشعارات، واحد غير مقروء} two {الإشعارات، اثنان غير مقروءين} few {الإشعارات، # غير مقروءة} many {الإشعارات، # غير مقروء} other {الإشعارات، # غير مقروء}}"
+
+#: apps/web/src/themes/v2/pages/xwhm/accounts/list.ts apps/web/src/themes/v2/pages/xwhm/overview/index.ts
+msgctxt "theme:v2"
+msgid "{count, plural, one {# account in total.} other {# accounts in total.}}"
+msgstr "{count, plural, zero {لا حسابات.} one {حساب واحد في المجموع.} two {حسابان في المجموع.} few {# حسابات في المجموع.} many {# حسابًا في المجموع.} other {# حساب في المجموع.}}"
+
+#: apps/web/src/themes/v2/pages/xwhm/activity/audit.ts
+msgctxt "theme:v2"
+msgid "{count, plural, one {# entry on this page} other {# entries on this page}}"
+msgstr "{count, plural, zero {لا إدخالات في هذه الصفحة} one {إدخال واحد في هذه الصفحة} two {إدخالان في هذه الصفحة} few {# إدخالات في هذه الصفحة} many {# إدخالًا في هذه الصفحة} other {# إدخال في هذه الصفحة}}"
 
 #: apps/web/src/themes/v2/components/change-review.ts apps/web/src/themes/v2/layouts/common.ts
 msgctxt "theme:v2"
@@ -27,10 +37,20 @@ msgctxt "theme:v2"
 msgid "{count, plural, one {Other counts DROP, INDEX, REFERENCES and # advanced privilege.} other {Other counts DROP, INDEX, REFERENCES and # advanced privileges.}}"
 msgstr "{count, plural, zero {يشمل «أخرى» DROP وINDEX وREFERENCES و# صلاحية متقدمة.} one {يشمل «أخرى» DROP وINDEX وREFERENCES وصلاحية متقدمة واحدة.} two {يشمل «أخرى» DROP وINDEX وREFERENCES وصلاحيتين متقدمتين.} few {يشمل «أخرى» DROP وINDEX وREFERENCES و# صلاحيات متقدمة.} many {يشمل «أخرى» DROP وINDEX وREFERENCES و# صلاحية متقدمة.} other {يشمل «أخرى» DROP وINDEX وREFERENCES و# صلاحية متقدمة.}}"
 
+#: apps/web/src/themes/v2/pages/xwhm/host/php.ts
+msgctxt "theme:v2"
+msgid "{count} of {total} saved domains use CGI."
+msgstr "{count} من {total} من النطاقات المحفوظة تستخدم CGI."
+
 #: apps/web/src/themes/v2/pages/xwhm/overview/index.ts
 msgctxt "theme:v2"
 msgid "{value} available"
 msgstr "{value} متاح"
+
+#: apps/web/src/themes/v2/pages/xwhm/overview/index.ts
+msgctxt "theme:v2"
+msgid "15-minute averages, times in UTC. {read} of {total} intervals have samples."
+msgstr "متوسطات كل 15 دقيقة، والأوقات بتوقيت UTC. {read} من {total} فترة فيها عينات."
 
 #: apps/web/src/themes/v2/pages/xpanel/services/dns.ts
 msgctxt "theme:v2"
@@ -72,6 +92,11 @@ msgctxt "theme:v2"
 msgid "A host archive is not an off-server disaster recovery copy."
 msgstr "أرشيف الخادم ليس نسخة تعافٍ من الكوارث محفوظة خارج الخادم."
 
+#: apps/web/src/themes/v2/pages/xwhm/service-tools/web.ts
+msgctxt "theme:v2"
+msgid "A host-specific default baseline has not been supplied. Saved values are not proof of active configuration; draft differences appear in Pending change."
+msgstr "لم تُوفَّر قيم افتراضية مرجعية خاصة بهذا الخادم. لا تثبت القيم المحفوظة أنها الإعدادات النشطة؛ وتظهر اختلافات المسودة في قسم «التغيير المعلَّق»."
+
 #: apps/web/src/themes/v2/pages/xpanel/operations/terminal.ts
 msgctxt "theme:v2"
 msgid "A jailed session depends on the current plan, account state and a verified host terminal helper."
@@ -91,6 +116,11 @@ msgstr "لا يحتسب التشغيل النسخ إلا بعد التحقق م�
 msgctxt "theme:v2"
 msgid "A running service does not establish configuration health."
 msgstr "تشغيل الخدمة لا يثبت سلامة إعداداتها."
+
+#: apps/web/src/themes/v2/pages/xpanel/email/accounts.ts
+msgctxt "theme:v2"
+msgid "A service user runs as your account, has no shell and cannot sign in to xPanel."
+msgstr "يعمل مستخدم الخدمة باسم حسابك، وليست له صدفة أوامر ولا يستطيع الدخول إلى xPanel."
 
 #: apps/web/src/themes/v2/pages/xpanel/resources.ts
 msgctxt "theme:v2"
@@ -147,10 +177,20 @@ msgctxt "theme:v2"
 msgid "Account delegation unavailable here"
 msgstr "تفويض العنوان للحساب غير متاح هنا"
 
+#: apps/web/src/themes/v2/pages/xwhm/accounts/list.ts
+msgctxt "theme:v2"
+msgid "Account details"
+msgstr "تفاصيل الحساب"
+
 #: apps/web/src/themes/v2/pages/xpanel/observations/logs.ts
 msgctxt "theme:v2"
 msgid "Account domains have not been read. No log was read."
 msgstr "لم تُقرأ نطاقات الحساب. لم يُقرأ أي سجل."
+
+#: apps/web/src/themes/v2/pages/xwhm/service-tools/web.ts
+msgctxt "theme:v2"
+msgid "Account execution boundary"
+msgstr "حدود تنفيذ الحساب"
 
 #: apps/web/src/themes/v2/pages/xwhm/software/projects.ts
 msgctxt "theme:v2"
@@ -167,6 +207,11 @@ msgctxt "theme:v2"
 msgid "Account information"
 msgstr "معلومات الحساب"
 
+#: apps/web/src/themes/v2/pages/xwhm/accounts/list.ts
+msgctxt "theme:v2"
+msgid "Account list"
+msgstr "قائمة الحسابات"
+
 #: apps/web/src/themes/v2/pages/xwhm/databases/index.ts
 msgctxt "theme:v2"
 msgid "Account owners manage database users, passwords and grants in xPanel."
@@ -181,6 +226,11 @@ msgstr "حصص الحساب"
 msgctxt "theme:v2"
 msgid "Account repositories"
 msgstr "مستودعات الحسابات"
+
+#: apps/web/src/themes/v2/pages/xwhm/accounts/create.ts
+msgctxt "theme:v2"
+msgid "Account review"
+msgstr "مراجعة الحساب"
 
 #: apps/web/src/themes/v2/pages/xwhm/software/containers.ts
 msgctxt "theme:v2"
@@ -217,61 +267,6 @@ msgctxt "theme:v2"
 msgid "Account-scoped log observation"
 msgstr "رصد السجلات ضمن الحساب"
 
-#: apps/web/src/themes/v2/pages/xwhm/overview/index.ts
-msgctxt "theme:v2"
-msgid "{count, plural, one {# account in total.} other {# accounts in total.}}"
-msgstr "{count, plural, zero {لا حسابات.} one {حساب واحد في المجموع.} two {حسابان في المجموع.} few {# حسابات في المجموع.} many {# حسابًا في المجموع.} other {# حساب في المجموع.}}"
-
-#: apps/web/src/themes/v2/pages/xwhm/overview/index.ts
-msgctxt "theme:v2"
-msgid "15-minute averages, times in UTC. {read} of {total} intervals have samples."
-msgstr "متوسطات كل 15 دقيقة، والأوقات بتوقيت UTC. {read} من {total} فترة فيها عينات."
-
-#: apps/web/src/themes/v2/pages/xwhm/overview/index.ts
-msgctxt "theme:v2"
-msgid "CPU and memory use from {from} to {to} UTC"
-msgstr "استخدام المعالج والذاكرة من {from} إلى {to} بتوقيت UTC"
-
-#: apps/web/src/themes/v2/pages/xwhm/overview/index.ts
-msgctxt "theme:v2"
-msgid "CPU, peak {value}"
-msgstr "المعالج، الذروة {value}"
-
-#: apps/web/src/themes/v2/pages/xwhm/overview/index.ts
-msgctxt "theme:v2"
-msgid "Memory, peak {value}"
-msgstr "الذاكرة، الذروة {value}"
-
-#: apps/web/src/themes/v2/pages/xwhm/overview/index.ts
-msgctxt "theme:v2"
-msgid "Desired = applied"
-msgstr "المطلوب = المطبّق"
-
-#: apps/web/src/themes/v2/pages/xwhm/overview/index.ts
-msgctxt "theme:v2"
-msgid "Need attention"
-msgstr "تحتاج إلى انتباه"
-
-#: apps/web/src/themes/v2/pages/xwhm/overview/index.ts
-msgctxt "theme:v2"
-msgid "Resellers see only the accounts they own."
-msgstr "يرى الموزعون الحسابات التي يملكونها فقط."
-
-#: apps/web/src/themes/v2/pages/xwhm/overview/index.ts
-msgctxt "theme:v2"
-msgid "Review {account}"
-msgstr "مراجعة {account}"
-
-#: apps/web/src/themes/v2/pages/xwhm/overview/index.ts
-msgctxt "theme:v2"
-msgid "This server runs {version}."
-msgstr "هذا الخادم يعمل بالإصدار {version}."
-
-#: apps/web/src/themes/v2/pages/xwhm/overview/index.ts
-msgctxt "theme:v2"
-msgid "Upgrade {version} is available."
-msgstr "الترقية {version} متاحة."
-
 #: apps/web/src/themes/v2/pages/xwhm/accounts/list.ts
 msgctxt "theme:v2"
 msgid "Actions for {username}"
@@ -291,6 +286,11 @@ msgstr "بصمة الإعدادات النشطة"
 msgctxt "theme:v2"
 msgid "Active generation"
 msgstr "الجيل النشط"
+
+#: apps/web/src/themes/v2/pages/xwhm/host/firewall.ts
+msgctxt "theme:v2"
+msgid "Active rules changed since this draft was staged by {actor}. Restage before applying."
+msgstr "تغيّرت القواعد النشطة منذ أن جهّز {actor} هذه المسودة. أعد التجهيز قبل التطبيق."
 
 #: apps/web/src/themes/v2/pages/xpanel/security/account.ts
 msgctxt "theme:v2"
@@ -397,17 +397,22 @@ msgctxt "theme:v2"
 msgid "Allowing requests without a referrer keeps direct visits and privacy-minded browsers working."
 msgstr "السماح بطلبات لا تتضمن عنوان إحالة يبقي الزيارات المباشرة والمتصفحات المهتمة بالخصوصية قادرة على العمل."
 
-#: apps/web/src/themes/v2/pages/xwhm/host/services.ts
+#: apps/web/src/themes/v2/pages/xwhm/host/services.ts apps/web/src/themes/v2/pages/xwhm/server/setup.ts apps/web/src/themes/v2/pages/xwhm/service-tools/web.ts
 msgctxt "theme:v2"
 msgid "Alternative engine for the whole server. Installing does not switch engines."
 msgstr "محرك بديل للخادم بأكمله. لا يبدّل التثبيت المحرك المستخدم."
+
+#: apps/web/src/themes/v2/pages/xwhm/host/php.ts
+msgctxt "theme:v2"
+msgid "Always the default"
+msgstr "الافتراضي دائمًا"
 
 #: apps/web/src/themes/v2/pages/xpanel/resources.ts
 msgctxt "theme:v2"
 msgid "An account process list was not supplied. The task count does not identify processes or grant a process action."
 msgstr "لم تتوفر قائمة عمليات الحساب. لا يحدد عدد المهام العمليات ولا يمنح صلاحية تنفيذ إجراء عليها."
 
-#: apps/web/src/themes/v2/pages/xpanel/databases/common.ts apps/web/src/themes/v2/pages/xpanel/email-tools/common.ts apps/web/src/themes/v2/pages/xpanel/operations/common.ts apps/web/src/themes/v2/pages/xpanel/services/common.ts
+#: apps/web/src/themes/v2/pages/xpanel/email-tools/common.ts apps/web/src/themes/v2/pages/xpanel/services/common.ts
 msgctxt "theme:v2"
 msgid "An authorized account has not been read."
 msgstr "لم تُقرأ بيانات حساب مصرح به."
@@ -471,6 +476,21 @@ msgstr "عمليات نشر التطبيقات"
 msgctxt "theme:v2"
 msgid "Application feature key not read."
 msgstr "لم يُقرأ مفتاح ميزة التطبيق."
+
+#: apps/web/src/themes/v2/pages/xwhm/host/firewall.ts
+msgctxt "theme:v2"
+msgid "Applied as one generation"
+msgstr "التطبيق كجيل واحد"
+
+#: apps/web/src/themes/v2/pages/xwhm/host/firewall.ts
+msgctxt "theme:v2"
+msgid "Applied at"
+msgstr "طُبّق في"
+
+#: apps/web/src/themes/v2/pages/xpanel/home.ts
+msgctxt "theme:v2"
+msgid "Applied in generation #{generationId} · {at}"
+msgstr "طُبّق في الجيل #{generationId} · {at}"
 
 #: apps/web/src/themes/v2/pages/xpanel/resources.ts
 msgctxt "theme:v2"
@@ -547,10 +567,20 @@ msgctxt "theme:v2"
 msgid "Automatic ban settings and manual unban are not connected on this page. No ban state has been read."
 msgstr "إعدادات الحظر التلقائي ورفع الحظر اليدوي غير متصلة بهذه الصفحة. لم تُقرأ حالة حظر."
 
+#: apps/web/src/themes/v2/pages/xwhm/lifecycle/upgrade.ts
+msgctxt "theme:v2"
+msgid "Automatic rollback"
+msgstr "التراجع التلقائي"
+
 #: apps/web/src/themes/v2/pages/xwhm/tls/index.ts
 msgctxt "theme:v2"
 msgid "AutoSSL policy and renewal scheduling have not been read. These controls do not report an active policy."
 msgstr "لم تُقرأ سياسة AutoSSL أو جدولة التجديد. لا تعرض هذه الضوابط سياسة نشطة."
+
+#: apps/web/src/themes/v2/pages/xwhm/accounts/create.ts
+msgctxt "theme:v2"
+msgid "Availability checks"
+msgstr "فحوص التوفر"
 
 #: apps/web/src/themes/v2/pages/xpanel/security/tools.ts
 msgctxt "theme:v2"
@@ -587,17 +617,22 @@ msgctxt "theme:v2"
 msgid "Average request latency"
 msgstr "متوسط زمن استجابة الطلب"
 
-#: apps/web/src/themes/v2/components/change-review.ts
+#: apps/web/src/themes/v2/components/change-review.ts apps/web/src/themes/v2/pages/xwhm/plans/editor.ts
 msgctxt "theme:v2"
 msgid "Back to editing"
 msgstr "العودة إلى التحرير"
+
+#: apps/web/src/themes/v2/pages/xmail/compose.ts
+msgctxt "theme:v2"
+msgid "Back to Inbox"
+msgstr "العودة إلى الوارد"
 
 #: apps/web/src/themes/v2/pages/xwhm/databases/index.ts
 msgctxt "theme:v2"
 msgid "Back up"
 msgstr "نسخ احتياطي"
 
-#: apps/web/src/themes/v2/pages/xwhm/lifecycle/backups.ts apps/web/src/themes/v2/pages/xwhm/lifecycle/destinations.ts
+#: apps/web/src/themes/v2/pages/xwhm/lifecycle/destination-manager.ts
 msgctxt "theme:v2"
 msgid "Backblaze"
 msgstr "Backblaze"
@@ -647,6 +682,11 @@ msgctxt "theme:v2"
 msgid "Backup scope and safeguards"
 msgstr "نطاق النسخ الاحتياطي وضوابط الحماية"
 
+#: apps/web/src/themes/v2/pages/xwhm/lifecycle/backups.ts
+msgctxt "theme:v2"
+msgid "Backup sections"
+msgstr "أقسام النسخ الاحتياطي"
+
 #: apps/web/src/themes/v2/pages/xwhm/panel/integrations-developer.ts
 msgctxt "theme:v2"
 msgid "Backup storage"
@@ -667,10 +707,25 @@ msgctxt "theme:v2"
 msgid "Before the switch"
 msgstr "قبل التبديل"
 
+#: apps/web/src/themes/v2/pages/xwhm/server/setup.ts apps/web/src/themes/v2/pages/xwhm/service-tools/web.ts
+msgctxt "theme:v2"
+msgid "Behind the Nginx edge. Every request passes Apache, so .htaccess works."
+msgstr "خلف واجهة Nginx. يمر كل طلب عبر Apache، لذا يعمل ملف .htaccess."
+
 #: apps/web/src/themes/v2/pages/xwhm/databases/index.ts
 msgctxt "theme:v2"
 msgid "Bind address"
 msgstr "عنوان الربط"
+
+#: apps/web/src/themes/v2/pages/xpanel/domains/site-settings.ts
+msgctxt "theme:v2"
+msgid "Blocked addresses apply to every site of the account."
+msgstr "تنطبق العناوين المحظورة على كل مواقع الحساب."
+
+#: apps/web/src/themes/v2/pages/xwhm/host/firewall.ts
+msgctxt "theme:v2"
+msgid "Blocked by self-lockout guard: {reason}"
+msgstr "حُجب بواسطة حماية منع عزل الجلسة: {reason}"
 
 #: apps/web/src/themes/v2/components/bulk-bar.ts
 msgctxt "theme:v2"
@@ -686,6 +741,11 @@ msgstr "البايتات"
 msgctxt "theme:v2"
 msgid "Caching"
 msgstr "التخزين المؤقت"
+
+#: apps/web/src/themes/v2/pages/xpanel/settings/team.ts
+msgctxt "theme:v2"
+msgid "Can sign in when team sign-in is enabled, but cannot use account tools."
+msgstr "يمكنه تسجيل الدخول عند تفعيل دخول الفريق، لكنه لا يستطيع استخدام أدوات الحساب."
 
 #: apps/web/src/themes/v2/pages/xwhm/software/updates.ts
 msgctxt "theme:v2"
@@ -787,7 +847,7 @@ msgctxt "theme:v2"
 msgid "Change review"
 msgstr "مراجعة التغيير"
 
-#: apps/web/src/themes/v2/pages/xwhm/server/observations.ts apps/web/src/themes/v2/pages/xwhm/server/sharing-nodes.ts
+#: apps/web/src/themes/v2/pages/xwhm/server/sharing-nodes.ts
 msgctxt "theme:v2"
 msgid "Change role"
 msgstr "تغيير الدور"
@@ -812,7 +872,7 @@ msgctxt "theme:v2"
 msgid "Changes are saved as desired state. Saving does not prove public DNS propagation."
 msgstr "تُحفظ التغييرات كحالة مطلوبة. لا يثبت الحفظ انتشارها في DNS العام."
 
-#: apps/web/src/themes/v2/pages/xwhm/server/setup.ts
+#: apps/web/src/themes/v2/pages/xwhm/server/setup.ts apps/web/src/themes/v2/pages/xwhm/service-tools/web.ts
 msgctxt "theme:v2"
 msgid "Changes from defaults"
 msgstr "التغييرات عن القيم الافتراضية"
@@ -827,10 +887,25 @@ msgctxt "theme:v2"
 msgid "Checked controls disable the named tool. Saved membership is preserved until a verified save."
 msgstr "تُعطّل الخيارات المحددة الأداة المسماة. تبقى محتويات القائمة المحفوظة كما هي حتى التحقق من حفظ التغيير."
 
+#: apps/web/src/themes/v2/pages/xpanel/software/php.ts apps/web/src/themes/v2/pages/xwhm/accounts/create.ts
+msgctxt "theme:v2"
+msgid "Checked when submitted"
+msgstr "يُفحص عند الإرسال"
+
 #: apps/web/src/themes/v2/pages/xpanel/operations/backup.ts
 msgctxt "theme:v2"
 msgid "Checksum"
 msgstr "بصمة التحقق"
+
+#: apps/web/src/themes/v2/pages/xpanel/software/php.ts
+msgctxt "theme:v2"
+msgid "children"
+msgstr "عمليات فرعية"
+
+#: apps/web/src/themes/v2/pages/xmail/inbox.ts
+msgctxt "theme:v2"
+msgid "Choose a message from the list to read it here."
+msgstr "اختر رسالة من القائمة لقراءتها هنا."
 
 #: apps/web/src/themes/v2/pages/xwhm/software/projects.ts
 msgctxt "theme:v2"
@@ -867,12 +942,17 @@ msgctxt "theme:v2"
 msgid "Choose whether Apache lists files when the document root has no index page."
 msgstr "اختر ما إذا كان Apache يعرض قائمة الملفات عند غياب صفحة فهرس في جذر المستندات."
 
+#: apps/web/src/themes/v2/pages/xpanel/advanced/directives.ts
+msgctxt "theme:v2"
+msgid "Choose which Apache module processes a file extension on this domain. Changes replace only the managed block."
+msgstr "اختر أي وحدة من Apache تعالج امتداد ملف على هذا النطاق. تستبدل التغييرات الكتلة المُدارة فقط."
+
 #: apps/web/src/themes/v2/pages/xpanel/home.ts
 msgctxt "theme:v2"
 msgid "Clear filter"
 msgstr "مسح التصفية"
 
-#: apps/web/src/themes/v2/pages/xwhm/service-tools/ftp-log.ts
+#: apps/web/src/themes/v2/pages/xwhm/accounts/list.ts apps/web/src/themes/v2/pages/xwhm/service-tools/ftp-log.ts
 msgctxt "theme:v2"
 msgid "Clear filters"
 msgstr "مسح الفلاتر"
@@ -891,6 +971,11 @@ msgstr "مضيف العميل"
 msgctxt "theme:v2"
 msgid "Clients of the selected user"
 msgstr "عملاء المستخدم المحدد"
+
+#: apps/web/src/themes/v2/pages/xwhm/accounts/list.ts
+msgctxt "theme:v2"
+msgid "Close account details"
+msgstr "إغلاق تفاصيل الحساب"
 
 #: apps/web/src/themes/v2/pages/xpanel/operations/terminal.ts
 msgctxt "theme:v2"
@@ -944,6 +1029,11 @@ msgstr "تشخيص Composer"
 
 #: apps/web/src/themes/v2/pages/xwhm/software/projects.ts
 msgctxt "theme:v2"
+msgid "Composer runs as the account of the site, in its slice, with project scripts and plugins off."
+msgstr "يعمل Composer بحساب الموقع داخل شريحته، مع إيقاف نصوص المشروع والإضافات."
+
+#: apps/web/src/themes/v2/pages/xwhm/software/projects.ts
+msgctxt "theme:v2"
 msgid "Composer runtime"
 msgstr "بيئة Composer"
 
@@ -976,11 +1066,6 @@ msgstr "صحة الإعدادات"
 msgctxt "theme:v2"
 msgid "Configuration health has not been checked."
 msgstr "لم تُفحص صحة الإعدادات."
-
-#: apps/web/src/themes/v2/pages/xwhm/databases/index.ts
-msgctxt "theme:v2"
-msgid "Unset settings retain server defaults and secrets are never read."
-msgstr "تحتفظ الإعدادات غير المضبوطة بقيم الخادم الافتراضية ولا تُقرأ الأسرار أبدًا."
 
 #: apps/web/src/themes/v2/pages/xpanel/software/php.ts
 msgctxt "theme:v2"
@@ -1107,6 +1192,16 @@ msgctxt "theme:v2"
 msgid "Copying is unavailable until every saved feature key can be retained by the create operation."
 msgstr "النسخ غير متاح حتى تستطيع عملية الإنشاء الاحتفاظ بجميع مفاتيح الميزات المحفوظة."
 
+#: apps/web/src/themes/v2/pages/xpanel/email/accounts.ts
+msgctxt "theme:v2"
+msgid "Counts toward your disk"
+msgstr "يُحتسب من مساحة القرص"
+
+#: apps/web/src/themes/v2/pages/xwhm/overview/index.ts
+msgctxt "theme:v2"
+msgid "CPU and memory use from {from} to {to} UTC"
+msgstr "استخدام المعالج والذاكرة من {from} إلى {to} بتوقيت UTC"
+
 #: apps/web/src/themes/v2/pages/xwhm/overview/index.ts
 msgctxt "theme:v2"
 msgid "CPU and memory, last 24 hours"
@@ -1121,6 +1216,11 @@ msgstr "حمل المعالج"
 msgctxt "theme:v2"
 msgid "CPU usage"
 msgstr "استخدام المعالج"
+
+#: apps/web/src/themes/v2/pages/xwhm/overview/index.ts
+msgctxt "theme:v2"
+msgid "CPU, peak {value}"
+msgstr "المعالج، الذروة {value}"
 
 #: apps/web/src/themes/v2/pages/xpanel/domains/staging.ts
 msgctxt "theme:v2"
@@ -1162,7 +1262,7 @@ msgctxt "theme:v2"
 msgid "Cron jobs"
 msgstr "مهام Cron"
 
-#: apps/web/src/themes/v2/pages/xwhm/service-tools/web.ts
+#: apps/web/src/themes/v2/pages/xwhm/plans/editor.ts apps/web/src/themes/v2/pages/xwhm/service-tools/web.ts
 msgctxt "theme:v2"
 msgid "Current"
 msgstr "الحالي"
@@ -1186,6 +1286,11 @@ msgstr "اختبارات الإعدادات الحالية"
 msgctxt "theme:v2"
 msgid "Current ruleset"
 msgstr "مجموعة القواعد الحالية"
+
+#: apps/web/src/themes/v2/pages/xwhm/security/ssh.ts
+msgctxt "theme:v2"
+msgid "Current session protection."
+msgstr "حماية الجلسة الحالية."
 
 #: apps/web/src/themes/v2/pages/xwhm/resellers/index.ts
 msgctxt "theme:v2"
@@ -1287,15 +1392,35 @@ msgctxt "theme:v2"
 msgid "Days left"
 msgstr "الأيام المتبقية"
 
+#: apps/web/src/themes/v2/pages/xwhm/service-tools/web.ts
+msgctxt "theme:v2"
+msgid "Default baseline"
+msgstr "القيم الافتراضية المرجعية"
+
 #: apps/web/src/themes/v2/pages/xwhm/host/php.ts
 msgctxt "theme:v2"
 msgid "Default for new domains"
 msgstr "الافتراضي للنطاقات الجديدة"
 
+#: apps/web/src/themes/v2/pages/xwhm/host/php.ts
+msgctxt "theme:v2"
+msgid "Default handler"
+msgstr "المعالج الافتراضي"
+
 #: apps/web/src/themes/v2/pages/xwhm/service-tools/details.ts
 msgctxt "theme:v2"
 msgid "Default index files"
 msgstr "ملفات الفهرس الافتراضية"
+
+#: apps/web/src/themes/v2/pages/xwhm/host/php.ts
+msgctxt "theme:v2"
+msgid "Default version"
+msgstr "الإصدار الافتراضي"
+
+#: apps/web/src/themes/v2/pages/xwhm/host/php.ts
+msgctxt "theme:v2"
+msgid "Defaults for new domains"
+msgstr "الإعدادات الافتراضية للنطاقات الجديدة"
 
 #: apps/web/src/themes/v2/pages/xwhm/service-tools/ftp-log.ts
 msgctxt "theme:v2"
@@ -1341,6 +1466,11 @@ msgstr "يرفض النشر التغييرات غير المضمّنة في comm
 msgctxt "theme:v2"
 msgid "Deployments have not been read."
 msgstr "لم تُقرأ عمليات النشر بعد."
+
+#: apps/web/src/themes/v2/pages/xwhm/overview/index.ts
+msgctxt "theme:v2"
+msgid "Desired = applied"
+msgstr "المطلوب = المطبّق"
 
 #: apps/web/src/themes/v2/pages/xwhm/software/catalog.ts
 msgctxt "theme:v2"
@@ -1499,13 +1629,38 @@ msgstr "برنامج التشغيل"
 
 #: apps/web/src/themes/v2/pages/xwhm/host/php.ts
 msgctxt "theme:v2"
-msgid "Each account pool runs inside its account slice. The server pool defaults are further down this page."
-msgstr "يعمل مجمع كل حساب داخل شريحته. إعدادات المجمعات الافتراضية للخادم في أسفل هذه الصفحة."
+msgid "Each account pool runs inside its account slice. Inherited pools use these server-wide defaults unless overridden per domain."
+msgstr "يعمل مجمع كل حساب داخل شريحة الحساب الخاصة به. تستخدم المجمعات الموروثة هذه الإعدادات الافتراضية على مستوى الخادم ما لم تُتجاوز لكل نطاق."
 
 #: apps/web/src/themes/v2/pages/xwhm/panel/integrations-developer.ts
 msgctxt "theme:v2"
 msgid "Each integration uses its own authorized workspace and qualification. This explorer does not establish its connection or delivery state."
 msgstr "يستخدم كل تكامل مساحة عمل مصرحًا بها وتأهيلًا خاصًا به. لا يثبت هذا المستكشف حالة اتصاله أو تسليمه."
+
+#: apps/web/src/themes/v2/pages/xwhm/server/setup.ts
+msgctxt "theme:v2"
+msgid "Each value follows its field in the steps above. A field you have not changed shows its saved value."
+msgstr "تتبع كل قيمة حقلها في الخطوات أعلاه. يعرض الحقل الذي لم تغيره قيمته المحفوظة."
+
+#: apps/web/src/themes/v2/pages/xwhm/service-tools/web.ts
+msgctxt "theme:v2"
+msgid "Edge and reverse proxy"
+msgstr "واجهة الاتصال والوكيل العكسي"
+
+#: apps/web/src/themes/v2/pages/xwhm/accounts/list.ts
+msgctxt "theme:v2"
+msgid "Edit account"
+msgstr "تعديل الحساب"
+
+#: apps/web/src/themes/v2/pages/xwhm/plans/plans.ts
+msgctxt "theme:v2"
+msgid "Edit plan: {name}"
+msgstr "تعديل الخطة: {name}"
+
+#: apps/web/src/themes/v2/pages/xwhm/plans/plans.ts
+msgctxt "theme:v2"
+msgid "Editing above"
+msgstr "قيد التعديل أعلاه"
 
 #: apps/web/src/themes/v2/pages/xwhm/host/php.ts
 msgctxt "theme:v2"
@@ -1602,6 +1757,11 @@ msgctxt "theme:v2"
 msgid "Executable content types and script extensions are refused. PHP stays with the reviewed domain handler."
 msgstr "تُرفض أنواع المحتوى القابلة للتنفيذ وامتدادات السكربتات. يبقى PHP مرتبطًا بمعالج النطاق الذي تمت مراجعته."
 
+#: apps/web/src/themes/v2/pages/xwhm/host/php.ts
+msgctxt "theme:v2"
+msgid "Existing domains keep their version and handler."
+msgstr "تحتفظ النطاقات الحالية بإصدارها ومعالجها."
+
 #: apps/web/src/themes/v2/pages/xmail/workspaces/tools.ts
 msgctxt "theme:v2"
 msgid "Existing mailbox workflows retain their own permissions and read-back states."
@@ -1627,6 +1787,11 @@ msgctxt "theme:v2"
 msgid "Expires after"
 msgstr "تنتهي بعد"
 
+#: apps/web/src/themes/v2/pages/xwhm/domains/index.ts
+msgctxt "theme:v2"
+msgid "Explicit names under a hosted domain"
+msgstr "أسماء صريحة تحت نطاق مستضاف"
+
 #: apps/web/src/themes/v2/pages/xwhm/monitoring/workflows.ts
 msgctxt "theme:v2"
 msgid "Explicit temporary load with bounded resources and verified cleanup."
@@ -1641,6 +1806,11 @@ msgstr "الامتدادات"
 msgctxt "theme:v2"
 msgid "External signed catalogs are not supported. No third-party catalog URL is downloaded."
 msgstr "الكتالوجات الخارجية الموقّعة غير مدعومة. لا يُجلب أي كتالوج من عنوان تابع لجهة خارجية."
+
+#: apps/web/src/themes/v2/pages/xwhm/domains/index.ts
+msgctxt "theme:v2"
+msgid "Extra names that serve the parent site"
+msgstr "أسماء إضافية تعرض الموقع الأصل"
 
 #: apps/web/src/themes/v2/pages/xwhm/software/catalog.ts
 msgctxt "theme:v2"
@@ -1672,6 +1842,11 @@ msgctxt "theme:v2"
 msgid "Feature lists have not been read."
 msgstr "لم تُقرأ قوائم الميزات."
 
+#: apps/web/src/themes/v2/pages/xwhm/plans/editor.ts
+msgctxt "theme:v2"
+msgid "Features"
+msgstr "الميزات"
+
 #: apps/web/src/themes/v2/pages/xpanel/files/index.ts
 msgctxt "theme:v2"
 msgid "File manager views"
@@ -1702,6 +1877,31 @@ msgctxt "theme:v2"
 msgid "Filesystem space, inodes and account quotas are separate measured observations."
 msgstr "مساحة نظام الملفات وعُقد الملفات وحصص الحسابات قياسات منفصلة."
 
+#: apps/web/src/themes/v2/pages/xpanel/email/accounts.ts
+msgctxt "theme:v2"
+msgid "Filter by login"
+msgstr "التصفية باسم الدخول"
+
+#: apps/web/src/themes/v2/pages/xpanel/domains/domains.ts
+msgctxt "theme:v2"
+msgid "Filter by name or folder"
+msgstr "التصفية بالاسم أو المجلد"
+
+#: apps/web/src/themes/v2/pages/xpanel/domains/domains.ts
+msgctxt "theme:v2"
+msgid "Filter domains"
+msgstr "تصفية النطاقات"
+
+#: apps/web/src/themes/v2/pages/xpanel/services/dns.ts
+msgctxt "theme:v2"
+msgid "Filter records"
+msgstr "تصفية السجلات"
+
+#: apps/web/src/themes/v2/pages/xpanel/email/accounts.ts
+msgctxt "theme:v2"
+msgid "Filter users by login"
+msgstr "تصفية المستخدمين باسم الدخول"
+
 #: apps/web/src/themes/v2/pages/xwhm/service-tools/ftp-log.ts
 msgctxt "theme:v2"
 msgid "First (UTC)"
@@ -1727,6 +1927,11 @@ msgctxt "theme:v2"
 msgid "Forward and reverse hostname checks have not been read for this setup request."
 msgstr "لم تُقرأ فحوص اسم المضيف الأمامية والعكسية لطلب الإعداد هذا."
 
+#: apps/web/src/themes/v2/pages/xwhm/service-tools/web.ts
+msgctxt "theme:v2"
+msgid "Forwarded client headers are overwritten at the edge. The complete generated configuration includes additional guarded directives."
+msgstr "تُستبدل ترويسات العميل المُمرَّرة عند واجهة الاتصال. تتضمن الإعدادات المولَّدة الكاملة توجيهات حماية إضافية."
+
 #: apps/web/src/themes/v2/pages/xwhm/host/php.ts
 msgctxt "theme:v2"
 msgid "FPM pools"
@@ -1742,7 +1947,7 @@ msgctxt "theme:v2"
 msgid "From address"
 msgstr "عنوان المُرسِل"
 
-#: apps/web/src/themes/v2/pages/xwhm/lifecycle/backups.ts apps/web/src/themes/v2/pages/xwhm/lifecycle/destinations.ts
+#: apps/web/src/themes/v2/pages/xwhm/lifecycle/destination-manager.ts
 msgctxt "theme:v2"
 msgid "FTP"
 msgstr "FTP"
@@ -1756,6 +1961,11 @@ msgstr "حسابات FTP في الحالة المحفوظة"
 msgctxt "theme:v2"
 msgid "FTP activity has not been read."
 msgstr "لم يُقرأ نشاط FTP."
+
+#: apps/web/src/themes/v2/pages/xpanel/email/accounts.ts
+msgctxt "theme:v2"
+msgid "FTP and Web Disk never see anything outside the directory you choose."
+msgstr "لا يرى FTP و Web Disk أي شيء خارج المجلد الذي تختاره."
 
 #: apps/web/src/themes/v2/pages/xwhm/service-tools/ftp-log.ts
 msgctxt "theme:v2"
@@ -1831,11 +2041,6 @@ msgstr "الأجيال"
 msgctxt "theme:v2"
 msgid "Global php.ini"
 msgstr "ملف php.ini العام"
-
-#: apps/web/src/themes/v2/pages/xwhm/host/php.ts
-msgctxt "theme:v2"
-msgid "Global pool settings have no connected write operation in this workspace."
-msgstr "لا توجد عملية حفظ متصلة لإعدادات المجمعات العامة في مساحة العمل هذه."
 
 #: apps/web/src/themes/v2/pages/xwhm/software/projects.ts
 msgctxt "theme:v2"
@@ -1972,6 +2177,11 @@ msgctxt "theme:v2"
 msgid "How should the authority check the names?"
 msgstr "كيف ينبغي لجهة إصدار الشهادة التحقق من الأسماء؟"
 
+#: apps/web/src/themes/v2/pages/xpanel/settings/team.ts
+msgctxt "theme:v2"
+msgid "How team access works"
+msgstr "كيف يعمل وصول الفريق"
+
 #: apps/web/src/themes/v2/pages/xpanel/domains/domains.ts
 msgctxt "theme:v2"
 msgid "HTTPS redirect"
@@ -2002,6 +2212,11 @@ msgctxt "theme:v2"
 msgid "Identity and domain"
 msgstr "الهوية والنطاق"
 
+#: apps/web/src/themes/v2/pages/xwhm/accounts/list.ts
+msgctxt "theme:v2"
+msgid "Identity and plan"
+msgstr "الهوية والخطة"
+
 #: apps/web/src/themes/v2/pages/xwhm/server/setup.ts
 msgctxt "theme:v2"
 msgid "Identity and worker forms use their existing guarded operations. This page does not invent a saved draft, a tested generation or an activation result."
@@ -2011,6 +2226,11 @@ msgstr "تستخدم نماذج الهوية والعمليات العاملة �
 msgctxt "theme:v2"
 msgid "If conversion fails, inspect the saved outcome and any remaining system user before retrying."
 msgstr "إذا فشل التحويل، فافحص النتيجة المحفوظة وأي مستخدم نظام متبقٍ قبل إعادة المحاولة."
+
+#: apps/web/src/themes/v2/pages/xwhm/service-tools/web.ts
+msgctxt "theme:v2"
+msgid "Illustrative proxy block using the page-load saved HTTP port. This is not a read of a generated file or a verified listener."
+msgstr "كتلة توضيحية للوكيل تستخدم منفذ HTTP المحفوظ عند فتح الصفحة. هذا ليس محتوى ملف مولَّد تمت قراءته ولا دليلًا على وجود منفذ مستمع."
 
 #: apps/web/src/themes/v2/pages/xwhm/software/containers.ts
 msgctxt "theme:v2"
@@ -2101,6 +2321,11 @@ msgstr "تثبيت شهادة"
 msgctxt "theme:v2"
 msgid "Install an engine"
 msgstr "تثبيت محرك"
+
+#: apps/web/src/themes/v2/pages/xpanel/operations/packages.ts
+msgctxt "theme:v2"
+msgid "Install PEAR packages and Perl modules into your own account libraries."
+msgstr "ثبّت حزم PEAR ووحدات Perl في مكتبات حسابك."
 
 #: apps/web/src/themes/v2/pages/xwhm/software/containers.ts
 msgctxt "theme:v2"
@@ -2237,10 +2462,25 @@ msgctxt "theme:v2"
 msgid "keepalive_timeout (seconds)"
 msgstr "keepalive_timeout (ثوانٍ)"
 
+#: apps/web/src/themes/v2/pages/xwhm/host/php.ts
+msgctxt "theme:v2"
+msgid "Keeps a few spare workers ready and adds more under load."
+msgstr "يُبقي عددًا قليلًا من العمليات الاحتياطية جاهزًا ويضيف المزيد تحت الحمل."
+
+#: apps/web/src/themes/v2/pages/xwhm/host/php.ts
+msgctxt "theme:v2"
+msgid "Keeps a fixed number of workers in memory at all times."
+msgstr "يُبقي عددًا ثابتًا من العمليات في الذاكرة دائمًا."
+
 #: apps/web/src/themes/v2/pages/xpanel/advanced/directives.ts
 msgctxt "theme:v2"
 msgid "Keeps the previous file, validates with the protected Apache parser and checks the site locally. A failed check restores the kept file."
 msgstr "يحتفظ بالملف السابق ويتحقق بمحلل Apache المحمي ويفحص الموقع محليًا. يؤدي فشل الفحص إلى استعادة الملف المحفوظ."
+
+#: apps/web/src/themes/v2/pages/xwhm/host/firewall.ts
+msgctxt "theme:v2"
+msgid "Kept, or the previous rules return"
+msgstr "تُثبَّت، أو تعود القواعد السابقة"
 
 #: apps/web/src/themes/v2/pages/xwhm/monitoring/resources.ts
 msgctxt "theme:v2"
@@ -2337,6 +2577,16 @@ msgctxt "theme:v2"
 msgid "Limit events"
 msgstr "أحداث الحدود"
 
+#: apps/web/src/themes/v2/pages/xwhm/accounts/list.ts
+msgctxt "theme:v2"
+msgid "Limits and usage"
+msgstr "الحدود والاستخدام"
+
+#: apps/web/src/themes/v2/pages/xwhm/server/sharing-nodes.ts
+msgctxt "theme:v2"
+msgid "Link servers and push settings between them, with every link proved both ways."
+msgstr "اربط الخوادم وادفع الإعدادات بينها، مع إثبات كل ربط في الاتجاهين."
+
 #: apps/web/src/themes/v2/pages/xwhm/databases/index.ts
 msgctxt "theme:v2"
 msgid "Listen addresses"
@@ -2357,6 +2607,11 @@ msgctxt "theme:v2"
 msgid "Live log output"
 msgstr "سجل التنفيذ المباشر"
 
+#: apps/web/src/themes/v2/pages/xwhm/accounts/create.ts
+msgctxt "theme:v2"
+msgid "Live summary of the form."
+msgstr "ملخص مباشر لما في النموذج."
+
 #: apps/web/src/themes/v2/pages/xwhm/overview/index.ts
 msgctxt "theme:v2"
 msgid "Load {load} on {cores} cores"
@@ -2367,7 +2622,6 @@ msgctxt "theme:v2"
 msgid "Local account archives"
 msgstr "أرشيفات الحسابات المحلية"
 
-#: apps/web/src/themes/v2/pages/xwhm/lifecycle/backups.ts
 #: apps/web/src/themes/v2/pages/xwhm/dns/tools.ts
 msgctxt "theme:v2"
 msgid "Local zone checks, published comparisons and revision-bound TTL changes."
@@ -2383,10 +2637,20 @@ msgctxt "theme:v2"
 msgid "Locked / installed versions"
 msgstr "الإصدارات المقفلة / المثبتة"
 
+#: apps/web/src/themes/v2/pages/xpanel/email/accounts.ts
+msgctxt "theme:v2"
+msgid "Locked to a directory"
+msgstr "محصور في مجلد"
+
 #: apps/web/src/themes/v2/pages/xwhm/host/firewall.ts
 msgctxt "theme:v2"
 msgid "Lockout check"
 msgstr "فحص منع انقطاع الوصول"
+
+#: apps/web/src/themes/v2/pages/xwhm/host/firewall.ts
+msgctxt "theme:v2"
+msgid "Lockout check against your session"
+msgstr "فحص عدم حجب جلستك"
 
 #: apps/web/src/themes/v2/pages/xpanel/services/cron.ts
 msgctxt "theme:v2"
@@ -2412,6 +2676,11 @@ msgstr "تفضيلات صندوق البريد والسياسة الموروثة
 msgctxt "theme:v2"
 msgid "Mailbox sign-in security uses the current authenticated account-security workspace."
 msgstr "يستخدم أمان تسجيل الدخول لصندوق البريد مساحة أمان الحساب الحالي المصادق عليه."
+
+#: apps/web/src/themes/v2/pages/xpanel/email/accounts.ts
+msgctxt "theme:v2"
+msgid "Mailboxes and uploads use the disk quota of your account."
+msgstr "صناديق البريد والملفات المرفوعة تستهلك حصة القرص لحسابك."
 
 #: apps/web/src/themes/v2/pages/xpanel/home.ts
 msgctxt "theme:v2"
@@ -2448,7 +2717,7 @@ msgctxt "theme:v2"
 msgid "Manage saved membership, posting policy and the observed delivery state of your account lists."
 msgstr "أدر العضويات المحفوظة وسياسة النشر وحالة التسليم المرصودة لقوائم حسابك."
 
-#: apps/web/src/themes/v2/pages/xwhm/databases/index.ts
+#: apps/web/src/themes/v2/pages/xwhm/databases/index.ts apps/web/src/themes/v2/pages/xwhm/service-tools/web.ts
 msgctxt "theme:v2"
 msgid "Manage services"
 msgstr "إدارة الخدمات"
@@ -2482,6 +2751,11 @@ msgstr "الملف المُدار"
 msgctxt "theme:v2"
 msgid "Managed files"
 msgstr "الملفات المُدارة"
+
+#: apps/web/src/themes/v2/pages/xwhm/host/firewall.ts
+msgctxt "theme:v2"
+msgid "Management ports"
+msgstr "منافذ الإدارة"
 
 #: apps/web/src/themes/v2/pages/xpanel/advanced/directives.ts
 msgctxt "theme:v2"
@@ -2543,6 +2817,11 @@ msgctxt "theme:v2"
 msgid "Media"
 msgstr "الوسائط"
 
+#: apps/web/src/themes/v2/pages/xpanel/software/php.ts
+msgctxt "theme:v2"
+msgid "Memory at full load"
+msgstr "الذاكرة عند الحمل الكامل"
+
 #: apps/web/src/themes/v2/pages/xwhm/software/containers.ts
 msgctxt "theme:v2"
 msgid "Memory caches, message brokers and search services."
@@ -2563,6 +2842,11 @@ msgctxt "theme:v2"
 msgid "Memory usage"
 msgstr "استخدام الذاكرة"
 
+#: apps/web/src/themes/v2/pages/xwhm/overview/index.ts
+msgctxt "theme:v2"
+msgid "Memory, peak {value}"
+msgstr "الذاكرة، الذروة {value}"
+
 #: apps/web/src/themes/v2/pages/xwhm/software/catalog.ts
 msgctxt "theme:v2"
 msgid "Module installers"
@@ -2573,7 +2857,7 @@ msgctxt "theme:v2"
 msgid "Module support is not a verified WHMCS connection or a provisioning result."
 msgstr "دعم الوحدة لا يثبت اتصالًا متحققًا منه بـ WHMCS أو نتيجة تجهيز."
 
-#: apps/web/src/themes/v2/pages/xpanel/home.ts
+#: apps/web/src/themes/v2/pages/xpanel/home.ts apps/web/src/themes/v2/pages/xwhm/domains/index.ts
 msgctxt "theme:v2"
 msgid "More actions for {domain}"
 msgstr "إجراءات إضافية للنطاق {domain}"
@@ -2602,6 +2886,11 @@ msgstr "قوائم مسماة تفعّل أدوات xPanel أو تعطّلها �
 msgctxt "theme:v2"
 msgid "Names, dates, references and numbers remain aligned beneath their labels. Technical values keep their own reading direction."
 msgstr "تبقى الأسماء والتواريخ والمراجع والأرقام بمحاذاة تسمياتها وتحتها مباشرة. تحافظ القيم التقنية على اتجاه قراءتها الخاص."
+
+#: apps/web/src/themes/v2/pages/xwhm/overview/index.ts
+msgctxt "theme:v2"
+msgid "Need attention"
+msgstr "تحتاج إلى انتباه"
 
 #: apps/web/src/themes/v2/pages/xwhm/service-tools/details.ts
 msgctxt "theme:v2"
@@ -2642,6 +2931,11 @@ msgstr "الشبكات"
 msgctxt "theme:v2"
 msgid "Newer"
 msgstr "الأحدث"
+
+#: apps/web/src/themes/v2/pages/xwhm/accounts/list.ts
+msgctxt "theme:v2"
+msgid "Newest first."
+msgstr "الأحدث أولًا."
 
 #: apps/web/src/themes/v2/pages/xwhm/databases/index.ts
 msgctxt "theme:v2"
@@ -2762,6 +3056,11 @@ msgstr "لم يتوفر قياس لأحجام المجلدات. عرض قائم�
 msgctxt "theme:v2"
 msgid "No domains have been read"
 msgstr "لم تُقرأ أي نطاقات"
+
+#: apps/web/src/themes/v2/pages/xpanel/domains/domains.ts
+msgctxt "theme:v2"
+msgid "No domains match this filter."
+msgstr "لا توجد نطاقات تطابق هذه التصفية."
 
 #: apps/web/src/themes/v2/pages/xpanel/domains/domains.ts
 msgctxt "theme:v2"
@@ -2893,15 +3192,25 @@ msgctxt "theme:v2"
 msgid "No reviewed host-specific suggested values have been read. The saved worker limits are retained."
 msgstr "لم تُقرأ قيم مقترحة خاصة بالخادم تمت مراجعتها. تبقى حدود العمليات العاملة المحفوظة كما هي."
 
+#: apps/web/src/themes/v2/pages/xpanel/settings/team.ts
+msgctxt "theme:v2"
+msgid "No role"
+msgstr "بدون دور"
+
 #: apps/web/src/themes/v2/pages/xpanel/databases/mariadb.ts
 msgctxt "theme:v2"
 msgid "No saved database users."
 msgstr "لا يوجد مستخدمو قواعد بيانات محفوظون."
 
-#: apps/web/src/themes/v2/pages/xpanel/databases/mariadb.ts
+#: apps/web/src/themes/v2/pages/xpanel/databases/engines.ts apps/web/src/themes/v2/pages/xpanel/databases/mariadb.ts
 msgctxt "theme:v2"
 msgid "No saved databases. Create a database configuration to begin."
 msgstr "لا توجد قواعد بيانات محفوظة. أنشئ إعدادات قاعدة بيانات للبدء."
+
+#: apps/web/src/themes/v2/pages/xpanel/email/accounts.ts
+msgctxt "theme:v2"
+msgid "No service users match this filter."
+msgstr "لا يوجد مستخدمو خدمة يطابقون هذه التصفية."
 
 #: apps/web/src/themes/v2/pages/xwhm/software/containers.ts
 msgctxt "theme:v2"
@@ -2917,6 +3226,11 @@ msgstr "لم تُضبط قواعد Sieve."
 msgctxt "theme:v2"
 msgid "No signed catalog has been read."
 msgstr "لم يُقرأ أي فهرس موقّع."
+
+#: apps/web/src/themes/v2/pages/xwhm/host/firewall.ts
+msgctxt "theme:v2"
+msgid "No staged ruleset is waiting for review. Stage a port rule or JSON import to compare current and proposed rules before applying."
+msgstr "لا توجد مجموعة قواعد مجهّزة بانتظار المراجعة. جهّز قاعدة منفذ أو استيراد JSON لمقارنة القواعد الحالية بالمقترحة قبل التطبيق."
 
 #: apps/web/src/themes/v2/pages/xpanel/home.ts
 msgctxt "theme:v2"
@@ -2963,6 +3277,11 @@ msgctxt "theme:v2"
 msgid "No webhook delivery log has been read."
 msgstr "لم يُقرأ سجل تسليم webhook."
 
+#: apps/web/src/themes/v2/pages/xpanel/email/accounts.ts
+msgctxt "theme:v2"
+msgid "Not a Linux user"
+msgstr "ليس مستخدم Linux"
+
 #: apps/web/src/themes/v2/pages/xwhm/server/trusted-proxies.ts
 msgctxt "theme:v2"
 msgid "Not available here"
@@ -2992,6 +3311,11 @@ msgstr "غير ممنوح"
 msgctxt "theme:v2"
 msgid "Not in saved state"
 msgstr "غير موجودة في الحالة المحفوظة"
+
+#: apps/web/src/themes/v2/pages/xwhm/service-tools/web.ts
+msgctxt "theme:v2"
+msgid "Not reviewed"
+msgstr "لم يُراجع"
 
 #: apps/web/src/themes/v2/pages/xwhm/databases/index.ts
 msgctxt "theme:v2"
@@ -3088,6 +3412,11 @@ msgctxt "theme:v2"
 msgid "OCI runtime"
 msgstr "بيئة تشغيل OCI"
 
+#: apps/web/src/themes/v2/pages/xwhm/domains/index.ts
+msgctxt "theme:v2"
+msgid "of {total} domains"
+msgstr "من {total} نطاقات"
+
 #: apps/web/src/themes/v2/pages/xwhm/service-tools/ftp-log.ts
 msgctxt "theme:v2"
 msgid "Older"
@@ -3098,10 +3427,25 @@ msgctxt "theme:v2"
 msgid "One counter reading does not establish a workload trend."
 msgstr "قراءة واحدة للعداد لا تثبت اتجاه الحمل عبر الزمن."
 
+#: apps/web/src/themes/v2/pages/xwhm/service-tools/web.ts
+msgctxt "theme:v2"
+msgid "One engine serves the whole server, never one per site."
+msgstr "محرك واحد يخدم الخادم كله، وليس محركًا لكل موقع."
+
 #: apps/web/src/themes/v2/pages/xpanel/advanced/directives.ts
 msgctxt "theme:v2"
 msgid "One host name per line."
 msgstr "اسم مضيف واحد في كل سطر."
+
+#: apps/web/src/themes/v2/pages/xpanel/email/accounts.ts
+msgctxt "theme:v2"
+msgid "One login"
+msgstr "تسجيل دخول واحد"
+
+#: apps/web/src/themes/v2/pages/xwhm/domains/index.ts
+msgctxt "theme:v2"
+msgid "One per account"
+msgstr "نطاق واحد لكل حساب"
 
 #: apps/web/src/themes/v2/pages/xwhm/service-tools/web.ts
 msgctxt "theme:v2"
@@ -3153,6 +3497,16 @@ msgctxt "theme:v2"
 msgid "Only the reviewed addon domain and the listed related data may move to the new account."
 msgstr "يمكن نقل النطاق الإضافي المراجع والبيانات المرتبطة المدرجة فقط إلى الحساب الجديد."
 
+#: apps/web/src/themes/v2/pages/xpanel/observations/traffic.ts
+msgctxt "theme:v2"
+msgid "Only the selected domain is read. Other domains and the plan month total are not part of this observation."
+msgstr "يُقرأ النطاق المحدد فقط. النطاقات الأخرى وإجمالي شهر الخطة ليست جزءًا من هذه القراءة."
+
+#: apps/web/src/themes/v2/pages/xpanel/settings/team.ts
+msgctxt "theme:v2"
+msgid "Only the signed-in account owner can manage the team, and the plan must include it."
+msgstr "يمكن لمالك الحساب المسجل دخوله فقط إدارة الفريق، ويجب أن تتضمن الباقة هذه الميزة."
+
 #: apps/web/src/themes/v2/pages/xpanel/domains/site-settings.ts
 msgctxt "theme:v2"
 msgid "Open .htaccess editor"
@@ -3162,6 +3516,11 @@ msgstr "فتح محرر .htaccess"
 msgctxt "theme:v2"
 msgid "Open a folder from the file list."
 msgstr "افتح مجلدًا من قائمة الملفات."
+
+#: apps/web/src/themes/v2/pages/xpanel/settings/preferences.ts
+msgctxt "theme:v2"
+msgid "Open account preferences"
+msgstr "فتح تفضيلات الحساب"
 
 #: apps/web/src/themes/v2/pages/xwhm/server/terminal.ts
 msgctxt "theme:v2"
@@ -3208,12 +3567,17 @@ msgctxt "theme:v2"
 msgid "Open the zone editor"
 msgstr "فتح محرر المنطقة"
 
+#: apps/web/src/themes/v2/pages/xwhm/service-tools/web.ts
+msgctxt "theme:v2"
+msgid "OpenLiteSpeed is the saved engine. Its listener and per-site execution identity have not been observed."
+msgstr "المحرك المحفوظ هو OpenLiteSpeed. لم تُرصد منافذه المستمعة أو هوية تنفيذ كل موقع."
+
 #: apps/web/src/themes/v2/pages/xwhm/software/projects.ts
 msgctxt "theme:v2"
 msgid "Optional package mirror"
 msgstr "مرآة حزم اختيارية"
 
-#: apps/web/src/themes/v2/pages/xwhm/databases/index.ts apps/web/src/themes/v2/pages/xwhm/software/projects.ts apps/web/src/themes/v2/pages/xwhm/software/updates.ts
+#: apps/web/src/themes/v2/pages/xwhm/databases/index.ts apps/web/src/themes/v2/pages/xwhm/host/firewall.ts apps/web/src/themes/v2/pages/xwhm/software/projects.ts apps/web/src/themes/v2/pages/xwhm/software/updates.ts
 msgctxt "theme:v2"
 msgid "Origin"
 msgstr "المنشأ"
@@ -3227,6 +3591,11 @@ msgstr "أخرى"
 msgctxt "theme:v2"
 msgid "Other package managers running"
 msgstr "مديرو الحزم الآخرون قيد التشغيل"
+
+#: apps/web/src/themes/v2/pages/xpanel/settings/team.ts
+msgctxt "theme:v2"
+msgid "Owner only"
+msgstr "المالك فقط"
 
 #: apps/web/src/themes/v2/pages/xwhm/server/ips.ts
 msgctxt "theme:v2"
@@ -3343,6 +3712,11 @@ msgctxt "theme:v2"
 msgid "Pending packages"
 msgstr "الحزم المعلقة"
 
+#: apps/web/src/themes/v2/pages/xwhm/service-tools/web.ts
+msgctxt "theme:v2"
+msgid "Per-site handler"
+msgstr "معالج كل موقع"
+
 #: apps/web/src/themes/v2/pages/xwhm/software/catalog.ts
 msgctxt "theme:v2"
 msgid "Perl modules"
@@ -3368,6 +3742,11 @@ msgctxt "theme:v2"
 msgid "PHP for this site"
 msgstr "PHP لهذا الموقع"
 
+#: apps/web/src/themes/v2/pages/xwhm/software/projects.ts
+msgctxt "theme:v2"
+msgid "PHP of the site"
+msgstr "PHP الخاص بالموقع"
+
 #: apps/web/src/themes/v2/pages/xpanel/software/php.ts
 msgctxt "theme:v2"
 msgid "PHP-FPM keeps a pool for the domain. CGI starts a process for each request. Other handlers require server configuration and are not offered as account changes here."
@@ -3387,6 +3766,11 @@ msgstr "حزمة phpMyAdmin"
 msgctxt "theme:v2"
 msgid "phpPgAdmin package"
 msgstr "حزمة phpPgAdmin"
+
+#: apps/web/src/themes/v2/pages/xwhm/accounts/create.ts
+msgctxt "theme:v2"
+msgid "Plan and owner capacity"
+msgstr "سعة الخطة والمالك"
 
 #: apps/web/src/themes/v2/pages/xwhm/accounts/create.ts
 msgctxt "theme:v2"
@@ -3433,6 +3817,11 @@ msgctxt "theme:v2"
 msgid "Policy is rendered desired configuration. Host files are read separately; running daemon flags are not observed here."
 msgstr "السياسة هي إعدادات الحالة المطلوبة المولّدة. تُقرأ ملفات الخادم على حدة؛ لا تُرصد هنا خيارات تشغيل البرامج الخدمية."
 
+#: apps/web/src/themes/v2/pages/xwhm/host/php.ts
+msgctxt "theme:v2"
+msgid "Pool settings"
+msgstr "إعدادات المجمّع"
+
 #: apps/web/src/themes/v2/pages/xwhm/service-tools/details.ts apps/web/src/themes/v2/pages/xwhm/software/containers.ts
 msgctxt "theme:v2"
 msgid "Ports"
@@ -3457,6 +3846,11 @@ msgstr "معاينة التوجيهات"
 msgctxt "theme:v2"
 msgid "Preview is not a native syntax check. Saved configuration does not verify the page served externally; overrides and rewrites may change it."
 msgstr "المعاينة ليست فحص صياغة على الخادم. لا تتحقق الإعدادات المحفوظة من الصفحة المقدمة خارجيًا؛ فقد تغيّرها التجاوزات وقواعد إعادة الكتابة."
+
+#: apps/web/src/themes/v2/pages/xwhm/domains/index.ts
+msgctxt "theme:v2"
+msgid "Primary domains"
+msgstr "النطاقات الأساسية"
 
 #: apps/web/src/themes/v2/pages/xwhm/service-tools/details.ts
 msgctxt "theme:v2"
@@ -3498,7 +3892,7 @@ msgctxt "theme:v2"
 msgid "Project dependencies"
 msgstr "اعتمادات المشروع"
 
-#: apps/web/src/themes/v2/pages/xwhm/service-tools/web.ts
+#: apps/web/src/themes/v2/pages/xwhm/plans/editor.ts apps/web/src/themes/v2/pages/xwhm/service-tools/web.ts
 msgctxt "theme:v2"
 msgid "Proposed"
 msgstr "المقترح"
@@ -3512,6 +3906,11 @@ msgstr "المقترح · مسودتك"
 msgctxt "theme:v2"
 msgid "Proposed rules"
 msgstr "القواعد المقترحة"
+
+#: apps/web/src/themes/v2/pages/xpanel/domains/site-settings.ts
+msgctxt "theme:v2"
+msgid "Protect a folder, or the whole document root, on the Directory privacy page."
+msgstr "احم مجلدا أو جذر المستندات بالكامل من صفحة خصوصية المجلدات."
 
 #: apps/web/src/themes/v2/pages/xwhm/databases/index.ts
 msgctxt "theme:v2"
@@ -3527,6 +3926,11 @@ msgstr "البروتوكول"
 msgctxt "theme:v2"
 msgid "Provider credentials, domain links and separately observed zone state."
 msgstr "بيانات اعتماد المزود وروابط النطاقات وحالة المنطقة المقروءة بشكل منفصل."
+
+#: apps/web/src/themes/v2/pages/xwhm/service-tools/web.ts
+msgctxt "theme:v2"
+msgid "Proxy configuration reference"
+msgstr "مرجع إعداد الوكيل"
 
 #: apps/web/src/themes/v2/pages/xpanel/security/tools.ts
 msgctxt "theme:v2"
@@ -3548,7 +3952,7 @@ msgctxt "theme:v2"
 msgid "pure-ftpd settings"
 msgstr "إعدادات pure-ftpd"
 
-#: apps/web/src/themes/v2/pages/xpanel/store/index.ts
+#: apps/web/src/themes/v2/pages/xpanel/store/index.ts apps/web/src/themes/v2/pages/xwhm/host/firewall.ts
 msgctxt "theme:v2"
 msgid "Purpose"
 msgstr "الغرض"
@@ -3608,6 +4012,11 @@ msgctxt "theme:v2"
 msgid "Read and save the reviewed network list before requesting activation."
 msgstr "اقرأ قائمة الشبكات المراجعة واحفظها قبل طلب التفعيل."
 
+#: apps/web/src/themes/v2/pages/xwhm/host/firewall.ts
+msgctxt "theme:v2"
+msgid "Read back from this session"
+msgstr "إعادة القراءة من هذه الجلسة"
+
 #: apps/web/src/themes/v2/pages/xpanel/observations/logs.ts
 msgctxt "theme:v2"
 msgid "Read bounded access and error tails for domains owned by this account."
@@ -3627,6 +4036,11 @@ msgstr "اقرأ صحة الإعدادات لفحص توفر الإصلاح ال
 msgctxt "theme:v2"
 msgid "Read containers"
 msgstr "قراءة الحاويات"
+
+#: apps/web/src/themes/v2/pages/xwhm/software/projects.ts
+msgctxt "theme:v2"
+msgid "Read dependency metadata and run Composer as the account of a saved PHP site."
+msgstr "اقرأ بيانات التبعيات وشغّل Composer بحساب موقع PHP محفوظ."
 
 #: apps/web/src/themes/v2/pages/xwhm/software/projects.ts
 msgctxt "theme:v2"
@@ -3733,10 +4147,20 @@ msgctxt "theme:v2"
 msgid "Read the account’s stored FTP service users and manage only supported service-user operations."
 msgstr "اقرأ مستخدمي خدمة FTP المحفوظين للحساب وأدر عمليات مستخدم الخدمة المدعومة فقط."
 
+#: apps/web/src/themes/v2/pages/xwhm/service-tools/web.ts
+msgctxt "theme:v2"
+msgid "Read the actual reconcile result and resulting generation."
+msgstr "اقرأ النتيجة الفعلية لتطبيق الإعدادات والجيل الناتج."
+
 #: apps/web/src/themes/v2/pages/xpanel/observations/traffic.ts
 msgctxt "theme:v2"
 msgid "Read the bounded access log in the site log workspace. Archived log downloads have not been qualified."
 msgstr "اقرأ سجل الوصول المحدود النطاق في مساحة سجلات الموقع. لم يُتحقق من جاهزية تنزيل السجلات المؤرشفة."
+
+#: apps/web/src/themes/v2/pages/xwhm/service-tools/web.ts
+msgctxt "theme:v2"
+msgid "Read the complete saved settings and review the draft difference."
+msgstr "اقرأ الإعدادات المحفوظة كاملة وراجع اختلافات المسودة."
 
 #: apps/web/src/themes/v2/pages/xwhm/monitoring/snapshots.ts
 msgctxt "theme:v2"
@@ -3812,11 +4236,6 @@ msgstr "حالة الاستعادة"
 msgctxt "theme:v2"
 msgid "Refresh package lists"
 msgstr "تحديث قوائم الحزم"
-
-#: apps/web/src/themes/v2/pages/xwhm/server/sharing-nodes.ts
-msgctxt "theme:v2"
-msgid "Link servers and push settings between them, with every link proved both ways."
-msgstr "اربط الخوادم وادفع الإعدادات بينها، مع إثبات كل ربط في الاتجاهين."
 
 #: apps/web/src/themes/v2/pages/xwhm/software/projects.ts
 msgctxt "theme:v2"
@@ -3908,20 +4327,50 @@ msgctxt "theme:v2"
 msgid "Repository version"
 msgstr "إصدار المستودع"
 
+#: apps/web/src/themes/v2/pages/xwhm/service-tools/web.ts
+msgctxt "theme:v2"
+msgid "Request flow"
+msgstr "مسار الطلب"
+
 #: apps/web/src/themes/v2/pages/xwhm/server/setup.ts
 msgctxt "theme:v2"
 msgid "Request flow preview"
 msgstr "معاينة مسار الطلب"
+
+#: apps/web/src/themes/v2/pages/xwhm/service-tools/web.ts
+msgctxt "theme:v2"
+msgid "Request path"
+msgstr "مسار الطلب"
+
+#: apps/web/src/themes/v2/pages/xpanel/software/php.ts
+msgctxt "theme:v2"
+msgid "requests"
+msgstr "طلبات"
+
+#: apps/web/src/themes/v2/pages/xwhm/service-tools/web.ts
+msgctxt "theme:v2"
+msgid "Required change workflow. No step is marked passed by this explanatory reference."
+msgstr "مسار العمل المطلوب لإجراء التغيير. لا يُعلن هذا المرجع التوضيحي نجاح أي خطوة."
 
 #: apps/web/src/themes/v2/pages/xwhm/software/projects.ts
 msgctxt "theme:v2"
 msgid "Requirement"
 msgstr "المتطلب"
 
+#: apps/web/src/themes/v2/pages/xpanel/software/php.ts
+msgctxt "theme:v2"
+msgid "Requires server configuration"
+msgstr "يتطلب إعدادًا على الخادم"
+
 #: apps/web/src/themes/v2/pages/xwhm/server/ips.ts
 msgctxt "theme:v2"
 msgid "Reseller delegation unavailable here"
 msgstr "تفويض العنوان للموزع غير متاح هنا"
+
+#: apps/web/src/themes/v2/pages/xwhm/accounts/list.ts apps/web/src/themes/v2/pages/xwhm/overview/index.ts
+msgctxt "theme:v2"
+msgid "Resellers see only the accounts they own."
+msgstr "يرى الموزعون الحسابات التي يملكونها فقط."
 
 #: apps/web/src/themes/v2/pages/xwhm/service-tools/details.ts
 msgctxt "theme:v2"
@@ -3973,6 +4422,11 @@ msgctxt "theme:v2"
 msgid "Restoring configuration does not imply that account databases, mail or other live user data were restored."
 msgstr "استعادة الإعدادات لا تعني استعادة قواعد بيانات الحسابات أو البريد أو بيانات المستخدمين الفعلية الأخرى."
 
+#: apps/web/src/themes/v2/pages/xwhm/overview/index.ts
+msgctxt "theme:v2"
+msgid "Review {account}"
+msgstr "مراجعة {account}"
+
 #: apps/web/src/themes/v2/pages/xwhm/lifecycle/upgrade.ts
 msgctxt "theme:v2"
 msgid "Review a verified release, run host preflight and confirm before changing the control plane."
@@ -3988,7 +4442,7 @@ msgctxt "theme:v2"
 msgid "Review all six setup sections while retaining the server’s actual saved values and guarded apply workflow."
 msgstr "راجع أقسام الإعداد الستة مع الحفاظ على قيم الخادم المحفوظة الفعلية ومسار التطبيق المحمي."
 
-#: apps/web/src/themes/v2/components/change-review.ts apps/web/src/themes/v2/pages/xwhm/server/setup.ts
+#: apps/web/src/themes/v2/components/change-review.ts apps/web/src/themes/v2/pages/xwhm/plans/editor.ts apps/web/src/themes/v2/pages/xwhm/server/setup.ts
 msgctxt "theme:v2"
 msgid "Review and apply"
 msgstr "مراجعة وتطبيق"
@@ -4003,7 +4457,7 @@ msgctxt "theme:v2"
 msgid "Review application sources, installation choices and current operation state."
 msgstr "راجع مصادر التطبيقات وخيارات التثبيت وحالة العملية الحالية."
 
-#: apps/web/src/themes/v2/pages/xpanel/domains/site-settings.ts
+#: apps/web/src/themes/v2/pages/xpanel/domains/site-settings.ts apps/web/src/themes/v2/pages/xwhm/plans/editor.ts
 msgctxt "theme:v2"
 msgid "Review changes"
 msgstr "مراجعة التغييرات"
@@ -4052,6 +4506,11 @@ msgstr "راجع حالة الحزم المرصودة وعاين التغيير�
 msgctxt "theme:v2"
 msgid "Review observed system services and their start-at-boot state."
 msgstr "راجع خدمات النظام المرصودة وحالة تشغيلها عند الإقلاع."
+
+#: apps/web/src/themes/v2/pages/xwhm/service-tools/web.ts
+msgctxt "theme:v2"
+msgid "Review pending change"
+msgstr "مراجعة التغيير المعلَّق"
 
 #: apps/web/src/themes/v2/pages/xwhm/host/firewall.ts
 msgctxt "theme:v2"
@@ -4113,6 +4572,11 @@ msgctxt "theme:v2"
 msgid "Rewriting must remain on. Redirects must not end in a protected file type."
 msgstr "يجب أن تبقى إعادة الكتابة مفعّلة. يجب ألا تنتهي وجهات إعادة التوجيه بنوع ملف محمي."
 
+#: apps/web/src/themes/v2/pages/xpanel/settings/team.ts
+msgctxt "theme:v2"
+msgid "Role limit"
+msgstr "حد الأدوار"
+
 #: apps/web/src/themes/v2/pages/xwhm/software/catalog.ts
 msgctxt "theme:v2"
 msgid "Roll back"
@@ -4138,7 +4602,7 @@ msgctxt "theme:v2"
 msgid "Rows"
 msgstr "الصفوف"
 
-#: apps/web/src/themes/v2/pages/xwhm/lifecycle/backups.ts apps/web/src/themes/v2/pages/xwhm/lifecycle/destinations.ts
+#: apps/web/src/themes/v2/pages/xwhm/lifecycle/destination-manager.ts
 msgctxt "theme:v2"
 msgid "Rsync"
 msgstr "Rsync"
@@ -4157,6 +4621,16 @@ msgstr "تُفحص القواعد بترتيبها المحفوظ؛ تُطبّق
 msgctxt "theme:v2"
 msgid "Rules in the draft"
 msgstr "القواعد في المسودة"
+
+#: apps/web/src/themes/v2/pages/xwhm/host/firewall.ts
+msgctxt "theme:v2"
+msgid "Rules in this list"
+msgstr "القواعد في هذه القائمة"
+
+#: apps/web/src/themes/v2/pages/xwhm/software/projects.ts
+msgctxt "theme:v2"
+msgid "Run a built Go executable or Java archive as one isolated service of an account."
+msgstr "شغّل ملف Go تنفيذيًا أو أرشيف Java كخدمة معزولة واحدة لحساب."
 
 #: apps/web/src/themes/v2/pages/xpanel/services/cron.ts
 msgctxt "theme:v2"
@@ -4198,6 +4672,11 @@ msgctxt "theme:v2"
 msgid "Runtime"
 msgstr "بيئة التشغيل"
 
+#: apps/web/src/themes/v2/pages/xwhm/service-tools/web.ts
+msgctxt "theme:v2"
+msgid "Runtime not observed"
+msgstr "لم تُرصد حالة التشغيل"
+
 #: apps/web/src/themes/v2/pages/xwhm/databases/index.ts
 msgctxt "theme:v2"
 msgid "Runtime settings"
@@ -4208,7 +4687,7 @@ msgctxt "theme:v2"
 msgid "Runtimes have not been read."
 msgstr "لم تُقرأ بيئات التشغيل بعد."
 
-#: apps/web/src/themes/v2/pages/xwhm/lifecycle/backups.ts apps/web/src/themes/v2/pages/xwhm/lifecycle/destinations.ts
+#: apps/web/src/themes/v2/pages/xwhm/lifecycle/destination-manager.ts
 msgctxt "theme:v2"
 msgid "S3"
 msgstr "S3"
@@ -4248,7 +4727,17 @@ msgctxt "theme:v2"
 msgid "Saved and running"
 msgstr "المحفوظ والفعلي أثناء التشغيل"
 
-#: apps/web/src/themes/v2/pages/xwhm/databases/index.ts
+#: apps/web/src/themes/v2/pages/xwhm/service-tools/web.ts
+msgctxt "theme:v2"
+msgid "Saved Apache MPM: {mpm}. The saved choice does not verify the identity of a serving process."
+msgstr "وحدة Apache MPM المحفوظة: {mpm}. لا يثبت الاختيار المحفوظ هوية العملية التي تخدم الطلبات."
+
+#: apps/web/src/themes/v2/pages/xwhm/service-tools/web.ts
+msgctxt "theme:v2"
+msgid "Saved backend engine"
+msgstr "محرك الخدمة الخلفية المحفوظ"
+
+#: apps/web/src/themes/v2/pages/xwhm/databases/index.ts apps/web/src/themes/v2/pages/xwhm/service-tools/web.ts
 msgctxt "theme:v2"
 msgid "Saved configuration"
 msgstr "الإعداد المحفوظ"
@@ -4263,10 +4752,20 @@ msgctxt "theme:v2"
 msgid "Saved configuration by account"
 msgstr "الإعدادات المحفوظة حسب الحساب"
 
+#: apps/web/src/themes/v2/pages/xwhm/service-tools/web.ts
+msgctxt "theme:v2"
+msgid "Saved configuration comparison"
+msgstr "مقارنة الإعدادات المحفوظة"
+
 #: apps/web/src/themes/v2/pages/xwhm/host/php.ts
 msgctxt "theme:v2"
 msgid "Saved configuration does not establish running pool state."
 msgstr "لا تثبت الإعدادات المحفوظة حالة تشغيل المجمعات."
+
+#: apps/web/src/themes/v2/pages/xwhm/host/php.ts apps/web/src/themes/v2/pages/xwhm/service-tools/web.ts
+msgctxt "theme:v2"
+msgid "Saved configuration when this page opened. Reload after changes to refresh this reference."
+msgstr "الإعداد المحفوظ عند فتح هذه الصفحة. أعد تحميل الصفحة بعد التغييرات لتحديث هذا المرجع."
 
 #: apps/web/src/themes/v2/pages/xwhm/databases/index.ts
 msgctxt "theme:v2"
@@ -4282,6 +4781,11 @@ msgstr "إعدادات قواعد البيانات المحفوظة حسب ال�
 msgctxt "theme:v2"
 msgid "Saved databases"
 msgstr "قواعد البيانات المحفوظة"
+
+#: apps/web/src/themes/v2/pages/xwhm/host/php.ts
+msgctxt "theme:v2"
+msgid "Saved domain handlers have not been read."
+msgstr "لم تُقرأ معالجات النطاقات المحفوظة."
 
 #: apps/web/src/themes/v2/pages/xwhm/service-tools/details.ts
 msgctxt "theme:v2"
@@ -4343,6 +4847,11 @@ msgctxt "theme:v2"
 msgid "Saved policy and its running host readback remain separate sources."
 msgstr "تبقى السياسة المحفوظة وقراءة حالتها الفعلية على الخادم مصدرين منفصلين."
 
+#: apps/web/src/themes/v2/pages/xwhm/host/firewall.ts
+msgctxt "theme:v2"
+msgid "Saved rules"
+msgstr "القواعد المحفوظة"
+
 #: apps/web/src/themes/v2/pages/xwhm/lifecycle/backups.ts
 msgctxt "theme:v2"
 msgid "Saved schedule and retention have not been read. No scheduling or native archive verification is assumed."
@@ -4352,6 +4861,11 @@ msgstr "لم تُقرأ إعدادات الجدولة والاحتفاظ الم�
 msgctxt "theme:v2"
 msgid "Saved server identity"
 msgstr "هوية الخادم المحفوظة"
+
+#: apps/web/src/themes/v2/pages/xwhm/service-tools/web.ts
+msgctxt "theme:v2"
+msgid "Saved settings have not been read."
+msgstr "لم تُقرأ الإعدادات المحفوظة."
 
 #: apps/web/src/themes/v2/pages/xwhm/service-tools/web.ts
 msgctxt "theme:v2"
@@ -4510,6 +5024,16 @@ msgstr "افصل الامتدادات بمسافات، مثل .md .markdown."
 
 #: apps/web/src/themes/v2/pages/xpanel/advanced/directives.ts
 msgctxt "theme:v2"
+msgid "Separate extensions with spaces, such as .pl .cgi."
+msgstr "افصل بين الامتدادات بمسافات، مثل .pl .cgi."
+
+#: apps/web/src/themes/v2/pages/xwhm/domains/index.ts
+msgctxt "theme:v2"
+msgid "Separate sites, each with its own document root"
+msgstr "مواقع مستقلة، لكل منها جذر مستندات خاص"
+
+#: apps/web/src/themes/v2/pages/xpanel/advanced/directives.ts
+msgctxt "theme:v2"
 msgid "Server default (no managed rule)"
 msgstr "افتراضي الخادم (لا توجد قاعدة مُدارة)"
 
@@ -4552,6 +5076,11 @@ msgstr "مدة تشغيل الخادم (ثوانٍ)"
 msgctxt "theme:v2"
 msgid "Server-only schemas are not attributed to an account."
 msgstr "لا تُنسب المخططات الموجودة على الخادم فقط إلى أي حساب."
+
+#: apps/web/src/themes/v2/pages/xpanel/software/php.ts
+msgctxt "theme:v2"
+msgid "servers"
+msgstr "خوادم"
 
 #: apps/web/src/themes/v2/pages/xwhm/service-tools/details.ts
 msgctxt "theme:v2"
@@ -4613,6 +5142,11 @@ msgctxt "theme:v2"
 msgid "Session scope"
 msgstr "نطاق الجلسة"
 
+#: apps/web/src/themes/v2/pages/xpanel/settings/team.ts
+msgctxt "theme:v2"
+msgid "Set by the member through a single-use password link. You never see or choose their password."
+msgstr "يحددها العضو من خلال رابط كلمة مرور يستخدم مرة واحدة. لا يمكنك رؤية كلمة مروره أو اختيارها."
+
 #: apps/web/src/themes/v2/pages/xpanel/advanced/directives.ts
 msgctxt "theme:v2"
 msgid "Set the response content type for file extensions on this domain."
@@ -4628,7 +5162,7 @@ msgctxt "theme:v2"
 msgid "Setting or counter"
 msgstr "الإعداد أو العداد"
 
-#: apps/web/src/themes/v2/pages/xwhm/lifecycle/backups.ts apps/web/src/themes/v2/pages/xwhm/lifecycle/destinations.ts
+#: apps/web/src/themes/v2/pages/xwhm/lifecycle/destination-manager.ts
 msgctxt "theme:v2"
 msgid "SFTP"
 msgstr "SFTP"
@@ -4647,6 +5181,11 @@ msgstr "إظهار كلمات المرور"
 msgctxt "theme:v2"
 msgid "Show the file list"
 msgstr "إظهار قائمة الملفات"
+
+#: apps/web/src/themes/v2/pages/xpanel/email/accounts.ts
+msgctxt "theme:v2"
+msgid "Show users with"
+msgstr "إظهار المستخدمين الذين لديهم"
 
 #: apps/web/src/themes/v2/pages/xpanel/software/htaccess.ts
 msgctxt "theme:v2"
@@ -4683,6 +5222,11 @@ msgctxt "theme:v2"
 msgid "Sign-on uses a temporary database administrator and opens only after every server requirement passes. No password is shown."
 msgstr "يستخدم تسجيل الدخول مسؤول قاعدة بيانات مؤقتًا ولا يُفتح إلا بعد اجتياز جميع متطلبات الخادم. لا تُعرض كلمة مرور."
 
+#: apps/web/src/themes/v2/pages/xpanel/settings/team.ts
+msgctxt "theme:v2"
+msgid "Sign-out"
+msgstr "تسجيل الخروج"
+
 #: apps/web/src/themes/v2/pages/xpanel/security/tools.ts
 msgctxt "theme:v2"
 msgid "Signatures"
@@ -4707,6 +5251,11 @@ msgstr "تسجيل خروج"
 msgctxt "theme:v2"
 msgid "Single sign-on"
 msgstr "الدخول الموحد"
+
+#: apps/web/src/themes/v2/pages/xwhm/service-tools/web.ts
+msgctxt "theme:v2"
+msgid "Site application"
+msgstr "تطبيق الموقع"
 
 #: apps/web/src/themes/v2/pages/xwhm/software/projects.ts
 msgctxt "theme:v2"
@@ -4768,7 +5317,7 @@ msgctxt "theme:v2"
 msgid "Source accounts"
 msgstr "حسابات المصدر"
 
-#: apps/web/src/themes/v2/pages/xwhm/lifecycle/transfers.ts
+#: apps/web/src/themes/v2/pages/xwhm/lifecycle/client-templates.ts
 msgctxt "theme:v2"
 msgid "Source UID"
 msgstr "UID في المصدر"
@@ -4778,10 +5327,20 @@ msgctxt "theme:v2"
 msgid "Spam settings have not been read."
 msgstr "لم تُقرأ إعدادات البريد المزعج."
 
+#: apps/web/src/themes/v2/pages/xwhm/domains/index.ts
+msgctxt "theme:v2"
+msgid "SSL certificates"
+msgstr "شهادات SSL"
+
 #: apps/web/src/themes/v2/pages/xpanel/software/htaccess.ts
 msgctxt "theme:v2"
 msgid "Stack"
 msgstr "المكدس"
+
+#: apps/web/src/themes/v2/pages/xwhm/host/firewall.ts
+msgctxt "theme:v2"
+msgid "Staged by {actor}: {current} current rules -> {proposed} proposed rules (+{added} / ~{changed} / -{removed})."
+msgstr "جهّزها {actor}: {current} قواعد حالية -> {proposed} قواعد مقترحة (+{added} / ~{changed} / -{removed})."
 
 #: apps/web/src/themes/v2/pages/xwhm/software/containers.ts
 msgctxt "theme:v2"
@@ -4818,7 +5377,7 @@ msgctxt "theme:v2"
 msgid "Status interval (seconds)"
 msgstr "فترة العدادات (ثوانٍ)"
 
-#: apps/web/src/themes/v2/layouts/wizard-page.ts
+#: apps/web/src/themes/v2/layouts/wizard-page.ts apps/web/src/themes/v2/pages/xwhm/server/setup.ts
 msgctxt "theme:v2"
 msgid "Step {current} of {total}"
 msgstr "الخطوة {current} من {total}"
@@ -4883,7 +5442,7 @@ msgctxt "theme:v2"
 msgid "Summary counts cover the whole journal window and ignore search filters. Client addresses are shown as logged."
 msgstr "تشمل أعداد الملخص نافذة السجل كاملة وتتجاهل مرشحات البحث. تُعرض عناوين العملاء كما سُجلت."
 
-#: apps/web/src/themes/v2/pages/xwhm/activity/audit.ts apps/web/src/themes/v2/pages/xwhm/panel/data.ts
+#: apps/web/src/themes/v2/pages/xwhm/activity/audit.ts apps/web/src/themes/v2/pages/xwhm/activity/jobs.ts apps/web/src/themes/v2/pages/xwhm/panel/data.ts
 msgctxt "theme:v2"
 msgid "Superseded"
 msgstr "استُبدل"
@@ -4897,6 +5456,11 @@ msgstr "مدعوم من الوحدة"
 msgctxt "theme:v2"
 msgid "Supported operations"
 msgstr "العمليات المدعومة"
+
+#: apps/web/src/themes/v2/pages/xpanel/settings/team.ts
+msgctxt "theme:v2"
+msgid "Suspending or deleting a member, or removing a role, signs that member out."
+msgstr "يؤدي إيقاف العضو أو حذفه أو إزالة أحد أدواره إلى تسجيل خروجه."
 
 #: apps/web/src/themes/v2/pages/xwhm/databases/index.ts
 msgctxt "theme:v2"
@@ -4947,6 +5511,11 @@ msgstr "الفحص والتطبيق"
 msgctxt "theme:v2"
 msgid "Test before the switch"
 msgstr "الاختبار قبل التبديل"
+
+#: apps/web/src/themes/v2/pages/xwhm/service-tools/web.ts
+msgctxt "theme:v2"
+msgid "Test gate"
+msgstr "التحقق قبل التطبيق"
 
 #: apps/web/src/themes/v2/pages/xpanel/software/htaccess.ts
 msgctxt "theme:v2"
@@ -5043,6 +5612,11 @@ msgctxt "theme:v2"
 msgid "The certificate names are chosen by the server from the owned domain. Arbitrary names and wildcard requests are not submitted by this form."
 msgstr "يختار الخادم أسماء الشهادة من النطاق التابع للحساب. لا يرسل هذا النموذج أسماء اعتباطية أو طلبات شهادات شاملة."
 
+#: apps/web/src/themes/v2/pages/xwhm/server/setup.ts apps/web/src/themes/v2/pages/xwhm/service-tools/web.ts
+msgctxt "theme:v2"
+msgid "The child serving a site switches to its account before reading a file."
+msgstr "تنتقل العملية التي تخدم الموقع إلى حسابه قبل قراءة أي ملف."
+
 #: apps/web/src/themes/v2/pages/xwhm/databases/index.ts
 msgctxt "theme:v2"
 msgid "The client connection is independent of MariaDB server configuration."
@@ -5068,6 +5642,16 @@ msgctxt "theme:v2"
 msgid "The dedicated ingress verifies recovery and management access independently of saved settings."
 msgstr "تتحقق واجهة استقبال الاتصالات المخصصة من إمكانية الاسترداد والوصول الإداري بشكل مستقل عن الإعدادات المحفوظة."
 
+#: apps/web/src/themes/v2/pages/xwhm/accounts/create.ts
+msgctxt "theme:v2"
+msgid "The default IPv4 of the server, shared with other accounts."
+msgstr "عنوان IPv4 الافتراضي للخادم، مشترك مع حسابات أخرى."
+
+#: apps/web/src/themes/v2/pages/xwhm/service-tools/web.ts
+msgctxt "theme:v2"
+msgid "The domain handler, PHP pool or application process, account UID and served response require separate runtime evidence."
+msgstr "يلزم دليل منفصل من التشغيل الفعلي للتحقق من معالج النطاق، أو مجموعة عمليات PHP أو عملية التطبيق، ومعرّف مستخدم الحساب UID، والاستجابة المقدَّمة."
+
 #: apps/web/src/themes/v2/layouts/editor-page.ts
 msgctxt "theme:v2"
 msgid "The draft passed its test. Saving writes exactly the tested draft."
@@ -5077,6 +5661,11 @@ msgstr "اجتازت المسودة اختبارها. يكتب الحفظ الم
 msgctxt "theme:v2"
 msgid "The form shows stored settings. It does not claim that a pool is running or that saved and running values match."
 msgstr "يعرض النموذج الإعدادات المحفوظة. لا يفيد بأن مجمعًا يعمل أو أن القيم المحفوظة تطابق قيم التشغيل."
+
+#: apps/web/src/themes/v2/pages/xwhm/service-tools/web.ts
+msgctxt "theme:v2"
+msgid "The intended edge forwards site requests to the loopback backend. Public listeners and generated configuration have not been observed here."
+msgstr "توجّه واجهة الاتصال طلبات المواقع إلى الخدمة الخلفية على عنوان الحلقة المحلية وفق البنية المقصودة. لم تُرصد هنا المنافذ العامة المستمعة أو الإعدادات المولَّدة."
 
 #: apps/web/src/themes/v2/pages/xpanel/security/account.ts
 msgctxt "theme:v2"
@@ -5097,6 +5686,11 @@ msgstr "لم تُجر مقارنة بين الملف الفعلي والمسود
 msgctxt "theme:v2"
 msgid "The managed file has not been read."
 msgstr "لم يُقرأ الملف المُدار."
+
+#: apps/web/src/themes/v2/pages/xwhm/accounts/create.ts
+msgctxt "theme:v2"
+msgid "The next unallocated IPv4 that this plan may use."
+msgstr "أول عنوان IPv4 غير مخصص تسمح به هذه الخطة."
 
 #: apps/web/src/themes/v2/pages/xpanel/observations/traffic.ts
 msgctxt "theme:v2"
@@ -5142,6 +5736,16 @@ msgstr "يأتي الكتالوج المراجع ضمن هذا الإصدار. �
 msgctxt "theme:v2"
 msgid "The row editor validates the name, type, content, TTL and priority before saving the zone."
 msgstr "يتحقق محرر الصف من الاسم والنوع والمحتوى وTTL والأولوية قبل حفظ المنطقة."
+
+#: apps/web/src/themes/v2/pages/xpanel/email/accounts.ts
+msgctxt "theme:v2"
+msgid "The same user@domain and password for every service you turn on."
+msgstr "نفس user@domain وكلمة المرور لكل خدمة تفعّلها."
+
+#: apps/web/src/themes/v2/pages/xwhm/server/setup.ts
+msgctxt "theme:v2"
+msgid "The saved choice has not been read."
+msgstr "لم يُقرأ الاختيار المحفوظ."
 
 #: apps/web/src/themes/v2/pages/xpanel/services/dns.ts
 msgctxt "theme:v2"
@@ -5218,6 +5822,11 @@ msgctxt "theme:v2"
 msgid "These saved display settings belong to the current signed-in administrator or reseller. Server defaults are managed on their own pages."
 msgstr "تخص إعدادات العرض المحفوظة هذه المسؤول أو الموزع المسجّل دخوله حاليًا. تُدار إعدادات الخادم الافتراضية في صفحاتها الخاصة."
 
+#: apps/web/src/themes/v2/pages/xwhm/security/overview.ts
+msgctxt "theme:v2"
+msgid "These settings are read and changed on Panel access."
+msgstr "تُقرأ هذه الإعدادات وتُغيَّر من صفحة الوصول إلى اللوحة."
+
 #: apps/web/src/themes/v2/pages/xpanel/operations/ftp.ts
 msgctxt "theme:v2"
 msgid "This changes mailbox storage only. It is not an FTP disk quota."
@@ -5272,6 +5881,11 @@ msgstr "تدير هذه الصفحة جذر المستندات فقط. تتطل�
 msgctxt "theme:v2"
 msgid "This route is not qualified for file changes. The editor and workflow remain visible, but no file operation is started."
 msgstr "هذا المسار غير مؤهل لتغيير الملفات. يبقى المحرر ومسار العمل ظاهرين، لكن لا تبدأ أي عملية على الملفات."
+
+#: apps/web/src/themes/v2/pages/xwhm/overview/index.ts
+msgctxt "theme:v2"
+msgid "This server runs {version}."
+msgstr "هذا الخادم يعمل بالإصدار {version}."
 
 #: apps/web/src/themes/v2/pages/xwhm/service-tools/details.ts
 msgctxt "theme:v2"
@@ -5363,7 +5977,7 @@ msgctxt "theme:v2"
 msgid "Transfer account"
 msgstr "نقل حساب"
 
-#: apps/web/src/themes/v2/pages/xwhm/lifecycle/transfers.ts
+#: apps/web/src/themes/v2/pages/xwhm/lifecycle/client-templates.ts apps/web/src/themes/v2/pages/xwhm/lifecycle/transfers.ts
 msgctxt "theme:v2"
 msgid "Transfer review"
 msgstr "مراجعة النقل"
@@ -5433,6 +6047,16 @@ msgctxt "theme:v2"
 msgid "Unlimited child lifetime"
 msgstr "عمر غير محدود للعملية الفرعية"
 
+#: apps/web/src/themes/v2/pages/xwhm/databases/index.ts
+msgctxt "theme:v2"
+msgid "Unset settings retain server defaults and secrets are never read."
+msgstr "تحتفظ الإعدادات غير المضبوطة بقيم الخادم الافتراضية ولا تُقرأ الأسرار أبدًا."
+
+#: apps/web/src/themes/v2/pages/xpanel/settings/team.ts
+msgctxt "theme:v2"
+msgid "Up to 7 members can hold a role. Suspended members still count."
+msgstr "يمكن إسناد دور إلى 7 أعضاء كحد أقصى. ويحتسب الأعضاء الموقوفون ضمن هذا الحد."
+
 #: apps/web/src/themes/v2/pages/xwhm/software/updates.ts
 msgctxt "theme:v2"
 msgid "Update plan"
@@ -5442,6 +6066,11 @@ msgstr "خطة التحديث"
 msgctxt "theme:v2"
 msgid "Update review"
 msgstr "مراجعة التحديث"
+
+#: apps/web/src/themes/v2/pages/xwhm/overview/index.ts
+msgctxt "theme:v2"
+msgid "Upgrade {version} is available."
+msgstr "الترقية {version} متاحة."
 
 #: apps/web/src/themes/v2/pages/xwhm/lifecycle/upgrade.ts
 msgctxt "theme:v2"
@@ -5483,6 +6112,21 @@ msgctxt "theme:v2"
 msgid "Uptime"
 msgstr "مدة التشغيل"
 
+#: apps/web/src/themes/v2/pages/xwhm/accounts/list.ts
+msgctxt "theme:v2"
+msgid "Usage / configured plan limit. An account the host did not report shows Not read."
+msgstr "الاستخدام / حد الخطة المضبوط. الحساب الذي لم يبلّغ عنه الخادم يظهر «غير مقروء»."
+
+#: apps/web/src/themes/v2/pages/xwhm/accounts/list.ts
+msgctxt "theme:v2"
+msgid "Usage / limit in force: the package value or the account’s own limit. Only disk and bandwidth usage are read."
+msgstr "الاستخدام / الحد المعمول به: قيمة الباقة أو حد الحساب الخاص. يُقرأ استخدام القرص ونقل البيانات فقط."
+
+#: apps/web/src/themes/v2/pages/xwhm/accounts/list.ts
+msgctxt "theme:v2"
+msgid "Usage / the account’s own limit."
+msgstr "الاستخدام / حد الحساب الخاص."
+
 #: apps/web/src/themes/v2/pages/xwhm/server/trusted-proxies.ts
 msgctxt "theme:v2"
 msgid "Use a custom client-address header"
@@ -5498,6 +6142,11 @@ msgctxt "theme:v2"
 msgid "Use suggested values"
 msgstr "استخدام القيم المقترحة"
 
+#: apps/web/src/themes/v2/pages/xpanel/settings/preferences.ts
+msgctxt "theme:v2"
+msgid "Use the account preferences page to refresh or change saved contact details."
+msgstr "استخدم صفحة تفضيلات الحساب لتحديث بيانات الاتصال المحفوظة أو تغييرها."
+
 #: apps/web/src/themes/v2/pages/xwhm/host/firewall.ts
 msgctxt "theme:v2"
 msgid "Use the operation result and a live enforcement probe before reporting a port as opened or blocked."
@@ -5507,6 +6156,11 @@ msgstr "استخدم نتيجة العملية وفحصًا للتطبيق ال�
 msgctxt "theme:v2"
 msgid "Use the workspace language, color scheme and theme controls to change presentation. Contact changes do not change those preferences."
 msgstr "استخدم ضوابط لغة مساحة العمل ووضع الألوان وثيم الواجهة لتغيير المظهر. تغيير بيانات الاتصال لا يغيّر هذه التفضيلات."
+
+#: apps/web/src/themes/v2/pages/xpanel/settings/team.ts
+msgctxt "theme:v2"
+msgid "Use the xPanel sign-in page and the username shown in the team list. Sign-in availability follows the state reported above."
+msgstr "استخدم صفحة تسجيل الدخول إلى xPanel واسم المستخدم الظاهر في قائمة الفريق. تعتمد إمكانية تسجيل الدخول على الحالة الموضحة أعلاه."
 
 #: apps/web/src/themes/v2/pages/xpanel/advanced/directives.ts
 msgctxt "theme:v2"
@@ -5538,10 +6192,25 @@ msgctxt "theme:v2"
 msgid "Validate hosted names, certificate chain and matching private key before guarded installation."
 msgstr "تحقق من الأسماء المستضافة وسلسلة الشهادة ومطابقة المفتاح الخاص قبل التثبيت المحمي."
 
+#: apps/web/src/themes/v2/pages/xwhm/service-tools/web.ts
+msgctxt "theme:v2"
+msgid "Validate the candidate and test syntax before applying."
+msgstr "تحقّق من الإعدادات المقترحة واختبر صياغتها قبل التطبيق."
+
+#: apps/web/src/themes/v2/pages/xwhm/server/setup.ts
+msgctxt "theme:v2"
+msgid "Values to apply"
+msgstr "القيم المراد تطبيقها"
+
 #: apps/web/src/themes/v2/pages/xpanel/store/index.ts
 msgctxt "theme:v2"
 msgid "Verify package"
 msgstr "التحقق من الحزمة"
+
+#: apps/web/src/themes/v2/pages/xpanel/domains/site-settings.ts
+msgctxt "theme:v2"
+msgid "Version and handler are stored domain settings."
+msgstr "الإصدار والمعالج إعدادان محفوظان للنطاق."
 
 #: apps/web/src/themes/v2/pages/xwhm/host/php.ts
 msgctxt "theme:v2"
@@ -5608,6 +6277,11 @@ msgctxt "theme:v2"
 msgid "Welcome back, {username}"
 msgstr "مرحبًا بعودتك، {username}"
 
+#: apps/web/src/themes/v2/pages/xwhm/host/firewall.ts
+msgctxt "theme:v2"
+msgid "What a save does"
+msgstr "ما الذي يفعله الحفظ"
+
 #: apps/web/src/themes/v2/pages/xpanel/security/certificates.ts
 msgctxt "theme:v2"
 msgid "Where does the certificate come from?"
@@ -5627,6 +6301,11 @@ msgstr "سيُشغّل"
 msgctxt "theme:v2"
 msgid "Window (UTC)"
 msgstr "النافذة (UTC)"
+
+#: apps/web/src/themes/v2/pages/xwhm/host/php.ts
+msgctxt "theme:v2"
+msgid "Workers start when a request arrives and stop when idle."
+msgstr "تبدأ العمليات عند وصول طلب وتتوقف عند الخمول."
 
 #: apps/web/src/themes/v2/pages/xwhm/software/projects.ts
 msgctxt "theme:v2"
@@ -5658,7 +6337,7 @@ msgctxt "theme:v2"
 msgid "Your choices"
 msgstr "اختياراتك"
 
-#: apps/web/src/themes/v2/pages/xwhm/host/firewall.ts
+#: apps/web/src/themes/v2/pages/xwhm/host/firewall.ts apps/web/src/themes/v2/pages/xwhm/security/ssh.ts
 msgctxt "theme:v2"
 msgid "Your session"
 msgstr "جلستك"
@@ -5712,586 +6391,3 @@ msgstr "المناطق في الحالة المحفوظة"
 msgctxt "theme:v2"
 msgid "Zstandard"
 msgstr "Zstandard"
-
-msgctxt "theme:v2"
-msgid "Account details"
-msgstr "تفاصيل الحساب"
-
-msgctxt "theme:v2"
-msgid "Identity and plan"
-msgstr "الهوية والخطة"
-
-msgctxt "theme:v2"
-msgid "Limits and usage"
-msgstr "الحدود والاستخدام"
-
-msgctxt "theme:v2"
-msgid "Close account details"
-msgstr "إغلاق تفاصيل الحساب"
-
-msgctxt "theme:v2"
-msgid "How team access works"
-msgstr "كيف يعمل وصول الفريق"
-
-msgctxt "theme:v2"
-msgid "Role limit"
-msgstr "حد الأدوار"
-
-msgctxt "theme:v2"
-msgid "No role"
-msgstr "بدون دور"
-
-msgctxt "theme:v2"
-msgid "Sign-out"
-msgstr "تسجيل الخروج"
-
-msgctxt "theme:v2"
-msgid "Owner only"
-msgstr "المالك فقط"
-
-msgctxt "theme:v2"
-msgid "Backup sections"
-msgstr "أقسام النسخ الاحتياطي"
-
-msgctxt "theme:v2"
-msgid "Use the xPanel sign-in page and the username shown in the team list. Sign-in availability follows the state reported above."
-msgstr "استخدم صفحة تسجيل الدخول إلى xPanel واسم المستخدم الظاهر في قائمة الفريق. تعتمد إمكانية تسجيل الدخول على الحالة الموضحة أعلاه."
-
-msgctxt "theme:v2"
-msgid "Set by the member through a single-use password link. You never see or choose their password."
-msgstr "يحددها العضو من خلال رابط كلمة مرور يستخدم مرة واحدة. لا يمكنك رؤية كلمة مروره أو اختيارها."
-
-msgctxt "theme:v2"
-msgid "Up to 7 members can hold a role. Suspended members still count."
-msgstr "يمكن إسناد دور إلى 7 أعضاء كحد أقصى. ويحتسب الأعضاء الموقوفون ضمن هذا الحد."
-
-msgctxt "theme:v2"
-msgid "Can sign in when team sign-in is enabled, but cannot use account tools."
-msgstr "يمكنه تسجيل الدخول عند تفعيل دخول الفريق، لكنه لا يستطيع استخدام أدوات الحساب."
-
-msgctxt "theme:v2"
-msgid "Suspending or deleting a member, or removing a role, signs that member out."
-msgstr "يؤدي إيقاف العضو أو حذفه أو إزالة أحد أدواره إلى تسجيل خروجه."
-
-msgctxt "theme:v2"
-msgid "Only the signed-in account owner can manage the team, and the plan must include it."
-msgstr "يمكن لمالك الحساب المسجل دخوله فقط إدارة الفريق، ويجب أن تتضمن الباقة هذه الميزة."
-
-msgctxt "theme:v2"
-msgid "Use the account preferences page to refresh or change saved contact details."
-msgstr "استخدم صفحة تفضيلات الحساب لتحديث بيانات الاتصال المحفوظة أو تغييرها."
-
-msgctxt "theme:v2"
-msgid "Open account preferences"
-msgstr "فتح تفضيلات الحساب"
-
-#: apps/web/src/themes/v2/pages/xwhm/plans/editor.ts
-msgctxt "theme:v2"
-msgid "Features"
-msgstr "الميزات"
-
-msgctxt "theme:v2"
-msgid "Saved configuration when this page opened. Reload after changes to refresh this reference."
-msgstr "الإعداد المحفوظ عند فتح هذه الصفحة. أعد تحميل الصفحة بعد التغييرات لتحديث هذا المرجع."
-
-msgctxt "theme:v2"
-msgid "Runtime not observed"
-msgstr "لم تُرصد حالة التشغيل"
-
-msgctxt "theme:v2"
-msgid "Edge and reverse proxy"
-msgstr "واجهة الاتصال والوكيل العكسي"
-
-msgctxt "theme:v2"
-msgid "The intended edge forwards site requests to the loopback backend. Public listeners and generated configuration have not been observed here."
-msgstr "توجّه واجهة الاتصال طلبات المواقع إلى الخدمة الخلفية على عنوان الحلقة المحلية وفق البنية المقصودة. لم تُرصد هنا المنافذ العامة المستمعة أو الإعدادات المولَّدة."
-
-msgctxt "theme:v2"
-msgid "Saved backend engine"
-msgstr "محرك الخدمة الخلفية المحفوظ"
-
-msgctxt "theme:v2"
-msgid "Saved Apache MPM: {mpm}. The saved choice does not verify the identity of a serving process."
-msgstr "وحدة Apache MPM المحفوظة: {mpm}. لا يثبت الاختيار المحفوظ هوية العملية التي تخدم الطلبات."
-
-msgctxt "theme:v2"
-msgid "OpenLiteSpeed is the saved engine. Its listener and per-site execution identity have not been observed."
-msgstr "المحرك المحفوظ هو OpenLiteSpeed. لم تُرصد منافذه المستمعة أو هوية تنفيذ كل موقع."
-
-msgctxt "theme:v2"
-msgid "Saved settings have not been read."
-msgstr "لم تُقرأ الإعدادات المحفوظة."
-
-msgctxt "theme:v2"
-msgid "Site application"
-msgstr "تطبيق الموقع"
-
-msgctxt "theme:v2"
-msgid "Per-site handler"
-msgstr "معالج كل موقع"
-
-msgctxt "theme:v2"
-msgid "Account execution boundary"
-msgstr "حدود تنفيذ الحساب"
-
-msgctxt "theme:v2"
-msgid "The domain handler, PHP pool or application process, account UID and served response require separate runtime evidence."
-msgstr "يلزم دليل منفصل من التشغيل الفعلي للتحقق من معالج النطاق، أو مجموعة عمليات PHP أو عملية التطبيق، ومعرّف مستخدم الحساب UID، والاستجابة المقدَّمة."
-
-msgctxt "theme:v2"
-msgid "Request flow"
-msgstr "مسار الطلب"
-
-msgctxt "theme:v2"
-msgid "Request path"
-msgstr "مسار الطلب"
-
-msgctxt "theme:v2"
-msgid "Proxy configuration reference"
-msgstr "مرجع إعداد الوكيل"
-
-msgctxt "theme:v2"
-msgid "Illustrative proxy block using the page-load saved HTTP port. This is not a read of a generated file or a verified listener."
-msgstr "كتلة توضيحية للوكيل تستخدم منفذ HTTP المحفوظ عند فتح الصفحة. هذا ليس محتوى ملف مولَّد تمت قراءته ولا دليلًا على وجود منفذ مستمع."
-
-msgctxt "theme:v2"
-msgid "Forwarded client headers are overwritten at the edge. The complete generated configuration includes additional guarded directives."
-msgstr "تُستبدل ترويسات العميل المُمرَّرة عند واجهة الاتصال. تتضمن الإعدادات المولَّدة الكاملة توجيهات حماية إضافية."
-
-msgctxt "theme:v2"
-msgid "A host-specific default baseline has not been supplied. Saved values are not proof of active configuration; draft differences appear in Pending change."
-msgstr "لم تُوفَّر قيم افتراضية مرجعية خاصة بهذا الخادم. لا تثبت القيم المحفوظة أنها الإعدادات النشطة؛ وتظهر اختلافات المسودة في قسم «التغيير المعلَّق»."
-
-msgctxt "theme:v2"
-msgid "Saved configuration comparison"
-msgstr "مقارنة الإعدادات المحفوظة"
-
-msgctxt "theme:v2"
-msgid "Default baseline"
-msgstr "القيم الافتراضية المرجعية"
-
-msgctxt "theme:v2"
-msgid "Not reviewed"
-msgstr "لم يُراجع"
-
-msgctxt "theme:v2"
-msgid "Review pending change"
-msgstr "مراجعة التغيير المعلَّق"
-
-msgctxt "theme:v2"
-msgid "Test gate"
-msgstr "التحقق قبل التطبيق"
-
-msgctxt "theme:v2"
-msgid "Required change workflow. No step is marked passed by this explanatory reference."
-msgstr "مسار العمل المطلوب لإجراء التغيير. لا يُعلن هذا المرجع التوضيحي نجاح أي خطوة."
-
-msgctxt "theme:v2"
-msgid "Read the complete saved settings and review the draft difference."
-msgstr "اقرأ الإعدادات المحفوظة كاملة وراجع اختلافات المسودة."
-
-msgctxt "theme:v2"
-msgid "Validate the candidate and test syntax before applying."
-msgstr "تحقّق من الإعدادات المقترحة واختبر صياغتها قبل التطبيق."
-
-msgctxt "theme:v2"
-msgid "Read the actual reconcile result and resulting generation."
-msgstr "اقرأ النتيجة الفعلية لتطبيق الإعدادات والجيل الناتج."
-
-#: apps/web/src/themes/v2/pages/xpanel/advanced/directives.ts
-msgctxt "theme:v2"
-msgid "Choose which Apache module processes a file extension on this domain. Changes replace only the managed block."
-msgstr "اختر أي وحدة من Apache تعالج امتداد ملف على هذا النطاق. تستبدل التغييرات الكتلة المُدارة فقط."
-
-#: apps/web/src/themes/v2/pages/xpanel/advanced/directives.ts
-msgctxt "theme:v2"
-msgid "Separate extensions with spaces, such as .pl .cgi."
-msgstr "افصل بين الامتدادات بمسافات، مثل .pl .cgi."
-
-#: apps/web/src/themes/v2/pages/xpanel/domains/site-settings.ts
-msgctxt "theme:v2"
-msgid "Version and handler are stored domain settings."
-msgstr "الإصدار والمعالج إعدادان محفوظان للنطاق."
-
-#: apps/web/src/themes/v2/pages/xpanel/domains/site-settings.ts
-msgctxt "theme:v2"
-msgid "Protect a folder, or the whole document root, on the Directory privacy page."
-msgstr "احم مجلدا أو جذر المستندات بالكامل من صفحة خصوصية المجلدات."
-
-#: apps/web/src/themes/v2/pages/xpanel/domains/site-settings.ts
-msgctxt "theme:v2"
-msgid "Blocked addresses apply to every site of the account."
-msgstr "تنطبق العناوين المحظورة على كل مواقع الحساب."
-
-msgctxt "theme:v2"
-msgid "Composer runs as the account of the site, in its slice, with project scripts and plugins off."
-msgstr "يعمل Composer بحساب الموقع داخل شريحته، مع إيقاف نصوص المشروع والإضافات."
-
-msgctxt "theme:v2"
-msgid "Install PEAR packages and Perl modules into your own account libraries."
-msgstr "ثبّت حزم PEAR ووحدات Perl في مكتبات حسابك."
-
-msgctxt "theme:v2"
-msgid "PHP of the site"
-msgstr "PHP الخاص بالموقع"
-
-msgctxt "theme:v2"
-msgid "Read dependency metadata and run Composer as the account of a saved PHP site."
-msgstr "اقرأ بيانات التبعيات وشغّل Composer بحساب موقع PHP محفوظ."
-
-msgctxt "theme:v2"
-msgid "Run a built Go executable or Java archive as one isolated service of an account."
-msgstr "شغّل ملف Go تنفيذيًا أو أرشيف Java كخدمة معزولة واحدة لحساب."
-
-#: apps/web/src/themes/v2/pages/xwhm/accounts/create.ts
-msgctxt "theme:v2"
-msgid "Account review"
-msgstr "مراجعة الحساب"
-
-#: apps/web/src/themes/v2/pages/xwhm/accounts/create.ts
-msgctxt "theme:v2"
-msgid "Live summary of the form."
-msgstr "ملخص مباشر لما في النموذج."
-
-#: apps/web/src/themes/v2/pages/xwhm/accounts/create.ts
-msgctxt "theme:v2"
-msgid "Availability checks"
-msgstr "فحوص التوفر"
-
-#: apps/web/src/themes/v2/pages/xwhm/accounts/create.ts
-msgctxt "theme:v2"
-msgid "Checked when submitted"
-msgstr "يُفحص عند الإرسال"
-
-#: apps/web/src/themes/v2/pages/xwhm/accounts/create.ts
-msgctxt "theme:v2"
-msgid "Plan and owner capacity"
-msgstr "سعة الخطة والمالك"
-
-#: apps/web/src/themes/v2/pages/xwhm/accounts/create.ts
-msgctxt "theme:v2"
-msgid "The default IPv4 of the server, shared with other accounts."
-msgstr "عنوان IPv4 الافتراضي للخادم، مشترك مع حسابات أخرى."
-
-#: apps/web/src/themes/v2/pages/xwhm/accounts/create.ts
-msgctxt "theme:v2"
-msgid "The next unallocated IPv4 that this plan may use."
-msgstr "أول عنوان IPv4 غير مخصص تسمح به هذه الخطة."
-
-#: apps/web/src/themes/v2/pages/xwhm/accounts/list.ts
-msgctxt "theme:v2"
-msgid "Usage / configured plan limit. An account the host did not report shows Not read."
-msgstr "الاستخدام / حد الخطة المضبوط. الحساب الذي لم يبلّغ عنه الخادم يظهر «غير مقروء»."
-
-#: apps/web/src/themes/v2/pages/xwhm/accounts/list.ts
-msgctxt "theme:v2"
-msgid "Usage / the account’s own limit."
-msgstr "الاستخدام / حد الحساب الخاص."
-
-#: apps/web/src/themes/v2/pages/xwhm/accounts/list.ts
-msgctxt "theme:v2"
-msgid "Usage / limit in force: the package value or the account’s own limit. Only disk and bandwidth usage are read."
-msgstr "الاستخدام / الحد المعمول به: قيمة الباقة أو حد الحساب الخاص. يُقرأ استخدام القرص ونقل البيانات فقط."
-
-msgctxt "theme:v2"
-msgid "Account list"
-msgstr "قائمة الحسابات"
-
-msgctxt "theme:v2"
-msgid "Newest first."
-msgstr "الأحدث أولًا."
-
-msgctxt "theme:v2"
-msgid "Edit account"
-msgstr "تعديل الحساب"
-
-msgctxt "theme:v2"
-msgid "Editing above"
-msgstr "قيد التعديل أعلاه"
-
-msgctxt "theme:v2"
-msgid "Edit plan: {name}"
-msgstr "تعديل الخطة: {name}"
-
-msgctxt "theme:v2"
-msgid "Primary domains"
-msgstr "النطاقات الأساسية"
-
-msgctxt "theme:v2"
-msgid "One per account"
-msgstr "نطاق واحد لكل حساب"
-
-msgctxt "theme:v2"
-msgid "Separate sites, each with its own document root"
-msgstr "مواقع مستقلة، لكل منها جذر مستندات خاص"
-
-msgctxt "theme:v2"
-msgid "Extra names that serve the parent site"
-msgstr "أسماء إضافية تعرض الموقع الأصل"
-
-msgctxt "theme:v2"
-msgid "Explicit names under a hosted domain"
-msgstr "أسماء صريحة تحت نطاق مستضاف"
-
-msgctxt "theme:v2"
-msgid "of {total} domains"
-msgstr "من {total} نطاقات"
-
-msgctxt "theme:v2"
-msgid "SSL certificates"
-msgstr "شهادات SSL"
-
-#: apps/web/src/themes/v2/pages/xwhm/host/firewall.ts
-msgctxt "theme:v2"
-msgid "Applied as one generation"
-msgstr "التطبيق كجيل واحد"
-
-#: apps/web/src/themes/v2/pages/xwhm/host/firewall.ts
-msgctxt "theme:v2"
-msgid "Applied at"
-msgstr "طُبّق في"
-
-#: apps/web/src/themes/v2/pages/xwhm/security/ssh.ts
-msgctxt "theme:v2"
-msgid "Current session protection."
-msgstr "حماية الجلسة الحالية."
-
-#: apps/web/src/themes/v2/pages/xwhm/host/firewall.ts
-msgctxt "theme:v2"
-msgid "Kept, or the previous rules return"
-msgstr "تُثبَّت، أو تعود القواعد السابقة"
-
-#: apps/web/src/themes/v2/pages/xwhm/host/firewall.ts
-msgctxt "theme:v2"
-msgid "Lockout check against your session"
-msgstr "فحص عدم حجب جلستك"
-
-#: apps/web/src/themes/v2/pages/xwhm/host/firewall.ts
-msgctxt "theme:v2"
-msgid "Management ports"
-msgstr "منافذ الإدارة"
-
-#: apps/web/src/themes/v2/pages/xwhm/host/firewall.ts
-msgctxt "theme:v2"
-msgid "Read back from this session"
-msgstr "إعادة القراءة من هذه الجلسة"
-
-#: apps/web/src/themes/v2/pages/xwhm/host/firewall.ts
-msgctxt "theme:v2"
-msgid "Rules in this list"
-msgstr "القواعد في هذه القائمة"
-
-#: apps/web/src/themes/v2/pages/xwhm/host/firewall.ts
-msgctxt "theme:v2"
-msgid "Saved rules"
-msgstr "القواعد المحفوظة"
-
-#: apps/web/src/themes/v2/pages/xwhm/host/firewall.ts
-msgctxt "theme:v2"
-msgid "What a save does"
-msgstr "ما الذي يفعله الحفظ"
-
-#: apps/web/src/themes/v2/pages/xwhm/lifecycle/upgrade.ts
-msgctxt "theme:v2"
-msgid "Automatic rollback"
-msgstr "التراجع التلقائي"
-
-#: apps/web/src/themes/v2/pages/xwhm/activity/audit.ts
-msgctxt "theme:v2"
-msgid "{count, plural, one {# entry on this page} other {# entries on this page}}"
-msgstr "{count, plural, zero {لا إدخالات في هذه الصفحة} one {إدخال واحد في هذه الصفحة} two {إدخالان في هذه الصفحة} few {# إدخالات في هذه الصفحة} many {# إدخالًا في هذه الصفحة} other {# إدخال في هذه الصفحة}}"
-
-msgctxt "theme:v2"
-msgid "Defaults for new domains"
-msgstr "الإعدادات الافتراضية للنطاقات الجديدة"
-
-msgctxt "theme:v2"
-msgid "Existing domains keep their version and handler."
-msgstr "تحتفظ النطاقات الحالية بإصدارها ومعالجها."
-
-msgctxt "theme:v2"
-msgid "Default version"
-msgstr "الإصدار الافتراضي"
-
-msgctxt "theme:v2"
-msgid "Default handler"
-msgstr "المعالج الافتراضي"
-
-msgctxt "theme:v2"
-msgid "Always the default"
-msgstr "الافتراضي دائمًا"
-
-msgctxt "theme:v2"
-msgid "{count} of {total} saved domains use CGI."
-msgstr "{count} من {total} من النطاقات المحفوظة تستخدم CGI."
-
-msgctxt "theme:v2"
-msgid "Saved domain handlers have not been read."
-msgstr "لم تُقرأ معالجات النطاقات المحفوظة."
-
-msgctxt "theme:v2"
-msgid "Workers start when a request arrives and stop when idle."
-msgstr "تبدأ العمليات عند وصول طلب وتتوقف عند الخمول."
-
-msgctxt "theme:v2"
-msgid "Keeps a few spare workers ready and adds more under load."
-msgstr "يُبقي عددًا قليلًا من العمليات الاحتياطية جاهزًا ويضيف المزيد تحت الحمل."
-
-msgctxt "theme:v2"
-msgid "Keeps a fixed number of workers in memory at all times."
-msgstr "يُبقي عددًا ثابتًا من العمليات في الذاكرة دائمًا."
-
-msgctxt "theme:v2"
-msgid "Pool settings"
-msgstr "إعدادات المجمّع"
-
-msgctxt "theme:v2"
-msgid "The saved choice has not been read."
-msgstr "لم يُقرأ الاختيار المحفوظ."
-
-msgctxt "theme:v2"
-msgid "Behind the Nginx edge. Every request passes Apache, so .htaccess works."
-msgstr "خلف واجهة Nginx. يمر كل طلب عبر Apache، لذا يعمل ملف .htaccess."
-
-msgctxt "theme:v2"
-msgid "The child serving a site switches to its account before reading a file."
-msgstr "تنتقل العملية التي تخدم الموقع إلى حسابه قبل قراءة أي ملف."
-
-msgctxt "theme:v2"
-msgid "Values to apply"
-msgstr "القيم المراد تطبيقها"
-
-msgctxt "theme:v2"
-msgid "Each value follows its field in the steps above. A field you have not changed shows its saved value."
-msgstr "تتبع كل قيمة حقلها في الخطوات أعلاه. يعرض الحقل الذي لم تغيره قيمته المحفوظة."
-
-msgctxt "theme:v2"
-msgid "One engine serves the whole server, never one per site."
-msgstr "محرك واحد يخدم الخادم كله، وليس محركًا لكل موقع."
-
-#: apps/web/src/themes/v2/pages/xpanel/email/accounts.ts
-msgctxt "theme:v2"
-msgid "Show users with"
-msgstr "إظهار المستخدمين الذين لديهم"
-
-#: apps/web/src/themes/v2/pages/xpanel/email/accounts.ts
-msgctxt "theme:v2"
-msgid "No service users match this filter."
-msgstr "لا يوجد مستخدمو خدمة يطابقون هذه التصفية."
-
-#: apps/web/src/themes/v2/pages/xpanel/email/accounts.ts
-msgctxt "theme:v2"
-msgid "One login"
-msgstr "تسجيل دخول واحد"
-
-#: apps/web/src/themes/v2/pages/xpanel/email/accounts.ts
-msgctxt "theme:v2"
-msgid "The same user@domain and password for every service you turn on."
-msgstr "نفس user@domain وكلمة المرور لكل خدمة تفعّلها."
-
-#: apps/web/src/themes/v2/pages/xpanel/email/accounts.ts
-msgctxt "theme:v2"
-msgid "Not a Linux user"
-msgstr "ليس مستخدم Linux"
-
-#: apps/web/src/themes/v2/pages/xpanel/email/accounts.ts
-msgctxt "theme:v2"
-msgid "A service user runs as your account, has no shell and cannot sign in to xPanel."
-msgstr "يعمل مستخدم الخدمة باسم حسابك، وليست له صدفة أوامر ولا يستطيع الدخول إلى xPanel."
-
-#: apps/web/src/themes/v2/pages/xpanel/email/accounts.ts
-msgctxt "theme:v2"
-msgid "Locked to a directory"
-msgstr "محصور في مجلد"
-
-#: apps/web/src/themes/v2/pages/xpanel/email/accounts.ts
-msgctxt "theme:v2"
-msgid "FTP and Web Disk never see anything outside the directory you choose."
-msgstr "لا يرى FTP و Web Disk أي شيء خارج المجلد الذي تختاره."
-
-#: apps/web/src/themes/v2/pages/xpanel/email/accounts.ts
-msgctxt "theme:v2"
-msgid "Counts toward your disk"
-msgstr "يُحتسب من مساحة القرص"
-
-#: apps/web/src/themes/v2/pages/xpanel/email/accounts.ts
-msgctxt "theme:v2"
-msgid "Mailboxes and uploads use the disk quota of your account."
-msgstr "صناديق البريد والملفات المرفوعة تستهلك حصة القرص لحسابك."
-
-
-#: apps/web/src/themes/v2/pages/xpanel/services/dns.ts
-msgctxt "theme:v2"
-msgid "Filter records"
-msgstr "تصفية السجلات"
-
-
-#: apps/web/src/themes/v2/pages/xpanel/observations/traffic.ts
-msgctxt "theme:v2"
-msgid "Only the selected domain is read. Other domains and the plan month total are not part of this observation."
-msgstr "يُقرأ النطاق المحدد فقط. النطاقات الأخرى وإجمالي شهر الخطة ليست جزءًا من هذه القراءة."
-
-#: apps/web/src/themes/v2/pages/xpanel/software/php.ts
-msgctxt "theme:v2"
-msgid "Requires server configuration"
-msgstr "يتطلب إعدادًا على الخادم"
-
-#: apps/web/src/themes/v2/pages/xpanel/software/php.ts
-msgctxt "theme:v2"
-msgid "children"
-msgstr "عمليات فرعية"
-
-#: apps/web/src/themes/v2/pages/xpanel/software/php.ts
-msgctxt "theme:v2"
-msgid "servers"
-msgstr "خوادم"
-
-#: apps/web/src/themes/v2/pages/xpanel/software/php.ts
-msgctxt "theme:v2"
-msgid "requests"
-msgstr "طلبات"
-
-#: apps/web/src/themes/v2/pages/xpanel/software/php.ts
-msgctxt "theme:v2"
-msgid "Memory at full load"
-msgstr "الذاكرة عند الحمل الكامل"
-
-#: apps/web/src/themes/v2/pages/xmail/compose.ts
-msgctxt "theme:v2"
-msgid "Back to Inbox"
-msgstr "العودة إلى الوارد"
-
-#: apps/web/src/themes/v2/pages/xmail/inbox.ts
-msgctxt "theme:v2"
-msgid "Choose a message from the list to read it here."
-msgstr "اختر رسالة من القائمة لقراءتها هنا."
-
-#: apps/web/src/themes/v2/pages/xwhm/security/overview.ts
-msgctxt "theme:v2"
-msgid "These settings are read and changed on Panel access."
-msgstr "تُقرأ هذه الإعدادات وتُغيَّر من صفحة الوصول إلى اللوحة."
-
-#: apps/web/src/themes/v2/pages/xpanel/domains/domains.ts
-msgctxt "theme:v2"
-msgid "Filter domains"
-msgstr "تصفية النطاقات"
-
-#: apps/web/src/themes/v2/pages/xpanel/domains/domains.ts
-msgctxt "theme:v2"
-msgid "Filter by name or folder"
-msgstr "التصفية بالاسم أو المجلد"
-
-#: apps/web/src/themes/v2/pages/xpanel/domains/domains.ts
-msgctxt "theme:v2"
-msgid "No domains match this filter."
-msgstr "لا توجد نطاقات تطابق هذه التصفية."
-
-#: apps/web/src/themes/v2/pages/xpanel/email/accounts.ts
-msgctxt "theme:v2"
-msgid "Filter users by login"
-msgstr "تصفية المستخدمين باسم الدخول"
-
-#: apps/web/src/themes/v2/pages/xpanel/email/accounts.ts
-msgctxt "theme:v2"
-msgid "Filter by login"
-msgstr "التصفية باسم الدخول"

@@ -85,16 +85,17 @@ export function renderClassicEnhancementAssign(locale: Locale, editable: boolean
 /** WHM Home: the administrator's favorites and notifications, filled by WHM_HOME_CLIENT_BINDING. */
 export function renderClassicWhmHome(locale: Locale): string {
   const t = tr(locale), box = 'min-width: 0; flex: 1 1 320px; display: flex; flex-direction: column; gap: 16px; padding: 24px; border-radius: 12px; background: light-dark(#FFFFFF,var(--xp-bg-surface,#FFFFFF)); border: 1px solid light-dark(#E2E6EC,var(--xp-border,#E2E6EC))'
-  return `<div style="display: flex; flex-wrap: wrap; gap: 16px">
-    <section data-whm-favorites aria-labelledby="whm-favorites-heading" style="${box}"><h2 id="whm-favorites-heading" style="margin: 0; font-size: 16px">${t('Favorites')}</h2>
-      <p data-whm-favorites-empty style="margin: 0">${t('Star a page in the quick bar to keep it here and in the side menu.')}</p>
+  const copyStyle = 'margin: 0; font-size: 13px; line-height: 1.6; color: light-dark(#475467,var(--xp-text-secondary,#475467))'
+  return `<div style="display: flex; flex-wrap: wrap; align-items: stretch; gap: 16px">
+    <section data-whm-favorites aria-labelledby="whm-favorites-heading" style="${box}"><h2 id="whm-favorites-heading" style="margin: 0; font-size: 16px; font-weight: 600">${t('Favorites')}</h2>
+      <p data-whm-favorites-empty style="${copyStyle}">${t('Star a page in the quick bar to keep it here and in the side menu.')}</p>
       <ul data-whm-favorites-list style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px"></ul>
-      <label class="xp-whm-detail-choice" style="display: flex; gap: 8px; align-items: center; min-block-size: 44px"><input type="checkbox" data-whm-favorites-descriptions checked><span>${t('Show descriptions')}</span></label>
-      <p role="status" data-whm-favorites-status hidden></p></section>
-    <section data-whm-inbox aria-labelledby="whm-inbox-heading" style="${box}"><h2 id="whm-inbox-heading" style="margin: 0; font-size: 16px">${t('Notifications')}</h2>
-      <p role="status" data-whm-inbox-status data-state="unread">${t('Notifications have not been read.')}</p>
+      <label class="xp-whm-detail-choice" style="margin-block-start: auto; display: flex; gap: 8px; align-items: center; min-block-size: 44px; font-size: 14px"><input type="checkbox" data-whm-favorites-descriptions checked><span>${t('Show descriptions')}</span></label>
+      <p role="status" data-whm-favorites-status hidden style="${copyStyle}"></p></section>
+    <section data-whm-inbox aria-labelledby="whm-inbox-heading" style="${box}"><h2 id="whm-inbox-heading" style="margin: 0; font-size: 16px; font-weight: 600">${t('Notifications')}</h2>
+      <p role="status" data-whm-inbox-status data-state="unread" style="${copyStyle}">${t('Notifications have not been read.')}</p>
       <ul data-whm-inbox-list style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px"></ul>
-      <div><button type="button" class="xp-btn" data-whm-inbox-read disabled>${t('Mark all as read')}</button></div></section>
+      <div style="margin-block-start: auto"><button type="button" class="xp-btn" data-whm-inbox-read disabled>${t('Mark all as read')}</button></div></section>
   </div>`
 }
 
