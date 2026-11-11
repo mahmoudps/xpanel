@@ -37,11 +37,16 @@ export function forwarderWriteUncertain(error: unknown): boolean {
   if (['verificationRequired', 'stateChanged', 'unknownOutcome', 'needsAttention'].some(key => failure[key] === true || details[key] === true)) return true
   return !(details.stateChanged === false || (typeof failure.status === 'number' && failure.status >= 400 && failure.status < 500 && failure.status !== 408))
 }
-/** A datetime-local value read as UTC, in the canonical whole-second form the API stores. */
+/**
+ * A time entered as UTC, in the canonical whole-second form the API stores. It accepts the datetime-local value
+ * (`YYYY-MM-DDTHH:mm`) and the product's text form (`YYYY-MM-DD HH:mm`, optionally followed by `UTC`).
+ */
 export function utcInstant(local: string): string | null {
-  if (!local) return null
-  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(local)) throw new Error('invalid_time')
-  const value = local + ':00.000Z'
+  const entered = local.trim().replace(/\s+UTC$/i, '')
+  if (!entered) return null
+  const match = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})$/.exec(entered)
+  if (!match) throw new Error('invalid_time')
+  const value = match[1] + 'T' + match[2] + ':00.000Z'
   if (new Date(value).toISOString() !== value) throw new Error('invalid_time')
   return value
 }
@@ -172,7 +177,8 @@ function bindAccountForwarders(askDialog?: (options: Record<string, unknown>) =>
     // a mailbox answers with its own vacation (/api/webmail/vacation); any other address through /api/mail/autoresponders
     let records = new Map<string, Record<string, unknown>>(), mailboxes: string[] = [], editing: Record<string, unknown> | null = null
     const field = (name: string) => form!.elements.namedItem(name) as HTMLInputElement
-    const localTime = (value: unknown) => typeof value === 'string' ? value.slice(0, 16) : ''
+    // A text control shows the product form YYYY-MM-DD HH:mm; a datetime-local control takes its own value form.
+    const localTime = (value: unknown, control?: HTMLInputElement) => typeof value === 'string' ? (control?.type === 'datetime-local' ? value.slice(0, 16) : value.slice(0, 16).replace('T', ' ')) : ''
     const stopEditing = () => {
       editing = null
       if (!form) return
@@ -240,7 +246,7 @@ function bindAccountForwarders(askDialog?: (options: Record<string, unknown>) =>
         field('address').value = String(item.address); field('address').readOnly = true
         field('subject').value = String(item.subject); (form.elements.namedItem('body') as HTMLTextAreaElement).value = String(item.body)
         field('interval').value = String(item.replyIntervalHours)
-        field('start').value = localTime(item.startDate); field('end').value = localTime(item.endDate); field('noEnd').checked = item.endDate === null
+        field('start').value = localTime(item.startDate, field('start')); field('end').value = localTime(item.endDate, field('end')); field('noEnd').checked = item.endDate === null
         form.querySelector<HTMLElement>('[data-autoresponder-form-title]')!.textContent = copy('Edit the autoresponder of {address}', { address: String(item.address) })
         form.querySelector<HTMLElement>('[data-autoresponder-submit]')!.textContent = copy('Save autoresponder')
         form.querySelector<HTMLElement>('[data-autoresponder-cancel]')!.hidden = false

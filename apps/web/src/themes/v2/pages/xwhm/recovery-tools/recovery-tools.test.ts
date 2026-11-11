@@ -6,6 +6,19 @@ const admitted = { canRead: true, canManage: true, root: true } as const
 const render = (activeRoute: string) => renderV2WhmRecoveryToolsPage({ activeRoute, locale: 'en' }, admitted)!
 
 describe('V2 WHM guarded recovery tools', () => {
+  it('marks every recovery table for two-column phone rows and names the stacked cells in the row templates', () => {
+    for (const route of V2_WHM_RECOVERY_TOOL_ROUTES) {
+      const tables = render(route).match(/<table[^>]*>/g) ?? []
+      expect(tables.length).toBeGreaterThan(0)
+      for (const table of tables) expect(table).toMatch(/^<table data-phone-value="[1-4]"(?: data-phone-name="2")?>$/)
+    }
+    const files = render('/whm/backups/files')
+    expect(files).toContain('<td data-phone-label="Created (UTC)"><bdi dir="ltr" class="v2-mono" data-xp-slot="created"></bdi></td>')
+    expect(files).toContain('<td data-xp-slot="reason" data-phone-label="Reason"></td>')
+    expect(render('/whm/backups/restore-more')).toContain('<td data-xp-slot="state" data-phone-label="Mailbox now"></td>')
+    expect(renderV2WhmRecoveryToolsPage({ activeRoute: '/whm/backups/files', locale: 'ar' }, admitted)).not.toContain('data-phone-label="Reason"')
+  })
+
   it.each(V2_WHM_RECOVERY_TOOL_ROUTES)('preserves the real %s workflow with default-denied admission', activeRoute => {
     const html = renderV2WhmRecoveryToolsPage({ activeRoute })!
     expect(html).toContain(`data-whm-detail-route="${activeRoute}"`)
@@ -14,6 +27,16 @@ describe('V2 WHM guarded recovery tools', () => {
     expect(nodes.every(node => node.attrs.has('disabled'))).toBe(true)
     expect(html).not.toContain('<form')
     expect(html).not.toMatch(/class="xp-|style=/)
+  })
+
+  it.each(V2_WHM_RECOVERY_TOOL_ROUTES)('puts the checked rules of %s beside its first card inside the scoped body', activeRoute => {
+    const html = render(activeRoute)
+    const body = html.slice(html.indexOf('class="v2-recovery-tools v2-recovery__column"'))
+    const grid = body.slice(body.indexOf('<div class="v2-recovery__grid">'))
+    expect(grid.indexOf('<section class="v2-card"')).toBeLessThan(grid.indexOf('<aside class="v2-recovery__column">'))
+    const rules = body.match(/<ul class="v2-recovery__rules">.*?<\/ul>/s)?.[0] ?? ''
+    expect(rules.match(/<li><svg\b/g)).toHaveLength(5)
+    expect(body.match(/<ol class="v2-recovery__steps"/g)).toHaveLength(1)
   })
 
   it('does not map an unrelated or unknown route to a recovery outage', () => {

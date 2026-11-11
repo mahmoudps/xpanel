@@ -4,7 +4,7 @@ import { actions, area, button, check, context, esc, facts, frameRead, field, fi
 type PolicyPage = 'waf' | 'flood' | 'panel-access'
 export function renderV2WhmSecurityPolicy(input: WhmObservationInput, kind: PolicyPage): string {
   const { t, canRead: liveRead, canManage } = context(input), canRead = liveRead || frameRead(input)
-  const number = (key: string, label: string, min: number, max: number) => field(t, `sec-${key}`, label, inputControl(`sec-${key}`, { 'data-sec-input': key }, false, ` dir="ltr" inputmode="numeric" min="${min}" max="${max}" step="1"`, 'number'))
+  const number = (key: string, label: string, min: number, max: number, note?: string) => field(t, `sec-${key}`, label, inputControl(`sec-${key}`, { 'data-sec-input': key }, false, ` dir="ltr" inputmode="numeric" min="${min}" max="${max}" step="1"`, 'number'), note)
   const textArea = (key: string, label: string, max: number, note: string) => field(t, `sec-${key}`, label, area(`sec-${key}`, { 'data-sec-input': key }, ` dir="ltr" rows="5" maxlength="${max}" autocomplete="off" spellcheck="false"`), note)
   const refresh = actions(button(t, msgid('Refresh'), { 'data-sec-action': 'refresh' }, liveRead))
   const unread = status(t, canRead ? msgid('Nothing has been read yet.') : msgid('This page requires an authorized administrator. Nothing was read or changed.'), { 'data-sec-status': true }, canRead ? 'unread' : 'unavailable')
@@ -14,10 +14,9 @@ export function renderV2WhmSecurityPolicy(input: WhmObservationInput, kind: Poli
   const body = kind === 'waf'
     ? section(t, 'waf-limits', msgid('Nginx web application firewall'), unread + refresh + help(t, msgid('Our own rules, applied at the edge before any request reaches Apache or an account.'))
       + facts(t, [['updated', msgid('Last saved (UTC)')], ['lists-active', msgid('Deny lists in the running configuration')], ['reconcile', msgid('Last apply request')]], 'data-sec-field')
-      + fields(number('rate', msgid('Requests per address (req/s)'), 1, 10000) + number('burst', msgid('Burst (req)'), 0, 100000)) + check(t, msgid('Unlimited request rate'), { 'data-sec-input': 'rate-unlimited' })
-      + help(t, msgid('Requests over the burst get 429. Each site gets its own per-address zone.'))
-      + fields(number('body', msgid('Largest request body (MB)'), 1, 102400) + field(t, 'sec-denied', msgid('Answer for denied requests'), select(t, 'sec-denied', { 'data-sec-input': 'denied' }, [['403', msgid('403 Forbidden')], ['444', msgid('444 Close the connection')]])))
-      + check(t, msgid('Unlimited request body'), { 'data-sec-input': 'body-unlimited' }) + help(t, msgid('Larger uploads get 413.'))
+      + fields(number('rate', msgid('Requests per address (req/s)'), 1, 10000) + number('burst', msgid('Burst (req)'), 0, 100000, msgid('Requests over the burst get 429. Each site gets its own per-address zone.'))) + check(t, msgid('Unlimited request rate'), { 'data-sec-input': 'rate-unlimited' })
+      + fields(number('body', msgid('Largest request body (MiB)'), 1, 102400, msgid('Larger uploads get 413.')) + field(t, 'sec-denied', msgid('Answer for denied requests'), select(t, 'sec-denied', { 'data-sec-input': 'denied' }, [['403', msgid('403 Forbidden')], ['444', msgid('444 Close the connection')]])))
+      + check(t, msgid('Unlimited request body'), { 'data-sec-input': 'body-unlimited' })
       + fields(textArea('deny-ips', msgid('Addresses and ranges'), 50000, msgid('One address or network per line, up to 1000.')) + textArea('deny-paths', msgid('Path patterns'), 26000, msgid('One PCRE pattern per line. Each pattern is compiled during nginx -t; a bad pattern keeps the previous generation.')) + textArea('deny-agents', msgid('User-agent patterns'), 26000, msgid('One PCRE pattern per line, matched without regard to case.')))
       + check(t, msgid('Use ModSecurity with the OWASP Core Rule Set when the Nginx connector is installed'), { 'data-sec-input': 'modsecurity' }) + saveHelp + save)
       + section(t, 'waf-modsecurity', msgid('ModSecurity with OWASP Core Rule Set'), status(t, msgid('Not read'), { 'data-sec-field': 'modsec-state', 'data-tone': 'neutral' })
@@ -27,9 +26,9 @@ export function renderV2WhmSecurityPolicy(input: WhmObservationInput, kind: Poli
     : kind === 'flood'
       ? section(t, 'flood-limits', msgid('Host firewall limits'), unread + refresh + help(t, msgid('nftables limits on the web ports, applied after established connections are accepted. SSH and the panel ports keep their own sign-in protection.'))
         + facts(t, [['updated', msgid('Last saved (UTC)')], ['reconcile', msgid('Last apply request')]], 'data-sec-field') + check(t, msgid('Turn on flood protection'), { 'data-sec-input': 'enabled' })
-        + fields(number('conn', msgid('Connections per address'), 1, 100000) + number('ping', msgid('Ping requests per second'), 1, 10000) + number('rate', msgid('New connections per second per address'), 1, 100000) + number('burst', msgid('Burst (connections)'), 1, 100000))
-        + help(t, msgid('Concurrent connections from one address to ports 80 and 443. Empty means no limit.')) + fields(number('web-conn', msgid('Concurrent requests per address in Nginx'), 1, 100000))
-        + help(t, msgid('Applied to every site with limit_conn. Excess requests get 429.')) + saveHelp + save)
+        + fields(number('conn', msgid('Connections per address'), 1, 100000, msgid('Concurrent connections from one address to ports 80 and 443. Empty means no limit.')) + number('rate', msgid('New connections per second per address'), 1, 100000) + number('burst', msgid('Burst (connections)'), 1, 100000)
+          + number('ping', msgid('Ping requests per second'), 1, 10000) + number('web-conn', msgid('Concurrent requests per address in Nginx'), 1, 100000, msgid('Applied to every site with limit_conn. Excess requests get 429.')))
+        + saveHelp + save)
         + section(t, 'flood-kernel', msgid('Running firewall'), facts(t, [['kernel-state', msgid('State')], ['observed-at', msgid('Observed at (UTC)')]], 'data-sec-field')
           + table(t, msgid('Flood rules in the kernel'), [msgid('Limit'), msgid('Rules'), msgid('Tracked addresses')], { 'data-sec-rows': 'kernel' }, msgid('The running firewall has not been read.')))
       : section(t, 'access-connection', msgid('Your connection'), unread + refresh + facts(t, [['listener', msgid('Entry point')], ['address', msgid('Your address')], ['enforcement', msgid('Enforcement')], ['updated', msgid('Last saved (UTC)')]], 'data-sec-field')

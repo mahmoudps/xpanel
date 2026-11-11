@@ -47,7 +47,7 @@ describe('account database insights page', () => {
       reply({ databases: [reply().databases[0], reply().databases[0]] }), reply({ users: [{ name: 'alice_app', server: 'present', hosts: null }] }), reply({ databases: [{ ...reply().databases[0], largestTables: [table('a\u202eb')] }] }),
       reply({ databases: [{ ...reply().databases[0], dataBytes: -1 }] })])
       expect(() => readDatabaseInsightsView(clone(bad), accountId)).toThrow()
-    expect([insightsBytes(null), insightsBytes(0), insightsBytes(999), insightsBytes(1500000), insightsBytes(16384)]).toEqual(['-', '0 B', '999 B', '1.50 MB', '16.4 KB'])
+    expect([insightsBytes(null), insightsBytes(0), insightsBytes(999), insightsBytes(1500000), insightsBytes(16384)]).toEqual(['-', '\u20660\u00a0B\u2069', '\u2066999\u00a0B\u2069', '\u20661.43\u00a0MiB\u2069', '\u206616.0\u00a0KiB\u2069'])
   })
   it('reads on open, renders rows as text and switches the largest-tables database', async () => {
     const request = vi.fn(async (method: string, path: string) => { expect([method, path]).toEqual(['GET', '/api/account/database-insights']); return clone(reply()) })
@@ -56,7 +56,7 @@ describe('account database insights page', () => {
     expect(rows('databases').map(row => row.slice(0, 3))).toEqual([['alice_wp', 'Present', '2'], ['alice_shop', 'Present', '0'], ['alice_gone', 'Missing', '-']])
     expect(rows('users')).toEqual([['alice_app', 'Present', '2'], ['alice_old', 'Missing', '-']])
     expect(rows('tables').map(row => row[0])).toEqual(['wp_posts', '<img src=x>']); expect(document.querySelector('[data-insights-tables] img')).toBeNull()
-    expect($('[data-insights-fact="size"]').textContent).toBe('2.00 MB'); expect($('[data-insights-fact="tables"]').textContent).toBe('2'); expect($('[data-insights-status]').getAttribute('data-state')).toBe('read')
+    expect($('[data-insights-fact="size"]').textContent).toBe('\u20661.91\u00a0MiB\u2069'); expect($('[data-insights-fact="tables"]').textContent).toBe('2'); expect($('[data-insights-status]').getAttribute('data-state')).toBe('read')
     expect([...$<HTMLSelectElement>('[data-insights-database]').options].map(option => option.value)).toEqual(['alice_wp', 'alice_shop'])
     $<HTMLSelectElement>('[data-insights-database]').value = 'alice_shop'; $('[data-insights-database]').dispatchEvent(new Event('change'))
     expect(rows('tables')).toEqual([['This database has no tables.']])

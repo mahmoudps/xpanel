@@ -7,7 +7,7 @@ import { dataTable } from '../../../components/data-table.ts'
 import { pageHeader } from '../../../components/page-header.ts'
 import { escapeHtml } from '../../../html.ts'
 import type { WhmResellerAuthority } from './index.ts'
-import { renderV2ResellerEmail, renderV2ResellerIpsNameservers, renderV2ResellerUsage } from './tools.ts'
+import { phoneCell, renderV2ResellerEmail, renderV2ResellerIpsNameservers, renderV2ResellerUsage } from './tools.ts'
 
 /** These two registered documents expose saved records; they do not mutate delegation or nameservers. */
 export function renderV2WhmResellerRecords(t: Translate, props: WhmSurfaceProps, authority: WhmResellerAuthority): string | undefined {
@@ -18,7 +18,7 @@ export function renderV2WhmResellerRecords(t: Translate, props: WhmSurfaceProps,
     && canOpenRegisteredRoute(route, { ...props.visibility, principal, reseller: props.visibility?.reseller ?? props.activeReseller ?? undefined })
   const resellers = readable ? props.resellers?.filter(reseller => principal.kind === 'root' || reseller.id === principal.id) : undefined
   const title = route === '/whm/resellers/more' ? t('More reseller tools') : t('IPs & nameservers')
-  const rows = (resellers ?? []).map(reseller => ({ cellsHtml: [`<bdi dir="ltr">${escapeHtml(reseller.username)}</bdi>`, reseller.maxAccounts === 'unlimited' ? escapeHtml(t('Unlimited')) : `<bdi dir="ltr">${reseller.maxAccounts}</bdi>`, reseller.nameservers.map(name => `<bdi dir="ltr">${escapeHtml(name)}</bdi>`).join('<br>')] }))
+  const rows = (resellers ?? []).map(reseller => ({ cellsHtml: [`<bdi dir="ltr">${escapeHtml(reseller.username)}</bdi>`, reseller.maxAccounts === 'unlimited' ? escapeHtml(t('Unlimited')) : `<bdi dir="ltr">${reseller.maxAccounts}</bdi>`, phoneCell(t('Nameservers'), reseller.nameservers.map(name => `<bdi dir="ltr">${escapeHtml(name)}</bdi>`).join('<br>'))] }))
   const root = readable && principal.kind === 'root' && authority.canManage
   const records = card({ title, titleId: 'v2-reseller-records-heading', bodyHtml: dataTable(t, { id: 'v2-reseller-records', caption: title, columns: [t('Reseller'), t('Account limit'), t('Nameservers')].map(label => ({ label })), rows, emptyText: t(resellers === undefined ? msgid('Not read') : msgctxt('theme:v2', 'No resellers were returned.')) }) })
   const scoped = { ...props, resellers }

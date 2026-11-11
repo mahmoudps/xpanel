@@ -3,6 +3,9 @@ import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as canonicalFormatDispl
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
 import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
+import { ASCII_BYTES_BINDING, formatIsolatedBytes as canonicalFormatClientBytes } from './display-format.ts'
+// Module-local alias: the binding source defines it again from ASCII_BYTES_BINDING.
+const formatClientBytes = canonicalFormatClientBytes
 const clientTemplate = canonicalClientTemplate
 const clientTemplateSlot = canonicalClientTemplateSlot
 const cloneClientTemplate = canonicalCloneClientTemplate
@@ -129,7 +132,7 @@ function bindAccountBackup(askDialog: ((options: Record<string, unknown>) => Pro
         const created = createdAt ? formatDisplayDateTime(createdAt) : t(msgctxt('account-backup-client', 'Not read'))
         const row = cloneClientTemplate(archiveTemplate, 'tr', ['file', 'created', 'bytes', 'integrity'])
         clientTemplateSlot(row, 'file').textContent = archive.file
-        clientTemplateSlot(row, 'bytes').textContent = String(archive.bytes)
+        clientTemplateSlot(row, 'bytes').textContent = formatClientBytes(archive.bytes)
         const time = clientTemplateSlot(row, 'created', 'time') as HTMLTimeElement; time.textContent = created
         if (createdAt) time.dateTime = createdAt; else time.removeAttribute('datetime')
         clientTemplateSlot(row, 'integrity').textContent = archive.bytes <= 0 || archive.bytes > ACCOUNT_ARCHIVE_MAX_BYTES ? t('Empty or over the 2 GiB limit') : t('Stored; not yet inspected')
@@ -227,4 +230,4 @@ function bindAccountBackup(askDialog: ((options: Record<string, unknown>) => Pro
     controls(); void reload()
   })
 }
-export const ACCOUNT_BACKUP_CLIENT_BINDING = `(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const ACCOUNT_ARCHIVE_MAX_BYTES=${ACCOUNT_ARCHIVE_MAX_BYTES};const ACCOUNT_ARCHIVE_STATES=${JSON.stringify(ACCOUNT_ARCHIVE_STATES)};const backupObject=${backupObject.toString()};const backupFile=${backupFile.toString()};const backupContext=${backupContext.toString()};const backupArchive=${backupArchive.toString()};const readAccountBackups=${readAccountBackups.toString()};const readAccountBackupPreview=${readAccountBackupPreview.toString()};return ${bindAccountBackup.toString()};})()`
+export const ACCOUNT_BACKUP_CLIENT_BINDING = `(()=>{const formatClientBytes=${ASCII_BYTES_BINDING};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const ACCOUNT_ARCHIVE_MAX_BYTES=${ACCOUNT_ARCHIVE_MAX_BYTES};const ACCOUNT_ARCHIVE_STATES=${JSON.stringify(ACCOUNT_ARCHIVE_STATES)};const backupObject=${backupObject.toString()};const backupFile=${backupFile.toString()};const backupContext=${backupContext.toString()};const backupArchive=${backupArchive.toString()};const readAccountBackups=${readAccountBackups.toString()};const readAccountBackupPreview=${readAccountBackupPreview.toString()};return ${bindAccountBackup.toString()};})()`

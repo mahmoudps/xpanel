@@ -29,6 +29,9 @@ describe('notification templates', { tags: ['unit'] }, () => {
     expect(events.map((row: { event: string }) => row.event)).toContain('account.suspended')
     expect(events[0]).toMatchObject({ state: 'default', variables: '{account} {domain} {server}' })
     expect(events[0].en.subject).toContain('{account}'); expect(events[0].ar.subject.length).toBeGreaterThan(0)
+    const quota = events.find((row: { event: string }) => row.event === 'quota.warning')
+    expect(quota.en.body).toBe('The account {account} on {server} uses {usedMb} MiB of its {limitMb} MiB disk quota ({percent}%).')
+    expect(quota.ar.body).toBe('يستخدم الحساب {account} على {server} مقدار {usedMb} MiB من حصته البالغة {limitMb} MiB ({percent}%).')
   })
   it('refuses an unknown variable with its name and keeps the saved text', async () => {
     const h = harness(), { revision } = await h.call()

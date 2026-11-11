@@ -33,6 +33,7 @@ function bindHomeTools(): void {
       .filter(tool => tool.closest('[data-tool-group]') === group && tool.closest('[data-panel-home]') === root)]))
     const initialHidden = new Set([...groups, ...[...tools.values()].flat()].filter(node => node.hidden))
     const remembered = new Map<HTMLDetailsElement, boolean>()
+    const programmatic = new Map<HTMLDetailsElement, boolean>()
     const media = new Map<number, boolean>()
     let query = ''
 
@@ -43,15 +44,29 @@ function bindHomeTools(): void {
       const threshold = Number(rawThreshold)
       if (/^[1-9][0-9]{0,3}$/.test(rawThreshold) && typeof window.matchMedia === 'function') {
         if (!media.has(threshold)) media.set(threshold, window.matchMedia(`(max-width: ${threshold - 1}px)`).matches)
-        if (media.get(threshold)) details.open = false
+        if (media.get(threshold) && details.open) {
+          programmatic.set(details, false)
+          details.open = false
+        }
       }
       remembered.set(details, details.open)
       details.addEventListener('toggle', () => {
+        if (programmatic.get(details) === details.open) {
+          programmatic.delete(details)
+          return
+        }
+        programmatic.delete(details)
         if (query === '') remembered.set(details, details.open)
       })
-      details.querySelector('summary')?.addEventListener('click', event => {
+      const summary = details.querySelector('summary')
+      details.addEventListener('click', event => {
+        if (!summary || !(event.target instanceof Node) || !summary.contains(event.target)) return
+        const before = details.open
         queueMicrotask(() => {
-          if (!event.defaultPrevented && root.isConnected) remembered.set(details, details.open)
+          if (!event.defaultPrevented && root.isConnected) {
+            programmatic.delete(details)
+            remembered.set(details, details.open === before ? !before : details.open)
+          }
         })
       })
     }
@@ -81,7 +96,11 @@ function bindHomeTools(): void {
         if (badge) badge.textContent = query === '' ? badge.dataset.rest ?? '' : copy('{hits} of {size}', { hits, size })
         if (remembered.has(group as HTMLDetailsElement)) {
           const details = group as HTMLDetailsElement
-          details.open = query !== '' ? hits > 0 : remembered.get(details)!
+          const nextOpen = query !== '' ? hits > 0 : remembered.get(details)!
+          if (details.open !== nextOpen) {
+            programmatic.set(details, nextOpen)
+            details.open = nextOpen
+          }
         }
       }
       count.textContent = query === '' ? count.dataset.rest ?? ''

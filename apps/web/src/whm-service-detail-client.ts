@@ -6,6 +6,12 @@ import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayD
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
 import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+import { ASCII_BYTES_BINDING, formatIsolatedBytes as canonicalFormatClientBytes } from './display-format.ts'
+import { ISOLATE_LTR_BINDING, isolateLtr as canonicalIsolateLtr } from './display-format.ts'
+// Module-local alias: the binding source declares it again from ISOLATE_LTR_BINDING.
+const isolateLtr = canonicalIsolateLtr
+// Module-local alias: the binding source defines it again from ASCII_BYTES_BINDING.
+const formatClientBytes = canonicalFormatClientBytes
 const frameRequest = canonicalFrameRequest
 const formatDisplayDateTime = sharedFormatDisplayDateTime
 export type ServiceRowView = { id: string; label: string; unit: string | null; state: string } | null
@@ -131,7 +137,7 @@ function bindWhmServiceDetail(askDialog: Ask | undefined): void {
     const show = (target: HTMLElement, kindOf: string, message: string): void => { target.hidden = false; target.dataset.outcome = kindOf; target.textContent = message; target.setAttribute('role', ['unknown', 'failed'].includes(kindOf) ? 'alert' : 'status') }
     const technical = (value: string): HTMLElement => { const bdi = document.createElement('bdi'); bdi.dir = 'ltr'; bdi.textContent = value; return bdi }
     const fact = (key: string, value: string | null): void => { const cell = root.querySelector<HTMLElement>('[data-whm-service-detail-fact="' + key + '"]'); if (cell) cell.textContent = value ?? notRead }
-    const size = (bytes: number): string => bytes < 1024 ? bytes + ' B' : bytes < 1048576 ? (bytes / 1024).toFixed(1) + ' KB' : (bytes / 1048576).toFixed(1) + ' MB'
+    const size = (bytes: number): string => formatClientBytes(bytes)
     const serviceStates: Record<string, string> = { active: t(msgctxt('whm-service-detail-client', 'Running')), inactive: t('Stopped'), failed: t(msgctxt('whm-service-detail-client', 'Failed')), 'not-installed': t('Not installed'), unchecked: t(msgctxt('whm-service-detail-client', 'Not checked')) }
     const controlStates: Record<string, string> = { reachable: t('Answering (rping)'), unreachable: t('Not answering'), unavailable: t('Reply not readable') }
     const fileStates: Record<string, string> = { parsed: t('SOA read'), missing: t('Missing'), malformed: t('SOA not readable'), 'too-large': t('Too large to read'), 'not-regular': t('Not a regular file'), unreadable: t('Unreadable'), 'not-read': notRead }
@@ -189,7 +195,7 @@ function bindWhmServiceDetail(askDialog: Ask | undefined): void {
         fact('tls', tls ? (tlsModes[tls.desired] ?? tls.desired) + ' / ' + (tls.observed === null ? settingStates[tls.state]! : tlsModes[tls.observed] ?? tls.observed) : notRead)
         fact('passive', passive ? range(passive.desired) + ' / ' + (passive.observed === null ? settingStates[passive.state]! : range(passive.observed)) : notRead)
         fact('accounts', current.ftpAccounts === null ? t('Saved state not read') : String(current.ftpAccounts)); fact('conf-dir', current.confDir)
-        for (const item of current.settings) row([[technical(item.name)], [technical(item.desired)], [item.observed === null ? settingStates[item.state]! : technical(item.observed)], [settingStates[item.state]!]])
+        for (const item of current.settings) { const shown = (value: string): string | Node => item.name === 'TLS' && tlsModes[value] ? tlsModes[value]! : technical(value); row([[technical(item.name)], [shown(item.desired)], [item.observed === null ? settingStates[item.state]! : shown(item.observed)], [settingStates[item.state]!]]) }
         if (!current.settings.length) empty(4, t('No settings were read.'))
       } else {
         fact('hostname', current.hostname ?? t('Not set in saved state'))
@@ -198,7 +204,7 @@ function bindWhmServiceDetail(askDialog: Ask | undefined): void {
         for (const endpoint of current.endpoints) {
           const cert = endpoint.certificate, file: (string | Node)[] = endpoint.certPath ? [technical(endpoint.certPath)] : []
           if (endpoint.state === 'not-rendered') file.push(t('xPanel does not render a certificate path for this service.'))
-          else if (endpoint.reason) file.push((file.length ? ' · ' : '') + (reasons[endpoint.reason] ?? endpoint.reason))
+          else if (endpoint.reason) file.push((file.length ? ' · ' : '') + (reasons[endpoint.reason] ?? t('The service reported a reason xPanel does not recognize ({code}).', { code: isolateLtr(endpoint.reason) })))
           const covered = !cert || cert.coversHostname === null ? (cert ? t('Hostname not set') : none) : cert.coversHostname ? t('Covered') : t('Not covered')
           row([[endpoints[endpoint.id] ?? endpoint.id], [endpoint.ports.length ? technical(endpoint.ports.join(', ')) : none], file, [cert ? technical(cert.names.join(', ')) : none], [cert ? technical(cert.issuer) : none],
             [cert ? technical(formatDisplayDateTime(cert.notAfter)) : none], [cert ? technical(String(cert.daysLeft)) : none], [covered],
@@ -282,4 +288,4 @@ function bindWhmServiceDetail(askDialog: Ask | undefined): void {
   })
 }
 
-export const WHM_SERVICE_DETAIL_CLIENT_BINDING = withFrameRequest(`(()=>{${WHM_CLIENT_TEMPLATE_BINDING}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readServiceDetailView=${readServiceDetailView.toString()};const readZoneCheckView=${readZoneCheckView.toString()};return ${bindWhmServiceDetail.toString()};})()`)
+export const WHM_SERVICE_DETAIL_CLIENT_BINDING = withFrameRequest(`(()=>{${ISOLATE_LTR_BINDING};const formatClientBytes=${ASCII_BYTES_BINDING};${WHM_CLIENT_TEMPLATE_BINDING}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readServiceDetailView=${readServiceDetailView.toString()};const readZoneCheckView=${readZoneCheckView.toString()};return ${bindWhmServiceDetail.toString()};})()`)

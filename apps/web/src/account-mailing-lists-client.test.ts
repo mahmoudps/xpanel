@@ -69,6 +69,11 @@ describe('mailing lists browser binding', () => {
     expect(status().dataset.state).toBe('loaded')
     expect(status().hidden).toBe(true)
   })
+  it('clears a theme status that starts as unread once the saved lists are read', async () => {
+    status().dataset.state = 'unread'; status().textContent = 'Saved mailing lists have not been read.'; status().hidden = false
+    boot(vi.fn(async () => ({ mailingLists: [record()] }))); await tick()
+    expect([status().dataset.state, status().hidden, status().textContent]).toEqual(['loaded', true, ''])
+  })
   it('reads saved lists, creates a list and verifies the readback', async () => {
     let lists = [record()]
     const calls: { method: string; path: string; body?: unknown }[] = []

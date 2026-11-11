@@ -12,7 +12,8 @@ const statusModel = (status: StatusPageModel['status'], overrides: Partial<Statu
 const unavailable = (overrides: Partial<UnavailableProps> = {}): UnavailableProps => ({
   surface: 'xpanel', locale: 'en', theme: 'light', density: 'comfortable', route: '/domains/site-settings', heading: 'Site settings',
   admitted: true, securityPage: false, qualifiedRoutes: new Set(), signedIn: true,
-  visibility: { principal: { kind: 'user', id: 'principal-internal', username: 'alice', accountId: 'account-internal' }, disabledFeatures: new Set() }, ...overrides,
+  visibility: { principal: { kind: 'user', id: 'principal-internal', username: 'alice', accountId: 'account-internal' }, disabledFeatures: new Set() },
+  readOnlyFacts: { surface: 'xpanel', panel: {} }, ...overrides,
 })
 const liveState = (overrides: Partial<ActivityDrawerProps['live']> = {}): ActivityDrawerProps['live'] => ({
   connectionState: 'offline', reconcile: { generationId: 0, status: 'idle', stages: { render: 'pending', test: 'pending', switch: 'pending', reload: 'pending', verify: 'pending' }, stateChecksum: null, filesCount: 0, durationMs: null, failedTest: null, error: null, updatedAt: null },
@@ -58,6 +59,8 @@ describe('v2 sign-in contracts', () => {
     const html = renderV2Login({ audience: 'xwhm', username: 'real-user', lockout: { locked: true, lockedUntil: '2026-10-29T10:15:00Z', retryAfterSec: 2.3 } })
     expect(html).toContain('data-auth-state="locked"')
     expect(html).toContain('data-retry-after="3"')
+    // Each of the three sign-in guards leads with its icon inside the term.
+    expect(html.match(/<dt><svg class="v2-icon"/g)).toHaveLength(3)
     expect(html).toContain('2026-10-29 10:15 UTC')
     expect(html).not.toContain('203.0.113.7')
     expect(html).not.toContain('14 minutes')
@@ -140,6 +143,20 @@ describe('v2 status and unqualified routes', () => {
     expect(html).toContain('<bdi dir="ltr">&lt;unsafe&gt;</bdi>')
     expect(html).not.toContain('data-nav-route="/whm')
   })
+
+  it('renders the unavailable summary card without calling readOnlyPage when an admitted caller has no realm facts', () => {
+    const readOnly = vi.fn(() => '<h1>Read-only</h1>')
+    const html = createV2UnavailableRenderer(readOnly)(unavailable({
+      readOnlyFacts: undefined,
+      summary: { title: 'Account summary', accountEmpty: false, fields: [{ key: 'status', label: 'Status', value: 'Suspended', ltr: false }] },
+    }))
+    expect(readOnly).not.toHaveBeenCalled()
+    expect(html).toContain('data-tool-availability="unverified"')
+    expect(html).toContain('<h1>Site settings</h1>')
+    expect(html).toContain('data-workspace-field="status"')
+    expect(html).toContain('Suspended')
+    expect(html).not.toContain('data-readonly="true"')
+  })
 })
 
 describe('v2 shared security and document slots', () => {
@@ -156,7 +173,8 @@ describe('v2 shared security and document slots', () => {
   it('shows enabled or development-disabled facts without enrollment controls', () => {
     const enabled = renderV2AccountSecurityCard({ ...security, principalKind: 'root', surface: 'xwhm', totpEnabled: true })
     expect(enabled).toContain('data-mfa-enabled="true"')
-    expect(enabled).toContain('xpanel disable-2fa root --confirm')
+    expect(enabled.replace(/<[^>]+>/g, '')).toContain('xpanel disable-2fa root --confirm')
+    expect(enabled).toContain('<span class="v2-security__tok">--confirm</span>')
     expect(enabled).not.toContain('data-auth-setup-form')
     const disabled = renderV2AccountSecurityCard({ ...security, mfaMode: 'disabled', totpEnabled: true })
     expect(disabled).toContain('data-mfa-configured="true"')

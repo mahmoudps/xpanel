@@ -4,6 +4,12 @@ import './i18n.ts'
 import type { IoWorkspaceView } from '../../api/src/metering-workspace.ts'
 import type { BandwidthReport } from '../../agent/src/metering.ts'
 import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+import { ASCII_BYTES_BINDING, formatIsolatedBytes as canonicalFormatClientBytes } from './display-format.ts'
+import { ISOLATE_LTR_BINDING, isolateLtr as canonicalIsolateLtr } from './display-format.ts'
+// Module-local alias: the binding source declares it again from ISOLATE_LTR_BINDING.
+const isolateLtr = canonicalIsolateLtr
+// Module-local alias: the binding source defines it again from ASCII_BYTES_BINDING.
+const formatClientBytes = canonicalFormatClientBytes
 const frameRequest = canonicalFrameRequest
 const formatDisplayDateTime = sharedFormatDisplayDateTime
 
@@ -126,7 +132,7 @@ export function accountLimitsPatch(fields: { name: string; value: string; unlimi
 
 function bindWhmMetering(askDialog?: (input: { title: string; body: string; confirm: string }) => Promise<unknown>): void {
   const t = (message: string, values?: MessageValues): string => xpT(message, values)
-  const bytes = (value: number): string => { const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB']; let size = value, index = 0; while (size >= 1024 && index < units.length - 1) { size /= 1024; index++ } return (index ? size.toFixed(1) : String(size)) + ' ' + units[index] }
+  const bytes = (value: number): string => formatClientBytes(value)
   const fixed = (value: number): string => String(Math.round(value * 10) / 10)
   document.querySelectorAll<HTMLElement>('[data-whm-metering]').forEach(root => {
     if (root.dataset.meteringBound === 'true') return
@@ -164,8 +170,8 @@ function bindWhmMetering(askDialog?: (input: { title: string; body: string; conf
       fact('observed', view.observedAt ? formatDisplayDateTime(view.observedAt) : unavailable)
       // Totals over no measured account would read as a real zero while accounts are still unmeasured.
       const noTotals = view.state === 'unavailable' ? unavailable : !view.accounts.length && view.unmeasuredAccounts ? t('Not measured') : null
-      fact('read', noTotals ?? bytes(sum('readBytesPerSec')) + '/s')
-      fact('write', noTotals ?? bytes(sum('writeBytesPerSec')) + '/s')
+      fact('read', noTotals ?? formatClientBytes(sum('readBytesPerSec'), true))
+      fact('write', noTotals ?? formatClientBytes(sum('writeBytesPerSec'), true))
       fact('iops', noTotals ?? fixed(sum('readIops') + sum('writeIops')) + ' IOPS')
       fact('latency', disk.state === 'read' && disk.awaitMs !== null ? fixed(disk.awaitMs) + ' ms (' + disk.intervalSeconds + ' s)' : disk.state === 'idle' ? t('No disk operations in the last interval') : unavailable)
       fact('pressure', host?.psiSomeAvg10 != null ? fixed(host.psiSomeAvg10) + '% (some, 10 s)' : unavailable)
@@ -175,7 +181,7 @@ function bindWhmMetering(askDialog?: (input: { title: string; body: string; conf
       if (count) count.textContent = view.unmeasuredAccounts ? t('{shown, plural, one {# account measured} other {# accounts measured}}; {missing} not yet measured.', { shown: view.accounts.length, missing: view.unmeasuredAccounts }) : t('{shown, plural, one {# account measured.} other {# accounts measured.}}', { shown: view.accounts.length })
       fill('io', view.accounts.map(row => [
         { text: row.username + ' (UID ' + row.uid + ', xpanel-' + row.uid + '.slice)' },
-        { text: 'R: ' + bytes(row.readBytesPerSec) + '/s / W: ' + bytes(row.writeBytesPerSec) + '/s', numeric: true },
+        { text: 'R: ' + formatClientBytes(row.readBytesPerSec, true) + ' / W: ' + formatClientBytes(row.writeBytesPerSec, true), numeric: true },
         { text: 'R: ' + fixed(row.readIops) + ' / W: ' + fixed(row.writeIops), numeric: true },
         { ...meter(row.memoryCurrentBytes, row.memoryLimitMb, 'MiB', 1024 * 1024), numeric: true },
         { text: fixed(row.cpuPercent) + '%', numeric: true },
@@ -189,7 +195,7 @@ function bindWhmMetering(askDialog?: (input: { title: string; body: string; conf
       if (relief) relief.disabled = !canRelieve || !limited.length
       const SOURCE_STATES: Record<string, string> = { read: t('Counted'), partial: t('Partly counted'), unavailable: t('Not counted') }
       fact('month', view.month)
-      fact('since', view.since ? formatDisplayDateTime(view.since) : unavailable)
+      fact('since', view.since ? isolateLtr(formatDisplayDateTime(view.since)) : unavailable)
       fact('updated', view.updatedAt ? formatDisplayDateTime(view.updatedAt) : unavailable)
       fact('pending', view.state === 'unavailable' ? unavailable : bytes(view.pendingBytes))
       for (const source of ['web', 'mail', 'ftp'] as const) { const state = view.sources[source]; fact(source, SOURCE_STATES[state.state]! + (state.since ? ' · ' + formatDisplayDateTime(state.since) : '')) }
@@ -223,7 +229,7 @@ function bindWhmMetering(askDialog?: (input: { title: string; body: string; conf
       const accounts = readCustomBandwidthView(await send('GET', '/api/accounts/bandwidth/custom'))
       customRows.replaceChildren()
       const columns = customRows.closest('table')?.querySelectorAll('thead th').length ?? 1
-      const mb = (value: number | 'unlimited' | null): string => value === null ? t('Not read') : value === 'unlimited' ? t('Unlimited') : value + ' MB'
+      const mb = (value: number | 'unlimited' | null): string => value === null ? t('Not read') : value === 'unlimited' ? t('Unlimited') : bytes(value * 1048576)
       if (!accounts.length) { const row = document.createElement('tr'), td = document.createElement('td'); td.colSpan = columns; td.textContent = t('No account has a custom bandwidth limit.'); row.append(td); customRows.append(row) }
       for (const account of accounts) {
         const row = document.createElement('tr')
@@ -335,7 +341,7 @@ function bindWhmMetering(askDialog?: (input: { title: string; body: string; conf
     const editable = root.dataset.quotasCanEdit === 'true' && !root.closest('[data-readonly="true"],[data-capability-state="unavailable"],fieldset:disabled')
     const query = { sort: 'username', dir: 'asc' as 'asc' | 'desc', page: 1 }
     let total = 0, timer: ReturnType<typeof setTimeout> | undefined, busy = false
-    const mb = (value: number | 'unlimited' | null): string => value === null ? t('Not read') : value === 'unlimited' ? t('Unlimited') : value + ' MB'
+    const mb = (value: number | 'unlimited' | null): string => value === null ? t('Not read') : value === 'unlimited' ? t('Unlimited') : bytes(value * 1048576)
     const cell = (row: HTMLElement, lines: (string | null)[], numeric = false): HTMLTableCellElement => {
       const td = document.createElement('td')
       if (numeric) td.dataset.numeric = ''
@@ -349,7 +355,7 @@ function bindWhmMetering(askDialog?: (input: { title: string; body: string; conf
     }
     const save = async (row: DiskQuotaClientRow, value: string, unlimited: boolean): Promise<void> => {
       let patch: ReturnType<typeof accountLimitsPatch>
-      try { patch = accountLimitsPatch([{ name: 'diskMb', value, unlimited }]) } catch { say('failed', t('Enter whole megabytes, choose unlimited, or leave a field empty for the package value.')); return }
+      try { patch = accountLimitsPatch([{ name: 'diskMb', value, unlimited }]) } catch { say('failed', t('Enter whole MiB, choose unlimited, or leave a field empty for the package value.')); return }
       busy = true; lock(); say('reading', t('Saving limits…'))
       try { await send('PATCH', '/api/accounts/' + row.accountId + '/limits', patch); say('read', t('The disk limit of {username} is saved and applied. Hosting verification is still required.', { username: row.username })); busy = false; await load() }
       catch (error) { say('failed', refusal(error)) }
@@ -364,14 +370,14 @@ function bindWhmMetering(askDialog?: (input: { title: string; body: string; conf
         row.dataset.quotaAccount = item.username
         cell(row, [item.username, item.domain, item.owner ? t('Owner: {owner}', { owner: item.owner }) : null]).dataset.quotaCell = 'account'
         cell(row, [item.owner ?? t('Not read')]).dataset.quotaCell = 'owner'
-        cell(row, [item.usedMb === null ? t('Not read') : item.usedMb + ' MB'], true).dataset.quotaCell = 'used'
+        cell(row, [item.usedMb === null ? t('Not read') : bytes(item.usedMb * 1048576)], true).dataset.quotaCell = 'used'
         cell(row, [mb(item.limitMb), item.source === 'account' ? t('Account limit') : t('Package: {plan}', { plan: item.planName ?? t('Not read') })], true).dataset.quotaCell = 'limit'
         const change = document.createElement('td')
         change.dataset.quotaCell = 'change'
         if (editable) {
           const input = document.createElement('input'), label = document.createElement('label'), box = document.createElement('input'), text = document.createElement('span'), apply = document.createElement('button')
           input.type = 'text'; input.inputMode = 'numeric'; input.dir = 'ltr'; input.autocomplete = 'off'; input.value = typeof item.limitMb === 'number' && item.source === 'account' ? String(item.limitMb) : ''
-          input.placeholder = t('Package value'); input.setAttribute('aria-label', t('Disk limit of {username} (MB)', { username: item.username }))
+          input.placeholder = t('Package value'); input.setAttribute('aria-label', t('Disk limit of {username} (MiB)', { username: item.username }))
           box.type = 'checkbox'; box.checked = item.source === 'account' && item.limitMb === 'unlimited'; input.disabled = box.checked; text.textContent = t('Unlimited'); label.append(box, text)
           box.addEventListener('change', () => { input.disabled = box.checked })
           apply.type = 'button'; apply.className = refresh.className; apply.textContent = t('Save')
@@ -449,4 +455,4 @@ function bindWhmMetering(askDialog?: (input: { title: string; body: string; conf
     })
   })
 }
-export const WHM_METERING_CLIENT_BINDING = withFrameRequest(`(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readWhmIoView=${readWhmIoView.toString()};const readWhmBandwidthView=${readWhmBandwidthView.toString()};const readCustomBandwidthView=${readCustomBandwidthView.toString()};const readLogRetentionView=${readLogRetentionView.toString()};const accountLimitsPatch=${accountLimitsPatch.toString()};const readDiskQuotaPage=${readDiskQuotaPage.toString()};const readRawServerLogs=${readRawServerLogs.toString()};return ${bindWhmMetering.toString()};})()`)
+export const WHM_METERING_CLIENT_BINDING = withFrameRequest(`(()=>{${ISOLATE_LTR_BINDING};const formatClientBytes=${ASCII_BYTES_BINDING};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readWhmIoView=${readWhmIoView.toString()};const readWhmBandwidthView=${readWhmBandwidthView.toString()};const readCustomBandwidthView=${readCustomBandwidthView.toString()};const readLogRetentionView=${readLogRetentionView.toString()};const accountLimitsPatch=${accountLimitsPatch.toString()};const readDiskQuotaPage=${readDiskQuotaPage.toString()};const readRawServerLogs=${readRawServerLogs.toString()};return ${bindWhmMetering.toString()};})()`)

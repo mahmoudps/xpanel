@@ -101,7 +101,7 @@ function bindAccountSiteSettings(askDialog: ((options: Record<string, unknown>) 
       }
       if (!rules.length) { const tr = document.createElement('tr'), cell = document.createElement('td'); cell.colSpan = 4; cell.textContent = t('No deny rules are saved for this site.'); tr.append(cell); denyRows.append(tr) }
     }
-    const LABELS: Record<string, string> = { docRoot: t('Document root'), expiresAt: t('Stop the site on'), pathQuotaMb: t('Path quota (MB)'), site: t('Site options') }
+    const LABELS: Record<string, string> = { docRoot: t('Document root'), expiresAt: t('Stop the site on'), pathQuotaMb: t('Path quota (MiB)'), site: t('Site options') }
     const shown = (value: unknown): string => value === null || value === undefined ? t('Not set') : typeof value === 'object' ? JSON.stringify(value) : String(value)
     function changed(): void {
       const target = row(), body = target ? siteSettingsBody(target, draft()) : {}
@@ -176,7 +176,7 @@ function bindAccountSiteSettings(askDialog: ((options: Record<string, unknown>) 
       if (!target) return
       if (!askDialog) { note('failed', t('Confirmation is unavailable. Nothing was sent.')); return }
       const approved = await askDialog({ title: suspended ? t('Stop this site?') : t('Start this site?'), danger: suspended, confirm: suspended ? t('Stop site') : t('Start site'),
-        body: target.name + '\n' + (suspended ? t('Every request gets the stopped page until you start the site. Mail, FTP and files keep working.') : t('The site serves its content again.')) }).catch(() => false)
+        code: target.name, body: (suspended ? t('Every request gets the stopped page until you start the site. Mail, FTP and files keep working.') : t('The site serves its content again.')) }).catch(() => false)
       if (approved) await submit({ suspended })
     }
     if (!readable() || !SS_DOMAIN_ID.test(id) || !home.startsWith('/')) { note('unavailable', t('Site settings are unavailable here. Nothing was read or changed.')); return }

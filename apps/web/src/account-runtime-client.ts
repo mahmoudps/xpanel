@@ -6,6 +6,9 @@ import { readAccountRuntimeView } from '../../../packages/os/src/account-runtime
 import type { AccountRuntimeClientView } from '../../../packages/os/src/account-runtime-command.ts'
 import { clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
 import { frameAccess as canonicalFrameAccess, withFrameRequest } from './read-only-frame.ts'
+import { ASCII_BYTES_BINDING, formatIsolatedBytes as canonicalFormatClientBytes } from './display-format.ts'
+// Module-local alias: the binding source defines it again from ASCII_BYTES_BINDING.
+const formatClientBytes = canonicalFormatClientBytes
 export { readAccountRuntimeView }
 const frameAccess = canonicalFrameAccess
 const formatDisplayDateTime = sharedFormatDisplayDateTime
@@ -54,7 +57,7 @@ function bindAccountRuntime(askDialog: Ask | undefined, parse: typeof readAccoun
     const stateLabel = (state: string): string => state === 'running' ? t('Running') : state === 'starting' ? t('Starting') : state === 'stopped' ? t('Stopped') : state === 'failed' ? t('Failed') : t('Unknown')
     const chip = (text: string, tone: string): HTMLElement => { const node = templates.chip(); clientTemplateSlot(node, 'label').textContent = text; node.dataset.stateChip = tone; return node }
     const stateChip = (state: string): HTMLElement => chip(stateLabel(state), state === 'running' ? 'ok' : state === 'failed' ? 'problem' : 'unavailable')
-    const megabytes = (bytes: number | null): string => bytes === null ? t('Not read') : t('{value} MB', { value: (bytes / 1048576).toFixed(1) })
+    const megabytes = (bytes: number | null): string => bytes === null ? t('Not read') : formatClientBytes(bytes)
     const row = (cells: Record<string, string | HTMLElement>): HTMLElement => { const tr = templates.row(); for (const [name, value] of Object.entries(cells)) clientTemplateSlot(tr, name).replaceChildren(value); return tr }
     const empty = (body: HTMLElement, text: string, environment = false): void => { const tr = environment ? templates.envEmpty() : templates.empty(); clientTemplateSlot(tr, 'message').textContent = text; body.replaceChildren(tr) }
     const rowButton = (label: string, op: string, name: string, enabled: boolean): HTMLButtonElement => { const b = templates.action() as HTMLButtonElement; clientTemplateSlot(b, 'label').textContent = label; b.dataset.runtimeRow = op; b.dataset.runtimeName = name; b.dataset.runtimeBlocked = String(!enabled); b.disabled = true; return b }
@@ -123,7 +126,7 @@ function bindAccountRuntime(askDialog: Ask | undefined, parse: typeof readAccoun
       stat('count', t('{used} of {max}', { used: v.containers.length, max: v.plan.maxContainers }))
       stat('cleanup', v.imageCleanup === 'none' ? t('Never run') : v.imageCleanup === 'running' ? t('Running') : v.imageCleanup === 'succeeded' ? t('Succeeded') : t('Failed'))
       stat('memory', megabytes(v.containers.reduce<number | null>((sum, c) => c.memoryBytes === null ? sum : (sum ?? 0) + c.memoryBytes, null)))
-      stat('limits', t('Memory {memory} · CPU {cpu} · Processes {processes}', { memory: v.plan.memoryMb === null ? t('Unlimited') : v.plan.memoryMb + ' MB', cpu: v.plan.cpuPercent === null ? t('Unlimited') : v.plan.cpuPercent + '%', processes: v.plan.maxProcesses ?? t('Unlimited') }))
+      stat('limits', t('Memory {memory} · CPU {cpu} · Processes {processes}', { memory: v.plan.memoryMb === null ? t('Unlimited') : formatClientBytes(v.plan.memoryMb * 1048576), cpu: v.plan.cpuPercent === null ? t('Unlimited') : v.plan.cpuPercent + '%', processes: v.plan.maxProcesses ?? t('Unlimited') }))
       const body = q<HTMLElement>('[data-runtime-containers]')!
       if (!v.containers.length) empty(body, v.plan.containers ? t('No container yet.') : t('Your plan does not include containers.'))
       else body.replaceChildren(...v.containers.map(c => row({ name: c.name, image: c.image, state: stateChip(c.state), since: c.since ? formatDisplayDateTime(c.since) : '—', ports: t('None published'),
@@ -146,12 +149,12 @@ function bindAccountRuntime(askDialog: Ask | undefined, parse: typeof readAccoun
       const stat = (key: string, text: string): void => { const node = q<HTMLElement>('[data-runtime-stat="' + key + '"]'); if (node) node.textContent = text }
       for (const c of v.cache) stat(c.service, c.enabled ? stateLabel(c.state) : t('Disabled'))
       stat('memory', megabytes(v.cache.reduce<number | null>((sum, c) => c.memoryBytes === null ? sum : (sum ?? 0) + c.memoryBytes, null)))
-      stat('cap', t('{value} MB', { value: String(v.plan.cacheMaxMb) }))
+      stat('cap', formatClientBytes(v.plan.cacheMaxMb * 1048576))
       const body = q<HTMLElement>('[data-runtime-cache]')!
       body.replaceChildren(...v.cache.map(c => {
         const host = v.host.cache.find(h => h.service === c.service)!
         return row({ name: c.service === 'redis' ? 'Redis' : 'Memcached', state: host.available || c.enabled ? stateChip(c.enabled ? c.state : 'stopped') : chip(t('Not installed'), 'unavailable'), version: host.version ?? t('Not read'), socket: c.socket,
-          memory: c.memoryMb === null ? t('Not set') : t('{value} MB', { value: String(c.memoryMb) }),
+          memory: c.memoryMb === null ? t('Not set') : formatClientBytes(c.memoryMb * 1048576),
           actions: actions(rowButton(c.enabled ? t('Disable') : t('Enable'), c.enabled ? 'cache.disable' : 'cache.enable', c.service, v.plan.cache && (c.enabled || host.available)), rowButton(t('Log'), 'log:cache', c.service, true)) })
       }))
       const chosen = v.cache.find(c => c.service === field<HTMLSelectElement>('service').value) ?? v.cache[0]!
@@ -320,7 +323,7 @@ function bindAccountRuntime(askDialog: Ask | undefined, parse: typeof readAccoun
     action('cache-save')?.addEventListener('click', () => {
       if (!view) return
       const service = field<HTMLSelectElement>('service').value, memoryMb = Number(field<HTMLInputElement>('memory').value), c = view.cache.find(x => x.service === service)!
-      if (!Number.isInteger(memoryMb) || memoryMb < 8 || memoryMb > view.plan.cacheMaxMb) { note('failed', t('Choose a memory limit from 8 to {max} MB. Nothing was saved.', { max: view.plan.cacheMaxMb })); return }
+      if (!Number.isInteger(memoryMb) || memoryMb < 8 || memoryMb > view.plan.cacheMaxMb) { note('failed', t('Choose a memory limit from 8 to {max} MiB. Nothing was saved.', { max: view.plan.cacheMaxMb })); return }
       void send({ op: 'cache.save', service, enabled: c.enabled, memoryMb }, t('Settings saved.'))
     })
     action('cache-flush')?.addEventListener('click', () => { const service = field<HTMLSelectElement>('service').value; void send({ op: 'cache.flush', service }, t('The cache was flushed.'), { title: t('Flush {name}?', { name: service === 'redis' ? 'Redis' : 'Memcached' }), body: t('Every cached value is removed.') }) })
@@ -329,4 +332,4 @@ function bindAccountRuntime(askDialog: Ask | undefined, parse: typeof readAccoun
     void load()
   })
 }
-export const ACCOUNT_RUNTIME_CLIENT_BINDING = withFrameRequest(`(()=>{${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};${runtimeClientTemplates.toString()};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const parse=${readAccountRuntimeView.toString()};const bind=${bindAccountRuntime.toString()};return (ask)=>bind(ask,parse);})()`)
+export const ACCOUNT_RUNTIME_CLIENT_BINDING = withFrameRequest(`(()=>{const formatClientBytes=${ASCII_BYTES_BINDING};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};${runtimeClientTemplates.toString()};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const parse=${readAccountRuntimeView.toString()};const bind=${bindAccountRuntime.toString()};return (ask)=>bind(ask,parse);})()`)

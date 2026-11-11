@@ -84,7 +84,7 @@ function bindWhmAccountTemplates(askDialog: ((options: Record<string, unknown>) 
       editing = ''
       for (const control of Object.values(inputs)) { control.value = ''; control.removeAttribute('aria-invalid') }
       paintPlans([]); paintPreview(null)
-      heading.textContent = t('Create template'); save.textContent = t('Create template'); cancel.hidden = true
+      heading.textContent = t('New template'); save.textContent = t('Create template'); cancel.hidden = true
       lock(busy)
     }
     const edit = (template: WhmAccountTemplate): void => {
@@ -93,7 +93,7 @@ function bindWhmAccountTemplates(askDialog: ((options: Record<string, unknown>) 
       inputs['defaultPage.title']!.value = template.defaultPage.title; inputs['defaultPage.body']!.value = template.defaultPage.body
       inputs['suspendedPage.title']!.value = template.suspendedPage.title; inputs['suspendedPage.body']!.value = template.suspendedPage.body
       paintPlans(template.planIds); paintPreview(template)
-      heading.textContent = t('Edit template'); save.textContent = t('Save changes'); cancel.hidden = false; saveStatus.hidden = true
+      heading.textContent = t('Edit template: {name}', { name: template.name }); save.textContent = t('Save changes'); cancel.hidden = false; saveStatus.hidden = true
       lock(busy); inputs.name!.focus()
     }
     const paint = (next: WhmAccountTemplatesView): void => {
@@ -115,11 +115,14 @@ function bindWhmAccountTemplates(askDialog: ((options: Record<string, unknown>) 
       if (editing && !current) resetForm(); else if (current) { paintPlans(planBoxes().filter(box => box.checked).map(box => box.value)); paintPreview(current) } else paintPlans([])
       lock(false)
     }
+    // The saved-templates table never shows a header with no body: it says what is known.
+    const stateRow = (message: string): void => rows.replaceChildren(cloneViewRecord(root, 'account-template-empty', 'tr', { message }))
+    if (!rows.children.length) stateRow(t('Templates have not been read.'))
     const load = async (): Promise<void> => {
       if (!request) return
       loading.hidden = false; lock(true); note(status, 'reading', t('Reading templates...'))
       try { paint(readWhmAccountTemplatesView(await request('GET', '/api/server/account-templates'))) }
-      catch (error) { view = null; rows.replaceChildren(); empty.hidden = true; note(status, 'failed', failText(error, t('Templates could not be read or verified. Nothing was changed.'))); lock(false) }
+      catch (error) { view = null; stateRow(t('Templates have not been read.')); empty.hidden = true; note(status, 'failed', failText(error, t('Templates could not be read or verified. Nothing was changed.'))); lock(false) }
       finally { loading.hidden = true }
     }
     const act = async (action: string, template: WhmAccountTemplate): Promise<void> => {

@@ -34,6 +34,7 @@ function bindWhmDns(askDialog: ((options: Record<string, unknown>) => Promise<un
     const admitted = (): boolean => root.isConnected && !root.closest(denied)
     let zones: WhmZone[] = [], selected: WhmZone | null = null, draft: ZoneEditorDraftRow[] = []
     let busy = false, loaded = false, review = false, confirming = false
+    const savedById = (): Map<string, string> => new Map((selected ? zoneDraftFromRecords(selected.records) : []).map(item => [item.id, zoneStable([item])]))
     const dirty = (): boolean => !!selected && zoneStable(draft) !== zoneStable(zoneDraftFromRecords(selected.records))
     const announce = (state: string, message: string): void => {
       status.dataset.state = state
@@ -88,11 +89,12 @@ function bindWhmDns(askDialog: ((options: Record<string, unknown>) => Promise<un
     const fields = ['name', 'type', 'ttl', 'content', 'priority'] as const
     const paintRows=():void=>{
       rows.textContent=''
-      for(const record of draft){const row=cloneClientTemplate(rowTemplate,'tr',rowSlots);row.dataset.recordId=record.id
+      const baseline = savedById()
+      for(const record of draft){const row=cloneClientTemplate(rowTemplate,'tr',rowSlots);row.dataset.recordId=record.id;if(baseline.get(record.id)!==zoneStable([record]))row.dataset.listKeep='true'
         for(const field of fields){const input=clientTemplateSlot(row,field,field==='type'?'select':'input') as HTMLInputElement|HTMLSelectElement;input.id='whm-dns-'+record.id+'-'+field;const label=clientTemplateSlot(row,field+'-label','label') as HTMLLabelElement;label.htmlFor=input.id
           if(input instanceof HTMLSelectElement){for(const type of ZONE_RECORD_TYPES){const option=document.createElement('option');option.value=type;option.textContent=type;input.append(option)}}
           else if(field==='ttl'||field==='priority'){input.min='0';input.max=String(field==='ttl'?ZONE_TTL_MAX:ZONE_PRIORITY_MAX);input.step='1'}
-          input.value=record[field];input.addEventListener(field==='type'?'change':'input',()=>{if(input.disabled||!admitted())return;if(field==='type')record.type=input.value as ZoneRecordType;else record[field]=input.value;controls()})
+          input.value=record[field];input.addEventListener(field==='type'?'change':'input',()=>{if(input.disabled||!admitted())return;if(field==='type')record.type=input.value as ZoneRecordType;else record[field]=input.value;if(savedById().get(record.id)!==zoneStable([record]))row.dataset.listKeep='true';else delete row.dataset.listKeep;controls()})
         }
         const remove=clientTemplateSlot(row,'remove','button') as HTMLButtonElement;remove.dataset.dnsRemove='';remove.addEventListener('click',()=>{if(!remove.disabled&&admitted()){draft=draft.filter(item=>item!==record);paintRows();controls()}});rows.append(row)
       }

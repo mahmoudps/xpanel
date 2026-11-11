@@ -3,6 +3,7 @@ import { defaultPlan, type Account, type Domain, type WebsiteAnalyticsSnapshot, 
 import { parseMarkup } from '../../../../markup.ts'
 import { v2Messages } from '../../../messages.ts'
 import { WEB_STATS_FIXTURE } from '../../../../../../../../tests/fixtures/web-stats-view.ts'
+import { PANEL_OBSERVATIONS_CSS } from './common.ts'
 import { renderV2PanelObservation, renderV2PanelSiteHealth, renderV2PanelServerInformation, renderV2PanelLogs, renderV2PanelTraffic, renderV2PanelWebStatistics, V2_PANEL_OBSERVATION_ROUTES } from './index.ts'
 
 const account: Account = {
@@ -142,7 +143,7 @@ describe('v2 account observations', () => {
     expect(html).toContain('data-chart-state="loaded"')
     expect(html).toContain('dir="rtl"')
     expect(html).toContain('>30</span>')
-    expect(html).toContain('>9.00 KB</span>')
+    expect(html).toContain('>8.79\u00a0KiB</span>')
     expect(html).toContain('&lt;/td&gt;&lt;script&gt;alert(1)&lt;/script&gt;')
     expect(html).not.toContain('<script>')
     expect(html).toContain(v2Messages.translator('ar')('Daily visitor readings have not been read. Request totals do not establish a daily visitor series.'))
@@ -159,7 +160,7 @@ describe('v2 account observations', () => {
     observed.topPaths = []
     const html = renderV2PanelTraffic({ ...props, websiteAnalytics: observed }, authority)
     expect(html).toContain('data-chart-state="loaded"')
-    expect(html).toContain('>0 B</span>')
+    expect(html).toContain('>0\u00a0B</span>')
     expect(html).not.toContain('missing row is not a measured zero')
     // A one-bucket observation keeps both plots, their axes and legends, but has no two-point series path.
     // Decorative breadcrumb/KPI icons and grid paths remain valid and do not establish traffic samples.
@@ -193,7 +194,12 @@ describe('v2 account observations', () => {
     expect(unknown).not.toContain('>0 B<')
     expect(unknown).toContain('Not measured')
     const measured = renderV2PanelServerInformation({ ...props, usage: { phpVersion: '8.3', diskBytes: 0, memoryBytes: 0, processCount: 0, bandwidth: 'unmeasured' } }, authority)
-    expect(measured).toContain('>0 B</bdi>')
+    expect(measured).toContain('>0 B</bdi>')
+    // Sizes read like Home: MiB or GiB, never a raw byte count.
+    const large = renderV2PanelServerInformation({ ...props, usage: { phpVersion: '8.3', diskBytes: 4617089843, memoryBytes: 188743680, processCount: 3, bandwidth: 'unmeasured' } }, authority)
+    expect(large).toContain('>4.30 GiB</bdi>')
+    expect(large).toContain('>180 MiB</bdi>')
+    expect(large).not.toContain('4617089843')
     expect(measured).toContain('>8.3</bdi>')
     expect(measured).toContain('does not establish the operating system')
   })
@@ -206,7 +212,7 @@ describe('V2 web statistics', () => {
   it.each(['en', 'ar'] as const)('shows the AWStats month of the selection with every report section (%s)', locale => {
     const html = shown({ locale })
     expect(html).toContain('data-chart-state="loaded"')
-    for (const value of ['/shop/', 'firefox131', 'linuxubuntu', 'googlebot', 'https://search.example/', '2026-11-06', '81.9 KB', '2026-10']) expect(html, value).toContain(value)
+    for (const value of ['/shop/', 'firefox131', 'linuxubuntu', 'googlebot', 'https://search.example/', '2026-11-06', '80.0\u00a0KiB', '2026-10']) expect(html, value).toContain(value)
     expect(html).toContain('data-web-stats-metrics')
     expect(html).toContain('data-web-stats-metrics-save')
     expect(html).toContain(`data-web-stats-revision="${WEB_STATS_FIXTURE.view.choice.revision}"`)
@@ -231,5 +237,32 @@ describe('V2 web statistics', () => {
     const unauthorized = shown({}, { canRead: true, canManage: false, presentation: 'read-only', authorizedTools: new Set() })
     expect(unauthorized).toContain('data-chart-state="unread"')
     expect(unauthorized).not.toContain('/shop/')
+  })
+})
+
+describe('V2 account observation layout', () => {
+  it('draws the status share bar and shares only from observed status counts', () => {
+    const html = renderV2PanelTraffic({ ...props, websiteAnalytics: reading(), websiteAnalyticsWindow: '24h' }, authority)
+    expect(html).toContain('class="v2-panel-obs-bar"')
+    expect(html).toContain('>100.0%</bdi>')
+    const unread = renderV2PanelTraffic(props, authority)
+    expect(unread).not.toContain('v2-panel-obs-bar')
+    expect(unread).not.toContain('%</bdi>')
+  })
+
+  it('keeps the range as links and the summary rows free of inline layout styles', () => {
+    const html = renderV2PanelTraffic({ ...props, websiteAnalytics: reading(), websiteAnalyticsWindow: '7d' }, authority)
+    expect(html).toMatch(/<div class="v2-panel-obs-seg" role="group"[^>]*>(<a href="[^"]*window=[^"]*"( aria-current="true")?>[^<]+<\/a>){4}<\/div>/)
+    expect(html).not.toMatch(/class="v2-kpi-row[^"]*" style=/)
+    expect(renderV2PanelWebStatistics({ account }, authority)).not.toMatch(/class="v2-kpi-row[^"]*" style=/)
+  })
+
+  it('styles every page class of the observation routes in its own stylesheet', () => {
+    for (const render of renderers) {
+      const html = render({ ...props, websiteAnalytics: reading() }, { ...authority, logKinds: ['access'] })
+      const classes = new Set([...html.matchAll(/class="([^"]+)"/g)].flatMap(match => match[1]!.split(/\s+/)).filter(name => /^v2-panel-(extra|obs|operation)/.test(name)))
+      expect(classes.size).toBeGreaterThan(2)
+      for (const name of classes) expect(PANEL_OBSERVATIONS_CSS, name).toContain(`.${name.split('--')[0]}`)
+    }
   })
 })

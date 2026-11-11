@@ -95,10 +95,13 @@ function bindWhmWebServer(askDialog: ((options: Record<string, unknown>) => Prom
     const lockForm = (): void => { for (const control of formControls()) { if (!priorDisabled.has(control)) priorDisabled.set(control, control.disabled); control.disabled = true } }
     const unlockForm = (): void => { if (review) return; for (const [control, disabled] of priorDisabled) control.disabled = disabled; priorDisabled.clear() }
     const note = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', ['failed', 'stale', 'uncertain'].includes(state) ? 'alert' : 'status') }
-    const control = (key: string) => [...(form?.elements ?? [])].find(element => (element as HTMLInputElement).name === key) as HTMLInputElement | HTMLSelectElement | undefined
+    const named = (key: string) => [...(form?.elements ?? [])].filter(element => (element as HTMLInputElement).name === key) as (HTMLInputElement | HTMLSelectElement)[]
+    const radio = (element: HTMLInputElement | HTMLSelectElement): element is HTMLInputElement => element instanceof HTMLInputElement && element.type === 'radio'
+    // A radio group answers with its checked choice; any other name is its one control.
+    const control = (key: string) => { const all = named(key); return all.find(element => !radio(element) || element.checked) ?? all[0] }
     const draft = (): WebValues => {
       const result: WebValues = {}
-      for (const key of WHM_WEB_SETTING_FIELDS) { const element = control(key); if (element) result[key] = element instanceof HTMLInputElement && element.type === 'checkbox' ? element.checked : element.value }
+      for (const key of WHM_WEB_SETTING_FIELDS) { const element = control(key); if (element) result[key] = element instanceof HTMLInputElement && element.type === 'checkbox' ? element.checked : radio(element) && !element.checked ? '' : element.value }
       return result
     }
     const different = () => { const current = draft(); return saved ? Object.keys(current).filter(key => String(current[key]) !== String(saved![key])) : [] }
@@ -115,7 +118,7 @@ function bindWhmWebServer(askDialog: ((options: Record<string, unknown>) => Prom
       const body = page.querySelector<HTMLElement>('[data-whm-detail-section="web-pending"] tbody'), current = draft(), keys = different()
       if (!body) { sync(); return }
       body.textContent = ''
-      for (const key of keys) { const row = document.createElement('tr'), element = control(key), label = element && [...(form?.querySelectorAll<HTMLLabelElement>('label') ?? [])].find(item => item.htmlFor === element.id)?.textContent; cell(row, label?.trim() || key); cell(row, String(saved![key]), true); cell(row, String(current[key]), true); cell(row, t('Draft only')); body.append(row) }
+      for (const key of keys) { const row = document.createElement('tr'), element = control(key), label = element && (radio(element) ? element.closest('fieldset')?.querySelector('legend')?.textContent : [...(form?.querySelectorAll<HTMLLabelElement>('label') ?? [])].find(item => item.htmlFor === element.id)?.textContent); cell(row, label?.trim() || key); cell(row, String(saved![key]), true); cell(row, String(current[key]), true); cell(row, t('Draft only')); body.append(row) }
       if (!keys.length) empty(body, 4, saved ? t('No draft differences from the last saved-settings read.') : t('Saved settings have not been read.'))
       sync()
     }
@@ -131,7 +134,7 @@ function bindWhmWebServer(askDialog: ((options: Record<string, unknown>) => Prom
         if ([...targetSelect.options].some(option => option.value === previous)) targetSelect.value = previous
       }
       const body = page.querySelector<HTMLElement>('[data-whm-detail-section="web-generations"] tbody')
-      if (body) { body.textContent = ''; for (const generation of value.generations) { const row = document.createElement('tr'); cell(row, String(generation.id), true); cell(row, formatDisplayDateTime(generation.createdAt), true); cell(row, generation.status); cell(row, generation.filesCount === undefined ? t('Not read') : String(generation.filesCount), true); body.append(row) }; if (!value.generations.length) empty(body, 4, t('The generation read returned no records.')) }
+      if (body) { body.textContent = ''; for (const generation of value.generations) { const row = document.createElement('tr'); cell(row, String(generation.id), true); cell(row, formatDisplayDateTime(generation.createdAt), true); cell(row, ({ pending: t('Pending'), tested: t('Tested'), active: t('Active'), superseded: t('Superseded'), failed: t('Failed'), rolled_back: t('Rolled back') } as Record<string, string>)[generation.status] ?? generation.status); cell(row, generation.filesCount === undefined ? t('Not read') : String(generation.filesCount), true); body.append(row) }; if (!value.generations.length) empty(body, 4, t('The generation read returned no records.')) }
     }
     const paintServices = (services: WhmWebService[]): void => {
       const body = root.querySelector<HTMLElement>('[data-whm-web-services]')
@@ -168,7 +171,7 @@ function bindWhmWebServer(askDialog: ((options: Record<string, unknown>) => Prom
       try {
         if (await askDialog({ title: t('Discard the settings draft?'), body: t('Read the current saved settings and replace this unsaved draft. No host change is sent.'), confirm: t('Discard and read'), danger: true }) !== true || !admitted()) return
         const observed = readWhmWebSettings(await request('GET', '/api/server/settings'))
-        for (const key of WHM_WEB_SETTING_FIELDS) { const element = control(key); if (element) { if (element instanceof HTMLInputElement && element.type === 'checkbox') element.checked = observed[key] === true; else element.value = String(observed[key]) } }
+        for (const key of WHM_WEB_SETTING_FIELDS) { const element = control(key); if (element) { if (element instanceof HTMLInputElement && element.type === 'checkbox') element.checked = observed[key] === true; else if (radio(element)) named(key).forEach(item => { (item as HTMLInputElement).checked = item.value === String(observed[key]) }); else element.value = String(observed[key]) } }
         saved = observed; preview(); note('read', t('The draft was replaced with freshly read saved settings. No host change was sent.'))
       } catch { note('failed', t('Saved settings could not be read. The draft is preserved.')) }
       finally { busy = false; unlockForm(); sync() }

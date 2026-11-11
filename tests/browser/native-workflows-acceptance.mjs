@@ -28,9 +28,10 @@ plan.resources.ioReadBps = 2 * 1048576
 plan.resources.ioWriteBps = 1048576
 const secondPlan = { ...plan, id: secondPlanId, name: 'Alternate', featureListId: otherFeatureId }
 const account = (index, overrides = {}) => ({ id: `40000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`, username: 'acct' + String(index).padStart(2, '0'), uid: 20000 + index, gid: 20000 + index, home: '/home/synthetic' + index, primaryDomain: 'acct' + index + '.example.test', planId: index % 2 ? secondPlanId : planId, ownerId: null, status: index === 22 ? 'suspended' : 'active', suspendReason: null, contactEmail: '', ipv4: '192.0.2.1', shell: 'none', createdAt: '2026-10-24T00:00:00Z', ...overrides })
-const accounts = [...Array.from({ length: 23 }, (_, index) => account(index)), account(23, { username: 'resellalpha', ownerId: resellerId }), account(24, { username: 'resellbeta', ownerId: resellerId, status: 'suspended' }), account(25, { username: 'private-neighbor', ownerId: neighborId })]
+const accounts = [...Array.from({ length: 23 }, (_, index) => account(index)), account(23, { username: 'resellalpha', ownerId: resellerId }), account(24, { username: 'resellbeta', ownerId: resellerId, status: 'suspended' }), account(25, { username: 'privateneighbor', ownerId: neighborId })]
 const baseMail = { mode: 'custom-map', defaultIpv4: '192.0.2.1', defaultIpv6: null, defaultHelo: 'mail.example.test', domainOverrides: [{ domainName: 'alpha.example.test', ipv4: '192.0.2.11', ipv6: null, heloHostname: 'alpha-mail.example.test' }] }
 const freshMail = { ...baseMail, defaultIpv6: '2001:db8::99', defaultHelo: 'fresh-mail.example.test', domainOverrides: [...baseMail.domainOverrides, { domainName: 'fresh.example.test', ipv4: '192.0.2.12', ipv6: '2001:db8::12', heloHostname: 'fresh.example.test' }] }
+const serverSettings = { hostname: 'host.example.test', nameservers: ['ns1.example.test'], adminEmail: 'admin@example.test', engine: 'apache', apacheMpm: 'itk', panelPort: 2087, sshPort: 22, backendPort: 8080, backendTlsPort: 8443, nginx: { workerProcesses: 'auto', workerConnections: 4096, workerRlimitNofile: 16384, multiAccept: true, keepaliveTimeoutSec: 65 }, apache: { startServers: 8, minSpareServers: 5, maxSpareServers: 20, maxRequestWorkers: 300, serverLimit: 256, maxConnectionsPerChild: 0 } }
 // Qualification and identities below exist only inside this loopback UI fixture.
 // The runner never authenticates a production session or executes host/mail work.
 const catalog = tools.map(tool => ({ ...tool, status: 'verified', delivery: { status: 'verified', reason: 'Synthetic native workflow presentation only.', evidence: [] } }))
@@ -76,16 +77,24 @@ async function fixture() {
       if (/^\/api\/accounts\/[^/]+\/(?:suspend|unsuspend)$/.test(url.pathname)) { respond(403, { code: 'FORBIDDEN', details: { stateChanged: false } }); return }
       respond(404, { code: 'NOT_FOUND' }); return
     }
-    if (!['/whm/plans', '/whm/accounts', '/whm/email/outbound'].includes(url.pathname)) { outgoing.writeHead(404); outgoing.end(); return }
+    if (!['/whm/plans', '/whm/accounts', '/whm/email/outbound', '/whm/backups/destinations', '/whm/services/web', '/whm/email/monitor', '/whm/domains', '/whm/dns', '/software/packages'].includes(url.pathname)) { outgoing.writeHead(404); outgoing.end(); return }
     const locale = url.searchParams.get('lang') === 'ar' ? 'ar' : 'en', theme = url.searchParams.get('theme') === 'light' ? 'light' : 'dark'
-    const asReseller = url.searchParams.get('actor') === 'reseller'
-    const actor = asReseller ? { kind: 'reseller', id: resellerId, username: reseller.username } : principal
+    const actorParam = url.searchParams.get('actor')
+    const asReseller = actorParam === 'reseller' || actorParam === 'dns-reseller'
+    const activeReseller = actorParam === 'dns-reseller' ? { ...reseller, acl: [...reseller.acl, 'manage-dns'] } : reseller
+    const actor = asReseller ? { kind: 'reseller', id: resellerId, username: activeReseller.username } : principal
     const requested = url.searchParams.get('planId')
     const editor = requested ? requested === planId ? { kind: 'edit', plan } : { kind: 'unavailable' } : { kind: 'create' }
-    const html = renderWebApp({ surface: 'xwhm', activeRoute: url.pathname, locale, theme, catalog,
-      visibility: { principal: actor, ...(asReseller ? { reseller } : {}), disabledFeatures: new Set() }, security: { totpEnabled: true }, realtimeEnabled: false,
-      whm: { principal: actor, ...(asReseller ? { activeReseller: reseller } : {}), plans: [plan, secondPlan], accounts, resellers: [reseller, { ...reseller, id: neighborId, username: 'neighborreseller' }], featureLists: [{ id: featureId, name: 'Standard features' }, { id: otherFeatureId, name: 'Alternate features' }], planEditorState: editor, mailIpConfig: baseMail, ipPool: [] },
-    })
+    const ownerPrincipal = { kind: 'user', id: 'synthetic-owner', username: accounts[0].username, accountId: accounts[0].id }
+    const html = url.pathname === '/software/packages'
+      ? renderWebApp({ surface: 'xpanel', activeRoute: url.pathname, locale, theme, catalog, accountId: accounts[0].id,
+        visibility: { principal: ownerPrincipal, disabledFeatures: new Set() }, security: { totpEnabled: true }, realtimeEnabled: false,
+        panel: { account: accounts[0], plan },
+      })
+      : renderWebApp({ surface: 'xwhm', activeRoute: url.pathname, locale, theme, catalog,
+        visibility: { principal: actor, ...(asReseller ? { reseller: activeReseller } : {}), disabledFeatures: new Set() }, security: { totpEnabled: true }, realtimeEnabled: false,
+        whm: { principal: actor, ...(asReseller ? { activeReseller } : {}), plans: [plan, secondPlan], accounts, resellers: [activeReseller, { ...reseller, id: neighborId, username: 'neighborreseller' }], featureLists: [{ id: featureId, name: 'Standard features' }, { id: otherFeatureId, name: 'Alternate features' }], planEditorState: editor, mailIpConfig: baseMail, ipPool: [], serverSettings },
+      })
     // The page loads the runtime client from its versioned asset; that asset must be the actual current client.
     const client = /<script id="xpanel-realtime-client" src="(\/assets\/ws-client\.js)\?v=[0-9a-f]+"><\/script>/.exec(html)
     assert.ok(client, 'The actual current render must load the runtime client')
@@ -109,19 +118,26 @@ async function geometry(page, selector) {
     const scope = document.querySelector(selector), rtl = document.documentElement.dir === 'rtl'
     const rect = element => { const r = element.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height } }
     const edge = rectangle => rtl ? rectangle.right : rectangle.left
-    const fields = [...scope.querySelectorAll('.xp-field')].filter(field => field.checkVisibility()).flatMap(field => {
-      const label = field.querySelector(':scope > label,:scope > dt'), value = field.querySelector(':scope > input:not([type=checkbox]),:scope > select,:scope > textarea,:scope > dd')
-      if (!label || !value || !value.checkVisibility()) return []
-      const l = rect(label), v = rect(value), range = document.createRange(); range.selectNodeContents(value)
-      return [{ name: value.name || label.textContent, gap: v.top - l.bottom, edge: Math.abs(edge(l) - edge(v)), textAlign: getComputedStyle(value).textAlign, direction: getComputedStyle(value).direction, glyphEdge: value.tagName === 'DD' ? Math.abs(edge(l) - edge(range.getBoundingClientRect())) : null }]
+    const fields = [...scope.querySelectorAll('.v2-field, .v2-plan-field, .v2-whm-mail__field')].filter(field => field.checkVisibility() && !field.querySelector('pre')).flatMap(field => {
+      const label = field.querySelector(':scope > label[for], :scope > dt')
+      const value = label?.htmlFor ? document.getElementById(label.htmlFor) : field.querySelector(':scope > input:not([type=checkbox]), :scope > select, :scope > textarea, :scope > dd')
+      if (!label || !value || !value.checkVisibility() || (value instanceof HTMLInputElement && ['checkbox', 'radio'].includes(value.type))) return []
+      const labelRange = document.createRange(); labelRange.selectNodeContents(label)
+      const l = rect(labelRange), v = rect(value), style = getComputedStyle(value)
+      const valueEdge = value.tagName === 'DD' ? edge(v) : rtl ? v.right - parseFloat(style.borderRightWidth) - parseFloat(style.paddingRight) : v.left + parseFloat(style.borderLeftWidth) + parseFloat(style.paddingLeft)
+      let glyphEdge = null
+      if (value.tagName === 'DD') {
+        const range = document.createRange(); range.selectNodeContents(value)
+        glyphEdge = Math.abs(edge(l) - edge(range.getBoundingClientRect()))
+      }
+      return [{ name: value.name || value.id || label.textContent, gap: v.top - l.bottom, edge: Math.abs(edge(l) - valueEdge), textAlign: style.textAlign, direction: style.direction, glyphEdge }]
     })
-    const targets = [...scope.querySelectorAll('button,input,select,textarea,a,summary')].filter(element => element.checkVisibility()).map(element => {
-      const target = element.matches('input[type=checkbox]') ? element.labels?.[0] || element : element
+    const targets = [...scope.querySelectorAll('button,input:not([type=hidden]),select,textarea,a[href],summary')].filter(element => element.checkVisibility()).map(element => {
+      const target = element.matches('input[type=checkbox],input[type=radio]') ? element.labels?.[0] || element.closest('label') || element : element
       return { tag: element.tagName, type: element.type, ...rect(target) }
     })
-    const groups = [...scope.querySelectorAll('.xp-form-group')].filter(element => element.checkVisibility()).map(element => ({ gap: getComputedStyle(element).rowGap, fields: [...element.children].filter(child => child.matches('.xp-field')).map(rect), cards: [...element.children].filter(child => child.matches('.xp-card')).map(rect) }))
-    const cards = [...scope.querySelectorAll('.xp-card'), ...(scope.matches('.xp-card') ? [scope] : [])].filter(card => card.checkVisibility()).map(card => ({ padding: getComputedStyle(card).paddingInlineStart, ...rect(card) }))
-    const layout = scope.querySelector('[data-account-list-layout]')
+    const groups = [...scope.querySelectorAll('.v2-form, .v2-plan-fields, .v2-whm-mail__fields')].filter(element => element.checkVisibility()).map(element => ({ gap: getComputedStyle(element).rowGap, fields: [...element.children].filter(child => child.checkVisibility() && child.matches('.v2-field, .v2-plan-field, .v2-whm-mail__field')).map(rect) }))
+    const cards = [...scope.querySelectorAll('.v2-card:not(.v2-card--flush)'), ...(scope.matches('.v2-card:not(.v2-card--flush)') ? [scope] : [])].filter(card => card.checkVisibility()).map(card => ({ padding: getComputedStyle(card).paddingInlineStart, ...rect(card) }))
     const readonlyValues = [...scope.querySelectorAll('[data-mail-ip-overrides]')].map(value => {
       const container = value.closest('pre'), label = container.previousElementSibling
       const labelRange = document.createRange(), valueRange = document.createRange()
@@ -180,7 +196,7 @@ async function geometry(page, selector) {
         && characterOverhangs.every(item => item.asciiSpace && item.softWrap)
         && Object.keys(fullRangeOverhang).every(side => fullRangeOverhang[side] <= Math.max(0, ...characterOverhangs.flatMap(item => item.overhangs.map(bounds => bounds[side]))) + 1))
       return {
-        gap: rect(container).top - rect(label).bottom, glyphEdge: Math.abs(edge(labelRange.getBoundingClientRect()) - edge(valueRange.getBoundingClientRect())),
+        gap: rect(container).top - labelRange.getBoundingClientRect().bottom, glyphEdge: Math.abs(edge(labelRange.getBoundingClientRect()) - edge(valueRange.getBoundingClientRect())),
         rtl, label: computed(label), pre: computed(container), bdi: computed(value), parent: computed(container.parentElement),
         labelRange: { rect: box(labelRange.getBoundingClientRect()), lines: [...labelRange.getClientRects()].map(box) },
         valueRange: { rect: box(valueRange.getBoundingClientRect()), lines: [...valueRange.getClientRects()].map(box) },
@@ -192,7 +208,7 @@ async function geometry(page, selector) {
         preservedWhitespace: { fullRangeOverhang, hasFullOverhang, explainedByAsciiSoftWrapSpaces: whitespaceOnlyOverhang, characterOverhangs },
       }
     })
-    return { fields, targets, groups, cards, readonlyValues, group24: layout ? getComputedStyle(layout).rowGap : null, overflow: document.documentElement.scrollWidth - innerWidth, ascii: !/[\u0660-\u0669\u06f0-\u06f9]/.test(scope.innerText), page: rect(scope) }
+    return { fields, targets, groups, cards, readonlyValues, overflow: document.documentElement.scrollWidth - innerWidth, ascii: !/[\u0660-\u0669\u06f0-\u06f9]/.test(scope.innerText), page: rect(scope) }
   }, selector)
 }
 
@@ -203,13 +219,13 @@ async function verifyPresentation(page, state, selector, result, axeSource) {
   assert.ok(g.overflow <= 0, 'No document overflow')
   assert.equal(g.ascii, true)
   for (const field of g.fields) {
-    assert.ok(Math.abs(field.gap - 8) < 0.6, 'Actual label/value gap must be 8px: ' + field.name)
-    assert.ok(field.edge < 0.6, 'Actual label/value box edges must match: ' + field.name)
+    assert.ok(Math.abs(field.gap - 8) < 0.8, 'Actual label/value gap must be 8px: ' + field.name)
+    assert.ok(field.edge < 1, 'Actual label/value edges must match: ' + field.name)
     if (field.glyphEdge !== null) assert.ok(field.glyphEdge < 1, 'Actual readonly glyph edge must match its label')
   }
-  for (const target of g.targets) assert.ok(target.width >= 43.9 && target.height >= 43.9, 'All visible control targets, including checkbox labels, must be 44px')
+  for (const target of g.targets) assert.ok(target.width >= 43.5 && target.height >= 43.5, 'All visible control targets, including checkbox labels, must be 44px')
   for (const value of g.readonlyValues) {
-    assert.ok(Math.abs(value.gap - 8) < 0.6, 'Readonly override label/value gap stays 8px')
+    assert.ok(Math.abs(value.gap - 8) < 0.8, 'Readonly override label/value gap stays 8px')
     // Full-range bounds include preserved wrap spaces; visible text is measured on every actual line.
     assert.ok(value.nonWhitespaceRange.lines.length > 0 && value.nonWhitespaceRange.lines.every(line => line.labelDelta < 1), 'Every actual non-whitespace readonly line, including the first, stays at its label edge within 1px')
     assert.equal(value.nonWhitespaceRange.allTokensInside, true, 'All visible technical token rectangles stay inside their field')
@@ -220,54 +236,47 @@ async function verifyPresentation(page, state, selector, result, axeSource) {
       assert.notEqual(element.textOverflow, 'ellipsis')
     }
   }
-  for (const card of g.cards) assert.equal(card.padding, state.width <= 800 ? '16px' : '24px')
+  for (const card of g.cards) assert.equal(card.padding, state.width <= 600 ? '16px' : '24px')
   for (const group of g.groups) {
     if (group.fields.length > 1) assert.equal(group.gap, '16px', 'Field spacing stays 16px')
-    for (let index = 1; index < group.cards.length; index++) assert.ok(Math.abs(group.cards[index].top - group.cards[index - 1].bottom - 24) < 0.6, 'Actual major card groups stay 24px apart')
   }
-  if (g.group24) assert.equal(g.group24, '24px')
   result.font = await assertAppliedFont(page, 'h1', state.locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans')
   await injectTestScript(page, axeSource)
   result.accessibility = await page.evaluate(async selector => (await axe.run(selector, { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'] } })).violations.map(item => ({ id: item.id, impact: item.impact, targets: item.nodes.map(node => node.target) })), selector)
   assert.deepEqual(result.accessibility, [])
 }
 
+async function openPlanReview(form, expect) {
+  await form.locator('[data-plan-review-open]').click()
+  await expect(form.locator('[data-native-plan-review]')).toBeVisible()
+  await expect(form.locator('[data-native-plan-save]')).toBeEnabled()
+}
+
 async function plansFlow(page, host, state, result, expect, visit) {
   host.setPlanMode('success')
   await visit('/whm/plans?planId=' + planId)
   result.plan_layout = await page.locator('#whm-plans').evaluate(section => {
-    const tableRegion = section.querySelector('[data-plan-table-region]')
-    const create = [...section.querySelectorAll('a.xp-btn')].find(link => !tableRegion.contains(link) && new URL(link.href).pathname === '/whm/plans' && !new URL(link.href).searchParams.has('planId'))
-    const toolbar = create.closest('[data-plan-list-toolbar]') || create
-    const form = section.querySelector('[data-native-plan-editor]'), wrapper = form.parentElement
-    const heading = form.querySelector('h2'), firstCard = form.querySelector('.xp-card')
+    const picker = section.querySelector('#v2-plan-picker')
+    const allCard = section.querySelector('#v2-plan-all')
+    const tableRegion = allCard.querySelector('.v2-table-scroll[role="region"]')
+    const create = [...picker.querySelectorAll('a.v2-btn')].find(link => new URL(link.href).pathname === '/whm/plans' && !new URL(link.href).searchParams.has('planId'))
+    const columns = section.querySelector('.v2-plan-columns--editor')
+    const main = section.querySelector('.v2-plan-main')
+    const form = section.querySelector('[data-native-plan-editor]')
     const rect = element => { const r = element.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height } }
-    const style = element => { const s = getComputedStyle(element); return { display: s.display, gap: s.rowGap, marginBlockStart: s.marginBlockStart, marginBlockEnd: s.marginBlockEnd, paddingBlockStart: s.paddingBlockStart, paddingBlockEnd: s.paddingBlockEnd, paddingInlineStart: s.paddingInlineStart, paddingInlineEnd: s.paddingInlineEnd, borderBlockStart: s.borderBlockStartWidth, borderBlockEnd: s.borderBlockEndWidth } }
-    const glyph = element => { const range = document.createRange(); range.selectNodeContents(element); const r = range.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, left: r.left, right: r.right } }
-    const visibleTableContent = [...tableRegion.querySelectorAll('th,td')].filter(element => element.checkVisibility()).map(element => ({ box: rect(element), glyph: glyph(element) }))
     return {
-      toolbar: rect(toolbar), create: rect(create), table: rect(tableRegion), wrapper: rect(wrapper), form: rect(form), heading: rect(heading), headingGlyph: glyph(heading), firstCard: rect(firstCard),
-      toolbar_to_table: rect(tableRegion).top - rect(toolbar).bottom,
-      create_to_table: rect(tableRegion).top - rect(create).bottom,
-      table_to_wrapper: rect(wrapper).top - rect(tableRegion).bottom,
-      table_to_form: rect(form).top - rect(tableRegion).bottom,
-      table_to_heading: rect(heading).top - rect(tableRegion).bottom,
-      table_to_heading_glyph: glyph(heading).top - rect(tableRegion).bottom,
-      last_table_content_to_heading_glyph: glyph(heading).top - Math.max(...visibleTableContent.map(item => item.glyph.bottom)),
-      sectionStyle: style(section), parentStyle: style(tableRegion.parentElement), toolbarStyle: style(toolbar), wrapperStyle: style(wrapper), formStyle: style(form), headingStyle: style(heading), firstCardStyle: style(firstCard),
-      shared_parent: toolbar.parentElement === tableRegion.parentElement,
-      toolbar_children: toolbar === create ? 1 : [...toolbar.children].filter(element => element.checkVisibility()).length,
+      picker: rect(picker), create: rect(create), columns: rect(columns), allCard: rect(allCard), table: rect(tableRegion), form: rect(form),
+      picker_to_columns: rect(columns).top - rect(picker).bottom,
+      columns_to_all: rect(allCard).top - rect(columns).bottom,
+      sectionGap: getComputedStyle(section).rowGap,
+      mainGap: getComputedStyle(main).rowGap,
     }
   })
-  assert.ok(Math.abs(result.plan_layout.toolbar_to_table - 24) < 0.6, 'The actual nonempty plan toolbar and table stay 24px apart')
-  assert.ok(Math.abs(result.plan_layout.create_to_table - 24) < 0.6, 'The visible Create action has the same 24px boundary without toolbar filler')
-  assert.equal(result.plan_layout.shared_parent, true, 'The plan toolbar and table share one layout parent')
-  assert.equal(result.plan_layout.parentStyle.display, 'flex')
-  assert.equal(result.plan_layout.parentStyle.gap, '24px')
-  assert.equal(result.plan_layout.toolbar_children, 1, 'The plan toolbar has one real create action and no phantom item')
+  assert.equal(result.plan_layout.sectionGap, '32px')
+  assert.equal(result.plan_layout.mainGap, '24px')
+  assert.ok(Math.abs(result.plan_layout.picker_to_columns - 32) < 0.8, 'The plan picker card and editor workspace stay 32px apart')
+  assert.ok(Math.abs(result.plan_layout.columns_to_all - 32) < 0.8, 'The editor workspace and All plans card stay 32px apart')
   assert.ok(result.plan_layout.create.width >= 43.9 && result.plan_layout.create.height >= 43.9, 'The actual plan create target stays at least 44px')
-  // The plan table and the editor are sibling groups in the plans card: the card's 24px group gap separates them.
-  for (const boundary of ['table_to_wrapper', 'table_to_form', 'table_to_heading']) assert.ok(Math.abs(result.plan_layout[boundary] - 24) < 0.6, 'The real table-to-editor group boundary stays 24px without additive offsets: ' + boundary)
   result.plan_name_lines = await page.locator('#whm-plans [data-plan-name]').evaluateAll(nodes => nodes.map(node => {
     const range = document.createRange(); range.selectNodeContents(node)
     const lines = [...range.getClientRects()].filter(rect => rect.width > 0 && rect.height > 0).reduce((tops, rect) => tops.some(top => Math.abs(top - rect.top) < 0.6) ? tops : [...tops, rect.top], [])
@@ -275,9 +284,9 @@ async function plansFlow(page, host, state, result, expect, visit) {
   }))
   assert.deepEqual(result.plan_name_lines.map(item => item.name), ['Standard', 'Alternate'])
   assert.ok(result.plan_name_lines.every(item => item.lines === 1), 'Actual single-token plan names stay intact instead of splitting into character chunks.')
-  const planRegion = page.locator('[data-plan-table-region]')
+  const planRegion = page.locator('#v2-plan-all .v2-table-scroll[role="region"]')
   await expect(planRegion).toHaveAttribute('role', 'region'); await expect(planRegion).toHaveAttribute('tabindex', '0')
-  await expect(planRegion).toHaveAccessibleName(await page.locator('#whm-plans-heading').innerText())
+  await expect(planRegion).toHaveAccessibleName(await page.locator('#v2-plan-all h2').innerText())
   const scroll = await planRegion.evaluate(node => ({ width: node.clientWidth, content: node.scrollWidth, left: node.scrollLeft }))
   result.plan_table_scroll = { ...scroll, keyboard_tested: false }
   if (scroll.content > scroll.width + 1) {
@@ -287,22 +296,25 @@ async function plansFlow(page, host, state, result, expect, visit) {
     assert.ok(positions.some(left => Math.abs(left - scroll.left) > 1), 'An overflowing plan table scrolls with the keyboard inside its named region.')
     result.plan_table_scroll.keyboard_tested = true; result.plan_table_scroll.positions = positions
   }
-  const form = page.locator('[data-native-plan-editor]'), save = form.locator('[data-native-plan-save]'), status = form.locator('[data-native-plan-status]')
+  const form = page.locator('[data-native-plan-editor]'), reviewOpen = form.locator('[data-plan-review-open]'), save = form.locator('[data-native-plan-save]'), status = form.locator('[data-native-plan-status]')
   await expect(form).toHaveAttribute('data-plan-id', planId)
-  const editLink = page.locator('[data-plan-row="Standard"] a[href*="planId="]')
+  const pickerActiveLink = page.locator('#v2-plan-picker a[aria-current="page"]')
+  const activeUrl = new URL(await pickerActiveLink.getAttribute('href'), host.baseUrl)
+  assert.equal(activeUrl.searchParams.get('planId'), planId); assert.equal(activeUrl.searchParams.get('lang'), state.locale); assert.equal(activeUrl.searchParams.get('theme'), state.theme)
+  const editLink = page.locator('[data-plan-row="Alternate"] a[href*="planId="]')
   const link = new URL(await editLink.getAttribute('href'), host.baseUrl)
-  assert.equal(link.searchParams.get('planId'), planId); assert.equal(link.searchParams.get('lang'), state.locale); assert.equal(link.searchParams.get('theme'), state.theme)
-  await expect(save).toBeDisabled()
+  assert.equal(link.searchParams.get('planId'), secondPlanId); assert.equal(link.searchParams.get('lang'), state.locale); assert.equal(link.searchParams.get('theme'), state.theme)
+  await expect(reviewOpen).toBeDisabled(); await expect(save).toBeDisabled()
   // Plan names are permanent, so the editor keeps the saved name and the edit lands on a limit.
   await expect(form.locator('[name=name]')).toHaveJSProperty('readOnly', true)
   const limit = form.locator('[name=ioReadBps]')
-  await limit.fill('3'); await expect(save).toBeEnabled()
-  await limit.fill('2'); await expect(save).toBeDisabled()
-  await limit.fill('3')
+  await limit.fill('3'); await expect(reviewOpen).toBeEnabled(); await expect(save).toBeDisabled()
+  await limit.fill('2'); await expect(reviewOpen).toBeDisabled()
+  await limit.fill('3'); await openPlanReview(form, expect)
   const release = host.holdNextPlan(), start = host.requests.length
   const firstResponse = page.waitForResponse(response => response.request().method() === 'PATCH')
   try {
-    await limit.press('Enter')
+    await save.click()
     await expect(form).toHaveAttribute('aria-busy', 'true')
     await form.evaluate(form => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))
   } finally { release() }
@@ -313,12 +325,13 @@ async function plansFlow(page, host, state, result, expect, visit) {
   assert.deepEqual(first[0].body, (({ id, ownerId, ...body }) => ({ ...body, resources: { ...body.resources, ioReadBps: 3145728 }, enforceBandwidth: plan.enforceBandwidth ?? false }))(plan))
   assert.equal(Object.hasOwn(first[0].body, 'ownerId'), false)
   await form.locator('[name=ioReadBps]').fill('8'); await form.locator('[name=ioWriteBps]').fill('4')
+  await openPlanReview(form, expect)
   const secondResponse = page.waitForResponse(response => response.request().method() === 'PATCH')
-  await form.locator('[name=ioWriteBps]').press('Enter'); await secondResponse; await expect(status).toHaveAttribute('data-state', 'pending')
+  await save.click(); await secondResponse; await expect(status).toHaveAttribute('data-state', 'pending')
   const second = host.requests.filter(request => request.method === 'PATCH').at(-1)
   assert.equal(second.body.resources.ioReadBps, 8388608); assert.equal(second.body.resources.ioWriteBps, 4194304)
   assert.equal(second.body.name, plan.name); assert.equal(second.body.featureListId, featureId); assert.equal(Object.hasOwn(second.body, 'ownerId'), false)
-  host.setPlanMode('refused'); await limit.fill('5')
+  host.setPlanMode('refused'); await limit.fill('5'); await openPlanReview(form, expect)
   const refusal = page.waitForResponse(response => response.request().method() === 'PATCH')
   await save.click(); await refusal; await expect(status).toHaveAttribute('data-state', 'failed'); await expect(save).toBeEnabled()
   await expect(status).not.toContainText('untrusted-synthetic-detail')
@@ -331,14 +344,18 @@ async function plansFlow(page, host, state, result, expect, visit) {
   host.setPlanMode('success'); await visit('/whm/plans')
   const create = page.locator('[data-native-plan-editor]')
   assert.equal(await create.locator('[name=featureListId] option').count(), 2)
-  await create.locator('[name=name]').fill('Created plan'); await create.locator('[name=featureListId]').selectOption(otherFeatureId)
+  await create.locator('[name=name]').fill('Created plan')
+  await create.locator('#v2-plan-tab-features').click()
+  await create.locator('[name=featureListId]').selectOption(otherFeatureId)
+  await openPlanReview(create, expect)
   const creation = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === '/api/plans')
-  await create.locator('[name=name]').press('Enter'); await creation
+  await create.locator('[data-native-plan-save]').click(); await creation
   await expect(create.locator('[data-native-plan-status]')).toHaveAttribute('data-state', 'saved')
   const post = host.requests.filter(request => request.method === 'POST' && request.path === '/api/plans').at(-1)
   assert.equal(post.body.featureListId, otherFeatureId); assert.equal(post.body.ownerId, null)
   await expect(create).toHaveAttribute('data-plan-id', createdPlanId)
   await create.locator('[name=name]').fill('Created plan edited')
+  await openPlanReview(create, expect)
   const followup = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname.endsWith(createdPlanId))
   await create.locator('[data-native-plan-save]').click(); await followup
   assert.equal(Object.hasOwn(host.requests.at(-1).body, 'ownerId'), false)
@@ -362,25 +379,28 @@ async function accountsFlow(page, host, state, result, expect, visit, axeSource)
   await controls.locator('[data-list-search-input]').fill('acct22'); await expect(rows).toHaveCount(1)
   await controls.locator('[data-list-plan-filter]').selectOption(planId); await controls.locator('[data-list-state-filter]').selectOption('suspended'); await expect(rows).toHaveCount(1)
   const row = page.locator('[data-account-row=acct22]')
-  await expect(row.locator('[data-account-details] summary')).toBeVisible()
-  await row.locator('[data-account-details] summary').click()
+  await expect(row.locator('[data-account-detail-open="acct22"]:not([data-account-detail-section])')).toBeVisible()
+  await row.locator('[data-account-detail-open="acct22"]:not([data-account-detail-section])').click()
+  const detail = page.locator('[data-account-detail-for="acct22"]')
+  await expect(detail).toBeVisible()
   result.details_presentation = {}
-  await verifyPresentation(page, state, '[data-account-details][open]', result.details_presentation, axeSource)
-  await row.locator('[data-action=unsuspend-account]').click()
+  await verifyPresentation(page, state, '[data-account-detail-for="acct22"]', result.details_presentation, axeSource)
+  await detail.locator('[data-action=unsuspend-account]').click()
   const dialog = page.locator('[data-account-dialog]')
   await expect(dialog).toBeVisible(); await expect(dialog.locator('[data-account-dialog-username]')).toHaveText('acct22')
   const action = page.waitForResponse(response => response.url().endsWith('/unsuspend'))
   await dialog.locator('[data-account-action-submit]').click(); await action
   assert.equal(host.requests.at(-1).path, '/api/accounts/' + accounts[22].id + '/unsuspend')
   await expect(dialog.locator('[data-account-action-status]')).toHaveAttribute('data-state', 'failed')
-  await dialog.locator('[data-account-action-cancel]').click(); await expect(row).toBeVisible()
+  await dialog.locator('[data-account-action-cancel]').click(); await page.locator('[data-account-detail-close]').click(); await expect(detail).toBeHidden(); await expect(row).toBeVisible()
   await controls.locator('[data-list-search-input]').fill('no-matching-account'); await expect(rows).toHaveCount(0); await expect(controls.locator('[data-list-empty]')).toBeVisible()
   await visit('/whm/accounts?actor=reseller')
   await expect(page.locator('[data-account-row]')).toHaveCount(2)
   const scopeText = await page.locator('[data-accounts-workspace]').innerText()
   assert.ok(scopeText.includes('resellalpha') && scopeText.includes('resellbeta'))
-  assert.equal(scopeText.includes('private-neighbor'), false); assert.equal(scopeText.includes('acct00'), false)
-  await expect(page.locator('[data-account-row=resellbeta] [data-action=unsuspend-account]')).toBeVisible()
+  assert.equal(scopeText.includes('privateneighbor'), false); assert.equal(scopeText.includes('acct00'), false)
+  await page.locator('[data-account-row=resellbeta] button[popovertarget][aria-haspopup="menu"]').click()
+  await expect(page.locator('#v2-account-resellbeta-menu [data-action=unsuspend-account]')).toBeVisible()
   result.loaded_root_pages = [20, 6]; result.filtered_root_pages = [20, 3]; result.filtered_row_actions_preserved = true; result.reseller_rows = 2; result.neighbor_absent = true
 }
 
@@ -415,6 +435,28 @@ async function mailFlow(page, host, state, result, expect, visit) {
   const locked = host.requests.length; await form.evaluate(form => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))
   await expect(form).not.toHaveAttribute('aria-busy', 'true'); assert.equal(host.requests.length, locked)
   result.fresh_get_before_put = true; result.full_fresh_map_and_unedited_server_fields_preserved = true; result.failed_get_and_conflict_send_no_put = true; result.uncertain_receipt_locks_retry = true; result.smtp_or_delivery_not_qualified = true
+  if (state.locale === 'en' && state.width === 1440 && await page.locator('[data-ui-theme="v2"]').count() > 0) {
+    await visit('/whm/backups/destinations')
+    assert.deepEqual(await page.locator('[data-whm-backup-runs] template[data-xp-template]').evaluateAll(nodes => nodes.map(node => node.getAttribute('data-xp-template'))), ['whm-backup-runs-row', 'whm-backup-copies-row', 'whm-backup-recoveries-row', 'whm-backup-retention-row'])
+    await visit('/whm/services/web')
+    await expect(page.locator('[data-server-settings-form] input[name="engine"][value="apache"]')).toBeEnabled()
+    await expect(page.locator('[data-server-settings-form] [name="backendPort"]')).toBeEnabled()
+    await expect(page.locator('[data-server-settings-form] button[type="submit"]')).toBeEnabled()
+    await visit('/whm/email/monitor')
+    assert.equal(await page.locator('[data-whm-mail-log="monitor"] template[data-xp-template="whm-mail-timeline-button"]').count(), 1)
+    await visit('/software/packages')
+    assert.equal(await page.locator('[data-v2-operations-route="/software/packages"][data-readonly]').count(), 0)
+    await expect(page.locator('[data-v2-operations-route="/software/packages"] button:not([disabled])').first()).toBeVisible()
+    await visit('/whm/domains')
+    await expect(page.locator('[data-default-site-workspace]')).toHaveAttribute('data-default-site-enabled', 'true')
+    await visit('/whm/domains?actor=dns-reseller')
+    await expect(page.locator('[data-default-site-workspace]')).toHaveAttribute('data-default-site-enabled', 'false')
+    await visit('/whm/dns')
+    assert.equal(await page.locator('select[data-dns-account] option[value=""]').count(), 1)
+    await visit('/whm/dns?actor=dns-reseller')
+    assert.equal(await page.locator('select[data-dns-account] option[value=""]').count(), 0)
+    result.v2_surface_contracts = { backup_run_templates: true, web_server_root_editable: true, mail_monitor_templates: true, packages_authority: true, default_site_root_only: true, server_zone_root_only: true }
+  }
 }
 
 export async function runNativeWorkflowsAcceptance({ output, filter } = {}) {

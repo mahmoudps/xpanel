@@ -7,11 +7,12 @@ export const V2_WEB_DISK_TEMPLATES = '<template data-xp-template="web-disk-login
 
 const principalTemplate = (t: Translate, factsClass: string, actionsClass: string): string => {
   const fact = (label: string, slot: string): string => `<div><dt>${esc(label)}</dt><dd><bdi dir="ltr" class="v2-mono" data-xp-slot="${slot}"></bdi></dd></div>`
-  return `<template data-xp-template="dav-principal-row"><tr><td><dl class="${factsClass}">${fact(t(msgid('Login')), 'login')}${fact(t(msgid('Server')), 'server')}${fact(t(msgid('Principal')), 'principal')}${fact(t(msgid('Calendar')), 'calendar')}${fact(t(msgid('Address book')), 'address-book')}</dl><div class="${actionsClass}"><a class="v2-btn" download="calendars-contacts.mobileconfig" data-xp-slot="profile">${esc(t(msgid('Download the device profile')))}</a></div></td></tr></template>`
+  return `<template data-xp-template="dav-principal-row"><tr><td><dl class="${factsClass} v2-dav-principal">${fact(t(msgid('Login')), 'login')}${fact(t(msgid('Server')), 'server')}${fact(t(msgid('Principal')), 'principal')}${fact(t(msgid('Calendar')), 'calendar')}${fact(t(msgid('Address book')), 'address-book')}</dl><div class="${actionsClass}"><a class="v2-btn" download="calendars-contacts.mobileconfig" data-xp-slot="profile">${esc(t(msgid('Download the device profile')))}</a></div></td></tr></template>`
 }
 
+// A flex row, so a guide left alone on the last row takes the whole row instead of one column.
 export const v2DavGuide = (t: Translate, guides: readonly DavClientGuide[], factsClass: string): string =>
-  `<dl class="${factsClass}">${guides.map(guide => `<div><dt>${esc(t(guide.name))}</dt><dd><ol>${guide.steps.map(step => `<li>${esc(t(step))}</li>`).join('')}</ol></dd></div>`).join('')}</dl>`
+  `<dl class="${factsClass} v2-dav-guide">${guides.map(guide => `<div><dt>${esc(t(guide.name))}</dt><dd><ol>${guide.steps.map(step => `<li>${esc(t(step))}</li>`).join('')}</ol></dd></div>`).join('')}</dl>`
 
 export interface V2DavConnectionInput {
   t: Translate

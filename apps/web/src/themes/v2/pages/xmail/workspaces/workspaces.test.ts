@@ -30,6 +30,18 @@ describe('v2 sealed mailbox workspace pages', () => {
     expect(render('/mail/folders', { mailbox: '' })).toContain('data-folders-can-manage="false"')
   })
 
+  it('names each table column for phone rows and gives every select the house chevron', () => {
+    const html = render('/mail/folders')
+    expect(html).toContain(`style="--h1:&#39;Folder&#39;;--h2:&#39;Messages&#39;;--h3:&#39;Unread&#39;;--h4:&#39;Shown in mail apps&#39;;--h5:&#39;Actions&#39;"`)
+    expect(html).toMatch(/<span class="v2-select"><select id="mail-folders-parent"[^>]*>[^]*?<\/select><svg class="v2-icon"/)
+    expect(MAIL_WORKSPACES_CSS).toContain('td:nth-child(2)::before{content:var(--h2) ": "}')
+  })
+
+  it('keeps long loaded names inside the page: phone rows cap the value column and buttons may wrap', () => {
+    expect(MAIL_WORKSPACES_CSS).toContain('.v2-mail-workspace__table tr{display:grid;grid-template-columns:minmax(0,1fr) fit-content(50%);')
+    expect(MAIL_WORKSPACES_CSS).toContain('.v2-mail-workspace :is(.v2-mail-workspace__actions,td)>.v2-btn{max-inline-size:100%;block-size:auto;padding-block:8px;white-space:normal;text-align:start}')
+  })
+
   it('retains the folder create/rename/destructive confirmation contract and an unread table', () => {
     const html = render('/mail/folders')
     expect(find(html, '[data-mail-folders-create]')?.tag).toBe('form')
@@ -99,7 +111,7 @@ describe('v2 sealed mailbox workspace pages', () => {
 
   it('retains whole-second UTC vacation bounds and source-only HTML editing without claiming application', () => {
     const html = render('/mail/settings/autoresponder')
-    for (const name of ['startDate', 'endDate']) expect(find(html, `[name="${name}"]`)?.attributes).toMatchObject({ type: 'datetime-local', step: '1', disabled: true })
+    for (const name of ['startDate', 'endDate']) expect(find(html, `[name="${name}"]`)?.attributes).toMatchObject({ type: 'text', pattern: '\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}(:\\d{2})?( UTC)?', placeholder: 'YYYY-MM-DD HH:mm', disabled: true })
     expect(find(html, '[name="replyIntervalHours"]')?.attributes).toMatchObject({ min: '1', max: '8760', step: '1' })
     expect(find(html, '[data-vacation-preview]')?.attributes.hidden).toBe(true)
     expect(html).toContain('HTML is edited as source only and is never rendered here.')

@@ -3,7 +3,7 @@ import { formatAsciiBytes, formatAsciiNumber, formatDisplayDateTime } from '../.
 import { parseWebStatsView, webalizerReportHref, webStatsRunLabel, WEB_STATS_GENERATORS, WEB_STATS_SCHEMES, type WebStatsGenerator, type WebStatsRun, type WebStatsScheme } from '../../../../../models/web-stats.ts'
 import { kpiCard, lineChart, notice } from '../../../components/index.ts'
 import { check, emailContext, esc, facts, field, fields, header, page, section, select, table, technical } from '../email-tools/common.ts'
-import type { PanelObservationAuthority } from './common.ts'
+import { blankState, pair, tableCard, type PanelObservationAuthority } from './common.ts'
 import { ftpReport } from './traffic.ts'
 
 const ROUTE = '/metrics/web-stats'
@@ -26,11 +26,11 @@ export function renderV2PanelWebStatistics(props: PanelSurfaceProps, authority?:
   const params = new URLSearchParams({ lang: locale, theme: props.theme ?? 'dark' })
   const months = [...new Set([...(view?.months ?? []).map(row => row.month), ...(selection ? [selection.month] : [])])].sort().reverse()
   const selector = view && selection
-    ? `<form method="get" action="${ROUTE}" class="v2-panel-extra__groups"${readOnly ? ' data-readonly="true"' : ''}><input type="hidden" name="lang" value="${esc(locale)}"><input type="hidden" name="theme" value="${esc(props.theme ?? 'dark')}">${fields(
+    ? `<div class="v2-panel-obs-select"><form method="get" action="${ROUTE}"${readOnly ? ' data-readonly="true"' : ''}><input type="hidden" name="lang" value="${esc(locale)}"><input type="hidden" name="theme" value="${esc(props.theme ?? 'dark')}">${fields(
       field('v2-web-stats-site', t(msgid('Domain')), select('v2-web-stats-site', view.sites.map(row => [row.site, row.site] as const), undefined, readOnly, ' name="site" dir="ltr"', selection.site))
       + field('v2-web-stats-scheme', t(msgid('Entry')), select('v2-web-stats-scheme', WEB_STATS_SCHEMES.map(scheme => [scheme, schemeLabel(scheme)] as const), undefined, readOnly, ' name="scheme"', selection.scheme))
-      + field('v2-web-stats-month', t(msgid('Month')), select('v2-web-stats-month', months.map(month => [month, month] as const), undefined, readOnly, ' name="month" dir="ltr"', selection.month)))}<div class="v2-panel-extra__actions"><button type="submit" class="v2-btn"${readOnly ? ' disabled' : ''}>${esc(t(msgid('Show')))}</button></div></form>`
-    : `<p data-state="${readState}" role="status">${esc(t(view ? msgid('No site of this account is served yet.') : msgid('Not read')))}</p>`
+      + field('v2-web-stats-month', t(msgid('Month')), select('v2-web-stats-month', months.map(month => [month, month] as const), undefined, readOnly, ' name="month" dir="ltr"', selection.month)))}<div class="v2-panel-extra__actions"><button type="submit" class="v2-btn"${readOnly ? ' disabled' : ''}>${esc(t(msgid('Show')))}</button></div></form></div>`
+    : blankState(t(view ? msgid('No site of this account is served yet.') : msgid('Not read')), readState)
   const scope = section('v2-web-stats-selection', t(msgid('Report selection')), selector)
 
   const installed = view ? (['awstats', 'webalizer'] as const).filter(engine => view.engines[engine].installed && view.engines[engine].entitled) : []
@@ -41,7 +41,7 @@ export function renderV2PanelWebStatistics(props: PanelSurfaceProps, authority?:
           : t(msgid('AWStats report generated from the Nginx access logs of this site. Today is complete only after the next daily run.'))
   const status = notice(t, { tone: readState === 'loaded' ? 'info' : 'warn', lead: readState === 'loaded' ? t(msgid('AWStats report')) : t(msgid('No report shown')), text: statusCopy })
 
-  const summary = `<section class="v2-kpi-row" aria-label="${esc(t(msgid('Month summary')))}">${[
+  const summary = `<section class="v2-kpi-row v2-panel-obs-kpis--five" aria-label="${esc(t(msgid('Month summary')))}">${[
     { label: t(msgid('Unique visitors')), value: report?.unique, icon: 'users' as const },
     { label: t(msgid('Visits')), value: report?.visits, icon: 'activity' as const },
     { label: t(msgid('Pages')), value: report?.pages, icon: 'files' as const },
@@ -51,11 +51,11 @@ export function renderV2PanelWebStatistics(props: PanelSurfaceProps, authority?:
 
   const empty = (columns: number): string => `<tr><td colspan="${columns}">${esc(t(report ? msgid('No records were returned.') : msgid('Nothing has been read.')))}</td></tr>`
   const tableOf = (id: string, title: string, columns: string[], rows: string[][] | undefined): string =>
-    section(id, title, table(id + '-records', title, columns, rows?.length ? rows.map(row => `<tr>${row.map(cell => `<td>${cell}</td>`).join('')}</tr>`).join('') : empty(columns.length)))
+    tableCard(id, title, columns, rows?.length ? rows.map(row => `<tr>${row.map(cell => `<td>${cell}</td>`).join('')}</tr>`).join('') : empty(columns.length))
   const daysChart = report?.days.length
     ? lineChart({ label: t(msgid('Pages per day')), series: [{ label: t(msgid('Pages')), values: report.days.map(day => day[1]) }, { label: t(msgid('Hits')), values: report.days.map(day => day[2]) }],
       max: Math.max(1, ...report.days.map(day => day[2])), xTicks: [report.days[0]![0], report.days[report.days.length - 1]![0]], yTicks: [formatAsciiNumber(Math.max(0, ...report.days.map(day => day[2]))), '0'], height: 230 })
-    : `<p data-chart-state="${readState}" role="status">${esc(statusCopy)}</p>`
+    : blankState(statusCopy, readState)
   const days = section('v2-web-stats-days', t(msgid('Days of month')), daysChart + table('v2-web-stats-day-records', t(msgid('Days of month')), [t(msgid('Day')), t(msgid('Visits')), t(msgid('Pages')), t(msgid('Hits')), t(msgid('Bandwidth'))],
     report?.days.length ? report.days.map(([day, pages, hits, size, visits]) => `<tr><td>${technical(day)}</td><td>${number(visits)}</td><td>${number(pages)}</td><td>${number(hits)}</td><td>${bytes(size)}</td></tr>`).join('') : empty(5)))
   const history = tableOf('v2-web-stats-history', t(msgid('Monthly history')), [t(msgid('Month')), t(msgid('Unique visitors')), t(msgid('Visits')), t(msgid('Pages')), t(msgid('Hits')), t(msgid('Bandwidth'))],
@@ -81,7 +81,7 @@ export function renderV2PanelWebStatistics(props: PanelSurfaceProps, authority?:
     { label: 'Analog', valueHtml: analogFact },
     { label: 'AWStats', valueHtml: engineFacts('awstats') },
     { label: 'Webalizer', valueHtml: engineFacts('webalizer') },
-  ]) + (webalizerOpen ? `<a class="v2-btn" href="${esc(webalizerReportHref(selection.site, selection.scheme))}" target="_blank" rel="noopener noreferrer">${esc(t(msgid('Open Webalizer report')))}</a>`
+  ]) + (webalizerOpen ? `<div class="v2-panel-extra__actions"><a class="v2-btn" href="${esc(webalizerReportHref(selection.site, selection.scheme))}" target="_blank" rel="noopener noreferrer">${esc(t(msgid('Open Webalizer report')))}</a></div>`
     : ''))
   const schedule = section('v2-web-stats-schedule', t(msgid('Schedule')), facts([
     { label: t(msgid('Processing interval (hours)')), valueHtml: view?.schedule.intervalHours != null ? technical(view.schedule.intervalHours) : esc(t(msgid('Not read'))) },
@@ -94,21 +94,21 @@ export function renderV2PanelWebStatistics(props: PanelSurfaceProps, authority?:
   const geoip = section('v2-web-stats-geoip', t(msgid('Visitor countries')), facts([
     { label: t(msgid('Location database')), valueHtml: view ? view.geoip.installed ? `${esc(view.geoip.source)} ${technical(view.geoip.month ?? '')}` : esc(t(msgid('Not installed; countries are not resolved'))) : esc(t(msgid('Not read'))) },
   ]) + `<p><a href="https://db-ip.com" rel="noopener noreferrer" target="_blank">${esc(t(msgid('IP Geolocation by DB-IP')))}</a></p>`)
-  const sites = section('v2-web-stats-sites', t(msgid('Sites')), table('v2-web-stats-site-records', t(msgid('Sites')), [t(msgid('Domain')), t(msgid('Entry')), 'AWStats', 'Webalizer'],
+  const sites = tableCard('v2-web-stats-site', t(msgid('Sites')), [t(msgid('Domain')), t(msgid('Entry')), 'AWStats', 'Webalizer'],
     view?.sites.length ? view.sites.flatMap(row => WEB_STATS_SCHEMES.map(entry => {
       const query = new URLSearchParams(params); query.set('site', row.site); query.set('scheme', entry); if (selection) query.set('month', selection.month)
       return `<tr><td><a href="${esc(`${ROUTE}?${query}`)}">${technical(row.site)}</a></td><td>${esc(schemeLabel(entry))}</td><td>${run(row.schemes[entry].awstats)}</td><td>${run(row.schemes[entry].webalizer)}</td></tr>`
-    })).join('') : empty(4)))
+    })).join('') : empty(4))
 
   const editable = !readOnly && authority?.authorizedTools?.has('metrics-editor') === true && view?.choice.revision != null
   const label = (engine: WebStatsGenerator): string => engine === 'analog' ? 'Analog' : engine === 'awstats' ? 'AWStats' : 'Webalizer'
   const locks = (engine: WebStatsGenerator): boolean => !view!.choice.choosable.includes(engine) || !view!.engines[engine].installed || !view!.engines[engine].entitled
   const editorRows = view?.sites.length ? view.sites.map(row => `<tr><td>${technical(row.site)}</td>${WEB_STATS_GENERATORS.map(engine => `<td>${check(`v2-web-stats-choice-${engine}-${row.site}`, label(engine), { 'data-web-stats-choice': true, 'data-site': row.site, 'data-engine': engine, 'data-locked': String(locks(engine)) }, true, row.selected.includes(engine))}</td>`).join('')}</tr>`).join('') : empty(4)
-  const editor = section('v2-web-stats-metrics', t(msgid('Metrics Editor')), `<p>${esc(t(view && WEB_STATS_GENERATORS.some(engine => !view.choice.choosable.includes(engine)) ? msgid('The server administrator controls at least one engine; it stays as set.') : msgid('Choose which statistics engines run for each site. A change applies to the next run.')))}</p>`
-    + table('v2-web-stats-metrics-records', t(msgid('Metrics Editor')), [t(msgid('Domain')), 'Analog', 'AWStats', 'Webalizer'], editorRows)
-    + `<div class="v2-panel-extra__actions"><button type="button" class="v2-btn v2-btn--primary" data-web-stats-metrics-save disabled>${esc(t(msgid('Save')))}</button></div><p role="status" data-web-stats-metrics-status data-state="idle"></p>`,
-    { 'data-web-stats-metrics': true, 'data-web-stats-enabled': String(editable), 'data-web-stats-revision': view?.choice.revision ?? '' })
+  const editor = tableCard('v2-web-stats-metrics', t(msgid('Metrics Editor')), [t(msgid('Domain')), 'Analog', 'AWStats', 'Webalizer'], editorRows, {
+    description: t(view && WEB_STATS_GENERATORS.some(engine => !view.choice.choosable.includes(engine)) ? msgid('The server administrator controls at least one engine; it stays as set.') : msgid('Choose which statistics engines run for each site. A change applies to the next run.')),
+    afterHtml: `<div class="v2-panel-extra__actions"><button type="button" class="v2-btn v2-btn--primary" data-web-stats-metrics-save disabled>${esc(t(msgid('Save')))}</button></div><p role="status" data-web-stats-metrics-status data-state="idle"></p>`,
+    hooks: { 'data-web-stats-metrics': true, 'data-web-stats-enabled': String(editable), 'data-web-stats-revision': view?.choice.revision ?? '' } })
 
   return page(locale, ROUTE, header(t, ROUTE, t(msgid('Web statistics')), t(msgid('AWStats and Webalizer reports for your sites, generated daily from the Nginx access logs.')))
-    + `<div class="v2-panel-extra__groups"${readOnly ? ' data-readonly="true"' : ''} data-surface-widget="web-stats" data-chart-state="${readState}">${scope}${status}${summary}${days}${ftpReport(props, authority)}<div class="v2-panel-extra__split"><div class="v2-panel-extra__groups">${history}${hours}${countries}${browsers}${systems}${codes}${urls}${referrers}${robots}</div><aside class="v2-panel-extra__groups" aria-label="${esc(t(msgid('Workspace information')))}">${engines}${editor}${schedule}${geoip}${sites}</aside></div></div>`)
+    + `<div class="v2-panel-extra__groups"${readOnly ? ' data-readonly="true"' : ''} data-surface-widget="web-stats" data-chart-state="${readState}">${scope}${status}${summary}${days}${history}${pair(hours, countries, true)}${pair(browsers, systems, true)}${pair(codes, robots, true)}${urls}${pair(referrers, geoip, true)}${schedule}${engines}${sites}${editor}${ftpReport(props, authority)}</div>`)
 }

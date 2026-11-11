@@ -15,7 +15,7 @@ const scriptOf = (html: string, name: string): string => {
 describe('mail component fidelity and truthful actions', () => {
   it.each(['en', 'ar'] as const)('retains the complete responder editor without claiming a persisted change in %s', locale => {
     const html = renderCompose(xmailComposeFromProps({ locale, mailbox: 'owner@example.test', vacationEnabled: false, vacationCanManage: true }))
-    for (const [id, type] of [['vac-startDate', 'datetime-local'], ['vac-endDate', 'datetime-local'], ['vac-subject', 'text']]) {
+    for (const [id, type] of [['vac-startDate', 'text'], ['vac-endDate', 'text'], ['vac-subject', 'text']]) {
       assert.match(html, new RegExp('<label[^>]*for="' + id + '"'))
       assert.match(html, new RegExp('<input[^>]*id="' + id + '"[^>]*type="' + type + '"'))
     }
@@ -174,6 +174,7 @@ describe('compose formatting applies to the editor', () => {
     harness.click('insertHTML')
     harness.click('__proto__')
     assert.equal(harness.calls.length, 7)
+    assert.equal(harness.feedback.hidden, true)
   })
 
   it.each(['javascript:alert(1)', 'data:text/html,unsafe', 'https://name:secret@example.test/'])('rejects an unsafe editor link %s without changing content', url => {

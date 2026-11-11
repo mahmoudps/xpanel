@@ -74,7 +74,7 @@ const d = (id: string, title: Copy, message: Copy): PanelWorkspaceSection => ({
 const notRead: Copy = msgctxt('approved-xpanel-pages', 'Not read');
 const additionalSections = (route: string, shell?: Copy): PanelWorkspaceSection[] => route === '/email/accounts' ? [
     s('service-access', msgid('Create a service user'), [
-        f(msgid('Username')), f(msgid('Password'), undefined, 'password'), f(msgid('Mailbox quota (MB)'), undefined, 'number'), f(msgid('Email access'), undefined, 'checkbox'), f(msgid('FTP access'), undefined, 'checkbox'), f(msgid('Web Disk access'), undefined, 'checkbox'), f(msgid('Unlimited mailbox quota'), undefined, 'checkbox'), f(msgid('FTP and Web Disk directory')), f(msgid('Web Disk access mode'), undefined, undefined, [
+        f(msgid('Username')), f(msgid('Password'), undefined, 'password'), f(msgid('Mailbox quota (MiB)'), undefined, 'number'), f(msgid('Email access'), undefined, 'checkbox'), f(msgid('FTP access'), undefined, 'checkbox'), f(msgid('Web Disk access'), undefined, 'checkbox'), f(msgid('Unlimited mailbox quota'), undefined, 'checkbox'), f(msgid('FTP and Web Disk directory')), f(msgid('Web Disk access mode'), undefined, undefined, [
             msgid('Read and write'), msgid('Read only')
         ])
     ], [
@@ -190,10 +190,10 @@ const unreadNativeSections = (p: ApprovedXpanelWorkspaceProps): PanelWorkspaceSe
     switch (p.route) {
         case '/email/accounts': return [
             t('mailbox-users-unread', msgid('Service users'), [
-                msgid('Login'), msgid('Services'), msgid('Mailbox quota (MB)'), msgid('File directory'), msgid('Last sign-in')
+                msgid('Login'), msgid('Services'), msgid('Mailbox quota (MiB)'), msgid('File directory'), msgid('Last sign-in')
             ]),
             s('mailbox-create-unread', msgid('Create mailbox'), [
-                f(msgid('Local name')), f(msgid('Domain'), undefined, undefined, []), f(msgid('Password'), undefined, 'password'), f(msgid('Requested quota (MB)'), undefined, 'number')
+                f(msgid('Local name')), f(msgid('Domain'), undefined, undefined, []), f(msgid('Password'), undefined, 'password'), f(msgid('Requested quota (MiB)'), undefined, 'number')
             ], [
                 msgid('Generate password'), msgid('Create mailbox')
             ]),
@@ -470,7 +470,7 @@ export const buildApprovedPanelPage = (p: ApprovedXpanelWorkspaceProps): PanelWo
                 msgid('Refresh'), msgid('Download')
             ]),
             s('site-lifecycle', msgid('Stop, expiry and path quota'), [
-                f(msgid('Message on the stopped page'), undefined, 'textarea'), f(msgid('Stop the site on'), domain?.expiresAt, 'date'), f(msgid('Folder'), domain?.docRoot), f(msgid('Path quota (MB)'), domain?.pathQuotaMb), f(msgid('Unlimited path quota'), domain?.pathQuotaMb === 'unlimited', 'checkbox'), f(msgid('No expiry'), domain?.expiresAt === null, 'checkbox'), f(msgid('Expiry reminder address'), a?.contactEmail, 'email'), f(msgid('Reminder days before expiry'), undefined, 'number')
+                f(msgid('Message on the stopped page'), undefined, 'textarea'), f(msgid('Stop the site on'), domain?.expiresAt, 'date'), f(msgid('Folder'), domain?.docRoot), f(msgid('Path quota (MiB)'), domain?.pathQuotaMb), f(msgid('Unlimited path quota'), domain?.pathQuotaMb === 'unlimited', 'checkbox'), f(msgid('No expiry'), domain?.expiresAt === null, 'checkbox'), f(msgid('Expiry reminder address'), a?.contactEmail, 'email'), f(msgid('Reminder days before expiry'), undefined, 'number')
             ], [
                 msgid('Reset'), msgid('Stop site'), msgid('Start site'), msgid('Save site settings')
             ])

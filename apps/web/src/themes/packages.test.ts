@@ -44,7 +44,7 @@ describe('theme packages', { tags: ['unit'] }, () => {
     expect(renderWebApp({ surface: 'login', locale: 'en', uiTheme: 'classic' })).not.toContain('/assets/themes/acme/')
     expect(() => installThemePackage(parsed)).toThrow()
     removeUiThemePackage('acme')
-    expect(resolveUiTheme('acme').id).toBe('classic')
+    expect(resolveUiTheme('acme').id).toBe('v2')
     expect(findUiThemeAsset('/assets/themes/acme/tokens.css')).toBeUndefined()
   })
 

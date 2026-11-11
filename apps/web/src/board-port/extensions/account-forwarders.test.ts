@@ -17,6 +17,8 @@ describe('account forwarder configuration view', () => {
     expect(html).not.toContain('unavailable')
     expect(html).toContain('data-autoresponder-form')
     expect(html).toContain('Starts (UTC)')
+    for (const name of ['start', 'end']) expect(html).toContain(`name="${name}" type="text" dir="ltr" pattern="\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}( UTC)?" placeholder="YYYY-MM-DD HH:mm"`)
+    expect(html).not.toContain('datetime-local')
     expect(html).toContain('No end date')
     expect(html).toContain('data-default-form')
     expect(html).toContain('Discard silently')

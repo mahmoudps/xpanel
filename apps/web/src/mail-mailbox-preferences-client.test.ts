@@ -74,7 +74,7 @@ describe('mailbox preferences workspace', () => {
     const send = vi.fn(async (method: string) => { if (method === 'GET') return view({ plusAddressing: { state: 'supported', delimiter: '+', source: 'rendered-postfix-local-delivery' } }); throw put })
     const ask = boot(renderMailPreferences({ locale: 'ar', mailbox: MAILBOX, canManage: true }), send, vi.fn(async () => true), true); await tick()
     expect(document.querySelector('[data-preferences-plus] bdi')!.textContent).toBe('alice+news@example.com')
-    expect(select('replyIdentityId').options[0]!.textContent).toBe('عنوان هذا الصندوق (alice@example.com)')
+    expect(select('replyIdentityId').options[0]!.textContent).toBe('عنوان هذا الصندوق (\u2066alice@example.com\u2069)')
     expect(document.querySelector('[data-preferences-plus]')!.textContent).toBe('يدعمها إعداد خادم البريد. البريد المرسل إلى عنوان بوسم، مثل alice+news@example.com، يُسلَّم إلى هذا الصندوق. هذه الصفحة للشرح فقط ولا تغيّر التسليم.')
     choose('density', 'compact'); button('save').click(); await tick()
     expect(status().dataset.state).toBe('stale'); expect(select('density').disabled).toBe(true)

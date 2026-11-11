@@ -268,3 +268,29 @@ describe('creation request identity and uncertain outcomes', () => {
     expect(el<HTMLInputElement>('#new-acc-username').disabled).toBe(true)
   })
 })
+
+describe('account actions placed outside their row', () => {
+  it('finds the row by username for a detail drawer action and closes without a script error', async () => {
+    const dialog = boot()
+    const errors: Event[] = []
+    window.addEventListener('error', event => { errors.push(event) })
+    const button = el<HTMLButtonElement>('[data-account-row="alpha"] [data-action="terminate-account"]')
+    const drawer = document.createElement('aside')
+    el('[data-accounts-workspace]').append(drawer); drawer.append(button)
+    expect(button.closest('[data-account-row]')).toBeNull()
+    ;(window as any).xpanelSessionRequest = vi.fn().mockResolvedValue({ ok: true, purged: true })
+    button.click()
+    expect(dialog.open).toBe(true)
+    const input = el<HTMLInputElement>('[data-type-to-confirm]')
+    input.value = 'alpha'; input.dispatchEvent(new Event('input'))
+    el('[data-account-action-form]').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await tick()
+    expect(el('[data-account-action-status]').textContent).toContain('Account removed')
+    expect(el('[data-account-row="alpha"]').hidden).toBe(true)
+    expect(el('[data-account-row="beta"]').hidden).toBe(false)
+    button.disabled = true
+    dialog.close()
+    expect(dialog.open).toBe(false)
+    expect(errors).toEqual([])
+  })
+})

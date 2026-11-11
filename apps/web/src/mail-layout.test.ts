@@ -211,7 +211,7 @@ describe('bounded mail reference layout', () => {
         { id: 'drop', name: 'Drop noise', condition: 'From equals spam@example.test', action: 'Discard', enabled: false },
       ],
     }))
-    expect(html).toContain('— / 100 MiB')
+    expect(html).toContain('— / 100\u00a0MiB')
     expect(html).toContain('data-quota-ratio="unknown"')
     expect(html).not.toContain('0 / 100')
     expect(html).toContain('Selector default is stored for example.test')
@@ -233,12 +233,12 @@ describe('bounded mail reference layout', () => {
 
   it('labels mailbox quota in MiB and does not invent a used amount', () => {
     const measured = renderMailSurface(fixture({ quotaUsedMb: 0, quotaLimitMb: 100 }))
-    expect(measured).toContain('0 / 100 MiB')
+    expect(measured).toContain('0\u00a0B / 100\u00a0MiB')
     expect(measured).toContain('data-quota-ratio="measured"')
     const bytes = renderMailSurface(fixture({ quotaUsedMb: 0, quotaUsedBytes: 3300, quotaLimitMb: 256 }))
-    expect(bytes).toContain('3.3 KB / 256 MiB')
+    expect(bytes).toContain('3.22\u00a0KiB / 256\u00a0MiB')
     const limitOnly = renderMailSurface(fixture({ quotaLimitMb: 100 }))
-    expect(limitOnly).toContain('— / 100 MiB')
+    expect(limitOnly).toContain('— / 100\u00a0MiB')
     expect(limitOnly).toContain('data-quota-ratio="unknown"')
     expect(limitOnly).not.toContain('0 / 100')
     const unknown = renderMailSurface(fixture())

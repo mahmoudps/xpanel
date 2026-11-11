@@ -93,7 +93,7 @@ describe('truthful resource usage rendering', () => {
     snapshot.current.readBytesPerSec = Number.MIN_VALUE
     snapshot.accounts[0]!.readBytesPerSec = Number.MIN_VALUE
     const html = renderServerIoMonitorChart(snapshot)
-    expect(html).toContain('5e-324 B/s')
+    expect(html).toMatch(/(?:&lt;|<)1\u00a0B\/s/)
     expect(html).not.toContain('>0 MiB/s<')
   })
 

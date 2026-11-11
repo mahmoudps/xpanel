@@ -50,6 +50,17 @@ describe('v2 plan family', () => {
     expect(html).not.toContain(`data-plan-id="${plan.id}"`)
     expect(html).not.toContain('Saved plan')
   })
+  it('names the open plan with its owner and account count, and marks its row instead of linking to itself', () => {
+    const open = renderV2WhmPlans(t, props({ planEditorState: { kind: 'edit', plan } }), authority)
+    expect(open).toContain('>Edit plan: Saved plan</h2>')
+    expect(open).toContain('Owner Root · <bdi class="v2-mono v2-num" dir="ltr">1</bdi> Accounts')
+    expect(open).toContain('aria-current="true">Editing above</span>')
+    expect(open).toContain(`data-plan-delete="${plan.id}"`)
+    const closed = renderV2WhmPlans(t, props(), authority)
+    expect(closed).not.toContain('Editing above')
+    expect(closed).toContain('>Create plan</h2>')
+    expect(renderV2WhmPlans(t, props({ planEditorState: { kind: 'edit', plan }, accounts: undefined }), authority)).toContain('Owner Root · Not read Accounts')
+  })
   it('distinguishes unread assignments from measured empty assignments', () => {
     expect(renderV2WhmPlans(t, props({ accounts: undefined }), authority)).toContain('Account assignments have not been read.')
     expect(renderV2WhmPlans(t, props({ accounts: [] }), authority)).toContain('No assigned accounts were returned in this snapshot.')
@@ -70,6 +81,8 @@ describe('v2 plan family', () => {
     expect(html).toContain(`name="disabled" value="${item.featureKey}" form="v2-feature-form-0"`)
     expect(html).toMatch(new RegExp(`value="${item.featureKey}" form="v2-feature-form-0"[^>]* checked`))
     expect(html).toContain('Checked controls disable the named tool.')
+    const total = new Set(catalog.filter(tool => tool.featureKey).map(tool => tool.featureKey)).size
+    expect(html).toContain(`${total - 1}</bdi> / <bdi class="v2-mono v2-num" dir="ltr">${total}</bdi> Shown · <bdi class="v2-mono v2-num" dir="ltr">1</bdi> Hidden`)
   })
   it('preserves an unread feature membership instead of treating it as all enabled', () => {
     const custom = renderV2WhmFeatures(t, props({ pluginFeatures: [{ key: 'plugin:acme', label: 'Acme notes' }], featureLists: [{ id: plan.featureListId, name: 'Saved features', ownerId: null, disabled: ['plugin:acme'] }] }), authority)
@@ -174,5 +187,14 @@ describe('approved plan editor tabs and review structure', () => {
     const html = renderV2PlanEditor(t, props(), { ...authority, canRead: false }, { ...plan, name: 'PRIVATE-PLAN' }, true)
     expect(html).toContain('data-plan-review-readable="false"'); expect(html).toContain('data-plan-review-saved="false"')
     expect(html).not.toContain('PRIVATE-PLAN'); expect(html).not.toContain(plan.id)
+  })
+})
+
+describe('v2 plan list search', () => {
+  it('admits each plan row to the list filter and searches only a loaded list', () => {
+    const html = renderV2WhmPlans(t, props(), authority)
+    expect(html).toMatch(/<div class="v2-plan-filter" data-list-filter>.*id="v2-plan-search"[^>]*data-list-filter-search/s)
+    expect(html).toMatch(/<tr data-plan-row="Saved plan" data-list-row>/)
+    expect(renderV2WhmPlans(t, props({ plans: [] }), authority)).not.toContain('data-list-filter-search')
   })
 })

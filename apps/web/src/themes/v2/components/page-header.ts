@@ -45,7 +45,7 @@ export const PAGE_HEADER_CSS = `.v2-page-head{display:flex;flex-direction:column
 .v2-crumbs{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--space-1)}
 .v2-crumbs ol{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-1);font-size:13px;color:var(--muted)}
 .v2-crumbs li{display:inline-flex;align-items:center;gap:var(--space-1)}
-.v2-crumbs a{color:var(--muted);text-decoration:none}
+.v2-crumbs a{display:inline-flex;align-items:center;min-height:var(--target);min-inline-size:var(--target);color:var(--muted);text-decoration:none}
 .v2-crumbs a:hover{color:var(--text);text-decoration:underline}
 .v2-crumbs [aria-current="page"]{color:var(--text-2);font-weight:500}
 .v2-crumbs code{font-size:12px;color:var(--muted)}

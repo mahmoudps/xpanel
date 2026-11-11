@@ -2,6 +2,7 @@ import { databaseWorkspaceTemplates } from '../../../client-templates/data-works
 import { DB_PRIVILEGES } from '@xpanel/core'
 import { formatDisplayDateTime } from '../../../../../display-format.ts'
 import { notice } from '../../../components/index.ts'
+import { tabPanel, tabs } from '../../../components/tabs.ts'
 import { escapeHtml } from '../../../html.ts'
 import {
   databaseContext, dbButton, dbCard, dbEmptyRow, dbFacts, dbField, dbPage, dbTable,
@@ -90,11 +91,15 @@ ${dbButton(t('Show {count} advanced privileges', { count: advanced.length }), { 
   const trashCard = dbCard('trash', t('Trash'), `<div data-db-trash><p class="v2-db-notes">${escapeHtml(t('Trash and restore update saved configuration after named confirmation. Native database effects remain unverified. Permanent purge and retention actions are unavailable; no retention deadline is inferred.'))}</p>${dbTable('v2-db-trash-table', t('Trashed database metadata'), [t('Database'), t('Trashed at'), t('Retention'), t('Actions')], trashRows, { 'data-db-trash-rows': true }, { 'data-database-table': true, 'data-db-trash-table': true })}</div>`)
   const remote = dbCard('remote', t('Remote access'), `<div data-db-remote-access><p>${escapeHtml(t(msgctxt('theme:v2', 'Remote host changes have a separate policy and verification workflow. Review that page before changing outside access.')))}</p><div class="v2-db-fields">${dbField('v2-db-remote-host', t('Host or address'), '<input id="v2-db-remote-host" dir="ltr" disabled>')}${dbField('v2-db-remote-comment', t('Comment'), '<input id="v2-db-remote-comment" disabled>')}</div>${relatedDatabasePage(t, authority, '/databases/remote-access', t('Remote database access'))}</div>`)
   const pma = dbCard('pma', 'phpMyAdmin', `<p>${escapeHtml(t(msgctxt('theme:v2', 'Review single sign-on availability for this account on the phpMyAdmin page. No database password is exposed here.')))}</p>${relatedDatabasePage(t, authority, '/databases/phpmyadmin', t('Open phpMyAdmin'))}`)
+  // The board's four tabs: every section stays in the document for the database controller; only its panel is shown.
+  const sections: readonly (readonly [string, string, string])[] = [
+    ['databases', t('Databases'), `${list}${account ? renderV2DbWizard(props, t, { engine: 'mariadb', username: account.username, canManage }) : ''}<div class="v2-db-columns"><div class="v2-db-stack">${connection}${trashCard}${pma}</div><aside class="v2-db-stack" aria-label="${escapeHtml(t('Create a database'))}">${createDatabase}</aside></div>`],
+    ['users', t('Database users'), `${userList}<div class="v2-db-columns v2-db-columns--stack"><div>${createUser}</div><aside aria-label="${escapeHtml(t('Change user password'))}">${password}</aside></div>`],
+    ['privileges', t('Privileges'), `${overview}${privileges}`],
+    ['remote', t('Remote access'), `${remote}`],
+  ]
   const body = `<div class="v2-db-workspace" data-database-workspace data-db-account="${escapeHtml(account?.id ?? '')}" data-db-username="${escapeHtml(account?.username ?? '')}" data-db-home="${escapeHtml(account?.home ?? '')}" data-db-manage="${canManage}"${canRead ? '' : ' data-capability-unavailable="true"'} lang="${locale}" dir="${direction}">
-${summary}${status}<p role="status" data-db-row-status hidden></p><nav class="v2-db-section-links" aria-label="${escapeHtml(t(msgctxt('theme:v2', 'Database sections')))}">${[[t('Databases'), 'databases'], [t('Database users'), 'users'], [t('Privileges'), 'privileges'], [t('Remote access'), 'remote']].map(([label, key]) => `<a href="#v2-db-section-${key}">${escapeHtml(label!)}</a>`).join('')}</nav>
-<section id="v2-db-section-databases" class="v2-db-section" tabindex="-1">${list}${account ? renderV2DbWizard(props, t, { engine: 'mariadb', username: account.username, canManage }) : ''}<div class="v2-db-columns"><div class="v2-db-stack">${connection}${trashCard}</div><aside class="v2-db-stack" aria-label="${escapeHtml(t('Create a database'))}">${createDatabase}${pma}</aside></div></section>
-<section id="v2-db-section-users" class="v2-db-section" tabindex="-1">${userList}<div class="v2-db-columns"><div>${createUser}</div><aside aria-label="${escapeHtml(t('Change user password'))}">${password}</aside></div></section>
-<section id="v2-db-section-privileges" class="v2-db-section" tabindex="-1">${overview}${privileges}</section>
-<section id="v2-db-section-remote" class="v2-db-section" tabindex="-1">${remote}</section>${databaseWorkspaceTemplates(message => escapeHtml(t(message)))}</div>`
+${summary}${status}<p role="status" data-db-row-status hidden></p>
+<div class="v2-db-stack" data-presentation-tabs="panels">${tabs({ label: t(msgctxt('theme:v2', 'Database sections')), tabs: sections.map(([key, label], index) => ({ id: `v2-db-tab-${key}`, label, panelId: `v2-db-section-${key}`, selected: index === 0, hooks: { 'data-presentation-tab': key } })) })}${sections.map(([key, , bodyHtml], index) => tabPanel({ id: `v2-db-section-${key}`, tabId: `v2-db-tab-${key}`, hidden: index > 0, sectionSpacing: true, bodyHtml })).join('')}</div>${databaseWorkspaceTemplates(message => escapeHtml(t(message)))}</div>`
   return dbPage(t, '/databases/mariadb', t('MariaDB databases'), t(msgctxt('theme:v2', 'Account database names, users and saved grants. Service observations are shown only after they are read.')), body)
 }

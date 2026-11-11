@@ -3,6 +3,9 @@ import './i18n.ts'
 import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
 import { frameAccess as canonicalFrameAccess, withFrameRequest } from './read-only-frame.ts'
+import { ASCII_BYTES_BINDING, formatIsolatedBytes as canonicalFormatClientBytes } from './display-format.ts'
+// Module-local alias: the binding source defines it again from ASCII_BYTES_BINDING.
+const formatClientBytes = canonicalFormatClientBytes
 const frameAccess = canonicalFrameAccess
 const clientTemplate = canonicalClientTemplate
 const clientTemplateSlot = canonicalClientTemplateSlot
@@ -68,6 +71,7 @@ function bindBoxTrapper(askDialog?: (options: { title: string; body: string; con
     const allow = root.querySelector<HTMLTextAreaElement>('textarea[data-boxtrapper-list="allow"]'), ignore = root.querySelector<HTMLTextAreaElement>('textarea[data-boxtrapper-list="ignore"]'), deny = root.querySelector<HTMLTextAreaElement>('textarea[data-boxtrapper-list="deny"]')
     const day = root.querySelector<HTMLSelectElement>('select[data-boxtrapper-day]'), rows = root.querySelector<HTMLTableSectionElement>('tbody[data-boxtrapper-queue]'), shown = root.querySelector<HTMLElement>('pre[data-boxtrapper-message]')
     const logDay = root.querySelector<HTMLSelectElement>('select[data-boxtrapper-log-day]'), logText = root.querySelector<HTMLElement>('pre[data-boxtrapper-log]')
+    const queueStatus = root.querySelector<HTMLElement>('[data-boxtrapper-queue-status]')
     if (!status || !enabled || !name || !days || !score || !sent || !association || !extra || !forward || !template || !subject || !body || !reset || !save || !saveLists || !allow || !ignore || !deny || !day || !rows || !shown || !logDay || !logText || owner && !box) return
     const say = (message: string, kind: string): void => { status.dataset.state = kind; status.setAttribute('role', kind === 'failed' ? 'alert' : 'status'); status.textContent = message }
     // Reads run in a read-only frame too; editing and every write need the manage flag outside one.
@@ -122,7 +126,7 @@ function bindBoxTrapper(askDialog?: (options: { title: string; body: string; con
         clientTemplateSlot(row, 'at').textContent = formatTrapDateTime(item.at)
         clientTemplateSlot(row, 'from').textContent = item.from || copy('No sender')
         clientTemplateSlot(row, 'subject').textContent = item.subject
-        clientTemplateSlot(row, 'size').textContent = copy('{size} KB', { size: Math.ceil(item.size / 1024) })
+        clientTemplateSlot(row, 'size').textContent = formatClientBytes(item.size)
         const open = clientTemplateSlot(row, 'view', 'button') as HTMLButtonElement
         open.textContent = copy('View'); open.disabled = false
         open.addEventListener('click', () => {
@@ -146,7 +150,16 @@ function bindBoxTrapper(askDialog?: (options: { title: string; body: string; con
         const next = readBoxTrapperView(await request('GET', base()))
         disable(false); paint(next)
         // The queue and the log are read by POST, which a read-only frame refuses.
-        if (next.lists !== null && access.writable()) await Promise.all([readQueue('latest'), readLog('latest')])
+        if (next.lists !== null && access.writable()) {
+          if (!queueStatus) await Promise.all([readQueue('latest'), readLog('latest')])
+          else {
+            // Settings and lists were read: a failed queue or log read is said beside the queue, not over the settings status.
+            const failed: string[] = []
+            await Promise.all([readQueue('latest').catch(error => { failed.push(failure(error, copy('The queue could not be read.'))) }), readLog('latest').catch(error => { failed.push(failure(error, copy('The log could not be read.'))) })])
+            queueStatus.hidden = !failed.length; queueStatus.dataset.state = failed.length ? 'failed' : 'read'
+            queueStatus.setAttribute('role', failed.length ? 'alert' : 'status'); queueStatus.textContent = [...new Set(failed)].join(' ')
+          }
+        }
       } catch (error) { say(failure(error, copy('BoxTrapper could not be read. Nothing was changed.')), 'failed') }
     }
     template.addEventListener('change', () => { keepDraft(); active = template.value as TemplateName; showDraft() })
@@ -200,4 +213,4 @@ function bindBoxTrapper(askDialog?: (options: { title: string; body: string; con
   })
 }
 
-export const BOXTRAPPER_CLIENT_BINDING = withFrameRequest(`(function(askDialog){const clientTemplate=${clientTemplate.toString()};const clientTemplateSlot=${clientTemplateSlot.toString()};const cloneClientTemplate=${cloneClientTemplate.toString()};const formatTrapDateTime=${DISPLAY_DATETIME_BINDING};const boxTrapperObject=${boxTrapperObject.toString()};const boxTrapperLines=${boxTrapperLines.toString()};const readBoxTrapperView=${readBoxTrapperView.toString()};const readBoxTrapperQueue=${readBoxTrapperQueue.toString()};(${bindBoxTrapper.toString()})(askDialog);})`)
+export const BOXTRAPPER_CLIENT_BINDING = withFrameRequest(`(function(askDialog){const formatClientBytes=${ASCII_BYTES_BINDING};const clientTemplate=${clientTemplate.toString()};const clientTemplateSlot=${clientTemplateSlot.toString()};const cloneClientTemplate=${cloneClientTemplate.toString()};const formatTrapDateTime=${DISPLAY_DATETIME_BINDING};const boxTrapperObject=${boxTrapperObject.toString()};const boxTrapperLines=${boxTrapperLines.toString()};const readBoxTrapperView=${readBoxTrapperView.toString()};const readBoxTrapperQueue=${readBoxTrapperQueue.toString()};(${bindBoxTrapper.toString()})(askDialog);})`)

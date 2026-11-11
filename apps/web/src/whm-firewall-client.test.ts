@@ -183,6 +183,15 @@ describe('approved firewall port columns', () => {
     expect(document.querySelector('[data-whm-firewall-panel="banned"] [data-xp-slot="address"]')?.textContent).toBe('198.51.100.9')
     expect(document.querySelector<HTMLElement>('[data-firewall-manage-status]')?.dataset.state).toBe('read')
     expect(send.mock.calls.every(call => call[0] === 'GET')).toBe(true)
+    // The size of each list is real text in the slot a theme provides; classic provides none.
+    const counts = Object.fromEntries(['port', 'ip', 'forward', 'prefix-list', 'banned'].map(kind => [kind, document.querySelector('[data-whm-firewall-panel="' + kind + '"] [data-firewall-rule-count]')?.textContent]))
+    expect(counts).toEqual(theme === 'v2' ? { port: '1', ip: '1', forward: '1', 'prefix-list': '1', banned: '1' } : {})
+  })
+
+  it('renders the saved size of each v2 list as text before any read', () => {
+    document.body.innerHTML = firewallMarkup('v2', 'en', [typedPortRule()])
+    const count = (kind: string) => document.querySelector('[data-whm-firewall-panel="' + kind + '"] [data-firewall-rule-count]')?.textContent
+    expect([count('port'), count('ip'), count('banned')]).toEqual(['1', '0', 'Not read'])
   })
 
   for (const theme of ['classic', 'v2'] as const) for (const locale of ['en', 'ar'] as const) {
@@ -194,7 +203,7 @@ describe('approved firewall port columns', () => {
       if (!header || !row) throw new Error('missing_test_port_rows')
       expect(header.cells).toHaveLength(9); expect(row.cells).toHaveLength(9)
       expect(header.cells[5]?.textContent).toBe(locale === 'en' ? 'Purpose' : 'الغرض')
-      expect(header.cells[6]?.textContent).toBe(t('Origin')); expect(header.cells[7]?.textContent).toBe(t('Note')); expect(header.cells[8]?.textContent).toBe(t('Manage'))
+      expect(header.cells[6]?.textContent).toBe(locale === 'en' ? 'Origin' : 'المنشأ'); expect(header.cells[6]?.textContent).not.toBe(header.cells[4]?.textContent); expect(header.cells[7]?.textContent).toBe(t('Note')); expect(header.cells[8]?.textContent).toBe(t('Manage'))
       expect(row.cells[5]?.textContent).toBe(unread); expect(row.cells[6]?.textContent).toBe(unread); expect(row.cells[7]?.textContent).toBe(saved.comment)
       expect(row.querySelector('img')).toBeNull()
       const manage = row.cells[8]?.querySelector('button')

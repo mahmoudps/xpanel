@@ -3,7 +3,7 @@ import { renderV2ToolCard } from '../../../tool-card-view.ts'
 import { networkDiagnosticClientTemplates } from '../diagnostic-client-templates.ts'
 import { v2WhmClientTemplates } from '../../../whm-client-templates.ts'
 import type { PanelSurfaceProps } from '../../../../contract.ts'
-import { actions, button, deniedPage, esc, facts, field, fields, input, note, page, section, select, settingsContext, split, status, table, unreadRow, NO_SETTINGS_AUTHORITY, type PanelSettingsAuthority } from '../settings/common.ts'
+import { actions, button, deniedPage, esc, facts, field, fields, groups, input, note, page, pair, section, select, settingsContext, status, table, unreadRow, NO_SETTINGS_AUTHORITY, type PanelSettingsAuthority } from '../settings/common.ts'
 
 export function renderV2NetworkToolsPage(props: PanelSurfaceProps, authority: PanelSettingsAuthority = NO_SETTINGS_AUTHORITY): string {
   const c = settingsContext(props, authority), { t } = c, title = t(msgid('Network tools')), description = t(msgid('Look up DNS records, ping a host, trace the route or check a port from this server.'))
@@ -33,6 +33,6 @@ export function renderV2AccountApiExplorerPage(props: PanelSurfaceProps, authori
     + actions(button(t(msgid('Copy reviewed response')), { 'data-dev-copy': true })) + '<p data-dev-copy-status role="status" hidden></p>')
   const authorityCard = section('v2-api-authority', t(msgid('Current authority')), note(t(msgid('The account and principal come from this session. Every selected read repeats its normal API authentication and permissions. API tokens cannot operate this console.'))))
   const additional = section('v2-api-additional', t(msgid('Additional capabilities')), note(t(msgid('These providers are not connected. No remote service or callback has been contacted or verified.')))
-    + [msgid('Hooks and callbacks'), msgid('Registered applications'), msgid('Plugin generator')].map(label => `<div class="v2-panel-settings__groups"><h3>${esc(t(label))}</h3><p>${esc(t(msgid('Unavailable')))}</p></div>`).join(''))
-  return page(props, authority, '/advanced/api-shell', title, description, v2WhmClientTemplates('developer') + split(request + response + renderV2ToolCard(t, apiShellCard('account'), c.editable), authorityCard + additional), { 'data-developer-workspace': true, 'data-developer-surface': 'account', 'data-developer-can-read': String(c.readable), 'data-developer-enabled': String(c.readable) })
+    + facts([msgid('Hooks and callbacks'), msgid('Registered applications'), msgid('Plugin generator')].map(label => ({ label: t(label), valueHtml: esc(t(msgid('Unavailable'))) })), { 'data-cols': '3' }))
+  return page(props, authority, '/advanced/api-shell', title, description, v2WhmClientTemplates('developer') + pair(request, groups(response + authorityCard)) + renderV2ToolCard(t, apiShellCard('account'), c.editable) + additional, { 'data-developer-workspace': true, 'data-developer-surface': 'account', 'data-developer-can-read': String(c.readable), 'data-developer-enabled': String(c.readable) })
 }

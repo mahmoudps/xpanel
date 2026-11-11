@@ -3,6 +3,9 @@ import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayDateTime } from './tokens.ts'
 import { frameAccess as canonicalFrameAccess, withFrameRequest } from './read-only-frame.ts'
+import { ISOLATE_LTR_BINDING, isolateLtr as canonicalIsolateLtr } from './display-format.ts'
+// Module-local alias: the binding source declares it again from ISOLATE_LTR_BINDING.
+const isolateLtr = canonicalIsolateLtr
 
 const formatDisplayDateTime = sharedFormatDisplayDateTime
 const frameAccess = canonicalFrameAccess
@@ -50,7 +53,7 @@ function bindSiteInstances(askDialog: Ask | undefined): void {
     const nameOf = (id: string): string => apps.find(app => app.id === id)?.name ?? id
     const place = (item: Instance): string => item.path ? item.domain + '/' + item.path : item.domain
     const paint = (): void => {
-      fill(rows, instances.map(item => [item.username, place(item), nameOf(item.appId), item.version, item.database ?? t('None'), formatDisplayDateTime(item.updatedAt)]), t('No application is installed on this server.'), 6)
+      fill(rows, instances.map(item => [item.username, place(item), nameOf(item.appId), item.version, item.database ?? t('None'), isolateLtr(formatDisplayDateTime(item.updatedAt))]), t('No application is installed on this server.'), 6)
       const pairs = apps.flatMap(app => app.versions.map(version => [app, version] as const))
       fill(releases, pairs.map(([app, version]) => [app.name, version, app.stored.includes(version) ? t('Stored') : t('Not stored')]), t('The verified catalog lists no applications.'), 3)
       options(select, t('Select an installation'), instances.map(item => [item.revision, item.username + ' · ' + place(item) + ' · ' + nameOf(item.appId)]))
@@ -110,4 +113,4 @@ function bindSiteInstances(askDialog: Ask | undefined): void {
     void load()
   })
 }
-export const SITE_INSTANCES_CLIENT_BINDING = withFrameRequest(`(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const CHUNK_BYTES=${CHUNK_BYTES};return ${bindSiteInstances.toString()};})()`)
+export const SITE_INSTANCES_CLIENT_BINDING = withFrameRequest(`(()=>{${ISOLATE_LTR_BINDING};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const CHUNK_BYTES=${CHUNK_BYTES};return ${bindSiteInstances.toString()};})()`)

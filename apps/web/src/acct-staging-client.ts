@@ -3,6 +3,9 @@ import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
 import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
+import { ASCII_BYTES_BINDING, formatIsolatedBytes as canonicalFormatClientBytes } from './display-format.ts'
+// Module-local alias: the binding source defines it again from ASCII_BYTES_BINDING.
+const formatClientBytes = canonicalFormatClientBytes
 const clientTemplate = canonicalClientTemplate
 const clientTemplateSlot = canonicalClientTemplateSlot
 const cloneClientTemplate = canonicalCloneClientTemplate
@@ -83,7 +86,7 @@ function bindAccountStaging(askDialog: ((options: Record<string, unknown>) => Pr
     }
     const element = <K extends keyof HTMLElementTagNameMap>(tag: K, value?: string): HTMLElementTagNameMap[K] => { const node = document.createElement(tag); if (value !== undefined) node.textContent = value; return node }
     const technical = (value: string): HTMLElement => { const node = element('bdi', value); node.dir = 'ltr'; return node }
-    const size = (bytes: number): string => bytes < 1024 ? bytes + ' B' : bytes < 1048576 ? (bytes / 1024).toFixed(1) + ' KiB' : (bytes / 1048576).toFixed(1) + ' MiB'
+    const size = (bytes: number): string => formatClientBytes(bytes)
     const fill = (body: HTMLElement, rows: HTMLElement[], empty: string, _columns: number): void => { if (rows.length) { body.replaceChildren(...rows); return }; const row = cloneClientTemplate(body === rowsBody ? templates.emptyList : templates.emptyDetail, 'tr', ['message']); clientTemplateSlot(row, 'message', 'td').textContent = empty; body.replaceChildren(row) }
     const fact = (name: string, value: Node | string): void => { find(name)?.replaceChildren(value) }
     const button = (label: string, action: string, domainId: string, name: string): HTMLButtonElement => { const node = cloneClientTemplate(templates.action, 'button', ['label']) as HTMLButtonElement; clientTemplateSlot(node, 'label').textContent = label; node.dataset.action = action; node.dataset.domain = domainId; node.setAttribute('aria-label', label + ' ' + name); return node }
@@ -163,4 +166,4 @@ function bindAccountStaging(askDialog: ((options: Record<string, unknown>) => Pr
   })
 }
 
-export const ACCT_STAGING_CLIENT_BINDING = `(()=>{${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const displayDateTime=${DISPLAY_DATETIME_BINDING};const readStagingReply=${readStagingReply.toString()};return ${bindAccountStaging.toString()};})()`
+export const ACCT_STAGING_CLIENT_BINDING = `(()=>{const formatClientBytes=${ASCII_BYTES_BINDING};${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const displayDateTime=${DISPLAY_DATETIME_BINDING};const readStagingReply=${readStagingReply.toString()};return ${bindAccountStaging.toString()};})()`

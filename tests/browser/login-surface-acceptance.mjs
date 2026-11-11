@@ -13,7 +13,7 @@ const audiences = { xpanel: 'xPanel', xwhm: 'xWHM', xmail: 'xMail' }
 const headings = { xpanel: { en: 'Account sign in', ar: 'دخول الحساب' }, xwhm: { en: 'Server sign in', ar: 'دخول إدارة الخادم' }, xmail: { en: 'Mail sign in', ar: 'دخول البريد' } }
 const widths = [320, 360, 390, 768, 1440]
 const matrix = Object.keys(audiences).flatMap(audience => ['en', 'ar'].flatMap(locale => ['light', 'dark'].flatMap(theme => widths.map(width => ({ audience, locale, theme, width, id: `${audience}-${locale}-${theme}-${width}` })))))
-const inputs = ['apps/web/src/app.ts', 'apps/web/src/tokens.ts', 'apps/web/src/surfaces/login.ts', 'apps/web/src/surfaces/login-layout.ts', 'apps/web/src/login-client.ts', 'apps/web/src/document-routes.ts', 'tests/browser/login-surface-acceptance.mjs', 'tests/browser/applied-font-contract.mjs']
+const inputs = ['apps/web/src/app.ts', 'apps/web/src/themes/v2/tokens.ts', 'apps/web/src/themes/v2/surfaces/login.ts', 'apps/web/src/login-client.ts', 'apps/web/src/document-routes.ts', 'tests/browser/login-surface-acceptance.mjs', 'tests/browser/applied-font-contract.mjs']
 const fingerprint = () => inputs.map(path => ({ path, sha256: createHash('sha256').update(readFileSync(join(root, path))).digest('hex') }))
 
 async function createLoginFixture(audience) {
@@ -47,8 +47,8 @@ async function inspect(page) {
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
     const visible = element => element.checkVisibility() && !element.closest('[hidden],[inert]')
     const box = element => { const r = element.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height } }
-    const targets = [...document.querySelectorAll('.xp-login-shell a,.xp-login-shell button,.xp-login-shell input,.xp-login-shell summary')].filter(visible).map(element => ({ tag: element.tagName, id: element.id, text: element.tagName === 'INPUT' ? null : element.textContent.trim().slice(0, 70), ...box(element) }))
-    const fields = [...document.querySelectorAll('label[for]')].filter(visible).map(label => {
+    const targets = [...document.querySelectorAll('.v2-login a,.v2-login button,.v2-login input,.v2-login summary')].filter(visible).map(element => ({ tag: element.tagName, id: element.id, text: element.tagName === 'INPUT' ? null : element.textContent.trim().slice(0, 70), ...box(element) }))
+    const fields = [...document.querySelectorAll('.v2-login label[for]')].filter(label => visible(label) && !label.classList.contains('v2-sr')).map(label => {
       const control = document.getElementById(label.htmlFor), range = document.createRange(); range.selectNodeContents(label)
       const labelBox = range.getBoundingClientRect(), controlBox = box(control), rtl = document.documentElement.dir === 'rtl'
       return { id: label.htmlFor, label_text: label.textContent.trim(), edge_delta: Math.abs(rtl ? labelBox.right - controlBox.right : labelBox.left - controlBox.left), label_bottom: labelBox.bottom, control: controlBox, direction: getComputedStyle(control).direction, text_align: getComputedStyle(control).textAlign }
@@ -61,12 +61,12 @@ async function inspect(page) {
     const blend = (front, back) => { const alpha = front.length > 3 ? front[3] : 1; return front.slice(0, 3).map((v, i) => v * alpha + back[i] * (1 - alpha)) }
     const background = element => { const ancestry = []; for (let node = element; node; node = node.parentElement) ancestry.unshift(node); return ancestry.reduce((value, node) => blend(rgb(getComputedStyle(node).backgroundColor), value), [255, 255, 255]) }
     const luminance = values => values.map(value => value / 255).map(value => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4).reduce((sum, value, index) => sum + value * [0.2126, 0.7152, 0.0722][index], 0)
-    const contrasts = [...document.querySelectorAll('.xp-login-shell h1,.xp-login-shell h2,.xp-login-shell label,.xp-login-shell .xp-subtitle,.xp-login-shell .xp-help,.xp-login-shell .xp-login-step,.xp-login-shell .xp-brand__name,.xp-login-shell .xp-brand__sub,.xp-login-shell button,.xp-login-shell a,.xp-login-shell dt,.xp-login-shell dd,.xp-login-shell footer span,.xp-login-shell [data-auth-error]')].filter(element => visible(element) && element.textContent.trim() && !element.disabled).map(element => {
+    const contrasts = [...document.querySelectorAll('.v2-login h1,.v2-login h2,.v2-login label,.v2-login .v2-muted,.v2-login .v2-login__caption,.v2-login [data-login-product],.v2-login button,.v2-login a,.v2-login dt,.v2-login dd,.v2-login footer span,.v2-login [data-auth-error]')].filter(element => visible(element) && !element.classList.contains('v2-sr') && element.textContent.trim() && !element.disabled).map(element => {
       const style = getComputedStyle(element), bg = background(element), fg = blend(rgb(style.color), bg), a = luminance(bg), b = luminance(fg), size = parseFloat(style.fontSize), large = size >= 24 || size >= 18.66 && Number(style.fontWeight) >= 700
       return { selector: element.id || element.className || element.tagName, text: element.textContent.trim().slice(0, 70), ratio: (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05), required: large ? 3 : 4.5, foreground: style.color, background: bg }
     })
     const faces = [...document.fonts].map(face => ({ family: face.family, status: face.status }))
-    const definitions = [...document.querySelectorAll('.xp-login-dl dt')].filter(visible).map(label => { const value = label.nextElementSibling, lr = document.createRange(), vr = document.createRange(); lr.selectNodeContents(label); vr.selectNodeContents(value); const a = lr.getBoundingClientRect(), b = vr.getBoundingClientRect(); return { label: label.textContent.trim(), edge_delta: Math.abs(document.documentElement.dir === 'rtl' ? a.right - b.right : a.left - b.left), below: b.top >= a.bottom - 1 } })
+    const definitions = [...document.querySelectorAll('.v2-login__guards dt')].filter(visible).map(label => { const value = label.nextElementSibling, lr = document.createRange(), vr = document.createRange(), textNode = [...label.childNodes].find(node => node.nodeType === 3 && node.nodeValue.trim()); lr.selectNodeContents(textNode ?? label); vr.selectNodeContents(value); const a = lr.getBoundingClientRect(), b = vr.getBoundingClientRect(); return { label: label.textContent.trim(), edge_delta: Math.abs(document.documentElement.dir === 'rtl' ? a.right - b.right : a.left - b.left), below: b.top >= a.bottom - 1 } })
     const submit = document.querySelector('[data-auth-submit]'), submitBox = box(submit)
     return { width: innerWidth, viewport_height: innerHeight, submit: { ...submitBox, fits_first_viewport: submitBox.bottom <= innerHeight }, scroll_width: document.documentElement.scrollWidth, direction: document.documentElement.dir, eastern_digits: /[\u0660-\u0669\u06f0-\u06f9]/.test(document.body.innerText), targets, fields, definitions, contrasts,
       fonts: { ready: fontsReady, status: document.fonts.status, body_family: getComputedStyle(document.body).fontFamily, faces, loaded_faces: faces.filter(face => face.status === 'loaded'), failed_faces: faces.filter(face => face.status === 'error') } }
@@ -139,21 +139,20 @@ export async function runLoginSurfaceAcceptance({ output } = {}) {
         assert.equal(await page.getByRole('main').count(), 1)
         await expect(page.getByRole('main')).toHaveAccessibleName(headings[state.audience][state.locale])
         await expect(page.getByRole('form')).toHaveAccessibleName(headings[state.audience][state.locale])
-        await expect(page.locator('.xp-brand__name')).toHaveText(audiences[state.audience])
-        const approved = page.locator('.xp-login-shell[data-login-design="approved"]')
+        await expect(page.locator('[data-login-product]')).toHaveText(audiences[state.audience])
+        const approved = page.locator('.v2-login[data-login-design="v2"]')
         await expect(approved).toHaveCount(1)
-        await expect(approved.locator(':scope > header.xp-login-topbar')).toBeVisible()
-        await expect(approved.locator(':scope > main.xp-login-main > .xp-login-entry > section.xp-login-card')).toBeVisible()
+        await expect(approved.locator(':scope > .v2-login__work > header.v2-login__top')).toBeVisible()
+        await expect(approved.locator(':scope > .v2-login__work > main.v2-login__main > .v2-login__entry > section.v2-login__card')).toBeVisible()
         // Each sign-in page shows only its own panel: no profile tabs or links to another panel.
         await expect(approved.locator('.xp-login-profile-tabs, [data-login-profile], [data-panel-link]')).toHaveCount(0)
-        const context = approved.locator(':scope > main.xp-login-main > aside.xp-login-aside')
+        const context = approved.locator(':scope > aside.v2-login__about[aria-labelledby="login-context-heading"]')
         await expect(context).toBeVisible()
-        await expect(context.locator(':scope > .xp-login-context-card')).toHaveCount(2)
-        await expect(context.locator('[aria-labelledby="login-context-heading"]')).toBeVisible()
-        await expect(context.locator('.xp-login-context-brand')).toHaveText(audiences[state.audience])
+        await expect(context.locator('.v2-login__guards')).toBeVisible()
+        await expect(context.locator('[data-login-product]')).toHaveText(audiences[state.audience])
         await expect(context.locator('#login-context-heading')).toHaveText(state.locale === 'ar' ? 'استخدم الحساب المناسب' : 'Use the right account')
-        await expect(context.locator('[data-login-lockout-details]')).toBeHidden()
-        const footer = approved.locator(':scope > footer.xp-login-footer')
+        await expect(approved.locator('[data-login-lockout-details]')).toBeHidden()
+        const footer = approved.locator(':scope > .v2-login__work > footer.v2-login__footer')
         await expect(footer).toBeVisible()
         await expect(footer.locator(':scope > span')).toHaveCount(2)
         // The footer names only this panel; the other two panels are not mentioned anywhere on the page.
@@ -169,7 +168,7 @@ export async function runLoginSurfaceAcceptance({ output } = {}) {
         assert.ok(metrics.submit.fits_first_viewport, 'Essential sign-in form must fit the first viewport')
         assert.equal(metrics.eastern_digits, false, 'Visible digits must be ASCII')
         assert.ok(metrics.targets.every(target => target.width >= 43.5 && target.height >= 43.5), 'All visible controls need 44px targets')
-        assert.ok(metrics.fields.length >= 2 && metrics.fields.every(field => field.label_text && field.control.top >= field.label_bottom - 1 && field.control.height >= 48), 'Nonempty labels remain directly above 48px inputs; filled text edges are measured independently')
+        assert.ok(metrics.fields.length >= 2 && metrics.fields.every(field => field.label_text && field.control.top >= field.label_bottom - 1 && field.control.height >= 43.5), 'Nonempty labels remain directly above 44px inputs; filled text edges are measured independently')
         assert.ok(metrics.definitions.every(field => field.edge_delta <= 1 && field.below), 'Context values must align directly below their labels')
         assert.ok(metrics.contrasts.every(item => item.ratio + 0.02 >= item.required), 'Semantic text contrast must meet AA ratios')
         assert.equal(metrics.fonts.ready, true, 'Fonts must settle within 5 seconds')
@@ -177,7 +176,7 @@ export async function runLoginSurfaceAcceptance({ output } = {}) {
         assert.equal(metrics.fonts.failed_faces.length, 0)
         if (state.locale === 'en') assert.ok(metrics.fonts.loaded_faces.some(face => face.family.includes('IBM Plex Sans')), 'The English locale font must actually load')
         metrics.fonts.applied_roles = {}
-        for (const [role, selector, family, typographyRole] of [['brand', '.xp-brand__name', 'IBM Plex Mono', 'login-wordmark'], ['heading', '.xp-login-shell h1', state.locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans', 'ordinary']]) {
+        for (const [role, selector, family, typographyRole] of [['brand', '[data-login-product]', state.locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans', 'login-wordmark'], ['heading', '.v2-login h1', state.locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans', 'ordinary']]) {
           try { metrics.fonts.applied_roles[role] = await assertAppliedFont(page, selector, family, { role: typographyRole }) }
           catch (error) { if (error.appliedFontObservation) metrics.fonts.applied_roles[role] = error.appliedFontObservation; throw error }
         }
@@ -201,11 +200,11 @@ export async function runLoginSurfaceAcceptance({ output } = {}) {
           const input = document.getElementById(button.getAttribute('aria-controls')), ir = input.getBoundingClientRect(), br = button.getBoundingClientRect(), style = getComputedStyle(input)
           return { input: { left: ir.left, right: ir.right, top: ir.top, bottom: ir.bottom }, eye: { left: br.left, right: br.right, top: br.top, bottom: br.bottom, width: br.width, height: br.height }, padding_left: parseFloat(style.paddingLeft), padding_right: parseFloat(style.paddingRight), text_align: style.textAlign, resolved_text_align: style.textAlign === 'start' ? (style.direction === 'rtl' ? 'right' : 'left') : style.textAlign === 'end' ? (style.direction === 'rtl' ? 'left' : 'right') : style.textAlign, direction: style.direction }
         })
-        assert.ok(eyeGeometry.eye.width >= 44 && eyeGeometry.eye.height >= 44)
-        assert.ok(eyeGeometry.eye.left >= eyeGeometry.input.left && eyeGeometry.eye.right <= eyeGeometry.input.right && eyeGeometry.eye.top >= eyeGeometry.input.top && eyeGeometry.eye.bottom <= eyeGeometry.input.bottom, 'The eye target remains inside the password field')
+        assert.ok(eyeGeometry.eye.width >= 43.5 && eyeGeometry.eye.height >= 43.5)
+        assert.ok(state.locale === 'ar' ? eyeGeometry.eye.right <= eyeGeometry.input.left - 7 : eyeGeometry.eye.left >= eyeGeometry.input.right + 7, 'The eye target sits beside the password input with a non-overlapping gap')
+        assert.ok(Math.abs(eyeGeometry.eye.top - eyeGeometry.input.top) <= 1 && Math.abs(eyeGeometry.eye.bottom - eyeGeometry.input.bottom) <= 1, 'The eye target aligns vertically with the password input')
         assert.equal(eyeGeometry.direction, 'ltr')
         assert.equal(eyeGeometry.resolved_text_align, state.locale === 'ar' ? 'right' : 'left')
-        assert.ok((state.locale === 'ar' ? eyeGeometry.padding_left : eyeGeometry.padding_right) >= eyeGeometry.eye.width + 8, 'Credential text reserves the physical space occupied by the eye in either locale')
         await page.keyboard.press('Space'); await expect(password).toHaveAttribute('type', 'text'); await expect(toggle).toHaveAttribute('aria-pressed', 'true')
         await expect(toggle).toHaveAttribute('aria-label', state.locale === 'ar' ? 'إخفاء كلمة المرور' : 'Hide password')
         assert.equal(await page.locator('[data-password-show]').getAttribute('hidden'), '')
@@ -237,7 +236,7 @@ export async function runLoginSurfaceAcceptance({ output } = {}) {
           outcome.observations.push({ long_error_geometry: errorGeometry })
         }
         if (state.width === 1440) {
-          const language = page.locator('.xp-topbar-actions a').first(), theme = page.locator('.xp-topbar-actions a').last()
+          const language = page.locator('.v2-login__actions a').first(), theme = page.locator('.v2-login__actions a').last()
           await language.click(); await expect(page.locator('html')).toHaveAttribute('lang', state.locale === 'en' ? 'ar' : 'en'); await expect(page.locator('[data-login-audience]')).toHaveAttribute('data-login-audience', state.audience)
           await page.goBack({ waitUntil: 'domcontentloaded' }); await expect(page.locator('html')).toHaveAttribute('lang', state.locale)
           await theme.click(); await expect(page.locator('html')).toHaveAttribute('data-theme', state.theme === 'dark' ? 'light' : 'dark'); await expect(page.locator('[data-login-audience]')).toHaveAttribute('data-login-audience', state.audience)

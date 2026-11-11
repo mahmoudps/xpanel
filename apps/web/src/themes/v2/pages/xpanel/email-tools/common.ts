@@ -5,6 +5,7 @@ import { card, notice, pageHeader } from '../../../components/index.ts'
 import { escapeHtml, hookAttrs, type HookAttributes } from '../../../html.ts'
 import { icon } from '../../../icons.ts'
 import { v2Messages } from '../../../messages.ts'
+import { phoneLabelCss, phoneLabels } from '../settings/common.ts'
 import { mailCardsFor } from '../../../../../mail-cards.ts'
 import { renderV2MailCards } from '../../mail-cards.ts'
 
@@ -59,11 +60,11 @@ export const facts = (rows: readonly { label: string; valueHtml: string; hooks?:
 export const section = (id: string, title: string, bodyHtml: string, hooks?: HookAttributes, actionsHtml?: string): string =>
   card({ title, titleId: `${id}-heading`, bodyHtml, ...(hooks ? { hooks } : {}), ...(actionsHtml ? { actionsHtml } : {}) })
 export const table = (id: string, label: string, columns: readonly string[], bodyHtml: string, hooks?: HookAttributes, headHooks?: HookAttributes): string =>
-  `<div class="v2-panel-extra__table" role="region" tabindex="0" aria-label="${esc(label)}"><table id="${esc(id)}" class="v2-table"><caption class="v2-sr">${esc(label)}</caption><thead${hookAttrs(headHooks)}><tr>${columns.map(column => `<th scope="col">${esc(column)}</th>`).join('')}</tr></thead><tbody${hookAttrs(hooks)}>${bodyHtml}</tbody></table></div>`
+  `<div class="v2-panel-extra__table" role="region" tabindex="0" aria-label="${esc(label)}"><table id="${esc(id)}" class="v2-table"${phoneLabels(columns)}><caption class="v2-sr">${esc(label)}</caption><thead${hookAttrs(headHooks)}><tr>${columns.map(column => `<th scope="col">${esc(column)}</th>`).join('')}</tr></thead><tbody${hookAttrs(hooks)}>${bodyHtml}</tbody></table></div>`
 export const unread = (t: Translate, columns: number): string => `<tr><td colspan="${columns}">${esc(t(msgid('Nothing has been read.')))}</td></tr>`
 export const state = (message: string, hooks?: HookAttributes): string => `<p data-state="unread" role="status"${hookAttrs(hooks)}>${esc(message)}</p>`
 export const header = (t: Translate, route: string, title: string, description: string): string =>
-  pageHeader(t, { route, title, description, breadcrumb: [{ label: 'xPanel', href: '/home' }, { label: title }] })
+  pageHeader(t, { route, title, description, breadcrumb: [{ label: t(msgid('Home')), href: '/home' }, { label: title }] })
 export function missingAccount(t: Translate, route: string, title: string): string {
   return `<section class="v2-panel-extra">${header(t, route, title, t(msgid('Manage your hosting account and domains.')))}${notice(t, { tone: 'warn', lead: t(msgid('Unavailable')), text: t(msgctxt('theme:v2', 'An authorized account has not been read.')), urgent: true })}</section>`
 }
@@ -76,6 +77,8 @@ export const PANEL_ADDITIONAL_CSS = `.v2-panel-extra{display:flex;flex-direction
 .v2-panel-extra :is(h2,h3,h4,p,dl,dd,ul,ol,pre){margin:0}
 .v2-panel-extra .v2-card,.v2-panel-extra .v2-card__body{gap:var(--space-3)}
 .v2-panel-extra__groups,.v2-panel-extra__editor,.v2-panel-extra fieldset{display:grid;gap:var(--space-3);min-inline-size:0}
+.v2-panel-extra>[data-filter-workspace]{gap:var(--space-4)}
+.v2-panel-extra [data-filter-editor] [data-filter-group]{display:grid;gap:var(--space-2);min-inline-size:0}
 .v2-panel-extra__handoff{display:flex;flex-direction:column;align-items:flex-start;gap:var(--space-1);min-inline-size:0}
 .v2-panel-extra fieldset{padding:0;border:0}
 .v2-panel-extra legend{padding:0;margin-block-end:var(--space-2);font-weight:600}
@@ -84,16 +87,16 @@ export const PANEL_ADDITIONAL_CSS = `.v2-panel-extra{display:flex;flex-direction
 .v2-panel-extra__facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr));gap:var(--space-2);min-inline-size:0}
 .v2-panel-extra__facts>div{display:flex;flex-direction:column;gap:var(--space-1);min-inline-size:0;text-align:start}
 .v2-panel-extra__facts :is(dt,dd){text-align:start;overflow-wrap:anywhere}
+.v2-panel-extra__facts dt,.v2-panel-extra legend{text-box-trim:trim-end;text-box-edge:text}
+.v2-panel-extra__facts dd{text-box-trim:trim-start;text-box-edge:text}
 .v2-panel-extra__facts dt{font-size:12px;color:var(--muted)}
-.v2-panel-extra__check{display:flex;align-items:flex-start;gap:var(--space-1);min-block-size:var(--target)}
-.v2-panel-extra__check>input{margin-block:4px 0;flex:none}
-.v2-panel-extra__table{overflow:auto;min-inline-size:0;max-inline-size:100%}
+.v2-panel-extra__check{display:flex;align-items:center;gap:var(--space-1);min-block-size:var(--target)}
+.v2-panel-extra__check>input{margin-block:0;flex:none}
+.v2-panel-extra__table{overflow:auto;min-inline-size:0;max-inline-size:100%;border:1px solid var(--line);border-radius:var(--radius-control)}
+.v2-panel-extra .v2-card p{font-size:13px;line-height:1.6}.v2-panel-extra .v2-card :is(h3,legend){font-size:14px}
+.v2-panel-extra .v2-card p[role=status]:not(:empty,[hidden],[data-state=failed]){padding:10px 14px;border:1px solid var(--line);border-radius:var(--radius-control);background:var(--subtle);color:var(--text-2)}
+.v2-panel-extra__table td[colspan]{padding-block:var(--space-3);color:var(--muted);font-size:13px;text-align:center}
 .v2-panel-extra__table :is(th,td){padding:12px 16px;text-align:start;vertical-align:top}
-.v2-panel-extra [data-site-health] [data-state-chip]{display:inline-flex;align-items:center;gap:var(--space-1);padding:4px 10px;border:1px solid var(--line);border-radius:var(--radius-pill);background:var(--sunken);color:var(--muted);font-size:12px;font-weight:600;white-space:nowrap}
-.v2-panel-extra [data-site-health] [data-state-chip]::before{content:"";inline-size:6px;block-size:6px;border-radius:50%;background:currentColor;flex:none}
-.v2-panel-extra [data-site-health] [data-state-chip=ok]{color:var(--ok);background:var(--ok-soft);border-color:var(--ok-line)}
-.v2-panel-extra [data-site-health] [data-state-chip=problem]{color:var(--bad);background:var(--bad-soft);border-color:var(--bad-line)}
-.v2-panel-extra [data-site-health] [data-state-chip=unavailable]{color:var(--warn);background:var(--warn-soft);border-color:var(--warn-line)}
 .v2-panel-extra__list{list-style:none;padding:0;display:grid;gap:var(--space-3);min-inline-size:0}
 .v2-panel-extra__list>li,.v2-panel-extra__preview{padding:var(--v2-panel-padding);border:1px solid var(--line);border-radius:var(--radius-control);display:grid;gap:var(--space-2);min-inline-size:0}
 .v2-panel-extra__split{display:grid;grid-template-columns:minmax(0,1fr) minmax(240px,320px);gap:var(--space-3);align-items:start;min-inline-size:0}
@@ -104,8 +107,28 @@ export const PANEL_ADDITIONAL_CSS = `.v2-panel-extra{display:flex;flex-direction
 .v2-panel-extra textarea{inline-size:100%;resize:vertical;min-block-size:96px}
 .v2-panel-extra pre{white-space:pre-wrap;overflow-wrap:anywhere;max-inline-size:100%;min-inline-size:0;text-align:start}
 .v2-panel-extra pre.v2-panel-extra__raw{direction:ltr;white-space:pre;overflow:auto;padding:var(--space-2);background:var(--code);color:var(--code-text);border-radius:var(--radius-control)}
-.v2-panel-extra [role=status][data-state]:is([data-state=failed],[data-state=uncertain]){padding:var(--space-2);border:1px solid var(--warn-line);background:var(--warn-soft);border-radius:var(--radius-control)}
+.v2-panel-extra [role=status][data-state=uncertain]{padding:var(--space-2);border:1px solid var(--warn-line);background:var(--warn-soft);border-radius:var(--radius-control)}
+.v2-panel-extra :is(p,ol,pre):empty{display:none}
+.v2-panel-extra .v2-mail-card__scroll{border:1px solid var(--line);border-radius:var(--radius-control)}
+.v2-panel-extra input[type=file]{inline-size:100%;min-block-size:var(--target);padding:6px;border:1px dashed var(--line-strong);border-radius:var(--radius-control);background:var(--subtle);font-size:13px;color:var(--text-2)}
+.v2-panel-extra input[type=file]::file-selector-button{margin-inline-end:12px;min-block-size:var(--target);padding:0 12px;border:1px solid var(--line-strong);border-radius:8px;background:var(--surface);color:var(--text);font:inherit;font-weight:600;cursor:pointer}
+.v2-panel-extra [data-email-disk-usage] .v2-card__body>.v2-btn{align-self:flex-start}
+.v2-panel-extra [data-email-disk-usage] [role=region]{overflow:auto;min-inline-size:0;border:1px solid var(--line);border-radius:var(--radius-control)}
+.v2-panel-extra [data-email-disk-usage] table{inline-size:100%;border-collapse:collapse;font-size:13px}
+.v2-panel-extra [data-email-disk-usage] :is(th,td){padding:12px 16px;text-align:start}.v2-panel-extra [data-email-disk-usage] thead{background:var(--subtle)}.v2-panel-extra [data-email-disk-usage] tbody td{border-block-start:1px solid var(--line)}
+.v2-panel-extra [data-email-disk-usage] td[colspan]{padding-block:var(--space-3);color:var(--muted);text-align:center}
+.v2-panel-extra [data-email-disk-usage] th>.v2-btn{padding:0;border:0;background:none;box-shadow:none;font-size:12px;font-weight:600;color:var(--muted)}
 .v2-panel-extra [hidden]{display:none}
 @media(max-width:900px){.v2-panel-extra__split{grid-template-columns:minmax(0,1fr)}}
-@media(max-width:600px){.v2-panel-extra__fields{grid-template-columns:minmax(0,1fr)}.v2-panel-extra__actions>button{flex:1 1 auto}.v2-panel-extra__groups[data-account-quarantine] .v2-panel-extra__actions>button{max-inline-size:100%;white-space:normal}}
+@media(max-width:600px){.v2-panel-extra__fields{grid-template-columns:minmax(0,1fr)}.v2-panel-extra__facts{grid-template-columns:repeat(2,minmax(0,1fr))}.v2-panel-extra .v2-table thead{position:absolute;inline-size:1px;block-size:1px;overflow:hidden;clip-path:inset(50%)}.v2-panel-extra :is(.v2-mail-card__scroll,.v2-table-wrap):has(tbody:empty){display:none}.v2-panel-extra__actions>button{flex:1 1 auto}.v2-panel-extra__table{border:0;border-block-start:1px solid var(--line);border-radius:0}.v2-panel-extra__groups[data-account-quarantine] .v2-panel-extra__actions>button{max-inline-size:100%;white-space:normal}}
+.v2-panel-extra__stack{display:grid;gap:var(--space-1)}.v2-panel-extra__stack--wide{gap:var(--space-2)}.v2-panel-extra__field{display:flex;flex-direction:column;gap:var(--space-1);min-inline-size:0}
+${phoneLabelCss('.v2-panel-extra')}
+@media(max-width:600px){.v2-panel-extra table:not(:has(td)) thead{position:static;inline-size:auto;block-size:auto;clip-path:none}.v2-panel-extra table:not(:has(td)) thead tr{display:flex;flex-wrap:wrap;gap:4px var(--space-2);padding:var(--space-1) 0}.v2-panel-extra table:not(:has(td)) th{padding:0;background:none}}
+@media(min-width:601px){.v2-panel-extra #v2-email-archive-records{table-layout:fixed;inline-size:100%}.v2-panel-extra #v2-email-archive-records td>:is(select,input:not([type=checkbox])){inline-size:100%;min-inline-size:0}.v2-panel-extra #v2-email-archive-records th:nth-child(1){inline-size:17%}.v2-panel-extra #v2-email-archive-records th:nth-child(2){inline-size:24%}.v2-panel-extra #v2-email-archive-records th:nth-child(3){inline-size:8%}.v2-panel-extra #v2-email-archive-records th:nth-child(4){inline-size:8%}.v2-panel-extra #v2-email-archive-records th:nth-child(5){inline-size:11%}.v2-panel-extra #v2-email-archive-records th:nth-child(6){inline-size:13%}.v2-panel-extra #v2-email-archive-records th:nth-child(7){inline-size:19%}}
+@media(max-width:600px){.v2-panel-extra #v2-email-archive-records{display:block;min-inline-size:0!important}.v2-panel-extra #v2-email-archive-records>thead{position:absolute;inline-size:1px;block-size:1px;overflow:hidden;clip-path:inset(50%)}.v2-panel-extra #v2-email-archive-records>tbody{display:block}.v2-panel-extra #v2-email-archive-records>tbody>tr{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-2);padding:var(--space-2);border-block-start:1px solid var(--line)}.v2-panel-extra #v2-email-archive-records>tbody>tr:first-child{border-block-start:0}.v2-panel-extra #v2-email-archive-records>tbody>tr>td{display:flex;flex-direction:column;align-items:flex-start;gap:var(--space-1);min-inline-size:0;padding:0;border:0}.v2-panel-extra #v2-email-archive-records>tbody>tr>td:is(:first-child,:last-child,[colspan]),.v2-panel-extra #v2-email-archive-records>tbody>tr>td:nth-child(2){grid-column:1/-1}.v2-panel-extra #v2-email-archive-records td>:is(select,input:not([type=checkbox])){inline-size:100%}.v2-panel-extra #v2-email-archive-records td::before{margin:0!important}}
+.v2-panel-extra #v2-address-books td>input:not([type=checkbox]),.v2-panel-extra #v2-task-lists td>input:not([type=checkbox]){inline-size:100%;min-inline-size:0}
+@media(max-width:600px){.v2-panel-extra :is(#v2-address-books,#v2-task-lists){display:block;min-inline-size:0!important}.v2-panel-extra :is(#v2-address-books,#v2-task-lists)>thead{position:absolute;inline-size:1px;block-size:1px;overflow:hidden;clip-path:inset(50%)}.v2-panel-extra :is(#v2-address-books,#v2-task-lists)>tbody{display:block}.v2-panel-extra :is(#v2-address-books,#v2-task-lists)>tbody>tr{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:var(--space-1) var(--space-2);padding:var(--space-2);border-block-start:1px solid var(--line);border-block-end:0}.v2-panel-extra :is(#v2-address-books,#v2-task-lists)>tbody>tr>td{display:flex;flex-direction:column;align-items:stretch;gap:4px;min-inline-size:0;padding:0;border:0}.v2-panel-extra :is(#v2-address-books,#v2-task-lists)>tbody>tr>td:is(:first-child,:nth-child(2),[colspan]){grid-column:1/-1}.v2-panel-extra #v2-dav-principals dl{grid-template-columns:minmax(0,1fr)!important}}
+
+.v2-panel-extra #v2-email-archive-records td .v2-btn{white-space:normal}
+.v2-panel-extra [data-quarantine-inspect]{align-self:flex-start;justify-self:start;inline-size:auto}
 `

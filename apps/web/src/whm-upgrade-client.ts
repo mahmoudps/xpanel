@@ -161,7 +161,7 @@ function bindWhmUpgrade(): void {
     'manifest-not-regular-file': msgid('The manifest is not a regular file.'),
     'duplicate-version': msgid('Another manifest already stages this version.'),
   }
-  const reasons = (list: readonly string[]): string => list.map(code => ((reasonCopy[code]) ? t(reasonCopy[code]!) : null) ?? code).join(' ')
+  const reasons = (list: readonly string[]): string => list.map(code => ((reasonCopy[code]) ? t(reasonCopy[code]!) : null) ?? t('The host gave a reason xPanel does not recognize ({code}).', { code })).join(' ')
   const statusCopy: Record<string, string> = { pending: msgctxt('whm-upgrade-client', 'Pending'), running: msgid('Running'), succeeded: msgctxt('whm-upgrade-client', 'Done'), failed: msgid('Failed'), rolled_back: msgid('Rolled back') }
   const signatureCopy: Record<string, string> = { verified: msgid('Verified'), unverified: msgid('Untrusted key'), invalid: msgid('Invalid'), 'no-trusted-keys': msgid('Not checked: no trusted keys') }
   const bytes = (value: number | null): string => value === null ? t('Not read') : value >= 1073741824 ? (value / 1073741824).toFixed(1) + ' GB' : (value / 1048576).toFixed(1) + ' MB'
@@ -213,7 +213,7 @@ function bindWhmUpgrade(): void {
         ? t('Migrations in this release: none; the schema stays at {schema}.', { schema: String(item.schemaVersion) })
         : t('Migrations in this release: schema {from} → {to}. Each migration is checked as expand only by the upgrade machine after unpacking.', { from: String(observation.schemaVersion), to: String(item.schemaVersion) })
     }
-    const paintHistory = (history: UpgradeHistoryRow[]): void => fill('[data-upgrade-history]', 6, history.map(row => [row.fromVersion + ' → ' + row.toVersion, (row.fromSchemaVersion ?? '?') + ' → ' + (row.toSchemaVersion ?? '?'), formatDisplayDateTime(row.startedAt ?? row.createdAt), ((statusCopy[row.status]) ? t(statusCopy[row.status]!) : null) ?? row.status, row.actor, row.error ?? '']), [0, 1, 2, 4], t('No upgrade has been recorded.'))
+    const paintHistory = (history: UpgradeHistoryRow[]): void => fill('[data-upgrade-history]', 6, history.map(row => [row.fromVersion + ' → ' + row.toVersion, (row.fromSchemaVersion ?? '?') + ' → ' + (row.toSchemaVersion ?? '?'), formatDisplayDateTime(row.startedAt ?? row.createdAt), ((statusCopy[row.status]) ? t(statusCopy[row.status]!) : null) ?? row.status, row.actor, row.error ? t('The host reported: {error}', { error: row.error }) : '']), [0, 1, 2, 4], t('No upgrade has been recorded.'))
     const inFlight = (row: UpgradeHistoryRow | null): boolean => !!row && (row.status === 'pending' || row.status === 'running')
     const paintProgress = (lock: UpgradeLockView, latest: UpgradeHistoryRow | null, retirement: boolean | null, rewind: UpgradeRewindView | null): void => {
       const holder = progress.parentElement

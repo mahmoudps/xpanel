@@ -1,6 +1,9 @@
 import type { MessageValues } from './i18n.ts'
 import { MAIL_CLIENT_TEMPLATE_KIT, mailTemplate as canonicalMailTemplate, mailSlot as canonicalMailSlot, mailRequireTemplates as canonicalMailRequireTemplates } from './mail-client-template-kit.ts'
 import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+import { ASCII_BYTES_BINDING, formatIsolatedBytes as canonicalFormatClientBytes } from './display-format.ts'
+// Module-local alias: the binding source defines it again from ASCII_BYTES_BINDING.
+const formatClientBytes = canonicalFormatClientBytes
 const frameRequest = canonicalFrameRequest
 const mailTemplate = canonicalMailTemplate
 const mailSlot = canonicalMailSlot
@@ -62,11 +65,11 @@ function bindMailAttachments(_askDialog: unknown): void {
         const manifest = readAttachmentManifest(await transport('GET', '/api/webmail/attachment-workspace?uid=' + expected.uid + '&folder=' + encodeURIComponent(expected.folder) + (expected.uidValidity === undefined ? '' : '&uidValidity=' + expected.uidValidity)), expected)
         if (token !== generation || !eligible() || JSON.stringify(selected()) !== JSON.stringify(expected)) return
         if (!manifest.attachments.length) { announce('empty', t('The message has no attachments.')); return }
-        if (heading) heading.textContent = t('Attachments · {count} · {bytes} B', { count: manifest.attachments.length, bytes: manifest.attachments.reduce((sum, item) => sum + item.sizeBytes, 0) })
+        if (heading) heading.textContent = t('Attachments · {count} · {size}', { count: manifest.attachments.length, size: formatClientBytes(manifest.attachments.reduce((sum, item) => sum + item.sizeBytes, 0)) })
         for (const attachment of manifest.attachments) {
           const row = mailTemplate(root, 'mail-attachment-row', 'li', ['link', 'badge', 'name', 'size'])
           const link = mailSlot<HTMLAnchorElement>(row, 'link', 'a'), badge = mailSlot(row, 'badge'), name = mailSlot(row, 'name', 'bdi'), sizeValue = mailSlot(row, 'size', 'bdi')
-          name.textContent = digits(attachment.filename); sizeValue.textContent = String(attachment.sizeBytes) + ' B'
+          name.textContent = digits(attachment.filename); sizeValue.textContent = formatClientBytes(attachment.sizeBytes)
           const extension = attachment.filename.includes('.') ? attachment.filename.split('.').at(-1)! : ''
           badge.textContent = /^[a-z0-9]{1,6}$/i.test(extension) ? extension.toUpperCase() : 'FILE'
           link.href = attachment.downloadPath
@@ -89,4 +92,4 @@ function bindMailAttachments(_askDialog: unknown): void {
   })
 }
 
-export const MAIL_ATTACHMENTS_CLIENT_BINDING = withFrameRequest(`(()=>{${MAIL_CLIENT_TEMPLATE_KIT}const readAttachmentManifest=${readAttachmentManifest.toString()};return ${bindMailAttachments.toString()};})()`)
+export const MAIL_ATTACHMENTS_CLIENT_BINDING = withFrameRequest(`(()=>{const formatClientBytes=${ASCII_BYTES_BINDING};${MAIL_CLIENT_TEMPLATE_KIT}const readAttachmentManifest=${readAttachmentManifest.toString()};return ${bindMailAttachments.toString()};})()`)

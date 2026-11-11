@@ -175,7 +175,7 @@ describe('WHM jobs client binding', () => {
     expect($('[data-whm-jobs-steps]').textContent).toContain('النتيجة غير معروفة')
     expect($('[data-whm-jobs-steps]').textContent).toContain('100')
     expect($('[data-whm-jobs-steps]').textContent).toContain('تحديث قوائم الحزم')
-    expect($('[data-whm-jobs-steps]').textContent).toContain('فحص المنطقة example.com')
+    expect($('[data-whm-jobs-steps]').textContent).toContain('فحص المنطقة \u2066example.com\u2069')
     expect($('[data-whm-jobs-verification]').textContent).toBe('لم يؤكد فحص المضيف النتيجة المتوقعة.')
     expect($('[data-whm-jobs-log-status]').textContent).toBe('عرض 20 من 20 بايت.')
     expect($('[data-whm-jobs-verification-detail]').textContent).toContain('"stillUpgradable": 2')

@@ -204,6 +204,18 @@ describe('approved workspace browser bindings', () => {
     expect((form().elements.namedItem('ini.memory_limit') as HTMLInputElement).value).toBe('512M')
     submit(); await tick(); expect(send.mock.calls[2]).toEqual(['PATCH', '/api/domains/' + otherId, { php: nextPhp, expectedRevision: domainRevision }])
   })
+  it('rehydrates a radio group by checking the saved choice and keeps every choice value', async () => {
+    const nextPhp = { ...php, handler: 'lsphp' }
+    const domains = [{ id, php: { ...php, handler: 'fpm' } }, { id: otherId, php: nextPhp }]
+    const send = vi.fn<Request>().mockResolvedValueOnce({ domains, revision: domainRevision }).mockResolvedValueOnce({ domains, revision: domainRevision }).mockResolvedValueOnce({ domain: { id: otherId, php: nextPhp } }); request(send)
+    boot(`<form data-domain-php-form data-domain-id="${id}"><select name="domainId" data-domain-php-select><option value="${id}">One</option><option value="${otherId}">Two</option></select>${field('version', String(php.version))}<input type="radio" name="handler" value="fpm" checked><input type="radio" name="handler" value="lsphp"><button type="submit">Save</button><button type="reset">Reset</button><p data-domain-php-status></p></form>`)
+    const radios = Array.from(document.querySelectorAll<HTMLInputElement>('input[name="handler"]'))
+    const select = document.querySelector<HTMLSelectElement>('select')!; select.value = otherId; select.dispatchEvent(new Event('change')); await tick()
+    expect(radios.map(item => [item.value, item.checked])).toEqual([['fpm', false], ['lsphp', true]])
+    radios[0]!.checked = true; form().querySelector<HTMLButtonElement>('[type="reset"]')!.click()
+    expect(radios.map(item => item.checked)).toEqual([false, true])
+    submit(); await tick(); expect(send.mock.calls[2]).toEqual(['PATCH', '/api/domains/' + otherId, { php: nextPhp, expectedRevision: domainRevision }])
+  })
   it('blocks a changed domain until its current configuration can be read', async () => {
     const send = vi.fn<Request>().mockRejectedValue(new Error('read failed')); request(send)
     boot(`<form data-domain-php-form data-domain-id="${id}"><select name="domainId" data-domain-php-select><option value="${id}">One</option><option value="${otherId}">Two</option></select>${field('version', '8.3')}<button type="submit">Save</button></form>`)

@@ -43,9 +43,9 @@ describe('lab host command fixture', () => {
     assert.deepEqual(parseLoadavg(LOADAVG), { load1: 0, load5: 0.02, load15: 0 })
     const memory = parseMeminfo(MEMINFO)
     assert.equal(memory.totalBytes, 7939453 * 1024)
-    assert.equal(formatBytes(memory.totalBytes), '8.13 GB')
+    assert.equal(formatBytes(memory.totalBytes), '7.57\u00a0GiB')
     const disk = parseDf(DF_ROOT)
-    assert.equal(formatBytes(disk.totalBytes), '161 GB')
+    assert.equal(formatBytes(disk.totalBytes), '150\u00a0GiB')
     assert.equal(parseDf(DF_HOME).mount, '/')
     const inodes = parseDfInodes(DF_INODES)
     assert.deepEqual({ used: inodes.used, total: inodes.total, mount: inodes.mount }, { used: 148410, total: 9732496, mount: '/' })
@@ -63,14 +63,14 @@ describe('lab host command fixture', () => {
     assert.equal(model.hostRows.find(row => row.label === 'System')?.value, 'Ubuntu 24.04.3 LTS')
     assert.equal(model.hostRows.find(row => row.label === 'Kernel')?.value, '6.8.0-90-generic')
     assert.equal(model.hostRows.find(row => row.label === 'Uptime')?.value, '1 day, 11 hours')
-    assert.equal(model.hostRows.find(row => row.label === 'Hardware')?.value, '4 cores · AMD EPYC-Rome · 8.13 GB')
+    assert.equal(model.hostRows.find(row => row.label === 'Hardware')?.value, '4 cores · AMD EPYC-Rome · 7.57\u00a0GiB')
     assert.equal(model.hostRows.find(row => row.label === 'Engine')?.value, 'nginx 1.24.0 → Apache 2.4.58')
     assert.equal(model.hostRows.find(row => row.label === 'xPanel')?.value, '0.1.0')
     if (named) assert.equal(model.hostRows.find(row => row.label === 'Panel domain')?.value, 'panel.example.test')
     assert.equal(model.meters[0]?.value, '0.00 / 0.02 / 0.00')
     assert.equal(model.meters[0]?.note, '4 cores')
     assert.equal(model.meters[0]?.showBar, false)
-    assert.equal(model.meters[2]?.value, '40.0 GB / 161 GB')
+    assert.equal(model.meters[2]?.value, '37.3\u00a0GiB / 150\u00a0GiB')
     assert.equal(model.meters[3]?.label, 'Inodes on /')
     assert.equal(model.meters[3]?.value, '148,410 / 9,732,496')
     assert.equal(model.meters[3]?.pct, '2%')
@@ -101,12 +101,12 @@ describe('lab host command fixture', () => {
       'Ubuntu 24.04.3 LTS',
       '6.8.0-90-generic',
       '1 day, 11 hours',
-      '4 cores · AMD EPYC-Rome · 8.13 GB',
+      '4 cores · AMD EPYC-Rome · 7.57\u00a0GiB',
       'nginx 1.24.0 → Apache 2.4.58',
       '0.1.0',
       '0.00 / 0.02 / 0.00',
       '4 cores',
-      '161 GB',
+      '150\u00a0GiB',
       'Inodes on /',
       '148,410 / 9,732,496',
       '/home is on /',
@@ -130,7 +130,7 @@ describe('lab host command fixture', () => {
     if (named) assert.ok(html.indexOf('host.example.test') < html.indexOf('panel.example.test'))
     assert.equal(html.includes('aria-label="CPU"'), false)
     assert.equal(html.includes('aria-valuenow="0"'), false)
-    assert.equal(html.includes('7.57'), false)
+    assert.equal(html.includes('8.13'), false)
     assert.equal(html.includes('150 GB'), false)
     assert.equal(html.includes('6 / 6'), false)
 
@@ -149,7 +149,7 @@ describe('lab host command fixture', () => {
       },
     }))
     assert.match(arabic, /<bdi dir="ltr">4<\/bdi> أنوية/)
-    assert.match(arabic, /<bdi dir="ltr">8\.13 GB<\/bdi>/)
+    assert.match(arabic, /<bdi dir="ltr">7\.57\u00a0GiB<\/bdi>/)
     assert.match(arabic, /يوم واحد و<bdi dir="ltr">11<\/bdi> ساعة/)
     assert.match(arabic, /«\/home» على «\/»|\/home/)
     assert.match(arabic, /<bdi dir="ltr">\/home<\/bdi> على <bdi dir="ltr">\/<\/bdi>/)

@@ -62,7 +62,7 @@ describe('FTP account tools client', () => {
   it('shows the report, and the truthful state of an unread month', async () => {
     document.body.innerHTML = renderFtpReportCard('en')
     boot(async () => ({ state: 'partial', totals: { transfers: 2, downloads: 2, uploads: 0, bytes: 2048 }, days: [{ day: '2026-11-03', transfers: 2, bytes: 2048 }], hours: [], users: [] })); await tick()
-    expect(el('[data-ftp-report-fact="bytes"]').textContent).toBe('2.0 KiB')
+    expect(el('[data-ftp-report-fact="bytes"]').textContent).toBe('\u20662.00\u00a0KiB\u2069')
     expect(el('[data-ftp-report-status]').textContent).toContain('partial')
   })
 })

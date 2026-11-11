@@ -16,7 +16,6 @@ const creationFieldContract = [
   { id: 'new-acc-username', name: 'username', tag: 'INPUT', type: 'text', required: true },
   { id: 'new-acc-domain', name: 'primaryDomain', tag: 'INPUT', type: 'text', required: true },
   { id: 'new-acc-contact', name: 'contactEmail', tag: 'INPUT', type: 'email', required: false },
-  { id: 'new-acc-plan', name: 'planId', tag: 'SELECT', type: 'select-one', required: true },
   { id: 'new-acc-password', name: 'password', tag: 'INPUT', type: 'password', required: true },
   { id: 'new-acc-ipv4', name: 'ipAssignment', tag: 'SELECT', type: 'select-one', required: true },
   { id: 'new-acc-ipv6', name: 'ipv6', tag: 'INPUT', type: 'text', required: false },
@@ -73,7 +72,7 @@ async function fixture() {
             const observation = { chunksWritten: 0, canceled: false }; oversized.push(observation)
             res.writeHead(200, { 'transfer-encoding': 'chunked' }); res.write('{"scope":"')
             let chunks = 0
-            const timer = setInterval(() => { if (res.destroyed || ++chunks > 100) { clearInterval(timer); if (!res.destroyed) res.end('"}'); return } observation.chunksWritten++; res.write('x'.repeat(32768)) }, 2)
+            const timer = setInterval(() => { if (res.destroyed || ++chunks > 100) { clearInterval(timer); if (!res.destroyed) res.end('"}'); return } observation.chunksWritten++; res.write('x'.repeat(32768)) }, 20)
             res.on('close', () => { observation.canceled = !res.writableEnded; clearInterval(timer) }); return
           }
           if (scenario === 'delayed' || scenario === 'out-of-order' || scenario === 'detached') {
@@ -157,7 +156,10 @@ try {
       })))
       const nativeIds = new Set(creationFieldContract.map(field => field.id))
       assert.deepEqual(creationFields.filter(field => nativeIds.has(field.id)).map(({ id, name, tag, type, required }) => ({ id, name, tag, type, required })), creationFieldContract)
-      const approvedFields = creationFields.filter(field => !nativeIds.has(field.id))
+      // The plan is a group of required choices, one per plan; the IP mode choices mirror the assignment list.
+      const planChoices = creationFields.filter(field => field.name === 'planId')
+      assert.ok(planChoices.length > 0 && planChoices.every(field => field.tag === 'INPUT' && field.type === 'radio' && field.required), 'Each plan is a required choice')
+      const approvedFields = creationFields.filter(field => !nativeIds.has(field.id) && field.name !== 'planId' && field.name !== 'ipMode')
       assert.deepEqual(approvedFields.map(({ id, name, tag, type, required, value }) => ({ id, name, tag, type, required, value })), approvedOwnerShellFieldContract)
       const newFieldsAuthorized = catalog.some(tool => tool.id === 'create-account' && tool.status === 'verified' && tool.delivery.status === 'verified')
       assert.equal(newFieldsAuthorized, true, 'This synthetic functional fixture explicitly qualifies account creation; product capabilities are unchanged')
@@ -200,10 +202,10 @@ try {
         await expect(feedback).toHaveAttribute('data-state', 'unavailable'); await fillAccount(page); await submit.click(); assert.equal(postRequests().length, initialPosts)
         await selector.selectOption('dedicated:auto'); await expect(feedback).toHaveAttribute('data-state', 'ready')
       } else if (state.kind === 'plan-intent') {
-        await ready(page); await selector.selectOption('dedicated:' + ids.second); await page.locator('#new-acc-plan').selectOption(ids.sharedPlan)
+        await ready(page); await selector.selectOption('dedicated:' + ids.second); await page.locator('[data-create-account-form] input[name="planId"][value="' + ids.sharedPlan + '"]').check()
         await expect(feedback).toHaveAttribute('data-state', 'unavailable'); await expect(selector).toHaveValue('dedicated:' + ids.second); await expect(selector.locator('option:checked')).toBeDisabled()
         await fillAccount(page); await submit.click(); assert.equal(postRequests().length, initialPosts)
-        await page.locator('#new-acc-plan').selectOption(ids.alternatePlan); await ready(page); await expect(selector).toHaveValue('dedicated:' + ids.second); await expect(selector.locator('option:checked')).toBeEnabled(); await expect(page.locator('[data-account-ip-address]')).toHaveText('192.0.2.22')
+        await page.locator('[data-create-account-form] input[name="planId"][value="' + ids.alternatePlan + '"]').check(); await ready(page); await expect(selector).toHaveValue('dedicated:' + ids.second); await expect(selector.locator('option:checked')).toBeEnabled(); await expect(page.locator('[data-account-ip-address]')).toHaveText('192.0.2.22')
       } else if (['out-of-order', 'real-abort', 'detached'].includes(state.kind)) {
         await expect.poll(() => host.pending.filter(item => !item.res.writableEnded && !item.res.destroyed).length).toBeGreaterThan(0)
         const old = host.pending.at(-1), oldAbortCount = host.aborted
@@ -212,7 +214,7 @@ try {
           await expect.poll(() => old.res.writableEnded || old.res.destroyed).toBe(true)
           assert.equal(await page.evaluate(() => window.__detachedIpForm.querySelector('[data-account-ip-status]').getAttribute('data-state')), 'loading')
         } else {
-          host.setScenario('normal'); await page.locator('#new-acc-plan').selectOption(ids.alternatePlan); await ready(page); await expect(page.locator('[data-account-ip-address]')).toHaveText('192.0.2.12')
+          host.setScenario('normal'); await page.locator('[data-create-account-form] input[name="planId"][value="' + ids.alternatePlan + '"]').check(); await ready(page); await expect(page.locator('[data-account-ip-address]')).toHaveText('192.0.2.12')
           if (state.kind === 'out-of-order') {
             assert.equal(await page.evaluate(() => window.__ipDiagnosticSignals[0].aborted), true)
             const delivered = page.waitForResponse(response => response.url().includes('/api/ips?') && new URL(response.url()).searchParams.get('planId') === ids.dedicatedPlan)
@@ -235,7 +237,7 @@ try {
           await expect(page.locator('[data-account-create-status]')).toContainText('Review accounts before retrying', { timeout: state.kind === 'post-timeout' ? 25000 : 5000 }); await expect(submit).toBeDisabled(); await expect(selector).toBeDisabled(); await expect(page.locator('[data-account-ip-refresh]')).toBeDisabled()
           if (state.kind === 'post-timeout') { const elapsed = Date.now() - submittedAt; assert.ok(elapsed >= 19500 && elapsed < 26000); result.observations.push({ actualSessionTransportTimeoutMs: elapsed, automaticRetry: false }) }
         } else {
-          await expect(page.locator('[data-account-create-status]')).toHaveAttribute('data-state', 'pending'); await expect(submit).toBeDisabled(); await expect(page.locator('#xp-toast-region')).toHaveCount(0)
+          await expect(page.locator('[data-account-create-status]')).toHaveAttribute('data-state', 'pending'); await expect(submit).toBeDisabled(); await expect(page.locator('#xp-toast-region > *')).toHaveCount(0)
           const request = postRequests().at(-1), expected = state.kind === 'dedicated-specific' ? { mode: 'dedicated', poolId: ids.second } : state.kind === 'dedicated-auto' ? { mode: 'dedicated' } : { mode: 'shared' }
           assert.deepEqual(request.body.ipAssignment, expected); assert.equal(request.body.ipv4, undefined); assert.equal(request.body.ipv6, state.kind === 'dedicated-specific' ? '2001:db8::22' : undefined); assert.equal(request.csrf, 'synthetic-ip-diagnostic-csrf'); assert.match(request.contentType, /application\/json/); assert.equal(request.passwordSupplied, true)
           if (state.kind === 'shared-during-loading') await expect(page.locator('[data-account-ip-address]')).toHaveText('192.0.2.13')

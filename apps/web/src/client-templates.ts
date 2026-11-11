@@ -26,5 +26,17 @@ export function cloneClientTemplate(template: HTMLTemplateElement, tag: string, 
   }
   const clone = element.cloneNode(true) as HTMLElement
   for (const slot of slots) clientTemplateSlot(clone, slot)
+  // A popover is addressed by id: every clone of a row menu gets its own id, and its trigger follows it.
+  const popovers = clone.querySelectorAll<HTMLElement>('[popover][id]')
+  if (popovers.length) {
+    const counter = globalThis as { __xpTemplateCloneSerial?: number }
+    const serial = counter.__xpTemplateCloneSerial = (counter.__xpTemplateCloneSerial ?? 0) + 1
+    const referrers = clone.querySelectorAll<HTMLElement>('[popovertarget], [aria-controls]')
+    for (const popover of popovers) {
+      const shared = popover.id, own = shared + '-' + serial
+      popover.id = own
+      for (const referrer of referrers) for (const name of ['popovertarget', 'aria-controls']) if (referrer.getAttribute(name) === shared) referrer.setAttribute(name, own)
+    }
+  }
   return clone
 }

@@ -21,7 +21,7 @@ describe('v2 account files pages', () => {
 
   it('preserves controller roots, editor safety and the authoritative account context', () => {
     const html = render()
-    for (const hook of ['data-file-manager="browse"', 'data-account-username="alice"', 'data-file-manager-table', 'data-file-table-wrap', 'data-file-current-path', 'data-file-selected-path', 'data-file-status', 'data-file-upload', 'id="jailed-code-editor"', 'id="chmod-octal-input"']) expect(html).toContain(hook)
+    for (const hook of ['data-file-manager="browse"', 'data-account-username="alice"', 'data-file-manager-table', 'data-file-table-wrap', 'data-file-current-path', 'data-file-selected-path', 'data-file-status', 'data-file-upload', 'id="jailed-code-editor"']) expect(html).toContain(hook)
     for (const action of ['parent-directory', 'refresh-files', 'new-file', 'new-folder', 'upload-file', 'empty-trash', 'save-file', 'reload-file']) expect(html).toContain(`data-action="${action}"`)
     expect(html).toMatch(/data-action="save-file" disabled/)
     expect(html).toMatch(/data-action="reload-file" disabled/)
@@ -49,6 +49,16 @@ describe('v2 account files pages', () => {
     expect(trash).not.toContain('data-trash-id')
     expect(trash).not.toContain('jailed-code-editor')
     expect(trash).not.toContain('<time datetime=')
+  })
+
+  it('places folders above the list and permissions with uploads beside the selection details', () => {
+    const html = render({ files: [] })
+    expect(html.indexOf('v2-file-tree-disclosure')).toBeLessThan(html.indexOf('data-file-manager-table'))
+    expect(html).toMatch(/class="v2-file-side">.*class="v2-file-side__stack">.*v2-file-permissions-heading.*data-file-uploads/s)
+    expect(html.indexOf('Files up to 2 MiB')).toBeLessThan(html.indexOf('data-file-manager-table'))
+    const trash = render({ files: [], activeRoute: '/files/trash' })
+    expect(trash).not.toContain('v2-file-tree-disclosure')
+    expect(trash).not.toContain('Files up to 2 MiB')
   })
 
   it('uses read-only admission and unavailable states without creating an account identity', () => {
@@ -98,4 +108,12 @@ it.each(['en', 'ar'] as const)('restores the %s seven-column file layout and mou
   expect(html).toContain('data-xp-slot="owner"')
   expect(html).not.toContain('aria-valuenow')
   expect(V2_FILES_CSS).toContain('[data-file-manager] .v2-file-view-details')
+})
+
+it('names the modified time, mode and owner of a file row on a phone', () => {
+  const html = render({ files: [{ name: 'a.txt', path: '/home/alice/a.txt', kind: 'file', sizeBytes: 1, modeOctal: '0640', modifiedAt: '2026-10-29T00:00:00.000Z' }] })
+  expect(html).toContain('<td data-label="Modified (UTC)"><time dir="ltr" class="v2-mono" data-xp-slot="modified">')
+  expect(html).toContain('<td data-label="Owner">Not read</td>')
+  expect(renderV2FilesPage(t, { surface: { account, activeRoute: '/files/trash' }, canManage: true })).toContain('<td data-label="Deleted (UTC)"><time')
+  expect(V2_FILES_CSS).toContain('td[data-label]::before{content:attr(data-label)')
 })

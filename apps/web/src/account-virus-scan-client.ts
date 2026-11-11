@@ -92,6 +92,7 @@ function bindAccountVirusScan(_askDialog: unknown): void {
       const finished = [...next.scans].filter(scan => scan.status === 'succeeded' || scan.status === 'failed' || scan.status === 'cancelled').sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0]
       for (const [key, value] of [['last-scan', latest ? displayDateTime(latest.createdAt) : '—'], ['infected', finished?.infectedFiles === null || finished?.infectedFiles === undefined ? '—' : String(finished.infectedFiles)], ['signatures', engine.signatureVersion === null ? '—' : String(engine.signatureVersion)], ['next-scan', facts.next.textContent ?? '—']] as const) {
         const node = root.querySelector<HTMLElement>(`[data-vscan-kpi="${key}"]`); if (node) node.textContent = value
+        const tile = node?.parentElement; if (tile?.classList.contains('v2-kpi__value')) tile.classList.toggle('v2-kpi__value--text', !/\d/.test(value))
       }
       rows.textContent = ''
       const statuses: Record<string, string> = { queued: t(msgctxt('account-virus-scan-client', 'Queued')), running: t('Running'), succeeded: t('Finished'), failed: t('Failed'), cancelled: t('Cancelled') }

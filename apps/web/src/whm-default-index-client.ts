@@ -94,7 +94,7 @@ function bindWhmDefaultIndex(askDialog: ((options: Record<string, unknown>) => P
       if (!admitted() || busy || locked || !view || !askDialog || !(resetting ? view.reset : view.save)) return
       const before = view, draft = resetting ? ['index.php', 'index.html', 'index.htm'] : parseIndexDraft(input.value)
       if (!draft || !resetting && !dirty()) return
-      const confirmed = await askDialog({ title: resetting ? t('Reset index order?') : t('Save index order?'), body: before.name + '\n' + draft.join(', '), confirm: resetting ? t('Reset') : t('Save') })
+      const confirmed = await askDialog({ title: resetting ? t('Reset index order?') : t('Save index order?'), code: before.name + ': ' + draft.join(', '), confirm: resetting ? t('Reset') : t('Save') })
       if (confirmed !== true || !admitted() || busy || locked || view !== before || !resetting && !equal(parseIndexDraft(input.value), draft) || domain.value !== before.name) return
       busy = true; controls(); message('saving', t('Saving index configuration…'))
       try {

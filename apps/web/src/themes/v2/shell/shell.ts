@@ -143,13 +143,13 @@ function accountMenu(t: Translate, props: V2ShellProps): string {
     ? `<button type="button" class="v2-menu__item v2-menu__item--danger" data-action="logout">${escapeHtml(t('Sign out'))}</button>`
     : account.signInHref ? `<a class="v2-menu__item" href="${escapeHtml(account.signInHref)}">${escapeHtml(t('Sign in'))}</a>` : ''
   const interfaceChoice = !account.signedIn ? '' : `<section class="v2-ui-theme" data-ui-theme-preferences data-ui-theme-can-read="true" hidden><form data-ui-theme-form hidden><label for="v2-ui-theme-choice"><span>${escapeHtml(t(msgctxt('theme:v2', 'Interface theme')))}</span><select id="v2-ui-theme-choice" name="uiTheme" data-ui-theme-choice disabled><option value="classic">${escapeHtml(t('Classic'))}</option><option value="v2">V2</option></select></label><button class="v2-btn" type="submit" data-ui-theme-save disabled>${escapeHtml(t('Save'))}</button></form><p data-ui-theme-status role="status" aria-live="polite" hidden></p><button class="v2-btn v2-btn--ghost" type="button" data-ui-theme-reload disabled hidden>${escapeHtml(t('Reload'))}</button></section>`
-  return `<details class="v2-account" data-user-menu><summary class="v2-btn v2-account__summary" aria-label="${escapeHtml(`${t('User menu for')} ${name}${account.roleLabel ? ` ${account.roleLabel}` : ''}`)}"><span class="v2-account__avatar" aria-hidden="true">${escapeHtml(initial)}</span><span class="v2-account__id"><span${account.username ? ' dir="ltr"' : ''}>${escapeHtml(name)}</span>${account.roleLabel ? `<span>${escapeHtml(account.roleLabel)}</span>` : ''}</span></summary><div class="v2-account__panel">${links}${interfaceChoice}${session}</div></details>`
+  return `<details class="v2-account" data-user-menu><summary class="v2-btn v2-account__summary" aria-label="${escapeHtml(`${t('User menu for')} ${name}${account.roleLabel ? ` ${account.roleLabel}` : ''}`)}"><span class="v2-account__avatar" data-initial="${escapeHtml(initial)}" aria-hidden="true"></span><span class="v2-account__id"><span${account.username ? ' dir="ltr"' : ''}>${escapeHtml(name)}</span>${account.roleLabel ? ` <span>${escapeHtml(account.roleLabel)}</span>` : ''}</span></summary><div class="v2-account__panel">${links}${interfaceChoice}${session}</div></details>`
 }
 
 function topbar(t: Translate, props: V2ShellProps): string {
   const searchLabel = t(SEARCH_LABELS[props.surface])
   const server = props.server
-    ? `<span class="v2-server v2-num"${attr('data-generation-chip', props.server.generationId)}><span class="v2-server__dot v2-server__dot--${props.server.tone ?? 'ok'}" aria-hidden="true"></span><span class="v2-mono">${escapeHtml(props.server.name)}</span>${props.server.generationId === undefined ? '' : `<span class="v2-muted">${escapeHtml(t(msgctxt('theme:v2', 'gen {generation}'), { generation: props.server.generationId }))}</span>`}</span>` : ''
+    ? `<span class="v2-server v2-num" title="${escapeHtml(props.server.name)}"${attr('data-generation-chip', props.server.generationId)}><span class="v2-server__dot v2-server__dot--${props.server.tone ?? 'ok'}" aria-hidden="true"></span><span class="v2-mono">${escapeHtml(props.server.name)}</span>${props.server.generationId === undefined ? '' : `<span class="v2-muted">${escapeHtml(t(msgctxt('theme:v2', 'gen {generation}'), { generation: props.server.generationId }))}</span>`}</span>` : ''
   const languages = props.languages.map(language => `<a class="v2-btn v2-top__lang" href="${escapeHtml(language.href)}" lang="${language.tag}" hreflang="${language.tag}" data-lang-switch="${language.tag}">${icon('language', 16)}${escapeHtml(localeInfo(language.tag).nativeName)}</a>`).join('')
   const next = props.scheme.current === 'dark' ? 'light' : 'dark'
   const schemeLabel = next === 'dark' ? t('Dark theme') : t('Light theme')
@@ -159,7 +159,7 @@ function topbar(t: Translate, props: V2ShellProps): string {
 <button type="button" class="v2-btn v2-btn--icon v2-top__menu" data-action="toggle-mobile-nav" aria-controls="xp-sidebar" aria-expanded="false" aria-label="${escapeHtml(t('Menu'))}">${icon('menu')}</button>
 <a class="v2-top__brand" href="${escapeHtml(props.homeHref)}">${escapeHtml(brandingProductName(props.branding, PRODUCT[props.surface]))}</a>
 <details class="v2-tools" open data-xp-toolbar-options><summary class="v2-btn">${escapeHtml(t('Search & account'))}</summary><div class="v2-tools__content">
-${props.searchHtml ?? `<button type="button" class="v2-search" data-action="open-cmdk" aria-keyshortcuts="Control+K Meta+K" aria-label="${escapeHtml(`${searchLabel} Ctrl K`)}">${icon('search')}<span>${escapeHtml(searchLabel)}</span><kbd aria-hidden="true">Ctrl K</kbd></button>`}
+${props.searchHtml ?? `<button type="button" class="v2-search" data-action="open-cmdk" aria-keyshortcuts="Control+K Meta+K">${icon('search')}<span>${escapeHtml(searchLabel)}</span> <kbd>Ctrl K</kbd></button>`}
 <span class="v2-top__spacer"></span>${liveIndicator(t, props.realtimeEnabled)}${server}${languages}${scheme}${bell}${props.surface === 'xwhm' ? `<a class="v2-btn v2-btn--icon v2-top__bell" href="/whm#whm-inbox-heading" data-whm-bell data-unread="false" aria-label="${escapeHtml(t('Notifications'))}">${icon('inbox')}<span class="v2-top__count v2-num" data-whm-bell-count aria-hidden="true" hidden></span></a>` : ''}${accountMenu(t, props)}
 </div></details>
 </header>`
@@ -184,9 +184,9 @@ ${props.activity ? activityDrawer(t, props.activity) : ''}
 
 const SIDE = '.v2-side'
 export const SHELL_CSS = `.v2-shell{display:flex;min-height:100vh;background:var(--bg)}
-.v2-skip{position:fixed;inset-inline-start:var(--space-2);top:-100px;z-index:100;padding:12px var(--space-2);border-radius:var(--radius-control);background:var(--accent-fill);color:var(--on-accent);font-weight:600}
-.v2-skip:focus{top:var(--space-2);color:var(--on-accent)}
-${SIDE}{flex:0 0 264px;position:sticky;top:0;align-self:flex-start;height:100vh;overflow-y:auto;display:flex;flex-direction:column;gap:var(--space-3);padding:20px var(--space-2);background:var(--nav);color:var(--nav-text);border-inline-end:1px solid var(--nav-line)}
+.v2-skip{position:fixed;inset-inline-start:var(--space-2);top:-100px;z-index:100;display:inline-flex;align-items:center;min-height:var(--target);min-inline-size:var(--target);padding:12px var(--space-2);border-radius:var(--radius-control);background:var(--accent-fill);color:var(--on-accent);font-weight:600}
+.v2-skip:focus{top:var(--space-2);color:var(--on-accent);outline:2px solid var(--focus);outline-offset:2px}
+${SIDE}{flex:0 0 264px;position:sticky;top:0;align-self:flex-start;height:100vh;overflow-y:auto;scrollbar-color:var(--nav-line) var(--nav);display:flex;flex-direction:column;gap:var(--space-3);padding:20px var(--space-2);background:var(--nav);color:var(--nav-text);border-inline-end:1px solid var(--nav-line)}
 ${SIDE} :focus-visible{outline-color:var(--nav-focus)}
 ${SIDE}__top{display:flex;align-items:center;justify-content:space-between;gap:var(--space-1)}
 .v2-brand{display:flex;align-items:center;gap:10px;min-height:var(--target);padding:0 var(--space-1);color:var(--nav-strong);text-decoration:none}
@@ -196,7 +196,7 @@ ${SIDE}__top{display:flex;align-items:center;justify-content:space-between;gap:v
 .v2-brand__name{font-size:18px;font-weight:700;letter-spacing:-.01em}
 .v2-brand__sub{font-size:11px;color:var(--nav-muted)}
 ${SIDE}__close{display:none;border-color:var(--nav-line);background:transparent;color:var(--nav-text)}
-.v2-ctx{display:flex;flex-direction:column;gap:var(--space-2);padding:var(--space-2);border-radius:var(--radius-notice);background:var(--nav-2);border:1px solid var(--nav-line)}
+.v2-ctx{display:flex;flex-direction:column;gap:12px;padding:var(--space-2);border-radius:var(--radius-notice);background:var(--nav-2);border:1px solid var(--nav-line)}
 .v2-ctx__id{display:flex;align-items:center;gap:12px;min-width:0}
 .v2-ctx__avatar,.v2-ctx__tile{flex:none;display:flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:50%;background:var(--accent-fill);color:var(--nav-strong);font-weight:600}
 .v2-ctx__tile{border-radius:var(--radius-control);background:rgba(76,195,138,.16);color:var(--nav-ok)}
@@ -223,7 +223,7 @@ ${SIDE}__close{display:none;border-color:var(--nav-line);background:transparent;
 .v2-nav details[open]>summary{background:var(--nav-2);color:var(--nav-strong);font-weight:600}
 .v2-nav details[open]>summary .v2-nav__chev{transform:rotate(90deg)}
 .v2-nav summary:hover,.v2-nav a:hover{background:var(--nav-2);color:var(--nav-strong)}
-.v2-nav details>ul{margin-inline-start:20px;padding-block:4px var(--space-1);padding-inline-start:10px;border-inline-start:1px solid var(--nav-line)}
+.v2-nav details>ul{margin-inline-start:20px;padding-block:4px var(--space-1);padding-inline-start:30px;border-inline-start:1px solid var(--nav-line)}
 .v2-nav details a{font-size:13px;border-radius:var(--radius-chip)}
 .v2-nav a[aria-current="page"]{background:var(--accent-fill);color:var(--nav-strong);font-weight:600}
 .v2-nav__empty{padding:0 12px var(--space-1);font-size:12px;color:var(--nav-muted)}
@@ -252,34 +252,40 @@ ${SIDE}__foot a:hover{background:var(--nav-2);color:var(--nav-strong)}
 .v2-live[data-ws-indicator=connected]{color:var(--ok)}
 .v2-live[data-ws-indicator=connected] .v2-live__dot{background:currentColor}
 .v2-server{display:inline-flex;align-items:center;gap:var(--space-1);min-height:var(--target);padding:0 12px;border-radius:var(--radius-control);border:1px solid var(--line);font-size:13px}
-.v2-server>.v2-mono{font-weight:500}
-.v2-server__dot{width:8px;height:8px;border-radius:50%;background:var(--ok)}
+.v2-server>.v2-mono{min-inline-size:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
+.v2-server>.v2-muted{flex:none;white-space:nowrap}
+.v2-server__dot{flex:none;width:8px;height:8px;border-radius:50%;background:var(--ok)}
 .v2-server__dot--warn{background:var(--warn)}.v2-server__dot--bad{background:var(--bad)}.v2-server__dot--info{background:var(--accent)}.v2-server__dot--neutral{background:var(--muted)}
 .v2-top__lang{padding:0 12px;font-size:13px}
 .v2-top__lang>.v2-icon{color:var(--muted)}
 .v2-top__bell{position:relative}
-.v2-top__badge,.v2-top__count{position:absolute;top:6px;inset-inline-end:6px;min-width:18px;height:18px;padding:0 5px;display:flex;align-items:center;justify-content:center;border-radius:var(--radius-pill);background:var(--bad);color:var(--on-accent);font-size:11px;font-weight:700}
+.v2-top__badge,.v2-top__count{position:absolute;top:6px;inset-inline-end:6px;min-width:18px;height:18px;padding:0 5px;display:flex;align-items:center;justify-content:center;border-radius:var(--radius-pill);background:var(--bad);color:var(--surface);font-size:11px;font-weight:700}
 .v2-account{position:relative}
 .v2-account__summary{gap:10px;padding:0 var(--space-1);padding-inline-end:12px;list-style:none}
 .v2-account__summary::-webkit-details-marker{display:none}
-.v2-account__avatar{display:flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:50%;background:var(--accent-soft);color:var(--accent);font-weight:600}
+.v2-account__avatar{display:flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:50%;background:var(--accent-soft);color:var(--accent);font-weight:600}.v2-account__avatar::before{content:attr(data-initial)}
 .v2-account__id{display:flex;flex-direction:column;align-items:flex-start;line-height:1.25}
 .v2-account__id>:first-child{font-size:13px;font-weight:600}
 .v2-account__id>:nth-child(2){font-size:12px;font-weight:400;color:var(--muted)}
-.v2-account__panel{position:absolute;z-index:40;inset-inline-end:0;top:calc(100% + 4px);min-inline-size:220px;display:flex;flex-direction:column;padding:4px;border-radius:var(--radius-notice);background:var(--surface);border:1px solid var(--line-strong);box-shadow:0 8px 24px rgba(0,0,0,.12)}
+.v2-account__panel{position:absolute;z-index:40;inset-inline-end:0;top:calc(100% + 4px);min-inline-size:220px;display:flex;flex-direction:column;padding:4px;border-radius:var(--radius-notice);background:var(--surface);border:1px solid var(--line-strong);box-shadow:var(--shadow)}
 .v2-ui-theme{display:grid;gap:var(--space-3);padding:var(--space-3);border-block:1px solid var(--line)}.v2-ui-theme form{display:grid;gap:var(--space-2)}.v2-ui-theme label{display:grid;gap:var(--space-1)}.v2-ui-theme label>span{padding-inline-start:13px}.v2-ui-theme p{overflow-wrap:anywhere}
 .v2-main{flex:1 1 auto;outline:none}
+@media (min-width:960px){.v2-tools__content{flex-wrap:nowrap}.v2-tools__content>*{flex:none}.v2-tools__content>.v2-top__spacer{flex:1 1 0}.v2-tools__content>.v2-search{flex:1 1 280px;min-inline-size:160px}.v2-tools__content>.v2-server{flex:0 4 auto;min-inline-size:0}}
+@media (min-width:960px) and (max-width:1439px){.v2-live{font-size:0}}
+@media (min-width:960px) and (max-width:1199px){.v2-account__id,.v2-search>kbd,.v2-top__spacer{display:none}.v2-top__lang{min-inline-size:var(--target);gap:0;font-size:0}.v2-tools__content>:is(.v2-search,.v2-server){flex:1 1 0;min-inline-size:120px}}
 .v2-page{inline-size:100%;max-inline-size:1320px;margin:0 auto;padding:var(--space-3) clamp(16px,3vw,32px) 48px;display:flex;flex-direction:column;gap:var(--space-4)}
 @media (max-width:959px){
-${SIDE}{display:none}
-${SIDE}[aria-modal="true"]{display:flex;position:fixed;inset-block:0;inset-inline-start:0;z-index:70;inline-size:min(320px,88vw);height:100dvh}
+${SIDE}{position:fixed;inset-block:0;inset-inline-start:0;z-index:70;inline-size:min(320px,88vw);height:100dvh;visibility:hidden;pointer-events:none;overscroll-behavior:contain}
+.v2-shell[data-mobile-nav="open"]>${SIDE},${SIDE}[aria-modal="true"]{visibility:visible;pointer-events:auto}
 ${SIDE}__close{display:inline-flex}
-.v2-top{flex-wrap:wrap}
 .v2-top__menu,.v2-top__brand{display:inline-flex}
 .v2-tools>summary{display:flex;inline-size:fit-content;margin-inline-start:auto}
-.v2-tools[open]{flex-basis:100%}
-.v2-tools__content{inline-size:100%;padding-top:12px}
-.v2-search{max-width:none}
+.v2-tools__content{position:absolute;inset-inline:0;top:100%;padding:12px clamp(16px,3vw,32px);background:var(--surface);border-bottom:1px solid var(--line)}
+.v2-tools__content>:first-child{flex:1 1 100%;max-width:none}
+.v2-top__spacer{display:none}
+.v2-server{flex:1 1 220px;min-width:0}
+.v2-tools:not([data-mobile-ready])>.v2-tools__content{display:none}
+.v2-tools[open]>summary::after{content:"";position:fixed;inset:0;z-index:-1}
 }
-@media(max-width:640px){.v2-ui-theme{padding:var(--space-2)}.v2-tools__content{position:relative}.v2-account{position:static}.v2-account__panel{inset-inline:0;min-inline-size:0;max-inline-size:100%}}
+@media(max-width:640px){.v2-ui-theme{padding:var(--space-2)}.v2-account{position:static}.v2-account__panel{inset-inline:16px;min-inline-size:0;max-inline-size:100%}}
 `

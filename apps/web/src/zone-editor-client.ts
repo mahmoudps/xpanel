@@ -517,7 +517,8 @@ function bindZoneEditor(askDialog: unknown): void {
     const renderRows = (state: ZoneEditorState, locked: boolean) => {
       recordsBody.textContent=''
       if(!state.draft.length){const row=cloneClientTemplate(emptyTemplate,'tr',['message']);clientTemplateSlot(row,'message','td').textContent=!state.loaded?t('Zone records have not been read.'):state.zone?t('No records are stored in this zone yet.'):t('No saved zone record was returned for this name. Add a record to create the desired state.');recordsBody.append(row);return}
-      for(const draftRow of state.draft){const row=cloneClientTemplate(rowTemplate,'tr',rowSlots);row.dataset.recordId=draftRow.id
+      const baseline = new Map((state.baseline ? zoneDraftFromRecords(state.baseline) : []).map(item => [item.id, zoneStable([item])]))
+      for(const draftRow of state.draft){const row=cloneClientTemplate(rowTemplate,'tr',rowSlots);row.dataset.recordId=draftRow.id;if(baseline.get(draftRow.id)!==zoneStable([draftRow]))row.dataset.listKeep='true'
         for(const field of ['name','type','ttl','content','priority'] as const){const input=clientTemplateSlot(row,field,field==='type'?'select':'input') as HTMLInputElement|HTMLSelectElement;input.disabled=locked;input.value=draftRow[field]
           if(field==='type'){const select=input as HTMLSelectElement;for(const type of ZONE_RECORD_TYPES){const option=document.createElement('option');option.value=type;option.textContent=type;select.append(option)}select.value=draftRow.type}
           else if(field==='ttl'||field==='priority'){const number=input as HTMLInputElement;number.min='0';number.max=String(field==='ttl'?ZONE_TTL_MAX:ZONE_PRIORITY_MAX);number.step='1'}

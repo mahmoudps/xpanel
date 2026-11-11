@@ -50,7 +50,7 @@ describe('H03 & Q02 — Bilingual UX/UI, RTL <bdi dir="ltr"> isolation, ASCII di
     assert.equal(normalizeAsciiDigits('٢٠٢٦-١٠-٢٢ ١٤:٠٥:٠٠'), '2026-10-22 14:05:00')
     assert.equal(normalizeAsciiDigits('۹۸٬۷۶۵٫۴۳'), '98,765.43')
     assert.equal(formatAsciiNumber(1234567.89, { decimals: 2 }), '1,234,567.89')
-    assert.equal(formatAsciiBytes(15 * 1024 * 1024), '15.7 MB')
+    assert.equal(formatAsciiBytes(15 * 1024 * 1024), '15.0\u00a0MiB')
     assert.equal(formatAsciiPercent(84.5), '84.5%')
     assert.equal(formatAsciiDate('2026-10-22T14:05:09.000Z', { includeTime: true }), '2026-10-22 14:05 UTC')
     assert.equal(formatUtcClock('2026-10-22T17:29:00.000Z'), '17:29 UTC')

@@ -5,10 +5,9 @@ import { renderV2PanelWebStatistics } from './v2/pages/xpanel/observations/web-s
 import { WEB_STATS_FIXTURE } from '../../../../tests/fixtures/web-stats-view.ts'
 import { routeContracts, checkConformance, parseMarkup } from './contract.ts'
 import { checkControllerDeclarations } from './controller-conformance.ts'
-import { V2_STATEFUL_OBSERVATION_COUNTERPARTS, V2_HOME_OBSERVATION_HOOKS, V2_OBSERVATION_COUNTERPARTS, V2_SHARED_CHROME_REQUIREMENTS, V2_WEB_STATS_REQUIREMENT, checkV2Conformance, v2RouteContracts } from './v2-semantics.ts'
+import { V2_STATEFUL_OBSERVATION_COUNTERPARTS, V2_HOME_OBSERVATION_HOOKS, V2_OBSERVATION_COUNTERPARTS, V2_SHARED_CHROME_REQUIREMENTS, V2_WEB_STATS_REQUIREMENT, V2_TEMPLATE_COUNTERPARTS, checkV2Conformance, v2RouteContracts } from './v2-semantics.ts'
 import { renderV2Shell } from './v2/shell/shell.ts'
 import { v2Messages } from './v2/messages.ts'
-import { v2ConformanceCopy } from './v2/conformance-copy.ts'
 import { v2WhmClientTemplates } from './v2/whm-client-templates.ts'
 import { renderV2BackupsPage } from './v2/pages/xwhm/lifecycle/backups.ts'
 
@@ -63,14 +62,33 @@ describe('explicit V2 semantic counterparts', () => {
       const next = adapted.find(item => item.route === original.route)
       if (!next) throw new Error('Missing V2 route')
       const removed = original.hooks.filter(hook => !next.hooks.includes(hook))
-      expect(removed.every(hook => hook === '[data-status]' || hook === '[data-wiring="soon"]' || hook === '[data-wiring="unavailable"]' || original.route === '/home' && V2_HOME_OBSERVATION_HOOKS.includes(hook) || original.route === '/software/htaccess' && ['[data-auth-error]', '[data-auth-status]'].includes(hook) || ['/mail/inbox', '/mail/sent', '/mail/drafts', '/mail/trash'].includes(original.route) && hook === '[data-total]' || original.route === '/whm/security/ssh' && hook === '[data-server-settings-form]' || original.route === '/whm/software/php' && hook === '[data-php-extension-draft-grid]' || ['/whm/accounts/bandwidth','/whm/server/networking'].includes(original.route) && hook === '[data-numeric]' || original.route === '/whm/server/terminal' && hook === '[data-tone]' || original.route === '/whm/panel/data' && hook === '[data-xp-slot]' || ['/whm/backups','/whm/backups/restore'].includes(original.route) && ['[data-account-backups]','[data-backup-local-read]','[data-backup-destination-rows]','[data-backup-sftp-status]'].includes(hook))).toBe(true)
+      expect(removed.every(hook => hook === '[data-status]' || hook === '[data-wiring="soon"]' || hook === '[data-wiring="unavailable"]' || original.route === '/home' && V2_HOME_OBSERVATION_HOOKS.includes(hook) || original.route === '/software/htaccess' && ['[data-auth-error]', '[data-auth-status]'].includes(hook) || ['/mail/inbox', '/mail/sent', '/mail/drafts', '/mail/trash'].includes(original.route) && hook === '[data-total]' || original.route === '/whm/security/ssh' && hook === '[data-server-settings-form]' || original.route === '/whm/software/php' && hook === '[data-php-extension-draft-grid]' || ['/whm/accounts/bandwidth','/whm/server/networking'].includes(original.route) && hook === '[data-numeric]' || original.route === '/whm/server/terminal' && hook === '[data-tone]' || original.route === '/whm/panel/data' && hook === '[data-xp-slot]' || ['/whm/backups','/whm/backups/restore'].includes(original.route) && ['[data-backup-destination-rows]','[data-backup-sftp-status]'].includes(hook))).toBe(true)
       expect(next.controllers).toEqual(original.controllers)
-      expect(next.templates).toEqual(original.templates)
+      const excused = V2_TEMPLATE_COUNTERPARTS.filter(item => item.routes.includes(original.route))
+      expect(next.templates).toEqual(original.templates?.filter(template => !excused.some(item => item.templates?.includes(template.name)))
+        .map(template => ({ ...template, slots: template.slots.filter(slot => !excused.some(item => item.slots?.[template.name]?.includes(slot))) })))
       const prefix=next.authoritativeControllers?.slice(0,original.authoritativeControllers?.length)
       if(['/whm/backups','/whm/backups/restore'].includes(original.route)) {
         for(const old of original.authoritativeControllers??[]) if(!Object.keys(expectedBackupArms).includes(old.id) && old.id!=='whm-backups-forwarded') expect(prefix?.find(item=>item.id===old.id)).toEqual(old)
       } else expect(prefix).toEqual(original.authoritativeControllers)
     }
+  })
+  it('requires the templates core controllers clone and excuses only the enumerated V2 counterparts', () => {
+    const contracts = v2RouteContracts(), contract = (route: string) => contracts.find(item => item.route === route)!
+    const missing = (route: string) => checkConformance('<html><body></body></html>', { hooks: [], templates: contract(route).templates ?? [] }).filter(issue => issue.kind === 'template').map(issue => issue.name)
+    expect(contracts.every(item => (item.templates?.length ?? 0) > 0)).toBe(true)
+    expect(missing('/whm/backups/destinations')).toEqual(expect.arrayContaining(['whm-backup-runs-row', 'whm-backup-copies-row', 'whm-backup-recoveries-row', 'whm-backup-retention-row']))
+    for (const route of ['/whm/email/delivery', '/whm/email/monitor']) expect(missing(route)).toContain('whm-mail-timeline-button')
+    expect(contract('/whm/backups/destinations').templates!.find(item => item.name === 'whm-backup-copies-row')!.slots).toEqual(expect.arrayContaining(['account', 'destination', 'archive', 'size', 'started', 'action']))
+    expect(V2_TEMPLATE_COUNTERPARTS.flatMap(item => item.routes)).toEqual(['/domains/redirects', '/whm/transfers', '/whm/transfers/server'])
+    // The local archive list is mounted on both backup routes, so its row template is required there.
+    for (const route of ['/whm/backups', '/whm/backups/restore']) expect(contract(route).templates!.some(item => item.name === 'whm-local-archive-row')).toBe(true)
+    expect(V2_TEMPLATE_COUNTERPARTS.every(item => item.evidence.length > 0)).toBe(true)
+    expect(missing('/domains/redirects')).toEqual(expect.arrayContaining(['web-directive-notice', 'web-directive-issue']))
+    expect(missing('/domains/redirects')).not.toContain('web-directive-row')
+    expect(contract('/domains/redirects').authoritativeControllers?.some(item => item.id === 'v2-semantic-redirect-templates')).toBe(true)
+    expect(contract('/whm/transfers').templates!.find(item => item.name === 'transfer-inventory-row')!.slots).not.toContain('selected')
+    expect(contract('/whm/transfers').templates!.find(item => item.name === 'transfer-inventory-row')!.slots).toContain('username')
   })
   it('keeps the real Home announcement gaps visible to the same checker', () => {
     for (const route of ['/home']) {
@@ -234,7 +252,7 @@ const expectedBackupArms: Readonly<Record<string,readonly string[]>>={
 }
 const backupProfileIssues=(body:string,route:string,locale:'en'|'ar'='en')=>{
   const frame=documentFor(locale,true).replace('data-surface="xpanel"','data-surface="xwhm"').replace('</main>',body+'</main>')
-  return checkV2Conformance(frame,actualContract(route),v2ConformanceCopy).filter(issue=>issue.controller!==undefined && (issue.controller.startsWith('v2-backup') || issue.controller.startsWith('v2-semantic-backup') || issue.controller==='v2-semantic-local-archive-unavailable' || Object.keys(expectedBackupArms).includes(issue.controller)))
+  return checkV2Conformance(frame,actualContract(route)).filter(issue=>issue.controller!==undefined && (issue.controller.startsWith('v2-backup') || issue.controller.startsWith('v2-semantic-backup') || Object.keys(expectedBackupArms).includes(issue.controller)))
 }
 const backupStates: readonly {route:'/whm/backups'|'/whm/backups/restore';locale:'en'|'ar';canRead:boolean;canManage:boolean}[]=[
  {route:'/whm/backups',locale:'en',canRead:true,canManage:true},{route:'/whm/backups',locale:'ar',canRead:true,canManage:true},
@@ -243,19 +261,13 @@ const backupStates: readonly {route:'/whm/backups'|'/whm/backups/restore';locale
  {route:'/whm/backups/restore',locale:'en',canRead:false,canManage:false},{route:'/whm/backups/restore',locale:'ar',canRead:false,canManage:false},
 ]
 describe('V2 positively delegated backup contract',()=>{
- it.each(backupStates)('preserves real $route $locale manager and unavailable local layout (manage=$canManage)',state=>{
+ it.each(backupStates)('preserves real $route $locale manager and local archive list (manage=$canManage)',state=>{
   const html=renderV2BackupsPage({...state,activeRoute:state.route})
   expect(backupProfileIssues(html,state.route,state.locale)).toEqual([])
   const frame=documentFor(state.locale,true).replace('data-surface="xpanel"','data-surface="xwhm"').replace('</main>',html+'</main>')
-  const hasProviderIssue=(issues:ReturnType<typeof checkV2Conformance>)=>issues.some(issue=>issue.controller==='v2-backup-manager-ownership'&&issue.name==='[data-local-archives-unavailable]:theme-provider')
-  expect(hasProviderIssue(checkV2Conformance(frame,actualContract(state.route)))).toBe(true)
-  expect(hasProviderIssue(checkV2Conformance(frame,actualContract(state.route),()=>v2ConformanceCopy(state.locale==='en'?'ar':'en')))).toBe(true)
-  expect(hasProviderIssue(checkV2Conformance(frame,actualContract(state.route),()=>({locale:state.locale,localArchiveWorkflowNotice:''})))).toBe(true)
-  for(const value of [1, {}]) {
-    const malformed={...v2ConformanceCopy(state.locale)}
-    Reflect.set(malformed,'localArchiveWorkflowNotice',value)
-    expect(hasProviderIssue(checkV2Conformance(frame,actualContract(state.route),()=>malformed))).toBe(true)
-  }
+  // The local archive list is a real mount now: its root, read control and row template satisfy the legacy hooks.
+  const localIssues=checkV2Conformance(frame,actualContract(state.route)).filter(issue=>/local-archive|account-backups|backup-local-read|backup-create|backup-files/.test(`${issue.name} ${issue.controller ?? ''}`))
+  expect(localIssues).toEqual([])
  })
  it.each(Object.keys(expectedBackupArms))('retains every non-destination arm and the original legacy branch for %s',id=>{
   const original=routeContracts().find(item=>item.route==='/whm/backups')?.authoritativeControllers?.find(item=>item.id===id)
@@ -281,8 +293,7 @@ describe('V2 positively delegated backup contract',()=>{
   {name:'wrong Port bounds',mutate:html=>html.replace('max="65535"','max="65536"')},
   {name:'missing typed Test action',mutate:html=>html.replace('data-xp-action="test"','data-xp-action="wrong-test"')},
   {name:'missing typed Activate action',mutate:html=>html.replace('data-xp-action="activate"','data-xp-action="wrong-activate"')},
-  {name:'enabled local Create',mutate:html=>html.replace(/(<button\b[^>]*data-backup-create[^>]*?) disabled/,'$1')},
-  {name:'accidental native local binding',mutate:html=>html.replace('data-local-archives-unavailable','data-local-archives-unavailable data-account-backups')},
+  {name:'duplicate local archive list',mutate:html=>html.replace('</section></div>','</section><section data-account-backups></section></div>')},
   {name:'missing home-only scope warning',mutate:html=>html.replace('data-local-archive-scope-warning','data-missing-scope-warning')},
  ]
  it.each(corruptions)('rejects $name without weakening current native guards',test=>{

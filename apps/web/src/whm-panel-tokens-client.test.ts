@@ -150,7 +150,7 @@ describe('WHM API token client binding', () => {
     $<HTMLInputElement>('[data-whm-tokens-name]').value = 'stock-sync'
     $<HTMLInputElement>('input[value="accounts:read"]').checked = true
     submit(); await flush()
-    expect($('[data-whm-tokens-reveal-text]').textContent).toBe('انسخ الرمز الخاص بـ stock-sync الآن. يُعرض مرة واحدة؛ وبعد مغادرة هذه الصفحة لا تبقى إلا تجزئته.')
+    expect($('[data-whm-tokens-reveal-text]').textContent).toBe('انسخ الرمز الخاص بـ \u2066stock-sync\u2069 الآن. يُعرض مرة واحدة؛ وبعد مغادرة هذه الصفحة لا تبقى إلا تجزئته.')
     $<HTMLButtonElement>('[data-whm-tokens-copy]').click(); await flush()
     expect(writeText).toHaveBeenCalledWith(SECRET)
     expect($('[data-whm-tokens-copy-status]').textContent).toBe('نُسخ.')

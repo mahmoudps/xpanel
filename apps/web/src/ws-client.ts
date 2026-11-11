@@ -17,10 +17,13 @@ import type {
 } from '@xpanel/core'
 import { localeDirection, translator, type Locale } from './i18n.ts'
 import { escapeHtml, renderLtrValue, renderStatusBadge } from './tokens.ts'
+import { ASCII_BYTES_BINDING } from './display-format.ts'
+import { TABLE_PHONE_LABELS_CLIENT_BINDING } from './table-phone-labels-client.ts'
 import { SHELL_MOTION_CLIENT_SCRIPT } from './shell-motion.ts'
 import { MOBILE_NAVIGATION_CLIENT_FUNCTIONS } from './mobile-navigation-client.ts'
 import { PLAN_EDITOR_CLIENT_SCRIPT } from './plan-editor.ts'
 import { ACCOUNT_LIST_CLIENT_SCRIPT } from './account-list.ts'
+import { LIST_FILTER_CLIENT_SCRIPT } from './list-filter-client.ts'
 import { APPROVED_WORKSPACE_FORMS_CLIENT } from './approved-workspace-forms.ts'
 import { ACCOUNT_FORWARDERS_CLIENT_BINDING } from './account-forwarders-client.ts'
 import { ACCOUNT_FILTERS_CLIENT_BINDING } from './account-filters-client.ts'
@@ -706,8 +709,9 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
   function updateIoMetricsDom(snapshot) {
     if (!snapshot || !snapshot.current) return;
     var cur = snapshot.current;
-    var readMb = (cur.readBytesPerSec / (1024 * 1024)).toFixed(2) + ' MB/s';
-    var writeMb = (cur.writeBytesPerSec / (1024 * 1024)).toFixed(2) + ' MB/s';
+    var formatClientBytes = ${ASCII_BYTES_BINDING};
+    var readMb = formatClientBytes(cur.readBytesPerSec, true);
+    var writeMb = formatClientBytes(cur.writeBytesPerSec, true);
     var totalIops = String(Math.round(cur.readIops + cur.writeIops)) + ' IOPS';
     var awaitStr = cur.awaitMs.toFixed(2) + ' ms';
 
@@ -915,6 +919,8 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     var ipFeedback = form.querySelector('[data-account-ip-status]');
     var ipAddress = form.querySelector('[data-account-ip-address]');
     var ipRefresh = form.querySelector('[data-account-ip-refresh]');
+    // Optional mode choices (shared or automatic dedicated) that a theme may offer beside the assignment list.
+    var ipModes = form.querySelectorAll('[data-account-ip-mode]');
     var creationWorkspace = form.closest('[data-accounts-workspace]');
     var createAnother = creationWorkspace && creationWorkspace.querySelector('[data-approved-account-create-status] [data-account-create-another]') || form.querySelector('[data-account-create-another]');
     if (!button || !feedback || !password || !plan || !assignment || !ipFeedback || !ipAddress || !ipRefresh) return;
@@ -940,6 +946,8 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       ipFeedback.textContent = message;
       ipFeedback.setAttribute('data-state', state);
       ipFeedback.setAttribute('role', state === 'failed' ? 'alert' : 'status');
+      var check = creationWorkspace && creationWorkspace.querySelector('[data-account-ip-check]');
+      if (check) { check.textContent = message; check.setAttribute('data-state', state); }
     }
     function uuid(value) { return typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value); }
     function creationSelection(name) {
@@ -953,6 +961,18 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       return selected;
     }
     function ownerContext() { try { return creationSelection('ownerId'); } catch (_error) { return 'invalid'; } }
+    // The plan is one list or a group of choices; an unchecked group has no plan.
+    function planValue() {
+      var field = form.querySelector('input[name="planId"]:checked') || plan;
+      return field.type === 'radio' && !field.checked ? '' : field.value;
+    }
+    function paintIpModes() {
+      ipModes.forEach(function (mode) {
+        var entry = Array.prototype.find.call(assignment.options, function (item) { return item.value === mode.value; });
+        mode.checked = (mode.value === 'shared') === (wantedAssignment === 'shared');
+        mode.disabled = assignment.disabled || !entry || entry.disabled;
+      });
+    }
     function ipv4(value) {
       if (typeof value !== 'string') return false;
       var parts = value.split('.');
@@ -977,18 +997,19 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       return element;
     }
     function updateIpSelection() {
-      var current = availability && previewPlan === plan.value && previewOwner === ownerContext() ? availability : null;
+      var current = availability && previewPlan === planValue() && previewOwner === ownerContext() ? availability : null;
       var shared = wantedAssignment === 'shared';
       var selected = current && current.available.find(function (entry) { return wantedAssignment === 'dedicated:' + entry.poolId; });
       var available = shared ? !current || Boolean(current.shared) : Boolean(current && current.entitled && (wantedAssignment === 'dedicated:auto' ? current.available.length : selected));
       assignment.setCustomValidity(available ? '' : shared ? copy('No default shared IPv4 is configured.') : copy('This dedicated IPv4 selection is unavailable. Choose another assignment.'));
       ipAddress.textContent = current && (shared ? current.shared && current.shared.address : selected && selected.address) || '';
       ipAddress.parentElement.hidden = !ipAddress.textContent;
+      paintIpModes();
       if (current) ipStatus(available ? copy('Checked on the server after creation.') : assignment.validationMessage, available ? 'ready' : 'unavailable');
       return available;
     }
     function renderIpOptions() {
-      var current = availability && previewPlan === plan.value && previewOwner === ownerContext() ? availability : null;
+      var current = availability && previewPlan === planValue() && previewOwner === ownerContext() ? availability : null;
       var nodes = [option('shared', copy('Default shared'), Boolean(current && !current.shared)), option('dedicated:auto', copy('Dedicated · Automatic'), !current || !current.entitled || !current.available.length)];
       if (current) current.available.forEach(function (entry) { nodes.push(option('dedicated:' + entry.poolId, String.fromCharCode(0x2066) + entry.address + String.fromCharCode(0x2069), false)); });
       if (!nodes.some(function (entry) { return entry.value === wantedAssignment; })) nodes.push(option(wantedAssignment, copy('Dedicated selection unavailable'), true));
@@ -1006,19 +1027,19 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     }
     function refreshIpAvailability() {
       cancelPreview();
-      availability = null; previewPlan = plan.value; previewOwner = ownerContext();
+      availability = null; previewPlan = planValue(); previewOwner = ownerContext();
       renderIpOptions();
-      if (!canCreate || !plan.value || previewOwner === 'invalid' || !form.isConnected || busy || accepted || reviewRequired) {
+      if (!canCreate || !planValue() || previewOwner === 'invalid' || !form.isConnected || busy || accepted || reviewRequired) {
         ipStatus(copy('IP availability unavailable.'), 'unavailable'); return;
       }
       ipStatus(copy('Loading IP availability…'), 'loading');
       if (typeof window.fetch !== 'function' || typeof AbortController !== 'function') {
         ipStatus(copy('Could not load IP availability.'), 'failed'); return;
       }
-      var sequence = previewSequence, context = plan.value, owner = previewOwner, controller = new AbortController();
+      var sequence = previewSequence, context = planValue(), owner = previewOwner, controller = new AbortController();
       previewController = controller;
       previewTimer = setTimeout(function () { controller.abort(); }, 20000);
-      function current() { return sequence === previewSequence && context === plan.value && owner === ownerContext() && form.isConnected && !busy && !accepted && !reviewRequired; }
+      function current() { return sequence === previewSequence && context === planValue() && owner === ownerContext() && form.isConnected && !busy && !accepted && !reviewRequired; }
       async function readPreviewJson(response) {
         if (!response.body || typeof response.body.getReader !== 'function') { controller.abort(); throw new Error('IP availability stream unavailable'); }
         var reader = response.body.getReader(), bytes = new Uint8Array(1048576), length = 0;
@@ -1059,8 +1080,13 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     assignment.addEventListener('change', function () {
       wantedAssignment = assignment.value; dirty = true; updateIpSelection();
     });
-    plan.addEventListener('change', function () {
-      dirty = true; refreshIpAvailability();
+    ipModes.forEach(function (mode) {
+      mode.addEventListener('change', function () {
+        wantedAssignment = mode.value; assignment.value = wantedAssignment; dirty = true; updateIpSelection();
+      });
+    });
+    form.querySelectorAll('[name="planId"]').forEach(function (field) {
+      field.addEventListener('change', function () { dirty = true; refreshIpAvailability(); });
     });
     form.querySelectorAll('[name="ownerId"]').forEach(function (field) {
       field.addEventListener('change', function () { if (!busy && !accepted && !reviewRequired) { dirty = true; refreshIpAvailability(); } });
@@ -1140,7 +1166,7 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       var value = function (name) { return form.querySelector('[name="' + name + '"]').value.trim(); };
       var ipAssignment = wantedAssignment === 'shared' ? { mode: 'shared' } : { mode: 'dedicated' };
       if (wantedAssignment !== 'shared' && wantedAssignment !== 'dedicated:auto') ipAssignment.poolId = wantedAssignment.slice('dedicated:'.length);
-      var body = { username: value('username'), primaryDomain: value('primaryDomain'), planId: value('planId'), password: password.value, ipAssignment: ipAssignment };
+      var body = { username: value('username'), primaryDomain: value('primaryDomain'), planId: planValue(), password: password.value, ipAssignment: ipAssignment };
       try {
         var selectedOwner = creationSelection('ownerId'), selectedShell = creationSelection('shell');
         if (selectedOwner !== undefined) body.ownerId = selectedOwner;
@@ -1212,6 +1238,7 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
           control.disabled = reviewRequired || (accepted && (control.tagName === 'SELECT' || control.type === 'radio' || control.type === 'checkbox')) || state.disabled;
           if (control.tagName === 'INPUT') control.readOnly = accepted || state.readOnly;
         });
+        paintIpModes();
         busy = false; form.setAttribute('aria-busy', 'false'); button.disabled = accepted || reviewRequired || !canCreate;
         ipRefresh.disabled = accepted || reviewRequired || !canCreate;
         if (createAnother) createAnother.disabled = !accepted || busy || reviewRequired;
@@ -1243,11 +1270,24 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     function validate() {
       submission.disabled = busy || accepted || !target || (target.action === 'terminate-account' && confirmation.value !== target.username);
     }
+    // An action placed outside its row (the detail drawer) names the row by its username.
+    function rowOf(button) {
+      var row = button && button.closest('[data-account-row]');
+      if (row || !button) return row;
+      var rows = workspace.querySelectorAll('[data-account-row]'), name = button.getAttribute('data-username');
+      for (var index = 0; index < rows.length; index++) if (rows[index].getAttribute('data-account-row') === name) return rows[index];
+      return null;
+    }
     function close() { if (!busy) dialog.close(); }
     function clear() {
       target = null; accepted = false; confirmation.value = ''; reason.value = ''; status('', 'idle');
       if (origin && origin.isConnected) {
-        var returnTarget = origin.disabled ? origin.closest('[data-account-row]').querySelector('summary,button:not([disabled])') : origin;
+        var home = rowOf(origin);
+        var menu = origin.closest('[popover]');
+        var menuTrigger = menu && menu.id && home && Array.prototype.find.call(home.querySelectorAll('[popovertarget]:not([popovertargetaction])'), function (el) { return el.getAttribute('popovertarget') === menu.id; });
+        var returnTarget = menuTrigger || ((origin.disabled || (typeof origin.checkVisibility === 'function' && !origin.checkVisibility()))
+          ? (home && (home.querySelector('summary,[popovertarget]:not([popovertargetaction])') || home.querySelector('button:not([disabled])')))
+          : origin);
         if (returnTarget) returnTarget.focus();
       }
       origin = null; validate();
@@ -1280,6 +1320,8 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       // This target is captured from the originating row, never from the confirmation field or URL.
       target = Object.freeze({ id: id, username: username, domain: domain, action: action });
       origin = button; accepted = false; confirmation.value = ''; reason.value = ''; status('', 'idle');
+      var openMenu = button.closest('[popover]');
+      if (openMenu && typeof openMenu.hidePopover === 'function') { try { openMenu.hidePopover(); } catch (_err) {} }
       var deleting = action === 'terminate-account', suspending = action === 'suspend-account';
       dialog.querySelector('[data-account-dialog-title]').textContent = deleting ? copy('Delete account') : suspending ? copy('Suspend account') : copy('Unsuspend account');
       dialog.querySelector('[data-account-dialog-description]').textContent = deleting ? copy('Permanently removes this account and its data. This cannot be undone.') : suspending ? copy('Hosting access will be suspended for this account.') : copy('Restore hosting access for this account.');
@@ -1313,7 +1355,7 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
             status(copy('The result could not be verified. Review the account before retrying.'), 'failed'); return;
           }
           accepted = true;
-          var removed = origin && origin.closest('[data-account-row]');
+          var removed = rowOf(origin);
           if (removed) removed.hidden = true;
           status(copy('Account removed.'), 'pending');
           return;
@@ -1324,7 +1366,7 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
           status(copy('The result could not be verified. Review the account before retrying.'), 'failed'); return;
         }
         accepted = true;
-        var row = origin && origin.closest('[data-account-row]');
+        var row = rowOf(origin);
         var accountStatus = row && row.querySelector('[data-account-status]');
         var pendingStatus = row && row.querySelector('template[data-account-status-pending]');
         if (accountStatus && pendingStatus) {
@@ -1601,6 +1643,7 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
   var askDialog = (${PROMPT_CLIENT_BINDING})();
 
   function bindPhaseOneTools() {
+    (${TABLE_PHONE_LABELS_CLIENT_BINDING})();
     (${PRESENTATION_TABS_CLIENT_BINDING})();
     ${ACCOUNT_DETAILS_CLIENT_BINDING};
     ${PASSWORD_GENERATOR_CLIENT_BINDING}
@@ -2138,5 +2181,6 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
 })();
 ${PLAN_EDITOR_CLIENT_SCRIPT}
 ${ACCOUNT_LIST_CLIENT_SCRIPT}
+${LIST_FILTER_CLIENT_SCRIPT}
 `
 export const BROWSER_REALTIME_SCRIPT = browserRealtimeScript()

@@ -26,7 +26,7 @@ describe('stored mailbox read-only presentation authority', () => {
 
   it('preserves supplied observations but never enables native controls even with all tool grants', () => {
     const view = readOnly(props({ messages: [message], selectedUid: 7, quotaUsedMb: 2, quotaLimitMb: 10 }))
-    expect(view).toMatchObject({ kind: 'inbox', state: 'messages', total: 1, canRead: false, canManage: false, canReadAttachments: false, quota: { text: '2 / 10 MiB', percent: 20 } })
+    expect(view).toMatchObject({ kind: 'inbox', state: 'messages', total: 1, canRead: false, canManage: false, canReadAttachments: false, quota: { text: '2.00\u00a0MiB / 10.0\u00a0MiB', percent: 20 } })
     if (view?.kind !== 'inbox') throw new Error('Expected inbox')
     expect(view.messages[0]).toMatchObject({ uid: 7, body: message.body, attachments: [{ name: 'saved.txt' }] })
     expect(projectMailSurfaceView(props({ messages: [message] }))).toBeUndefined()

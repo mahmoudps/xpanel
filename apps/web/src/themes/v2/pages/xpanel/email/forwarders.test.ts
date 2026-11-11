@@ -24,7 +24,7 @@ describe('v2 email routing', () => {
     expect(html).toContain('data-default-destination-field hidden')
     expect(html).toContain('data-autoresponder-submit')
     expect(html).toContain('data-autoresponder-cancel hidden')
-    expect(html).toContain('type="datetime-local" step="60"')
+    expect(html).toContain('name="start" type="text" dir="ltr" pattern="\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}( UTC)?" placeholder="YYYY-MM-DD HH:mm"')
   })
 
   it('keeps read-only refresh and read status without mutation forms or row deletes', () => {

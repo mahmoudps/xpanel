@@ -34,13 +34,13 @@ describe('V2 read-only mailbox body authority', () => {
 
   it('shows only supplied quota facts without treating unknown usage as zero', () => {
     const known = renderV2MailWorkspace({ ...workspace, route: '/mail/overview', quotaUsedMb: 2, quotaLimitMb: 10 })!
-    expect(known).toContain('2 / 10 MiB')
+    expect(known).toContain('2.00\u00a0MiB / 10.0\u00a0MiB')
     expect(known).toContain('value="20"')
     const unknown = renderV2MailWorkspace({ ...workspace, route: '/mail/overview', quotaLimitMb: 10 })!
-    expect(unknown).toContain('— / 10 MiB')
+    expect(unknown).toContain('— / 10.0\u00a0MiB')
     expect(unknown).not.toContain('<meter')
     const denied = renderV2MailWorkspace({ ...workspace, route: '/mail/overview', canReadFacts: false, quotaUsedMb: 2, quotaLimitMb: 10 })!
-    expect(denied).not.toContain('2 / 10 MiB')
+    expect(denied).not.toContain('2.00\u00a0MiB / 10.0\u00a0MiB')
   })
 
   it('leaves the trusted account-security slot outside the native read-only blocker', () => {

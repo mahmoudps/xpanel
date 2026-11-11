@@ -6,6 +6,9 @@ import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
 import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+import { ASCII_BYTES_BINDING, formatIsolatedBytes as canonicalFormatClientBytes } from './display-format.ts'
+// Module-local alias: the binding source defines it again from ASCII_BYTES_BINDING.
+const formatClientBytes = canonicalFormatClientBytes
 const frameRequest = canonicalFrameRequest
 const formatMailDateTime = formatDisplayDateTime
 
@@ -107,7 +110,7 @@ function bindWhmMailboxMaintenance(askDialog: Ask | undefined): void {
     const technical = (value: string): HTMLElement => { const bdi = document.createElement('bdi'); bdi.dir = 'ltr'; bdi.textContent = value; return bdi }
     const fact = (key: string, value: string | null): void => { const cell = q('[data-whm-mailbox-maintenance-fact="' + key + '"]'); if (cell) cell.textContent = value ?? t('Not read') }
     const toggle = (selector: string, visible: boolean): void => { const node = q(selector); if (node) node.hidden = !visible }
-    const bytes = (value: number): string => value < 1024 ? value + ' B' : value < 1048576 ? (value / 1024).toFixed(1) + ' KB' : value < 1073741824 ? (value / 1048576).toFixed(1) + ' MB' : (value / 1073741824).toFixed(2) + ' GB'
+    const bytes = (value: number): string => formatClientBytes(value)
     const fill = (key: string, rows: (string | Node)[][], empty: string, columns: number): void => {
       const body = q('[data-whm-mailbox-maintenance-rows="' + key + '"]')
       if (!body) return
@@ -237,4 +240,4 @@ function bindWhmMailboxMaintenance(askDialog: Ask | undefined): void {
   })
 }
 
-export const WHM_MAILBOX_MAINTENANCE_CLIENT_BINDING = withFrameRequest(`(()=>{${WHM_CLIENT_TEMPLATE_BINDING}const formatMailDateTime=${DISPLAY_DATETIME_BINDING};const readMailboxMaintenanceView=${readMailboxMaintenanceView.toString()};const readMaintenanceJobAck=${readMaintenanceJobAck.toString()};return ${bindWhmMailboxMaintenance.toString()};})()`)
+export const WHM_MAILBOX_MAINTENANCE_CLIENT_BINDING = withFrameRequest(`(()=>{const formatClientBytes=${ASCII_BYTES_BINDING};${WHM_CLIENT_TEMPLATE_BINDING}const formatMailDateTime=${DISPLAY_DATETIME_BINDING};const readMailboxMaintenanceView=${readMailboxMaintenanceView.toString()};const readMaintenanceJobAck=${readMaintenanceJobAck.toString()};return ${bindWhmMailboxMaintenance.toString()};})()`)
