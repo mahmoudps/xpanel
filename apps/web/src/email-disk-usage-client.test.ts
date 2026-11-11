@@ -35,7 +35,7 @@ describe('Email Disk Usage client', () => {
     expect(ask).toHaveBeenCalledOnce(); expect(request.mock.calls.some(call => call[0] === 'POST')).toBe(false)
     ask.mockResolvedValue(true as never); $<HTMLButtonElement>('[data-email-usage-run]').click(); await settle()
     expect(request).toHaveBeenCalledWith('POST', '/api/account/email/disk-usage/cleanup', { mailbox: 'bob@example.com', folder: 'INBOX', preset: 'older-than-year', query: null, confirmFolder: 'INBOX' })
-    expect($('[data-email-usage-status]').textContent).toContain('1.0 KiB freed')
+    expect($('[data-email-usage-status]').textContent).toContain('\u20661.00\u00a0KiB\u2069 freed')
   })
   it('refuses an empty custom search before asking', async () => {
     const ask = vi.fn(); await bind(ask); $<HTMLButtonElement>('[data-email-usage-read]').click(); await settle()

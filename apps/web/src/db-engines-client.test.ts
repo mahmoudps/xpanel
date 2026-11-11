@@ -143,7 +143,7 @@ describe('PostgreSQL provisioning client', () => {
   it('shows saved and server-only objects and fills the owner choices', async () => {
     await bind(renderAccountDbEngineWorkspace({ page: 'postgresql', lang: 'en', accountId, username: 'alice', canManage: true }), vi.fn(async () => pgView()))
     const rows = [...document.querySelectorAll('[data-db-rows="databases"] tr')].map(row => row.textContent)
-    expect(rows[0]).toContain('alice_shop'); expect(rows[0]).toContain('2.0 KiB'); expect(rows[0]).toContain('Active'); expect(rows[0]).toContain('Move to trash')
+    expect(rows[0]).toContain('alice_shop'); expect(rows[0]).toContain('\u20662.00\u00a0KiB\u2069'); expect(rows[0]).toContain('Active'); expect(rows[0]).toContain('Move to trash')
     expect(rows[1]).toContain('Not saved in xPanel'); expect(q('[data-db-fact="limit"]').textContent).toBe('1 of 5')
     expect([...q<HTMLSelectElement>('#db-pg-owner').options].map(option => option.value)).toEqual(['alice_app'])
     expect([...q<HTMLSelectElement>('#db-pg-password-user').options].map(option => option.value)).toEqual([userId])

@@ -23,6 +23,14 @@ describe('phone table rows keep two columns instead of scrolling sideways', () =
     })
   }
 
+  it('separates V2 phone rows with one full-width line instead of a line per cell', () => {
+    // The foundation cell border adds no specificity, so the phone reset `tr>*{border:0}` wins for cells and row headers alike.
+    expect(V2_BASE_CSS).toContain(':where(td,tbody th){padding:14px 16px;border-top:1px solid var(--line)')
+    expect(V2_BASE_CSS).not.toContain(':is(td,tbody th)')
+    expect(V2_PHONE_TABLE_ROWS_CSS).toContain(' tr>*{grid-column:1;padding:0!important;border:0;')
+    expect(V2_PHONE_TABLE_ROWS_CSS).toContain(' tbody tr:not(:last-child){border-block-end:1px solid var(--line)}')
+  })
+
   it('keeps the V2 phone rows out of the shared foundation', () => {
     expect(V2_BASE_CSS).not.toContain(V2_PHONE_TABLE_ROWS_CSS)
   })

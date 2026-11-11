@@ -38,11 +38,12 @@ describe('forwarder host state and retry boundary', () => {
   it.each([{ status: 422 }, { status: 409 }, { status: 422, details: { stateChanged: false, rolledBack: true } }])('permits correction after a definite refusal %j', failure => {
     expect(forwarderWriteUncertain(failure)).toBe(false)
   })
-  it('reads datetime-local input as a canonical UTC instant', () => {
+  it('reads datetime-local or YYYY-MM-DD HH:mm (UTC) text as a canonical UTC instant', () => {
     expect(utcInstant('')).toBeNull()
     expect(utcInstant('2026-10-24T06:30')).toBe('2026-10-24T06:30:00.000Z')
-    expect(() => utcInstant('2026-02-30T00:00')).toThrow()
-    expect(() => utcInstant('2026-10-24 06:30')).toThrow()
+    expect(utcInstant('2026-10-24 06:30')).toBe('2026-10-24T06:30:00.000Z')
+    expect(utcInstant(' 2026-10-24 06:30 UTC ')).toBe('2026-10-24T06:30:00.000Z')
+    for (const bad of ['2026-02-30T00:00', '24/10/2026 06:30', '2026-10-24', '2026-10-24 6:30']) expect(() => utcInstant(bad)).toThrow()
   })
   it('produces a syntactically valid standalone browser binding', () => {
     expect(() => new Function(ACCOUNT_FORWARDERS_CLIENT_BINDING)).not.toThrow()

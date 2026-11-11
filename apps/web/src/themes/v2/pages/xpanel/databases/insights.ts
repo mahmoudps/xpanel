@@ -25,5 +25,5 @@ export function renderV2DatabaseInsightsPage(props: DatabasePageProps, authority
     [t('User'), t('On server'), t('Host entries')], dbEmptyRow(3, t('These records have not been read.')), { 'data-insights-users': true }), { flush: true })
   const status = `<p data-insights-status data-state="unread" role="status">${escapeHtml(canRead ? t('Reading database insights is ready.') : t('Database insights are unavailable here. Nothing was read.'))}</p>`
   return dbPage(t, '/databases/insights', t('Database insights'), t(msgctxt('theme:v2', 'Read actual database sizes and largest tables without changing stored configuration.')),
-    `<div class="v2-db-workspace" data-account-database-insights data-account="${escapeHtml(account?.id ?? '')}" data-insights-manage="${canRead}"${canRead ? '' : ' data-capability-unavailable="true"'} lang="${locale}" dir="${direction}">${overview}${databases}${tables}${users}${status}${databaseInsightsTemplates()}</div>`)
+    `<div class="v2-db-workspace" data-account-database-insights data-account="${escapeHtml(account?.id ?? '')}" data-insights-manage="${canRead}"${canRead ? '' : ' data-capability-unavailable="true"'} lang="${locale}" dir="${direction}">${overview}${databases}${tables}${users}${status}${databaseInsightsTemplates(message => escapeHtml(t(message)))}</div>`)
 }

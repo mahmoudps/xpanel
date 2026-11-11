@@ -6,6 +6,9 @@ const cloneClientTemplate = canonicalCloneClientTemplate
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { ASCII_BYTES_BINDING, formatIsolatedBytes as canonicalFormatClientBytes } from './display-format.ts'
+// Module-local alias: the binding source defines it again from ASCII_BYTES_BINDING.
+const formatClientBytes = canonicalFormatClientBytes
 const displayDateTime = formatDisplayDateTime
 const INSIGHTS_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const INSIGHTS_SERVER = [null, 'present', 'absent']
@@ -43,13 +46,9 @@ export function readDatabaseInsightsView(value: unknown, accountId: string): Dat
   if (new Set(databases.map(row => row.name)).size !== databases.length || new Set(users.map(row => row.name)).size !== users.length) throw new Error('invalid_insights_duplicate')
   return { state: value.state as DatabaseInsightsClientView['state'], observedAt: value.observedAt, omitted: { databases: value.omitted.databases as number, users: value.omitted.users as number }, databases, users }
 }
-/** Decimal units, like formatAsciiBytes in tokens.ts; null is a value the server did not report. */
+/** The shared byte format; null is a value the server did not report. */
 export function insightsBytes(bytes: number | null): string {
-  if (bytes === null) return '-'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  let value = bytes, unit = 0
-  while (value >= 1000 && unit < units.length - 1) { value /= 1000; unit++ }
-  return value.toFixed(unit === 0 ? 0 : value >= 100 ? 0 : value >= 10 ? 1 : 2) + ' ' + units[unit]
+  return bytes === null ? '-' : formatClientBytes(bytes)
 }
 
 function bindAccountDatabaseInsights(_askDialog: unknown): void {
@@ -130,4 +129,4 @@ function bindAccountDatabaseInsights(_askDialog: unknown): void {
   })
 }
 
-export const ACCOUNT_DATABASE_INSIGHTS_CLIENT_BINDING = `(()=>{${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const displayDateTime=${DISPLAY_DATETIME_BINDING};const INSIGHTS_ID=${INSIGHTS_ID.toString()};const INSIGHTS_SERVER=${JSON.stringify(INSIGHTS_SERVER)};const insightsObject=${insightsObject.toString()};const insightsSize=${insightsSize.toString()};const insightsText=${insightsText.toString()};const readDatabaseInsightsView=${readDatabaseInsightsView.toString()};const insightsBytes=${insightsBytes.toString()};return ${bindAccountDatabaseInsights.toString()};})()`
+export const ACCOUNT_DATABASE_INSIGHTS_CLIENT_BINDING = `(()=>{const formatClientBytes=${ASCII_BYTES_BINDING};${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const displayDateTime=${DISPLAY_DATETIME_BINDING};const INSIGHTS_ID=${INSIGHTS_ID.toString()};const INSIGHTS_SERVER=${JSON.stringify(INSIGHTS_SERVER)};const insightsObject=${insightsObject.toString()};const insightsSize=${insightsSize.toString()};const insightsText=${insightsText.toString()};const readDatabaseInsightsView=${readDatabaseInsightsView.toString()};const insightsBytes=${insightsBytes.toString()};return ${bindAccountDatabaseInsights.toString()};})()`

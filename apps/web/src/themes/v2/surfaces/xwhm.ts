@@ -65,7 +65,9 @@ export function renderV2WhmBody(view: WhmSurfaceView): string | undefined {
         canDbService: root && a.canManage && a.qualifiedTools.has(DB_SERVICE_TOOLS[view.route] ?? ''),
         canDbQuota: root && a.canManage && view.route === '/whm/databases' && a.qualifiedTools.has('aapanel-db-quota'),
         canPmaAccess: root && a.canManage && view.route === '/whm/databases/phpmyadmin' && a.qualifiedTools.has('aapanel-phpmyadmin-access') } }
-      return renderV2WhmPlanPage(t, props, a) ?? renderV2WhmResellerPage(t, props, a) ?? renderV2WhmNetworkPage(props, a)
+      return renderV2WhmPlanPage(t, props, a) ?? renderV2WhmResellerPage(t, props, a)
+        // The default site and server-owned zones belong to root alone, as in the classic workspaces.
+        ?? renderV2WhmNetworkPage(props, { ...a, canManageDefaultSite: root && a.canManage, canCreateServerZone: root })
         ?? renderV2WhmMailPage({ ...props, mailAuthority: a })
         ?? renderV2WhmMonitoringPage(observation) ?? renderV2WhmSecurityPage(observation) ?? renderV2WhmActivityPage(observation)
         ?? renderV2WhmDatabasePage(data) ?? renderV2WhmSoftwarePage(data) ?? renderV2WhmServiceToolPage(data)

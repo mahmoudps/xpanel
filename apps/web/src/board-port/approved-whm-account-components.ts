@@ -3,7 +3,7 @@ import { ACCOUNT_PACKAGE_LIMIT_FIELDS } from '../plan-editor.ts'
 import type { WhmSurfaceProps } from '../surfaces/xwhm.ts'
 import { escapeHtml, renderLtrValue } from '../tokens.ts'
 import { formatDisplayName } from '../display-name.ts'
-import { formatAsciiBytes } from '../display-format.ts'
+import { formatAsciiRate } from '../display-format.ts'
 import { SOURCE_LOCALE, translator } from '../i18n.ts'
 type Copy = string
 const copy = (props: WhmSurfaceProps, text: Copy): string => escapeHtml(translator(props.locale)(text))
@@ -134,7 +134,7 @@ export const renderApprovedWhmAccountTableCells = (props: WhmSurfaceProps, usern
   const quota = (cap: number | 'unlimited' | undefined): string => `<div class="xp-whm-account-field"><span>${missing} / ${limit(cap)}</span><small class="xp-help">${copy(props, msgid('Usage / configured plan limit. Usage has not been read.'))}</small></div>`
   const ioWrite = plan?.resources.ioWriteBps
   const ioWriteCap = ioWrite === 'unlimited' ? copy(props, msgid('Unlimited'))
-    : typeof ioWrite === 'number' && Number.isFinite(ioWrite) && ioWrite >= 0 ? renderLtrValue(`${formatAsciiBytes(ioWrite)}/s`) : missing
+    : typeof ioWrite === 'number' && Number.isFinite(ioWrite) && ioWrite >= 0 ? renderLtrValue(formatAsciiRate(ioWrite)) : missing
   return cell('owner', msgid('Owner'), ownerName === undefined ? missing : renderLtrValue(ownerName))
     + cell('ip', msgid('IP address'), account ? `<div class="xp-whm-account-field">${renderLtrValue(account.ipv4)}${account.ipv6 ? renderLtrValue(account.ipv6) : ''}</div>` : missing)
     + cell('disk', msgid('Disk'), quota(plan?.resources.diskMb))

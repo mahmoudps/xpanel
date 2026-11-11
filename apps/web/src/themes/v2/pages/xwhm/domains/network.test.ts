@@ -59,6 +59,19 @@ describe('independent v2 WHM domains, DNS and certificate pages', () => {
     for (const name of ['whm-search', 'whm-account', 'whm-ssl', 'whm-php', 'whm-page-size']) expect(nodes.some(node => node.attrs.get('name') === name)).toBe(true)
   })
 
+  it('counts the loaded domains by kind in the tiles and filter, and says Not read without a list', () => {
+    const html = renderV2WhmDomainsPage({ accounts: [account], domains: [domain, { ...domain, id: 'addon-1', name: 'shop.example.test', kind: 'addon' }] }, authority)
+    expect(html).toContain('<h2>Primary domains</h2>')
+    expect(html).toContain('<span>1</span><span class="v2-kpi__unit">of 2 domains</span>')
+    expect(html).toContain('data-whm-kind data-kind="addon" aria-pressed="false">Addon<span class="v2-count v2-num">1</span>')
+    expect(html).toContain('Hosted domains · 2')
+    expect(html).toContain('href="#v2-whm-network-domain-create-heading"')
+    const unread = renderV2WhmDomainsPage({ accounts: [account] }, authority)
+    expect(unread.match(/<article class="v2-kpi" data-state="unread">/g)).toHaveLength(4)
+    expect(unread).not.toContain('v2-count')
+    expect(unread).not.toContain('of 0 domains')
+  })
+
   it('retains native domain forms and independent guarded default-site controls', () => {
     const nodes = live(renderV2WhmDomainsPage({ accounts: [account] }, authority))
     for (const hook of ['data-whm-domain-create', 'data-whm-domain-settings', 'data-default-site-form']) expect(nodes.find(node => node.attrs.has(hook))?.tag).toBe('form')
@@ -76,6 +89,17 @@ describe('independent v2 WHM domains, DNS and certificate pages', () => {
     for (const hook of ['refresh', 'add-record', 'add-zone', 'save', 'delete']) expect(nodes.find(node => node.attrs.has(`data-dns-${hook}`))?.attrs.get('type')).toBe('button')
     expect(html).toContain('SOA serials are allocated by the server.')
     expect(html).toContain('Nothing has been imported.')
+  })
+
+  it('lays the zone list, its count and the new-zone form inside the editor the controller reads', () => {
+    const nodes = parseMarkup(renderV2WhmDnsPage({ accounts: [account] }, authority))
+    const editor = nodes.findIndex(node => node.attrs.has('data-dns-editor'))
+    const inside = (index: number): boolean => { for (let at = index; at >= 0; at = nodes[at]!.parent) if (at === editor) return true; return false }
+    for (const hook of ['data-whm-dns-zone-rows', 'data-whm-dns-zone-count', 'data-dns-refresh', 'data-dns-new-name', 'data-dns-account', 'data-dns-add-zone', 'data-dns-records', 'data-dns-status']) expect(inside(nodes.findIndex(node => node.attrs.has(hook))), hook).toBe(true)
+    expect(inside(nodes.findIndex(node => node.attrs.has('data-dns-file')))).toBe(false)
+    expect(nodes.find(node => node.attrs.has('data-whm-dns-zone-count'))?.attrs.get('role')).toBe('status')
+    expect(nodes.find(node => node.attrs.get('href') === '#v2-whm-network-dns-new-name')?.tag).toBe('a')
+    expect(renderV2WhmDnsPage({ accounts: [account] }, { canRead: true, canManage: false })).not.toContain('href="#v2-whm-network-dns-new-name"')
   })
 
   it('uses actual API numeric bounds in its record and TTL templates', () => {
@@ -161,5 +185,33 @@ describe('independent v2 WHM domains, DNS and certificate pages', () => {
     expect(WHM_NETWORK_CSS).toContain('gap:var(--space-1)')
     expect(WHM_NETWORK_CSS).toContain('@media(max-width:640px)')
     expect(renderV2WhmDnsToolsPage({ locale: 'ar' }, authority)).not.toMatch(/[٠-٩۰-۹]/)
+  })
+})
+
+describe('v2 domain row repaint and DNS record filter', () => {
+  it('repaints a domain row from a template with the same cell structure as the server row', () => {
+    const nodes = parseMarkup(renderV2WhmDomainsPage({ accounts: [account], domains: [domain], principal: { kind: 'root', id: 'r', username: 'root' } }, authority))
+    const template = nodes.findIndex(node => node.tag === 'template' && node.attrs.get('data-xp-template') === 'whm-domain-row')
+    const tableIndex = nodes.findIndex(node => node.tag === 'table' && node.attrs.has('data-whm-filter-table'))
+    const serverRow = nodes.findIndex(node => node.tag === 'tr' && node.template === -1 && nodes[node.parent]?.tag === 'tbody' && nodes[node.parent]?.parent === tableIndex)
+    const templateRow = nodes.findIndex(node => node.tag === 'tr' && node.template === template)
+    const inside = (index: number, root: number): boolean => { for (let at = nodes[index]!.parent; at >= 0; at = nodes[at]!.parent) { if (nodes[at]!.tag === 'svg' || nodes[at]!.attrs.get('class') === 'v2-menu') return false; if (at === root) return true } return false }
+    // A slot span inside a span only carries the value the server row writes as text; the status pill tone follows the row state.
+    const slotText = (node: (typeof nodes)[number]) => node.tag === 'span' && node.attrs.has('data-xp-slot') && nodes[node.parent]?.tag === 'span'
+    const shape = (cell: number) => nodes.flatMap((node, index) => node.tag !== 'svg' && node.attrs.get('class') !== 'v2-menu' && !slotText(node) && inside(index, cell) ? [`${node.tag}.${(node.attrs.get('class') ?? '').replace(/v2-pill--[a-z]+/, 'v2-pill--tone')}`] : [])
+    const cells = (row: number) => nodes.flatMap((node, index) => node.tag === 'td' && node.parent === row ? [index] : [])
+    const server = cells(serverRow), painted = cells(templateRow)
+    expect(painted).toHaveLength(server.length)
+    // The last cell differs only by the server row's menu and its link: the client opens the editor with a button.
+    for (let index = 0; index < server.length - 1; index++) expect(shape(painted[index]!)).toEqual(shape(server[index]!))
+    for (const slot of ['name', 'docroot', 'kind', 'wildcard', 'account', 'ssl', 'php-version', 'php-handler', 'status', 'site-type']) expect(nodes.some(node => node.template === template && node.attrs.get('data-xp-slot') === slot)).toBe(true)
+    expect(nodes.find(node => node.template === template && node.attrs.get('data-xp-action') === 'select')?.attrs.get('type')).toBe('checkbox')
+  })
+
+  it('filters loaded zone records by text and record type', () => {
+    const html = renderV2WhmDnsPage({ accounts: [account] }, authority)
+    expect(html).toMatch(/aria-labelledby="v2-whm-network-dns-editor-heading">.*<div class="v2-whm-network__records" data-list-filter>.*data-list-filter-search.*<select id="v2-whm-dns-record-type" data-list-filter-key="type"><option value="" selected>All<\/option><option value="A">A<\/option>/s)
+    expect(html).toContain('data-list-filter-empty hidden')
+    expect(html).toMatch(/<template data-xp-template="dns-record-row"><tr data-list-row>.*data-list-field="type"/s)
   })
 })

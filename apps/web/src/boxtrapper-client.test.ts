@@ -96,6 +96,25 @@ describe('BoxTrapper client', () => {
     }
   })
 
+  it('keeps the settings status when the queue read fails and says so beside the queue', async () => {
+    const failing = () => { const inner = fake(); return vi.fn(async (method: string, path: string, body?: unknown) => { if (method === 'POST' && (body as { op: string }).op === 'queue') throw new Error('queue'); return inner(method, path, body) }) }
+    mount(renderClassicBoxTrapperSection({ locale: 'en', scope: 'owner', connected: true }))
+    boot(failing()); await tick(); await tick()
+    // Without a queue status the page keeps its one status line, as before.
+    expect(document.querySelector('[data-boxtrapper-status]')?.textContent).toContain('BoxTrapper could not be read')
+    mount(renderClassicBoxTrapperSection({ locale: 'en', scope: 'owner', connected: true }))
+    document.querySelector('[data-boxtrapper]')!.insertAdjacentHTML('beforeend', '<p data-boxtrapper-queue-status hidden></p>')
+    boot(failing()); await tick(); await tick()
+    const own = document.querySelector<HTMLElement>('[data-boxtrapper-queue-status]')!
+    expect(document.querySelector('[data-boxtrapper-status]')?.textContent).not.toContain('could not be read')
+    expect(document.querySelector<HTMLElement>('[data-boxtrapper-status]')?.dataset.state).not.toBe('failed')
+    expect([own.hidden, own.dataset.state, own.getAttribute('role'), own.textContent]).toEqual([false, 'failed', 'alert', 'The queue could not be read.'])
+    expect(document.querySelector('pre[data-boxtrapper-log]')?.textContent).toContain('challenge')
+    mount(renderClassicBoxTrapperSection({ locale: 'en', scope: 'owner', connected: true }))
+    document.querySelector('[data-boxtrapper]')!.insertAdjacentHTML('beforeend', '<p data-boxtrapper-queue-status>stale</p>')
+    boot(fake()); await tick(); await tick()
+    expect([document.querySelector<HTMLElement>('[data-boxtrapper-queue-status]')!.hidden, document.querySelector('[data-boxtrapper-queue-status]')!.textContent]).toEqual([true, ''])
+  })
   it('says why nothing runs when the host cannot', async () => {
     mount(renderClassicBoxTrapperSection({ locale: 'en', scope: 'mailbox', connected: true }))
     const request = fake({ host: { state: 'connected', ready: false, active: false }, lists: null, listsRevision: null })

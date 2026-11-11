@@ -207,3 +207,54 @@ describe('WHM domain browser binding', () => {
     expect(status().dataset.state).toBe('stale'); expect(f.writes()).toHaveLength(0); expect(createInput('name').value).toBe('stale.example.test')
   })
 })
+
+describe('WHM domain overview rows owned by a theme template', () => {
+  const template = '<template data-xp-template="whm-domain-row"><tr><td><input type="checkbox" data-xp-action="select"><span data-whm-filter-row><bdi dir="ltr" data-xp-slot="name"></bdi></span><bdi dir="ltr" data-xp-slot="docroot"></bdi></td><td><span data-xp-slot="kind"></span><span>Wildcard: <span data-xp-slot="wildcard"></span></span></td><td data-xp-slot="account"></td><td data-xp-slot="ssl"></td><td><bdi dir="ltr" data-xp-slot="php"></bdi></td><td data-xp-slot="status"></td><td data-xp-slot="site-type"></td><td><button type="button" data-xp-action="open" disabled>Manage</button></td></tr></template>'
+  const painted = () => Array.from(document.querySelectorAll<HTMLTableRowElement>('[data-whm-filter-table] tbody tr')).filter(tr => tr.querySelector<HTMLElement>('[data-whm-filter-row]')?.dataset.account === account.username)
+  const selected = () => document.querySelector<HTMLSelectElement>('[data-whm-domain-selected]')!
+
+  it('keeps the nine built cells when the page provides no template', async () => {
+    const f = model(); f.boot(); await tick()
+    expect(painted()).toHaveLength(1)
+    expect(painted()[0]!.cells).toHaveLength(9)
+  })
+  it('fills the template by slot name, keeps the filter keys and drops the checkbox without bulk actions', async () => {
+    document.querySelector('[data-whm-detail-route]')!.insertAdjacentHTML('beforeend', template)
+    const f = model(); f.boot(); await tick()
+    const [tr] = painted()
+    expect(tr!.cells).toHaveLength(8)
+    const slot = (name: string) => tr!.querySelector(`[data-xp-slot="${name}"]`)!.textContent
+    expect([slot('name'), slot('docroot'), slot('kind'), slot('wildcard'), slot('account'), slot('ssl'), slot('status'), slot('site-type')])
+      .toEqual([row().name, row().docRoot, row().kind, 'No', account.username, 'Unassigned', 'Active desired state', row().siteType])
+    expect(tr!.querySelector<HTMLElement>('[data-whm-filter-row]')!.dataset).toMatchObject({ kind: row().kind, account: account.username, ssl: 'unassigned', status: 'active', search: row().name + ' ' + account.username })
+    expect(tr!.querySelector('input[type="checkbox"]')).toBeNull()
+    expect(document.querySelector('[data-whm-filter-table]')!.textContent).toContain('Preserved other account')
+    const open = tr!.querySelector<HTMLButtonElement>('[data-whm-domain-open]')!
+    expect(open.disabled).toBe(false)
+    expect(open.dataset).toMatchObject({ whmDomainOpen: row().id, accountId: account.id })
+  })
+  it.each([false, true])('repaints the real domain state like the server-rendered row (theme template: %s)', async themed => {
+    if (themed) document.querySelector('[data-whm-detail-route]')!.insertAdjacentHTML('beforeend', template)
+    const f = model(); f.setView(view('1', [row({ expiresAt: '2020-01-01T00:00:00.000Z' }), row({ id: id(3), name: 'held.example.test', kind: 'addon', suspended: true })])); f.boot(); await tick()
+    expect(painted().map(tr => themed ? tr.querySelector('[data-xp-slot="status"]')!.textContent : tr.cells[8]!.textContent)).toEqual(['Expired', 'Suspended'])
+  })
+  it('binds the template checkbox to the bulk controller when bulk actions exist', async () => {
+    document.querySelector('[data-whm-detail-route]')!.insertAdjacentHTML('beforeend', template + '<div data-domain-bulk></div>')
+    const f = model(); f.boot(); await tick()
+    expect(painted()[0]!.querySelector<HTMLInputElement>('input[type="checkbox"]')!.dataset).toMatchObject({ domainSelect: row().id, domainName: row().name })
+  })
+  it('opens a row in the manage card and switches to the account of a row from another account', async () => {
+    document.querySelector('[data-whm-detail-route]')!.insertAdjacentHTML('beforeend', template)
+    document.querySelector('[data-whm-filter-table] tbody tr td')!.insertAdjacentHTML('beforeend', `<a href="#manage" data-whm-domain-open="${id(9)}" data-account-id="${other.id}">Manage</a>`)
+    const f = model(); f.boot(); await tick()
+    expect(selected().value).toBe('')
+    painted()[0]!.querySelector<HTMLButtonElement>('[data-whm-domain-open]')!.click(); await tick(); await tick()
+    expect(selected().value).toBe(row().id)
+    expect(document.querySelector<HTMLElement>('[data-whm-domain-details]')!.hidden).toBe(false)
+    expect(f.writes()).toEqual([])
+    document.querySelector<HTMLElement>(`[data-account-id="${other.id}"]`)!.click(); await tick(); await tick()
+    expect(document.querySelector<HTMLSelectElement>('[data-whm-domain-account]')!.value).toBe(other.id)
+    expect(f.calls.some(call => call.method === 'GET' && call.path.includes(other.id))).toBe(true)
+    expect(f.writes()).toEqual([])
+  })
+})

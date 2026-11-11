@@ -88,7 +88,7 @@ describe('readable publisher recovery metadata', () => {
     expect(request).toHaveBeenCalledTimes(1); expect(confirm).not.toHaveBeenCalled(); expect(JSON.stringify(observed)).toBe(original)
     $<HTMLButtonElement>('rollback').click()
     await vi.waitFor(() => expect(confirm).toHaveBeenCalledTimes(1))
-    expect(confirm.mock.calls[0]![0].body).toBe(locale === 'ar' ? 'استعادة ملفات البداية المحفوظة للنطاق example.test وإزالة صفحة الناشر.' : 'Restore the saved index files for example.test and remove the publisher page.')
+    expect(confirm.mock.calls[0]![0].body).toBe(locale === 'ar' ? 'استعادة ملفات البداية المحفوظة للنطاق \u2066example.test\u2069 وإزالة صفحة الناشر.' : 'Restore the saved index files for example.test and remove the publisher page.')
     expect(request).toHaveBeenCalledTimes(1)
   })
 })

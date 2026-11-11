@@ -48,10 +48,10 @@ describe('selected V2 dynamic fragment styling', () => {
     const chip = parseMarkup(siteHealthClientTemplates()).find(node => node.attrs.has('data-state-chip'))!
     expect(chip.attrs.get('data-state-chip')).toBe('')
     const css = routeCss('xpanel', '/health')
-    expect(css).toContain('.v2-panel-extra [data-site-health] [data-state-chip]{display:inline-flex')
-    expect(css).toContain('background:var(--sunken);color:var(--muted)')
-    for (const state of ['ok', 'problem', 'unavailable']) expect(css).toContain('.v2-panel-extra [data-site-health] [data-state-chip=' + state + ']')
-    expect(routeCss('xpanel', '/advanced/network-tools')).not.toContain('[data-site-health] [data-state-chip]')
+    expect(css).toContain('.v2-panel-extra [data-state-chip]{display:inline-flex')
+    expect(css).toContain('background:var(--sunken);color:var(--text-2)')
+    for (const state of ['ok', 'problem', 'unavailable']) expect(css).toContain('.v2-panel-extra [data-state-chip=' + state + ']')
+    expect(routeCss('xpanel', '/advanced/network-tools')).not.toContain('.v2-panel-extra [data-state-chip]')
   })
   it.each(['/whm/backups', '/whm/backups/restore', '/whm/software/catalog', '/whm/software/runtimes', '/whm/software/modules', '/health'])('preserves the existing strict compressed asset budget for %s', route => {
     const assets = [v2Stylesheet, ...v2SharedStylesheets, ...v2StylesheetsForDocument({ surface: route.startsWith('/whm/') ? 'xwhm' : 'xpanel', route, viewKind: 'workspace' })]

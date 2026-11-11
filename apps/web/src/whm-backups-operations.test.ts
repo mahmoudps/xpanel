@@ -52,10 +52,10 @@ describe('server backups page operations', () => {
   it('paints the summary, run history, failure notice and the run log with the failing message', async () => {
     await boot()
     expect(document.querySelector('[data-backup-summary="next"]')!.textContent).toBe('2026-10-29 03:00 UTC')
-    expect(document.querySelector('[data-backup-summary="local"]')!.textContent).toBe('1.0 TiB used · 1.0 TiB free')
+    expect(document.querySelector('[data-backup-summary="local"]')!.textContent).toBe('\u20661.00\u00a0TiB\u2069 used · \u20661.00\u00a0TiB\u2069 free')
     expect(document.querySelector('[data-backup-summary="remote"]')!.textContent).toContain('Vault')
     const cells = [...document.querySelectorAll('[data-backup-snapshot-rows] tr:first-child td')].map(td => td.textContent)
-    expect(cells.slice(0, 7)).toEqual(['2026-10-28 02:00 UTC', 'Scheduled', '1 of 2', '2.0 KiB', '10 min 30 s', '1 of 2', 'Failed'])
+    expect(cells.slice(0, 7)).toEqual(['2026-10-28 02:00 UTC', 'Scheduled', '1 of 2', '\u20662.00\u00a0KiB\u2069', '10 min 30 s', '1 of 2', 'Failed'])
     expect(document.querySelector('[data-backup-run-failure] p')!.textContent).toContain('karim')
     const log = document.querySelector('[data-backup-run-log]')!
     expect(log.textContent).toContain('mariadb-dump: Got error: 145')
@@ -83,7 +83,7 @@ describe('server backups page operations', () => {
     for (const key of ['restore-databases', 'restore-dns']) { const box = document.querySelector<HTMLInputElement>('#backup-layout-' + key)!; expect(box.disabled).toBe(false); box.checked = true; box.dispatchEvent(new Event('change', { bubbles: true })) }
     expect(document.querySelector<HTMLInputElement>('#backup-layout-restore-home')!.disabled).toBe(true)
     action('restore-review').click(); await settle()
-    expect([...document.querySelectorAll('[data-backup-difference-rows] tr')].map(tr => tr.textContent)).toEqual(['Databasesalice_wpExists10 BReplace with the backup copy', 'DNS zonealice.example.testExists50 BReplace records with the backup copy'])
+    expect([...document.querySelectorAll('[data-backup-difference-rows] tr')].map(tr => tr.textContent)).toEqual(['Databasesalice_wpExists\u206610\u00a0B\u2069Replace with the backup copy', 'DNS zonealice.example.testExists\u206650\u00a0B\u2069Replace records with the backup copy'])
     expect(document.querySelector('[data-backup-difference="differ"]')!.textContent).toBe('2 parts replaced')
     const ack = document.querySelector<HTMLInputElement>('#backup-layout-restore-acknowledge')!; ack.checked = true; ack.dispatchEvent(new Event('change', { bubbles: true }))
     action('restore-apply').click(); await settle()
@@ -95,7 +95,7 @@ describe('server backups page operations', () => {
     expect(document.querySelector<HTMLInputElement>('#backup-layout-sftp-host')!.value).toBe('vault.xpanel.test')
     action('test-sftp').click(); await settle()
     expect(send).toHaveBeenCalledWith('POST', '/api/backups/workspace/destinations/' + ID + '/test', { expectedRevision: REV })
-    expect(document.body.textContent).toContain('Connected. 3.0 TiB free on the remote path.')
+    expect(document.body.textContent).toContain('Connected. \u20663.00\u00a0TiB\u2069 free on the remote path.')
   })
 })
 

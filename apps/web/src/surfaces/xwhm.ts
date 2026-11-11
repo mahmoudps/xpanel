@@ -49,6 +49,7 @@ import {
   renderLtrValue,
   renderStatusBadge,
   renderThresholdMeter,
+  formatAsciiBytes,
 } from '../tokens.ts'
 import { auditActionHtml, auditActorLabel, auditOutcomeLabel, auditTargetLabel } from '../audit-labels.ts'
 import { isArabicSentence } from '../arabic-type.ts'
@@ -138,6 +139,8 @@ export interface WhmSurfaceProps {
     to?: string
   }
   hostSample?: DashboardHostSample | null
+  /** Overview, root only: stored host CPU percent and memory MiB of the last 24 hours, one entry per 15-minute interval; null where an interval has no sample. */
+  performanceHistory?: { from: string; to: string; cpuPercent: readonly (number | null)[]; memoryMb: readonly (number | null)[] }
   driftCount?: number | null
   driftCheckedAt?: string | null
   /** Previous superseded generation. Empty when the host has nothing to roll back to. */
@@ -387,7 +390,7 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
           </div>
           <div>
           <dt>${translator(locale)('Disk quota')}</dt>
-          <dd><bdi dir="ltr">${escapeHtml((() => { const disk = plans.find(plan => plan.id === acc.planId)?.resources.diskMb; return disk === undefined ? (translator(locale)(msgctxt('xwhm', 'Unavailable'))) : disk === 'unlimited' ? (translator(locale)('Unlimited')) : disk + ' MB' })())}</bdi></dd>
+          <dd><bdi dir="ltr">${escapeHtml((() => { const disk = plans.find(plan => plan.id === acc.planId)?.resources.diskMb; return disk === undefined ? (translator(locale)(msgctxt('xwhm', 'Unavailable'))) : disk === 'unlimited' ? (translator(locale)('Unlimited')) : formatAsciiBytes(disk * 1024 * 1024) })())}</bdi></dd>
           </div>
           </dl>
           ${(isRoot || heldAcls.has('edit-account')) ? `<form class="xp-form-group" data-account-contact-form="true" data-account-id="${escapeHtml(acc.id)}">
@@ -554,8 +557,8 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
                   (plan) => `
                 <tr data-plan-row="${escapeHtml(plan.name)}">
                   <td><strong data-plan-name>${escapeHtml(formatDisplayName(plan.name))}</strong></td>
-                  <td class="xp-mono xp-tabular">${renderLtrValue(`${plan.resources.diskMb === 'unlimited' ? 'unlimited' : `${plan.resources.diskMb / 1024} GB`} / ${plan.resources.bandwidthMbMonth === 'unlimited' ? 'unlimited' : `${plan.resources.bandwidthMbMonth / 1024} GB`}`, 'xp-plan-resource-value')}</td>
-                  <td class="xp-mono xp-tabular">${renderLtrValue(`${plan.resources.cpuPercent}% / ${plan.resources.memoryMb} MB`, 'xp-plan-resource-value')}</td>
+                  <td class="xp-mono xp-tabular">${renderLtrValue(`${plan.resources.diskMb === 'unlimited' ? 'unlimited' : formatAsciiBytes(plan.resources.diskMb * 1024 * 1024)} / ${plan.resources.bandwidthMbMonth === 'unlimited' ? 'unlimited' : formatAsciiBytes(plan.resources.bandwidthMbMonth * 1024 * 1024)}`, 'xp-plan-resource-value')}</td>
+                  <td class="xp-mono xp-tabular">${renderLtrValue(`${plan.resources.cpuPercent}% / ${plan.resources.memoryMb === 'unlimited' ? 'unlimited' : formatAsciiBytes(plan.resources.memoryMb * 1024 * 1024)}`, 'xp-plan-resource-value')}</td>
                   <td class="xp-mono xp-tabular">${renderLtrValue(`${plan.resources.ioReadBps === 'unlimited' ? 'unlimited' : formatBytes(plan.resources.ioReadBps)}/s · ${plan.resources.ioWriteBps === 'unlimited' ? 'unlimited' : formatBytes(plan.resources.ioWriteBps)}/s`, 'xp-plan-resource-value')}</td>
                   <td class="xp-mono xp-tabular">${plan.resources.maxProcesses}</td>
                   <td class="xp-mono xp-tabular">${String(plan.caps.addonDomains)}</td>

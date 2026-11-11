@@ -15,7 +15,7 @@ import { parseWebStatsView, type WebStatsView } from '../../web/src/models/web-s
 import { publicContactEmail } from '../../web/src/display-name.ts'
 import { isOfferedLocale, requestLocale, type Locale } from '../../web/src/i18n.ts'
 import type { WebAppRenderState } from '../../web/src/app.ts'
-import { assertNoActiveDatabaseTransaction, createDb, getMailboxSession, hostOperationInFlight, initializeOperationalMetadata, latestActive, listAudit, listSessionsForPrincipal, migrate, previousGeneration, syncAccountContactIndex, type AuditQuery, type Db } from '@xpanel/db'
+import { assertNoActiveDatabaseTransaction, createDb, getMailboxSession, hostOperationInFlight, initializeOperationalMetadata, latestActive, listAudit, listMetricsHistory, listSessionsForPrincipal, migrate, previousGeneration, syncAccountContactIndex, type AuditQuery, type Db } from '@xpanel/db'
 import { detectOs } from '@xpanel/os'
 import { resellerPolicy, StateStore } from '@xpanel/state'
 import { protectInstalledStateParent } from '../../../packages/state/src/ownership.ts'
@@ -29,6 +29,7 @@ import { readMailboxPreferenceValues, type MailboxPreferenceFields } from './mai
 import { loadMailDocument, messageSizeLimitBytes, messageSizeLimitFromPostconf, type MailDocument } from './mail/document.ts'
 import { auditActorQuery, auditTargetQuery, authorizeMailboxSessionBinding, createLocalMailboxTransport, mailFolderName, mailboxAddressIndex, rewriteMailboxIds } from './mail/inbox.ts'
 import { createApiApp, ensureRootPrincipal, listenApiServer } from './server.ts'
+import { readHostPerformance } from './monitoring-workspace.ts'
 import { authenticateRequest } from './auth.ts'
 import { assertAuthPersonalOwner } from './auth-personal.ts'
 import { assertOwnerApiTokenFeatureAccess } from './owner-api-tokens-workspace.ts'
@@ -732,12 +733,14 @@ export const createDefaultWebRenderer = async (deps: {
         return response.ok ? await response.json() : null
       } catch { return null }
     }
-    const resellerUsageObservations = resellerUsageRoute ? await (async () => {
+    // The root account list shows each account's own measured disk and traffic from the same two reads.
+    const accountListUsageRoute = principal.kind === 'root' && documentRoute.activeRoute === '/whm/accounts'
+    const resellerUsageObservations = resellerUsageRoute || accountListUsageRoute ? await (async () => {
       const [quotaRaw, bandwidthRaw] = await Promise.all([readResellerSource('/host/quota/usage'), readResellerSource('/host/monitoring/bandwidth')])
       let bandwidth: ReturnType<typeof projectBandwidthReport> | null = null
       try { bandwidth = bandwidthRaw === null ? null : projectBandwidthReport(bandwidthRaw) } catch { bandwidth = null }
       const quota = readQuotaUsageReply(quotaRaw)
-      return { resellers: resellerUsage(visibleResellers, snap.accounts, quota, bandwidth), accounts: accountUsage(snap.accounts.filter(account => account.ownerId !== null), quota, bandwidth) }
+      return { resellers: resellerUsage(visibleResellers, snap.accounts, quota, bandwidth), accounts: accountUsage(accountListUsageRoute ? snap.accounts : snap.accounts.filter(account => account.ownerId !== null), quota, bandwidth) }
     })() : undefined
     const visibleFirewall = principal.kind === 'root' ? snap.firewall.rules : []
     const accountDomains = snap.domains.filter((d) => d.accountId === account?.id)
@@ -846,7 +849,7 @@ export const createDefaultWebRenderer = async (deps: {
         return null
       }
     }
-    const [hostInfo, hostServices, hostDrift, overviewAudit, rollbackGeneration, auditListed] = await Promise.all([
+    const [hostInfo, hostServices, hostDrift, overviewAudit, rollbackGeneration, auditListed, hostPerformance] = await Promise.all([
       dashboardRoute || auditRoute ? readAgentJson('/host/info') : null,
       dashboardRoute ? readAgentJson('/host/services') : null,
       dashboardRoute ? readAgentJson('/host/drift') : null,
@@ -860,6 +863,9 @@ export const createDefaultWebRenderer = async (deps: {
             ...(actionFilter ? { action: actionFilter } : {}),
           }).catch(() => [])
         : [],
+      dashboardRoute && principal.kind === 'root'
+        ? readHostPerformance(options => listMetricsHistory(deps.db, { scope: 'host', ...options }), '24h', new Date()).catch(() => null)
+        : null,
     ])
     const mailboxAddresses = mailboxAddressIndex(
       snap.serviceUsers.filter(user => user.services.email && user.login.includes('@')).map(user => user.login),
@@ -928,7 +934,7 @@ export const createDefaultWebRenderer = async (deps: {
         ...(principal.kind === 'root' && snap.mailIpConfig ? { mailIpConfig: snap.mailIpConfig } : {}),
         ipPool: visibleIpPool,
         ...(principal.kind === 'root' ? { ipv6Ranges: snap.ipv6Ranges ?? [], aclLists: snap.aclLists ?? [], ...(documentRoute.activeRoute === '/whm/server/ips' ? { remoteServiceIps: await readRemoteServiceIps(deps.store.rootDir).catch(() => null) ?? { smtp: [], nameservers: [] } } : {}) } : {}),
-        ...(resellerUsageObservations ? { resellerUsage: resellerUsageObservations.resellers, accountUsage: resellerUsageObservations.accounts } : {}),
+        ...(resellerUsageObservations ? { ...(resellerUsageRoute ? { resellerUsage: resellerUsageObservations.resellers } : {}), accountUsage: resellerUsageObservations.accounts } : {}),
         firewallRules: visibleFirewall,
         ...(principal.kind === 'root' && snap.server ? {
           serverSettings: snap.server.settings,
@@ -958,6 +964,8 @@ export const createDefaultWebRenderer = async (deps: {
           ...(active?.activatedAt ? { generationActivatedAt: active.activatedAt } : {}),
           ...(rollbackGeneration ? { rollbackGenerationId: rollbackGeneration.id } : {}),
           ...(hostSample ? { hostSample } : {}),
+          ...(hostPerformance?.state === 'read' && hostPerformance.samples > 0 ? { performanceHistory: { from: hostPerformance.from, to: hostPerformance.to,
+            cpuPercent: hostPerformance.points.map(point => point.values.cpuPercent?.avg ?? null), memoryMb: hostPerformance.points.map(point => point.values.memoryMb?.avg ?? null) } } : {}),
           ...(serviceRows ? { services: serviceRows } : {}),
         } : {}),
       } } : {}),

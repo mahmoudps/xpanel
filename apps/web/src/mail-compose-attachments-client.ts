@@ -4,6 +4,9 @@ const mailTemplate = canonicalMailTemplate
 const mailSlot = canonicalMailSlot
 const mailRequireTemplates = canonicalMailRequireTemplates
 import { COMPOSE_ATTACHMENT_LIMITS, type ComposeAttachmentPayload } from '@xpanel/core'
+import { ASCII_BYTES_BINDING, formatIsolatedBytes as canonicalFormatClientBytes } from './display-format.ts'
+// Module-local alias: the binding source defines it again from ASCII_BYTES_BINDING.
+const formatClientBytes = canonicalFormatClientBytes
 
 // A local binding keeps serialized functions independent of bundler import rewriting.
 const composeAttachmentLimits = COMPOSE_ATTACHMENT_LIMITS
@@ -105,13 +108,13 @@ export function bindMailComposeAttachments(_askDialog: unknown): void {
       if (summary) {
         const count = document.createElement('bdi'), size = document.createElement('bdi')
         count.dir = 'ltr'; count.textContent = String(state.files.length)
-        size.dir = 'ltr'; size.textContent = String(state.files.reduce((total, file) => total + atob(file.contentBase64).length, 0)) + ' B'
+        size.dir = 'ltr'; size.textContent = formatClientBytes(state.files.reduce((total, file) => total + atob(file.contentBase64).length, 0))
         summary.replaceChildren(...t('{count} files · {size}').split(/(\{\w+\})/).filter(Boolean).map(part => part === '{count}' ? count : part === '{size}' ? size : document.createTextNode(part)))
       }
       state.files.forEach((file, index) => {
         const row = mailTemplate(root, 'mail-compose-attachment-row', 'li', ['name', 'size', 'remove']), filename = mailSlot(row, 'name', 'bdi'), size = mailSlot(row, 'size', 'bdi'), remove = mailSlot<HTMLButtonElement>(row, 'remove', 'button')
         filename.textContent = digits(file.filename)
-        size.textContent = String(atob(file.contentBase64).length) + ' B'
+        size.textContent = formatClientBytes(atob(file.contentBase64).length)
         remove.dataset.composeAttachmentRemove = String(index)
         remove.textContent = t('Remove'); remove.setAttribute('aria-label', t('Remove {file}', { file: digits(file.filename) }))
         remove.addEventListener('click', () => { if (!enabled() || sending() || state.pending) return; state.files = Object.freeze(state.files.filter((_, current) => current !== index)); render(); announce() })
@@ -165,4 +168,4 @@ export function bindMailComposeAttachments(_askDialog: unknown): void {
   })
 }
 
-export const MAIL_COMPOSE_ATTACHMENTS_CLIENT_BINDING = `(()=>{${MAIL_CLIENT_TEMPLATE_KIT}const composeAttachmentLimits=${JSON.stringify(composeAttachmentLimits)};const readComposeAttachmentPayload=${readComposeAttachmentPayload.toString()};return ${bindMailComposeAttachments.toString()};})()`
+export const MAIL_COMPOSE_ATTACHMENTS_CLIENT_BINDING = `(()=>{const formatClientBytes=${ASCII_BYTES_BINDING};${MAIL_CLIENT_TEMPLATE_KIT}const composeAttachmentLimits=${JSON.stringify(composeAttachmentLimits)};const readComposeAttachmentPayload=${readComposeAttachmentPayload.toString()};return ${bindMailComposeAttachments.toString()};})()`

@@ -1,4 +1,5 @@
 import { whmStoredFacts, type WhmStoredFactAuthority } from '../stored-facts.ts'
+import { whmPolish } from '../monitoring/common.ts'
 import { canOpenRegisteredRoute } from '@xpanel/catalog'
 import { localeDirection, type Translate } from '../../../../../i18n.ts'
 import { normalizeAsciiDigits } from '../../../../../display-format.ts'
@@ -58,7 +59,9 @@ export function adminContext(t: Translate, props: WhmSurfaceProps, authority: Wh
   const technical = (value: string | number): string => `<bdi class="v2-mono v2-num" dir="ltr">${e(value)}</bdi>`
   const status = (message: string, hooks?: HookAttributes, hidden = false): string => `<p role="status" data-state="unread"${hookAttrs(hooks)}${hidden ? ' hidden' : ''}>${text(message)}</p>`
   const facts = (rows: readonly { label: string; value?: string | number | null; technical?: boolean; hooks?: HookAttributes }[]): string => `<dl class="v2-admin-fields">${rows.map(row => `<div class="v2-admin-field"><dt>${text(row.label)}</dt><dd>${row.technical ? `<bdi dir="ltr"${hookAttrs(row.hooks)}>` : `<span${hookAttrs(row.hooks)}>`}${row.value === undefined || row.value === null ? text('Not read') : e(row.value)}${row.technical ? '</bdi>' : '</span>'}</dd></div>`).join('')}</dl>`
-  const table = (id: string, title: string, columns: readonly string[], hooks?: HookAttributes, body?: string, empty = 'Not read'): string => `<div class="v2-admin-table" role="region" tabindex="0" aria-labelledby="${e(id)}-caption"><table id="${e(id)}"><caption id="${e(id)}-caption" class="v2-sr">${text(title)}</caption><thead><tr>${columns.map(label => `<th scope="col">${text(label)}</th>`).join('')}</tr></thead><tbody${hookAttrs(hooks)}>${body ?? `<tr><td colspan="${columns.length}">${text(empty)}</td></tr>`}</tbody></table></div>`
+  // Column names travel as custom properties so phone rows can label each value.
+  const columnLabels = (columns: readonly string[]): string => ` style="${e(columns.map((label, index) => `--v2-col-${index + 1}:'${t(label).replace(/[\\']/g, '\\$&')}'`).join(';'))}"`
+  const table = (id: string, title: string, columns: readonly string[], hooks?: HookAttributes, body?: string, empty = 'Not read'): string => `<div class="v2-admin-table" role="region" tabindex="0" aria-labelledby="${e(id)}-caption"><table id="${e(id)}"${columnLabels(columns)}><caption id="${e(id)}-caption" class="v2-sr">${text(title)}</caption><thead><tr>${columns.map(label => `<th scope="col">${text(label)}</th>`).join('')}</tr></thead><tbody${hookAttrs(hooks)}>${body ?? `<tr><td colspan="${columns.length}">${text(empty)}</td></tr>`}</tbody></table></div>`
   const section = (id: string, title: string, bodyHtml: string, hooks?: HookAttributes): string => card({ id, title: t(title), titleId: `${id}-heading`, bodyHtml, hooks })
   const actions = (html: string): string => `<div class="v2-admin-actions">${html}</div>`
   const fields = (html: string): string => `<div class="v2-admin-fields">${html}</div>`
@@ -76,8 +79,8 @@ ${scope} :is(p,dl,dd,fieldset,ul,ol,pre){margin:0}
 ${scope} .v2-admin-columns{display:grid;grid-template-columns:minmax(0,1.75fr) minmax(240px,1fr);gap:var(--space-3);align-items:start}
 ${scope} .v2-admin-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-2)}
 ${scope} .v2-admin-field{display:flex;flex-direction:column;gap:var(--space-1);min-inline-size:0;text-align:start}
-${scope} .v2-admin-field :is(label,dt){font-size:13px;font-weight:600;color:var(--text-2)}
-${scope} .v2-admin-field>label,${scope} .v2-admin-field>.v2-muted{padding-inline:13px}
+${scope} dl.v2-admin-fields{grid-template-columns:repeat(auto-fill,minmax(min(200px,calc(50% - 8px)),1fr))}
+${scope} .v2-admin-field>label:not(.v2-admin-choice){padding-inline:13px;font-size:13px;line-height:1.25;font-weight:600;color:var(--text-2)}
 ${scope} .v2-admin-field dd{margin:0;overflow-wrap:anywhere}
 ${scope} .v2-admin-field :is(input,select,textarea){inline-size:100%;min-inline-size:0;max-inline-size:100%;box-sizing:border-box}
 ${scope} :is(input,textarea)[dir=ltr]{text-align:var(--v2-control-align,start);unicode-bidi:isolate}
@@ -87,8 +90,9 @@ ${scope} .v2-admin-choice{display:flex;align-items:center;gap:var(--space-1);min
 ${scope} fieldset{display:flex;flex-direction:column;gap:var(--space-2);border:1px solid var(--line);border-radius:var(--radius-control);padding:var(--space-2);min-inline-size:0}
 ${scope} legend{padding-inline:var(--space-1);font-weight:600}
 ${scope} .v2-admin-table{overflow:auto;min-inline-size:0;max-inline-size:100%}
-${scope} .v2-admin-table table{inline-size:100%;min-inline-size:600px;border-collapse:collapse}
+${scope} .v2-admin-table table{inline-size:100%;min-inline-size:480px;border-collapse:collapse}
 ${scope} .v2-admin-table :is(th,td){padding:12px 16px;text-align:start;vertical-align:top;overflow-wrap:anywhere;border-block-end:1px solid var(--line)}
+@media(min-width:1280px){${scope} .v2-admin-table :is(th,td){overflow-wrap:break-word}}
 ${scope} .v2-admin-table :is(th,td):first-child{padding-inline-start:var(--v2-panel-padding)}
 ${scope} .v2-admin-table :is(th,td):last-child{padding-inline-end:var(--v2-panel-padding)}
 ${scope} .v2-admin-table :is(bdi,time,code){font-family:var(--font-mono);font-variant-numeric:tabular-nums}
@@ -97,7 +101,10 @@ ${scope} .v2-admin-subgroup{display:flex;flex-direction:column;gap:var(--space-3
 ${scope} .v2-admin-secret{display:block;min-block-size:var(--target);padding:var(--space-2);border:1px solid var(--line-strong);border-radius:var(--radius-control);background:var(--sunken);font-family:var(--font-mono);overflow-wrap:anywhere;user-select:all}
 ${scope} pre{padding:var(--space-2);border-radius:var(--radius-control);background:var(--code);color:var(--code-text);white-space:pre-wrap;overflow-wrap:anywhere;max-block-size:360px;overflow:auto}
 ${scope} [hidden]{display:none!important}
-@media(max-width:900px){${scope} .v2-admin-columns{grid-template-columns:minmax(0,1fr)}}
-@media(max-width:600px){${scope} .v2-admin-fields{grid-template-columns:minmax(0,1fr)}}
+${whmPolish(scope)}@media(max-width:900px){${scope} .v2-admin-columns{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:600px){${scope} div.v2-admin-fields{grid-template-columns:minmax(0,1fr)}
+${scope} .v2-admin-table table:not(:has([data-setting-row]),#v2-panel-token-scopes) td:nth-child(n+3):not([colspan])::before{flex:0 1 auto;max-inline-size:50%;font-size:13px;color:var(--muted);text-align:start;font-family:var(--font-sans)}
+${scope} .v2-admin-table table:not(:has([data-setting-row]),#v2-panel-token-scopes) td:nth-child(n+3):not([colspan],:empty){display:flex;justify-content:space-between;align-items:baseline;gap:16px;text-align:end}
+${[3, 4, 5, 6, 7, 8, 9, 10].map(n => `${scope} .v2-admin-table table:not(:has([data-setting-row]),#v2-panel-token-scopes) td:nth-child(${n}):not([colspan],:empty)::before{content:var(--v2-col-${n})}`).join('\n')}}
 `
 }

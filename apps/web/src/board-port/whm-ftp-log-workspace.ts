@@ -13,7 +13,7 @@ export function renderWhmFtpLog(input: { locale: Locale; canRead: boolean }): st
   const t = translator(input.locale), tag = input.canRead ? 'form' : 'div'
   const kinds = [['', t('Any event')], ['connect', t('Connected')], ['login', t('Signed in')], ['login-failed', t('Sign-in failed')], ['upload', t('Uploaded')], ['download', t('Downloaded')], ['delete', t('Deleted')], ['logout', t('Signed out')], ['timeout', t('Timed out')]]
   const tiles = [['succeeded', t('Successful sign-ins')], ['failed', t(msgctxt('whm-ftp-log-workspace', 'Failed sign-ins'))], ['connections', t('Connections')], ['uploads', t('Uploads')], ['uploadBytes', t('Uploaded bytes')], ['downloads', t('Downloads')], ['downloadBytes', t('Downloaded bytes')], ['deletes', t('Deletions')]]
-  const events = [t('Time (UTC)'), t('Event'), t('User'), t('Account'), t('Client'), t('Path'), t('Size (bytes)')]
+  const events = [t('Time (UTC)'), t('Event'), t('User'), t('Account'), t('Client'), t('Path'), t('Size')]
   return `${styles}<div class="xp-whm-ftp-log xp-whm-detail-grid" data-whm-ftp-log data-ftp-log-can-read="${input.canRead}" lang="${input.locale}" dir="${localeDirection(input.locale)}">
   <div class="xp-whm-detail-column">
     <section class="xp-whm-detail-card" aria-labelledby="whm-ftp-log-search"><h2 id="whm-ftp-log-search">${t('Search FTP activity')}</h2>

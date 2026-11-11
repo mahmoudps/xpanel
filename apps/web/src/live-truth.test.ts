@@ -163,7 +163,7 @@ describe('live truth surfaces', () => {
   })
 
   it('formats the IO cap in decimal units and shows the last sign-in', () => {
-    assert.equal(formatAsciiBytes(50_000_000), '50.0 MB')
+    assert.equal(formatAsciiBytes(50_000_000), '47.7\u00a0MiB')
     const home = xpanelHomeFromProps({
       account: { username: 'demohost', uid: 1001, home: '/home/demohost', primaryDomain: 'demo.example.test', ipv4: '192.0.2.10' },
       plan: { name: 'Demo', resources: { diskMb: 1000, bandwidthMbMonth: 1000, memoryMb: 512, maxProcesses: 20, ioWriteBps: 50_000_000 }, caps: { addonDomains: 5, mailboxes: 20, databases: 5 } },
@@ -179,16 +179,16 @@ describe('live truth surfaces', () => {
       usage: { phpVersion: '8.3', diskBytes: 1_500_000_000, memoryBytes: 120_000_000, processCount: 4, bandwidth: 'unmeasured', ioEnforced: false },
     }).desktop
     assert.match(sampled.info.map(row => row.valueHtml).join(' '), /8\.3 · PHP-FPM/)
-    assert.match(sampled.meters.find(meter => meter.label === 'Disk')?.value ?? '', /1\.50 GB \/ 5 GB/)
-    assert.match(sampled.meters.find(meter => meter.label === 'Memory')?.value ?? '', /120 MB \/ 537 MB/)
+    assert.match(sampled.meters.find(meter => meter.label === 'Disk')?.value ?? '', /1\.40\u00a0GiB \/ 5\.00\u00a0GiB/)
+    assert.match(sampled.meters.find(meter => meter.label === 'Memory')?.value ?? '', /114\u00a0MiB \/ 512\u00a0MiB/)
     assert.equal(sampled.meters.find(meter => meter.label === 'IO write cap')?.value, 'not enforced')
     const capped = xpanelHomeFromProps({
       account: { username: 'demohost', uid: 20000, home: '/home/demohost', primaryDomain: 'demo.example.test', ipv4: '192.0.2.10' },
       plan: { name: 'Demo', resources: { diskMb: 5120, bandwidthMbMonth: 1024, memoryMb: 1024, maxProcesses: 20, ioWriteBps: 50_000_000 }, caps: { addonDomains: 5, mailboxes: 20, databases: 5 } },
       usage: { phpVersion: '8.3', diskBytes: 1_500_000_000, memoryBytes: 120_000_000, processCount: 4, bandwidth: 'unmeasured', ioEnforced: true },
     }).desktop
-    assert.equal(capped.meters.find(meter => meter.label === 'IO write cap')?.value, '50.0 MB/s')
-    assert.match(capped.meters.find(meter => meter.label === 'Memory')?.value ?? '', /120 MB \/ 1\.07 GB/)
+    assert.equal(capped.meters.find(meter => meter.label === 'IO write cap')?.value, '47.7\u00a0MiB/s')
+    assert.match(capped.meters.find(meter => meter.label === 'Memory')?.value ?? '', /114\u00a0MiB \/ 1\.00\u00a0GiB/)
     assert.equal(sampled.meters.find(meter => meter.label === 'Processes')?.value, '4 / 20')
     assert.match(sampled.meters.find(meter => meter.label === 'Monthly bandwidth')?.value ?? '', /not measured yet/)
     assert.equal(sampled.metricsUnavailable, false)

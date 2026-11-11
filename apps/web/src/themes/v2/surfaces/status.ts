@@ -46,6 +46,6 @@ export function renderV2Status(props: StatusPageModel & ThemeViewProps): string 
 }
 
 export const V2_STATUS_CSS = `.v2-status-card{display:flex;flex-direction:column;gap:var(--space-3);inline-size:min(100%,720px);margin-inline:auto;padding:var(--space-3)}
-.v2-status-code{font:600 40px var(--font-mono);color:var(--muted)}.v2-status-actions{display:flex;flex-wrap:wrap;gap:var(--space-2)}
+.v2-status-code{font:600 40px var(--font-mono);color:var(--muted)}.v2-status-actions{display:flex;flex-wrap:wrap;gap:var(--space-2)}.v2-status-actions:empty{display:none}
 .v2-status-standalone{display:flex;flex-direction:column;min-block-size:100dvh}.v2-status-header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--space-2);padding:var(--space-3);background:var(--surface);border-block-end:1px solid var(--line)}.v2-status-main{flex:1;display:grid;align-content:center;padding:var(--space-4) var(--space-3)}
 @media(max-width:600px){.v2-status-card,.v2-status-header{padding:var(--space-2)}.v2-status-main{padding:var(--space-4) var(--space-2)}}`

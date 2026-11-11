@@ -66,6 +66,13 @@ function bindWhmSecurity(): void {
         if (saved.state === 'read') { fact(t('Saved panel port'), String(saved.panelPort)); fact(t('Saved SSH port'), String(saved.sshPort)); fact(t('Saved web engine'), String(saved.engine)) }
         else fact(t('Saved configuration'), t('Unavailable'), false)
         rows.replaceChildren(nextRows); config.replaceChildren(nextConfig)
+        // Optional count slots: a theme may show the totals of the painted findings as text.
+        for (const slot of root.closest('[data-whm-detail-route]')?.querySelectorAll<HTMLElement>('[data-whm-security-count]') ?? []) {
+          slot.textContent = String(checks.filter(check => slot.dataset.whmSecurityCount === 'all' || check.state === slot.dataset.whmSecurityCount).length)
+          // A v2 tile drops its text styling and its "Not read" note once it holds a count.
+          const tile = slot.parentElement
+          if (tile?.classList.contains('v2-kpi__value')) { tile.classList.remove('v2-kpi__value--text'); for (const node of Array.from(tile.parentElement?.children ?? [])) if (node.classList.contains('v2-kpi__note')) node.remove() }
+        }
         note('read', t('Individual observations read. Unknown checks remain unavailable; no overall security qualification is claimed.'))
       } catch { if (verifyTemplates()) note('failed', t('Security observations could not be read. Existing values are retained and no change was sent.')) }
       finally { busy = false; root.setAttribute('aria-busy', 'false'); refresh.disabled = !admitted() }

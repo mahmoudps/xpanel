@@ -44,7 +44,11 @@ export const LOGIN_CLIENT_SCRIPT = MOBILE_NAVIGATION_CLIENT_SCRIPT + /* js */ St
     if (errorBox) { errorBox.textContent = error ? text : ''; errorBox.hidden = !error; }
     if (statusBox) statusBox.textContent = error ? '' : text;
   }
-  function setState(state) { if (shell) shell.setAttribute('data-auth-state', state); }
+  function setState(state) {
+    if (shell) shell.setAttribute('data-auth-state', state);
+    var heading = document.getElementById('login-heading');
+    if (heading && heading.hasAttribute('data-v2-credential-title')) heading.textContent = heading.getAttribute(state === 'mfa-required' ? 'data-v2-factor-title' : 'data-v2-credential-title') || '';
+  }
   function factorManagementBlocked() { return mfaDisabled || securityReadOnly; }
   function busy(form, active) {
     form.setAttribute('aria-busy', String(active));

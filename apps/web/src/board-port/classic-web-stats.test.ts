@@ -30,7 +30,7 @@ describe('classic web statistics', () => {
     expect([...root.querySelectorAll('form')].every(form => form.method === 'get' && form.getAttribute('action') === '/metrics/web-stats')).toBe(true)
     expect([...root.querySelectorAll<HTMLButtonElement>('button[name="month"]')].map(button => button.value)).toEqual(['2026-11', '2026-10'])
     expect(root.querySelector('button[name="scheme"][aria-pressed="true"]')?.getAttribute('value')).toBe('http')
-    expect(cells(root, 'web-stats-days')).toEqual([['2026-11-05', '3', '10', '20', '20.5 KB'], ['2026-11-06', '9', '30', '70', '61.4 KB']])
+    expect(cells(root, 'web-stats-days')).toEqual([['2026-11-05', '3', '10', '20', '20.0\u00a0KiB'], ['2026-11-06', '9', '30', '70', '60.0\u00a0KiB']])
     expect(cells(root, 'web-stats-pages')[0]![0]).toBe('/shop/')
     expect(cells(root, 'web-stats-countries').map(row => row[0])).toEqual(['de', 'ip'])
     expect(root.querySelector('[data-workspace-table="web-stats-pages"] tbody [data-technical-value] bdi[dir="ltr"]')).not.toBeNull()

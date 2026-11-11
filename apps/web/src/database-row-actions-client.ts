@@ -35,7 +35,7 @@ function bindDatabaseRowActions(askDialog: ((options: Record<string, unknown>) =
         if (action === 'password') { if (resetUser) { resetUser.value = id; resetPassword?.focus() } return }
         const asked = action === 'rename' ? await askDialog({ title: t('Rename database'), body: t('The database is copied to the new name, then the old copy is removed. Update the sites that use it.'), input: true, label: t('New name'), value: name })
           : action === 'import' ? await askDialog({ title: t('Import a dump'), body: t('Enter a .sql or .sql.gz file inside your home. Its statements run inside {name} only.', { name }), input: true, label: t('Dump file'), value: '' })
-            : await askDialog({ title: action === 'drop' ? t('Drop this database?') : t('Delete this user?'), body: name + ' — ' + t('This cannot be undone.'), confirm: t('Delete'), danger: true })
+            : await askDialog({ title: action === 'drop' ? t('Drop this database?') : t('Delete this user?'), code: name, body: t('This cannot be undone.'), confirm: t('Delete'), danger: true })
         if (!asked) return
         button.disabled = true; say(t('Working…'))
         try {

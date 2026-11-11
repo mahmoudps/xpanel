@@ -120,26 +120,26 @@ async function createMfaFixture(mfaMode = 'disabled', principalKind = 'root') {
 
 async function geometry(page) {
   return page.evaluate(() => {
-    const visible = element => element.checkVisibility() && !element.closest('[hidden],[inert]')
-    const controls = [...document.querySelectorAll('button,a.xp-btn,a.xp-nav-item,summary,input:not([type="hidden"]),select,textarea')].filter(visible).map(element => {
+    const visible = element => element.checkVisibility({ checkVisibilityCSS: true }) && !element.closest('[hidden],[inert]')
+    const controls = [...document.querySelectorAll('button,a.v2-btn,.v2-nav a,a.xp-btn,a.xp-nav-item,summary,input:not([type="hidden"]),select,textarea')].filter(visible).map(element => {
       // A compact checkbox or radio is hit through its single HTML-associated label; a full-size control is measured itself.
       const own = element.getBoundingClientRect(), compact = own.width < 43.5 || own.height < 43.5
       const hit = compact && ['checkbox', 'radio'].includes(element.type) && element.labels?.length === 1 ? element.labels[0] : element
       const rect = hit.getBoundingClientRect()
       return { tag: element.tagName, id: element.id || null, target: hit === element ? 'control' : 'associated_label', width: rect.width, height: rect.height }
     })
-    const fields = [...document.querySelectorAll('[data-login-form] .xp-field,.xp-account-security .xp-field')].filter(visible).flatMap(element => {
+    const fields = [...document.querySelectorAll('[data-login-form] .v2-login__field,[data-login-form] .v2-field,.v2-security .v2-security__field,[data-login-form] .xp-field,.xp-account-security .xp-field')].filter(visible).flatMap(element => {
       const label = element.querySelector('label'), control = element.querySelector('input,select,textarea')
       if (!label || !control || !visible(control)) return []
       const a = label.getBoundingClientRect(), b = control.getBoundingClientRect()
       return [{ gap: b.top - a.bottom, height: b.height, label_text: label.textContent.trim() }]
     })
-    const card = document.querySelector('.xp-login-card,.xp-account-security'), style = getComputedStyle(card)
-    const security = document.querySelector('[data-security-page] > .xp-account-security[data-auth-state="development-disabled"]')
+    const card = document.querySelector('.v2-login__card,[data-account-security],.xp-login-card,.xp-account-security'), style = getComputedStyle(card)
+    const security = document.querySelector('[data-security-page] [data-account-security][data-auth-state="development-disabled"]')
     let security_layout = null
     if (security) {
       const wrapper = security.parentElement
-      const title = wrapper.querySelector(':scope > h1')
+      const title = wrapper.querySelector(':scope > .v2-page-head, :scope > h1')
       const heading = security.querySelector(':scope > h2')
       const status = security.querySelector(':scope > p[role="status"]')
       if (title && heading && status) {
@@ -172,10 +172,13 @@ async function geometry(page) {
 async function recoveryCommandGeometry(page, requireCommand = true) {
   return page.evaluate(requireCommand => {
     const card = document.querySelector('[data-account-security][data-mfa-enabled="true"]')
-    const heading = card?.querySelector(':scope > h2'), status = card?.querySelector(':scope > p[role="status"]'), help = card?.querySelector(':scope > p.xp-help'), command = help?.querySelector('bdi')
-    // The root page places the card beside its page title; the xPanel personal workspace nests it under its section heading.
-    const title = card?.parentElement.querySelector(':scope > h1') ?? card?.parentElement.closest('section[aria-labelledby]')?.querySelector(':scope > h2')
-    if (!card || !heading || !status || !title || (requireCommand && (!help || !command))) return null
+    const heading = card?.querySelector(':scope > h2'), status = card?.querySelector(':scope > p[role="status"]'), help = card?.querySelector(':scope > p:has(> bdi), :scope > p.xp-help'), command = help?.querySelector('bdi')
+    // The root page places the card beside its page header; the xPanel personal workspace nests it in its spaced section sequence.
+    const lead = card?.parentElement.querySelector(':scope > .v2-page-head, :scope > h1')
+      ?? card?.closest('[data-presentation-tab-visible]')?.previousElementSibling
+      ?? card?.parentElement.closest('section[aria-labelledby]')?.querySelector(':scope > h2')
+    const title = lead?.matches('h1, h2') ? lead : lead?.querySelector('h1') ?? document.querySelector('[data-security-page] h1')
+    if (!card || !heading || !status || !lead || !title || (requireCommand && (!help || !command))) return null
     const rtl = document.dir === 'rtl', edge = rect => rtl ? rect.right : rect.left
     const range = element => { const value = document.createRange(); value.selectNodeContents(element); return value.getBoundingClientRect() }
     const c = card.getBoundingClientRect(), h = heading.getBoundingClientRect(), s = status.getBoundingClientRect(), p = help?.getBoundingClientRect(), style = getComputedStyle(card)
@@ -206,7 +209,7 @@ async function recoveryCommandGeometry(page, requireCommand = true) {
     return {
       root_command_present: Boolean(command), text: command?.textContent ?? null, visible: command?.checkVisibility() ?? false, direction: commandStyle?.direction ?? null, unicode_bidi: commandStyle?.unicodeBidi ?? null,
       glyph_count: glyphs.length, lexemes, all_glyphs_visible: Boolean(command) && glyphs.every(r => r.width > 0 && r.height > 0 && r.left >= innerLeft - 0.75 && r.right <= innerRight + 0.75 && r.top >= p.top - 0.75 && r.bottom <= p.bottom + 0.75),
-      title_kind: title.tagName, page_to_card: c.top - title.getBoundingClientRect().bottom, heading_to_status: s.top - h.bottom, status_to_help: p ? p.top - s.bottom : null,
+      title_kind: title.tagName, page_to_card: c.top - lead.getBoundingClientRect().bottom, heading_to_status: s.top - h.bottom, status_to_help: p ? p.top - s.bottom : null,
       heading_content_delta: Math.abs(edge(range(heading)) - innerEdge), status_content_delta: Math.abs(edge(range(status)) - innerEdge), help_content_delta: help ? Math.abs(edge(range(help)) - innerEdge) : null,
       inner_left: innerLeft, inner_right: innerRight, help_left: p?.left ?? null, help_right: p?.right ?? null,
     }
@@ -214,7 +217,7 @@ async function recoveryCommandGeometry(page, requireCommand = true) {
 }
 
 async function recoveryCommandFont(page) {
-  const selector = '[data-account-security][data-mfa-enabled="true"] .xp-help bdi'
+  const selector = '[data-account-security][data-mfa-enabled="true"] p bdi'
   const session = await page.context().newCDPSession(page)
   try {
     await session.send('DOM.enable')
@@ -311,9 +314,12 @@ export async function runMfaRuntimeAcceptance({ output, screenshotBudget = 8, fi
         assert.equal(fonts.ready, true, 'Fonts must settle within 5 seconds.')
         assert.deepEqual(fonts.failed_faces, [])
         row.fonts = fonts
-        row.fonts.heading = await assertAppliedFont(page, state.screen === 'login' ? '.xp-login-shell h1' : '[data-security-page] > h1, [data-security-page] > header > h1', state.locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans')
+        const isV2 = await page.locator('[data-ui-theme="v2"]').count() > 0
+        row.fonts.heading = await assertAppliedFont(page, state.screen === 'login' ? '.v2-login h1, .xp-login-shell h1' : '[data-security-page] h1', state.locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans')
         if (state.screen === 'login') {
-          row.fonts.wordmark = await assertAppliedFont(page, '.xp-brand__name', 'IBM Plex Mono', { role: 'login-wordmark' })
+          row.fonts.wordmark = isV2
+            ? await assertAppliedFont(page, '[data-login-product]', state.locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans')
+            : await assertAppliedFont(page, '.xp-brand__name', 'IBM Plex Mono', { role: 'login-wordmark' })
           await page.locator('#login-username').fill('root')
           await page.locator('#login-password').fill(syntheticPassword)
           await page.locator('#login-password').evaluate(input => input.setSelectionRange(2, 8, 'backward'))
@@ -338,11 +344,11 @@ export async function runMfaRuntimeAcceptance({ output, screenshotBudget = 8, fi
           assert.equal(await page.locator('[data-mfa-enabled="true"],[data-auth-recovery]').count(), 0)
         } else if (state.screen === 'recovery-command') {
           await expect(page.locator('[data-account-security]')).toHaveAttribute('data-mfa-enabled', 'true')
-          await expect(page.locator('[data-account-security] .xp-help bdi')).toHaveText('xpanel disable-2fa root --confirm')
+          await expect(page.locator('[data-account-security] p bdi')).toHaveText('xpanel disable-2fa root --confirm')
           row.fonts.command = await recoveryCommandFont(page)
         } else {
           await expect(page.locator('[data-account-security]')).toHaveAttribute('data-mfa-enabled', 'true')
-          assert.equal(await page.locator('[data-account-security] .xp-help bdi').count(), 0, 'User cards never render the root recovery command.')
+          assert.equal(await page.locator('[data-account-security] p bdi').count(), 0, 'User cards never render the root recovery command.')
           assert.equal(await page.locator('[data-account-security]').evaluate(card => card.textContent.includes('disable-2fa')), false)
           row.fonts.status = await assertAppliedFont(page, '[data-account-security] > p[role="status"]', state.locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans')
         }
@@ -352,7 +358,7 @@ export async function runMfaRuntimeAcceptance({ output, screenshotBudget = 8, fi
         assert.ok(metrics.scroll_width <= state.width + 1, 'No document horizontal overflow.')
         assert.equal(metrics.ascii, true, 'Visible digits must remain ASCII.')
         assert.ok(metrics.controls.every(control => control.width >= 43.5 && control.height >= 43.5), 'Visible controls retain 44px targets.')
-        const cardPadding = state.width <= 640 ? 16 : 24
+        const cardPadding = state.width <= 640 ? 16 : isV2 && state.screen === 'login' ? 32 : 24
         assert.equal(metrics.padding_top, cardPadding)
         assert.equal(metrics.padding_inline, cardPadding)
         assert.equal(metrics.row_gap, 24, 'Card content groups retain the 24px role.')
@@ -395,7 +401,7 @@ export async function runMfaRuntimeAcceptance({ output, screenshotBudget = 8, fi
         }
         if (state.screen === 'login') {
           assert.equal(metrics.fields.length, 2)
-          assert.ok(metrics.fields.every(field => field.label_text && Math.abs(field.gap - 8) <= 1 && field.height >= 48), 'Two labeled 48px inputs retain 8px label gaps.')
+          assert.ok(metrics.fields.every(field => field.label_text && Math.abs(field.gap - 8) <= 1 && field.height >= (isV2 ? 43.5 : 48)), 'Two labeled inputs retain 8px label gaps.')
           assert.ok(metrics.submit_bottom <= metrics.height, 'The essential sign-in form fits the first viewport.')
           await capture(page, row, 'filled-login-before-synthetic-submission')
           if (row.screenshot_failure) throw new Error('The representative sign-in screenshot could not be written.')

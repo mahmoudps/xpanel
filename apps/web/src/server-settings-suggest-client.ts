@@ -17,6 +17,8 @@ function bindServerSettingsDraft(): void {
       try { values = JSON.parse(button.dataset.serverSettingsSuggest ?? '') as Record<string, unknown> } catch { return }
       for (const [name, value] of Object.entries(values)) {
         const control = form.elements.namedItem(name)
+        // A radio group takes the suggestion as its checked choice.
+        if (control instanceof RadioNodeList) { if (!Array.from(control).some(item => (item as HTMLInputElement).disabled)) control.value = String(value); continue }
         if (!(control instanceof HTMLInputElement) || control.disabled) continue
         if (control.type === 'checkbox') control.checked = value === true
         else control.value = String(value)

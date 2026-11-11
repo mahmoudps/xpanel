@@ -20,11 +20,11 @@ describe('v2 account list', () => {
   it.each(['en', 'ar'] as const)('renders the %s configured IO write cap without treating missing usage as throughput', locale => {
     const translate = v2Messages.translator(locale)
     const ioCell = (html: string): string => {
-      const cells = [...html.matchAll(/<td data-account-table-value="io-write">([\s\S]*?)<\/td>/g)]
+      const cells = [...html.matchAll(/<td data-account-table-value="io-write"[^>]*>([\s\S]*?)<\/td>/g)]
       expect(cells).toHaveLength(1)
       return cells[0]![1]!
     }
-    for (const [cap, expected] of [[2_000_000, '2.00 MB/s'], [0, '0 B/s'], ['unlimited', translate('Unlimited')]] as const) {
+    for (const [cap, expected] of [[2_000_000, '1.91\u00a0MiB/s'], [0, '0\u00a0B/s'], ['unlimited', translate('Unlimited')]] as const) {
       const cell = ioCell(renderV2WhmAccountList(translate, { ...props, locale, plans: [{ ...plan, resources: { ...plan.resources, ioWriteBps: cap } }] }))
       expect(cell.replace(/<[^>]+>/g, '')).toBe(expected)
       if (typeof cap === 'number') expect(cell).toMatch(/<bdi\b[^>]*dir="ltr"/)
@@ -41,9 +41,9 @@ describe('v2 account list', () => {
     const principal: Principal = { kind: 'reseller', id: 'internal-reseller', username: 'partner' }
     const reseller: Reseller = { id: principal.id, username: principal.username, acl: ['list-accounts'], maxAccounts: 5, totalDiskMb: 100000, totalBandwidthMb: 100000, oversell: { disk: false, bandwidth: false }, nameservers: [], delegatedIps: [] }
     const scoped: WhmSurfaceProps = { ...props, principal, visibility: { principal, reseller }, activeReseller: reseller, accounts: [{ ...account, ownerId: principal.id }] }
-    const cell = (input: WhmSurfaceProps) => renderV2WhmAccountList(t, input).match(/<td data-account-table-value="io-write">([\s\S]*?)<\/td>/)?.[1] ?? ''
+    const cell = (input: WhmSurfaceProps) => renderV2WhmAccountList(t, input).match(/<td data-account-table-value="io-write"[^>]*>([\s\S]*?)<\/td>/)?.[1] ?? ''
     for (const ownerId of [null, principal.id]) {
-      expect(cell({ ...scoped, plans: [{ ...plan, ownerId, resources: { ...plan.resources, ioWriteBps: 2_000_000 } }] })).toContain('2.00 MB/s')
+      expect(cell({ ...scoped, plans: [{ ...plan, ownerId, resources: { ...plan.resources, ioWriteBps: 2_000_000 } }] })).toContain('1.91\u00a0MiB/s')
     }
     const foreignPlan = { ...plan, ownerId: 'other-reseller', resources: { ...plan.resources, ioWriteBps: 9_000_000 } }
     expect(cell({ ...scoped, plans: [foreignPlan] })).toBe('Not read')
@@ -57,11 +57,26 @@ describe('v2 account list', () => {
     const headers = [...table.matchAll(/<th\b[^>]*>([\s\S]*?)<\/th>/g)]
     const firstRow = table.match(/<tbody>\s*<tr\b[^>]*>([\s\S]*?)<\/tr>/)?.[1] ?? ''
     const cells = [...firstRow.matchAll(/<td\b[^>]*>[\s\S]*?<\/td>/g)]
-    expect(headers).toHaveLength(11)
+    expect(headers).toHaveLength(8)
     expect(cells).toHaveLength(headers.length)
-    expect(headers[8]![1]).toBe(translate('IO write cap'))
-    expect(cells[8]![0]).toContain('data-account-table-value="io-write"')
-    expect(renderV2WhmAccountList(translate, { ...props, locale, accounts: [] })).toContain('<td colspan="11">')
+    expect(headers[6]![1]).toBe(translate('IO write cap'))
+    expect(cells[6]![0]).toContain('data-account-table-value="io-write"')
+    expect(renderV2WhmAccountList(translate, { ...props, locale, accounts: [] })).toContain('<td colspan="8">')
+  })
+  it('shows measured disk and traffic against the limit with a meter, and Not read for what the host did not report', () => {
+    const limited = { ...plan, resources: { ...plan.resources, diskMb: 1000, bandwidthMbMonth: 'unlimited' as const } }
+    const read = (bytes: number | null) => ({ state: 'read' as const, bytes, observedAt: '2026-11-10T08:00:00.000Z', unmeasured: bytes === null ? 1 : 0 })
+    const html = renderV2WhmAccountList(t, { ...props, plans: [limited], accountUsage: { [account.id]: { disk: read(900 * 1048576), traffic: read(5 * 1048576) } } })
+    expect(html).toContain('<bdi dir="ltr">900\u00a0MiB</bdi> / <bdi dir="ltr">1000\u00a0MiB</bdi></span><div class="v2-bar" role="meter" aria-label="Disk" aria-valuemin="0" aria-valuemax="100" aria-valuenow="90" aria-valuetext="900\u00a0MiB / 1000\u00a0MiB"><span class="v2-bar__fill v2-bar--warn" style="inline-size:90%">')
+    // An unlimited limit has no scale: the measured value is shown without a bar.
+    expect(html).toContain('<bdi dir="ltr">5.00\u00a0MiB</bdi> / Unlimited</span></div>')
+    // The disk meter is drawn in the row and in the detail panel; unlimited traffic has none.
+    expect([...html.matchAll(/role="meter"/g)]).toHaveLength(2)
+    expect(html).not.toContain('Usage / configured plan limit. Usage has not been read.')
+    const unreported = renderV2WhmAccountList(t, { ...props, plans: [limited], accountUsage: { [account.id]: { disk: read(null), traffic: { state: 'unavailable', bytes: null, observedAt: null, unmeasured: 1 } } } })
+    expect(unreported).toContain('<span>Not read / <bdi dir="ltr">1000\u00a0MiB</bdi></span></div>')
+    expect(unreported).toContain('<span>Not read / Unlimited</span></div>')
+    expect(unreported).not.toContain('role="meter"')
   })
   it('keeps authorized real account actions, the native dialog and list controller hooks', () => {
     const html = renderV2WhmAccountList(t, props)
@@ -110,6 +125,35 @@ describe('v2 native create account', () => {
     expect(html).toContain('name="password" type="password" required minlength="8"')
   })
 
+  it('offers plans and IP modes as choice cards and reviews only the real form defaults', () => {
+    const html = renderV2WhmAccountCreate(t, { ...props, plans: [plan, { ...plan, id: 'second-plan', name: 'Second plan' }] })
+    expect(html).not.toContain('<select id="new-acc-plan"')
+    expect(html).toContain('<fieldset class="v2-whm-create__owners" id="new-acc-plan">')
+    expect(html).toContain(`<input type="radio" id="new-acc-plan-0" name="planId" value="${plan.id}" required checked data-review-label="Business">`)
+    expect(html).toContain('<input type="radio" id="new-acc-plan-1" name="planId" value="second-plan" required data-review-label="Second plan">')
+    expect(html).toContain('name="ipMode" value="shared" data-account-ip-mode checked>')
+    expect(html).toContain('name="ipMode" value="dedicated:auto" data-account-ip-mode disabled>')
+    expect(html).toContain('<select id="new-acc-ipv4" name="ipAssignment" required')
+    for (const field of ['username', 'primaryDomain', 'contactEmail', 'planId', 'ownerId', 'ipAssignment', 'ipv6', 'shell']) expect([...html.matchAll(new RegExp(`data-create-review="${field}"`, 'g'))]).toHaveLength(1)
+    expect(html).not.toContain('data-create-review="password"')
+    expect(html).toContain('<bdi data-create-review="planId">Business</bdi>')
+    expect(html).toContain('<bdi data-create-review="ownerId">root</bdi>')
+    expect(html).toContain('<bdi data-create-review="username">Not entered</bdi>')
+    expect(html).toContain('<bdi data-create-review="shell">Jailed shell</bdi>')
+    expect([...html.matchAll(/Checked when submitted/g)]).toHaveLength(3)
+    expect(html).toContain('data-account-ip-check>IP availability has not been read.')
+  })
+  it('formats plan IO rates like the account list instead of raw bytes', () => {
+    const html = renderV2WhmAccountCreate(t, { ...props, plans: [{ ...plan, resources: { ...plan.resources, ioReadBps: 2_000_000, ioWriteBps: 'unlimited' } }] })
+    expect(html).toContain('<bdi dir="ltr">1.91\u00a0MiB/s</bdi>')
+    expect(html).not.toContain('2000000')
+  })
+  it('keeps one disabled plan control and an unread review when plans were not read', () => {
+    const html = renderV2WhmAccountCreate(t, { ...props, plans: undefined })
+    expect(html).toContain('<input type="radio" id="new-acc-plan-empty" name="planId" value="" disabled>')
+    expect(html).toContain('<bdi data-create-review="planId">Not read</bdi>')
+    expect(html).toContain('type="submit" class="v2-btn v2-btn--primary" disabled')
+  })
   it('fails closed without qualification and never exposes another owner’s plans', () => {
     const html = renderV2WhmAccountCreate(t, { ...props, catalog: [] })
     expect(html).toContain('Account creation is not qualified for this host or caller.')
@@ -160,6 +204,33 @@ describe('v2 stored account facts without provider qualification', () => {
   })
 })
 
+describe('v2 account list board regions', () => {
+  it('names the list, counts it, keeps secondary values under their primary cell and folds every detail form', () => {
+    const html = renderV2WhmAccountList(t, props)
+    expect(html).toContain('<h2 id="v2-whm-accounts-list">Account list</h2><p>1 account in total. Newest first.</p>')
+    expect(html).toContain('Resellers see only the accounts they own.')
+    expect(html).toContain('<a href="/whm/plans" class="v2-btn">Plans</a>')
+    expect(html.split('href="/whm/accounts">Clear filters<')).toHaveLength(3)
+    expect(html).toContain('<small class="v2-muted v2-mono" data-account-table-value="ip"><bdi dir="ltr">192.0.2.10</bdi></small>')
+    expect(html).toContain('<small class="v2-muted" data-account-table-value="owner">Owner <bdi dir="ltr">root</bdi></small>')
+    for (const hook of ['disk', 'bandwidth']) expect(html).toContain(`<div class="v2-whm-accounts__quota" data-account-table-value="${hook}">`)
+    const nodes = parseMarkup(html)
+    for (const hook of ['data-account-contact-form', 'data-account-password-form', 'data-account-plan-form', 'data-account-limits-form']) {
+      const form = nodes.find(node => node.attrs.has(hook))!
+      expect(nodes[form.parent]!.tag).toBe('details')
+    }
+    // The row keeps one opener; the handoff lives in the row menu and in the panel, never on the opener.
+    const handoffs = nodes.filter(node => node.attrs.has('data-handoff'))
+    expect(handoffs).toHaveLength(2)
+    expect(handoffs.map(node => node.attrs.get('role') ?? 'button').sort()).toEqual(['button', 'menuitem'])
+  })
+
+  it('shows no root scope note, plan link or account count to a caller who may not list accounts', () => {
+    const principal: Principal = { kind: 'reseller', id: 'internal-reseller', username: 'partner' }
+    const html = renderV2WhmAccountList(t, { ...props, principal, visibility: { principal }, accounts: [] })
+    for (const absent of ['Resellers see only the accounts they own.', 'href="/whm/plans"', 'in total.']) expect(html).not.toContain(absent)
+  })
+})
 
 describe('v2 selected account detail composition', () => {
   it.each(['en', 'ar'] as const)('keeps the %s detail panel outside the table and every existing native form once', locale => {
@@ -174,7 +245,8 @@ describe('v2 selected account detail composition', () => {
     for (let parent = detail.node.parent; parent >= 0; parent = nodes[parent]!.parent) expect(['table', 'tbody', 'tr', 'td']).not.toContain(nodes[parent]!.tag)
     const openers = nodes.filter(node => node.attrs.has('data-account-detail-open'))
     const panels = nodes.filter(node => node.attrs.has('data-account-detail-for'))
-    expect(openers.map(node => node.attrs.get('data-account-detail-open')).sort()).toEqual(['alice', 'bob'])
+    // One avatar opener per row; row-menu items open named sections of the same panel.
+    expect(openers.filter(node => !node.attrs.has('data-account-detail-section')).map(node => node.attrs.get('data-account-detail-open')).sort()).toEqual(['alice', 'bob'])
     expect(panels.map(node => node.attrs.get('data-account-detail-for')).sort()).toEqual(['alice', 'bob'])
     for (const opener of openers) {
       expect(opener.tag).toBe('button')
@@ -215,5 +287,35 @@ describe('v2 selected account detail composition', () => {
     for (const field of nodes.filter(node => ['contactEmail', 'password'].includes(node.attrs.get('name') ?? ''))) expect(field.attrs.has('disabled')).toBe(true)
     expect(html).toContain('Usage / configured plan limit. Usage has not been read.')
     expect(html).not.toContain('role="meter"')
+  })
+})
+
+describe('v2 account row menu, drawer actions and status chips', () => {
+  it('opens details sections from the row menu, keeps Suspend and Delete in the drawer, and binds status chips with real counts', () => {
+    const suspended = { ...account, id: 'internal-suspended', username: 'bob', primaryDomain: 'bob.example.test', uid: 20002, status: 'suspended' as const }
+    const html = renderV2WhmAccountList(t, { ...props, accounts: [account, suspended] })
+    const nodes = parseMarkup(html)
+    const openers = nodes.filter(node => node.attrs.get('data-account-detail-open') === 'alice')
+    // The avatar button comes first: the focus-return target. Menu openers name the part they open and close the menu.
+    expect(openers[0]?.attrs.has('data-account-detail-section')).toBe(false)
+    const sections = openers.slice(1).map(node => node.attrs.get('data-account-detail-section'))
+    expect(sections.length).toBeGreaterThan(0)
+    for (const opener of openers.slice(1)) {
+      expect(opener.attrs.get('aria-controls')).toBe('v2-account-detail'); expect(opener.attrs.get('aria-expanded')).toBe('false')
+      expect(opener.attrs.get('popovertarget')).toBe('v2-account-alice-menu'); expect(opener.attrs.has('data-action')).toBe(false)
+    }
+    const panel = nodes.findIndex(node => node.attrs.get('data-account-detail-for') === 'alice')
+    const inPanel = (index: number) => { for (let at = nodes[index]?.parent ?? -1; at >= 0; at = nodes[at]!.parent) if (at === panel) return true; return false }
+    for (const section of sections) expect(nodes.some((node, index) => node.attrs.get('data-account-detail-section') === section && node.tag === 'details' && inPanel(index))).toBe(true)
+    const drawerActions = nodes.flatMap((node, index) => node.tag === 'button' && node.attrs.get('data-username') === 'alice' && inPanel(index) ? [node.attrs.get('data-action')] : [])
+    expect(drawerActions).toEqual(['suspend-account', 'terminate-account'])
+    expect(html).toMatch(/data-account-detail-for="bob".*data-action="unsuspend-account"/s)
+    const chips = nodes.filter(node => node.attrs.has('data-list-state-chip'))
+    expect(chips.map(node => `${node.attrs.get('data-list-state-chip')}:${node.attrs.get('aria-pressed')}`)).toEqual([':true', 'active:false', 'suspended:false', 'terminating:false'])
+    expect(html).toMatch(/data-list-state-chip="suspended">Suspended<span class="v2-count v2-num">1<\/span>/)
+  })
+
+  it('offers no chips before the list is readable', () => {
+    expect(renderV2WhmAccountList(t, { ...props, accounts: undefined })).not.toContain('data-list-state-chip')
   })
 })

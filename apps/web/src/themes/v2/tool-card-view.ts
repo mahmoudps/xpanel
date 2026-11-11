@@ -5,8 +5,10 @@ import { escapeHtml, hookAttrs } from './html.ts'
 /** The V2 skin of the shared runtime, developer and panel-data cards; every control waits for its controller. */
 export const TOOL_CARD_CSS = `.v2-tool-card__stack{display:flex;flex-direction:column;gap:var(--space-3);min-inline-size:0}
 .v2-tool-card__fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));gap:var(--space-2);min-inline-size:0}
+.v2-tool-card__fields:has(>.v2-field:only-child:not(:has(textarea))){max-inline-size:480px}
 .v2-tool-card__facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));gap:var(--space-2);margin:0;min-inline-size:0}
-.v2-tool-card__facts dt{font-size:13px;font-weight:600;color:var(--text-2)}
+.v2-tool-card__facts>div{display:flex;flex-direction:column;gap:var(--space-1);min-inline-size:0}
+.v2-tool-card__facts dt{font-size:12px;color:var(--muted)}
 .v2-tool-card__facts dd{margin:0;overflow-wrap:anywhere}
 .v2-tool-card__actions{display:flex;flex-wrap:wrap;gap:var(--space-2)}
 .v2-tool-card__check{display:flex;align-items:center;gap:var(--space-1);min-block-size:var(--target)}

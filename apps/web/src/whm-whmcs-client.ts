@@ -201,7 +201,7 @@ function bindWhmWhmcs(askDialog: ((options: Record<string, unknown>) => Promise<
           cell(ltr(formatDisplayDateTime(entry.at))); cell(entry.action ? labels[entry.action] ?? ltr(entry.action) : t('Unknown'))
           cell(entry.username ? ltr(entry.username) : '—')
           const badge = whmClientNode(root, 'whm-whmcs-result-' + entry.result, 'span', results[entry.result]), result = document.createElement('span')
-          result.append(badge, ' ', ltr(entry.reason)); cell(result)
+          const reason = ({ completed: t('Completed'), invalid_request: t('The request was not valid'), provisioning_authority_changed: t('Provisioning authority changed'), package_not_mapped: t('The package is not mapped to a plan'), create_disabled: t('Account creation is turned off'), account_not_found: t('Account not found'), host_agent_unavailable: t('The host agent was unavailable'), token_invalid: t('The API token was not valid'), integration_disabled: t('The integration is turned off'), address_not_allowed: t('The address is not allowed'), internal_error: t('Internal error') } as Record<string, string>)[entry.reason]; result.append(badge, ' ', reason ?? ltr(entry.reason)); cell(result)
           cell(entry.ip ? ltr(entry.ip) : t('Unknown'))
           logRows.append(row)
         }

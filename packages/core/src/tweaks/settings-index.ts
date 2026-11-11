@@ -40,7 +40,7 @@ export const SETTINGS_INDEX: readonly SettingsIndexEntry[] = [
   web('nginx.keepaliveTimeoutSec', 'keepalive_timeout', true), web('nginx.multiAccept', 'multi_accept', true),
   web('apache.startServers', 'StartServers', true), web('apache.minSpareServers', 'MinSpareServers', true), web('apache.maxSpareServers', 'MaxSpareServers', true),
   web('apache.maxRequestWorkers', 'MaxRequestWorkers', true), web('apache.serverLimit', 'ServerLimit', true), web('apache.maxConnectionsPerChild', 'MaxConnectionsPerChild', true),
-  directive('web.timeoutSec', msgid('Request timeout (seconds)')), directive('web.clientMaxBodyMb', msgid('Largest request body (MB)')),
+  directive('web.timeoutSec', msgid('Request timeout (seconds)')), directive('web.clientMaxBodyMb', msgid('Largest request body (MiB)')),
   directive('web.tlsProtocols', msgid('TLS protocols')), directive('web.tlsCiphers', msgid('TLS 1.2 cipher list')),
   directive('web.gzip.enabled', msgid('Compress responses')), directive('web.gzip.level', msgid('Compression level')),
   directive('web.directoryIndex', 'DirectoryIndex', true), directive('web.rlimitMemMb', 'RLimitMEM (MB)', true), directive('web.rlimitCpuSec', 'RLimitCPU', true),

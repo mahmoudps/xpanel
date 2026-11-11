@@ -23,7 +23,7 @@ const DEFAULTS: Readonly<Record<string, NotificationText>> = {
   'account.provisioned': { subject: msgid('Your hosting account {account} is ready'), body: msgid('The hosting account {account} for {domain} is ready on {server}.') },
   'account.suspended': { subject: msgid('Your hosting account {account} is suspended'), body: msgid('The hosting account {account} for {domain} on {server} is suspended. Contact your provider for details.') },
   'account.unsuspended': { subject: msgid('Your hosting account {account} is active again'), body: msgid('The hosting account {account} for {domain} on {server} is active again.') },
-  'quota.warning': { subject: msgid('Disk quota warning for {account}'), body: msgid('The account {account} on {server} uses {usedMb} MB of its {limitMb} MB disk quota ({percent}%).') },
+  'quota.warning': { subject: msgid('Disk quota warning for {account}'), body: msgid('The account {account} on {server} uses {usedMb} MiB of its {limitMb} MiB disk quota ({percent}%).') },
   'ssl.renewal': { subject: msgid('Certificate report for {server}'), body: msgid('Automatic certificate results for {account}:\n\n{summary}') },
   'mail.outbound_hold': { subject: msgid('Outgoing mail from {target} is held'), body: msgid('{target} delivered {count} messages this {window}, over its limit of {limit}. Further messages stay on hold on {server} until an administrator releases them.') },
 }

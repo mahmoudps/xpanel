@@ -5,6 +5,9 @@ import './i18n.ts'
 import { WHM_DIAGNOSTIC_TEMPLATE_BINDING, whmDiagnosticNode as canonicalDiagnosticNode, whmDiagnosticTemplate as canonicalDiagnosticTemplate, assertWhmDiagnosticTemplates as canonicalAssertDiagnosticTemplates } from './whm-diagnostic-client-templates.ts'
 import { clientTemplateSlot as canonicalDiagnosticSlot } from './client-templates.ts'
 import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+import { ASCII_BYTES_BINDING, formatIsolatedBytes as canonicalFormatClientBytes } from './display-format.ts'
+// Module-local alias: the binding source defines it again from ASCII_BYTES_BINDING.
+const formatClientBytes = canonicalFormatClientBytes
 const frameRequest = canonicalFrameRequest
 const formatDisplayDateTime = sharedFormatDisplayDateTime
 const whmDiagnosticNode = canonicalDiagnosticNode
@@ -112,7 +115,7 @@ function bindWhmServerHealth(): void {
   const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
   const utc = (value: string | null): string => value ? formatDisplayDateTime(value) : t('Not read')
   const fixed = (value: number): string => String(Math.round(value * 10) / 10)
-  const bytes = (value: number): string => value >= 1048576 ? fixed(value / 1048576) + ' MiB' : value >= 1024 ? fixed(value / 1024) + ' KiB' : String(value) + ' B'
+  const bytes = (value: number): string => formatClientBytes(value)
   document.querySelectorAll<HTMLElement>('[data-whm-server-health]').forEach(root => {
     if (root.dataset.serverHealthBound === 'true') return
     root.dataset.serverHealthBound = 'true'
@@ -258,7 +261,7 @@ function bindWhmServerHealth(): void {
       stale: msgid('The last resource sample is too old.'), 'configuration-changed': msgid('Accounts changed since the last resource sample.'),
       invalid: msgid('The resource sample could not be verified.'), incomplete: msgid('The resource sample is incomplete.'), 'no-accounts': msgid('There are no accounts.'),
     }
-    const amount = (id: string, value: number): string => id === 'cpu' ? fixed(value) + '%' : id === 'memory' || id === 'disk' ? bytes(value) : id.endsWith('-bps') ? bytes(value) + '/s' : id.endsWith('-iops') ? fixed(value) + ' IOPS' : fixed(value)
+    const amount = (id: string, value: number): string => id === 'cpu' ? fixed(value) + '%' : id === 'memory' || id === 'disk' ? bytes(value) : id.endsWith('-bps') ? formatClientBytes(value, true) : id.endsWith('-iops') ? fixed(value) + ' IOPS' : fixed(value)
     const rows = new Map<string, AccountLimitsView>()
     let observedAt = '', sampleAt: string | null = null, sampleReason: string | null = null, hostUnread = false, truncated = false
     const stateOf = (account: AccountLimitsView): string => account.drift ? 'drift' : account.high ? 'high' : account.unavailable ? 'unavailable' : 'ok'
@@ -360,4 +363,4 @@ function bindWhmServerHealth(): void {
   })
 }
 
-export const WHM_SERVER_HEALTH_CLIENT_BINDING = withFrameRequest(`(()=>{${WHM_DIAGNOSTIC_TEMPLATE_BINDING};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};${[shObject, shFail, shText, shIso, shCount, shAmount, shOneOf].map(helper => helper.toString()).join(';')};const readServerHealthReport=${readServerHealthReport.toString()};const readServerLimitsReport=${readServerLimitsReport.toString()};return ${bindWhmServerHealth.toString()};})()`)
+export const WHM_SERVER_HEALTH_CLIENT_BINDING = withFrameRequest(`(()=>{const formatClientBytes=${ASCII_BYTES_BINDING};${WHM_DIAGNOSTIC_TEMPLATE_BINDING};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};${[shObject, shFail, shText, shIso, shCount, shAmount, shOneOf].map(helper => helper.toString()).join(';')};const readServerHealthReport=${readServerHealthReport.toString()};const readServerLimitsReport=${readServerLimitsReport.toString()};return ${bindWhmServerHealth.toString()};})()`)

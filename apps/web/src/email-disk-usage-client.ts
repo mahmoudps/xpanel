@@ -3,6 +3,9 @@ import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayD
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
 import type { EmailDiskUsageView } from '../../agent/src/mailbox-disk-usage.ts'
+import { ASCII_BYTES_BINDING, formatIsolatedBytes as canonicalFormatClientBytes } from './display-format.ts'
+// Module-local alias: the binding source defines it again from ASCII_BYTES_BINDING.
+const formatClientBytes = canonicalFormatClientBytes
 const formatDisplayDateTime = sharedFormatDisplayDateTime
 
 export function readEmailDiskUsage(raw: unknown, mailbox: string): EmailDiskUsageView & { freedBytes?: number | null } {
@@ -15,7 +18,7 @@ export function readEmailDiskUsage(raw: unknown, mailbox: string): EmailDiskUsag
 function bindEmailDiskUsage(askDialog: ((input: Record<string, unknown>) => Promise<unknown>) | undefined): void {
   const t = (message: string, values?: MessageValues): string => xpT(message, values)
   const send = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
-  const bytes = (value: number): string => { const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB']; let size = value, index = 0; while (size >= 1024 && index < units.length - 1) { size /= 1024; index++ } return (index ? size.toFixed(1) : String(size)) + ' ' + units[index] }
+  const bytes = (value: number): string => formatClientBytes(value)
   document.querySelectorAll<HTMLElement>('[data-email-disk-usage]').forEach(root => {
     if (root.dataset.emailDiskUsageBound === 'true') return
     root.dataset.emailDiskUsageBound = 'true'
@@ -71,4 +74,4 @@ function bindEmailDiskUsage(askDialog: ((input: Record<string, unknown>) => Prom
   })
 }
 
-export const EMAIL_DISK_USAGE_CLIENT_BINDING = `(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readEmailDiskUsage=${readEmailDiskUsage.toString()};return ${bindEmailDiskUsage.toString()}})()`
+export const EMAIL_DISK_USAGE_CLIENT_BINDING = `(()=>{const formatClientBytes=${ASCII_BYTES_BINDING};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readEmailDiskUsage=${readEmailDiskUsage.toString()};return ${bindEmailDiskUsage.toString()}})()`

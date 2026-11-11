@@ -14,6 +14,7 @@ import {
   escapeHtml,
   formatAsciiNumber,
   formatBytes,
+  formatAsciiRate,
   formatDisplayDateTime,
   getThresholdLevel,
   renderLtrValue,
@@ -68,9 +69,8 @@ const suppliedPositiveCounter = (value: number): number | undefined => Number.is
 
 const suppliedRate = (value: number, divisor: number, unit: string, locale: Locale): string => {
   if (suppliedPositive(value) === undefined) return translator(locale)('Unavailable')
-  const scaled = value / divisor
-  // Preserve a positive supplied rate when binary-unit scaling underflows.
-  return scaled === 0 && divisor === 1024 * 1024 ? `${formatAsciiNumber(value)} B/s` : `${formatAsciiNumber(scaled)} ${unit}`
+  // Byte rates use the product byte format; other units (IOPS) stay plain counts.
+  return divisor === 1024 * 1024 ? formatAsciiRate(value) : `${formatAsciiNumber(value / divisor)} ${unit}`
 }
 
 function renderIoAccountRow(rank: AccountIoRank, locale: Locale): string {
@@ -296,7 +296,7 @@ export function renderWebsiteAnalyticsChart(
     `<div class="xp-card xp-field">` +
     `<div class="xp-label" style="font-size:0.82rem;color:var(--xp-text-secondary);">${escapeHtml(translator(locale)('Edge Bandwidth'))}</div>` +
     `<div class="xp-kpi__value xp-tabular" style="font-size:1.45rem;font-weight:700;margin:0;">${renderLtrValue(`${formatBytes(totals.bytes)}`)}</div>` +
-    `<div class="xp-mono xp-tabular" style="font-size:0.78rem;color:var(--xp-text-muted);">${renderLtrValue(`${totals.bytes.toLocaleString('en-US')} B`)}</div>` +
+    `<div class="xp-mono xp-tabular" style="font-size:0.78rem;color:var(--xp-text-muted);">${renderLtrValue(`${totals.bytes.toLocaleString('en-US')}\u00a0B`)}</div>` +
     `</div>` +
     `<div class="xp-card xp-field">` +
     `<div class="xp-label" style="font-size:0.82rem;color:var(--xp-text-secondary);">${escapeHtml(translator(locale)('Unique Visitors'))}</div>` +

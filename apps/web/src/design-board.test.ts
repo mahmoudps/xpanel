@@ -122,10 +122,10 @@ describe('design board routes', () => {
     expect(nav).not.toContain('/design/system')
     expect(nav).not.toContain('/design/components')
     expect(nav).not.toContain('/design/navigation')
-    const shell = renderWebApp({ surface: 'xpanel', activeRoute: '/home', locale: 'en' })
+    const shell = renderWebApp({ uiTheme: 'classic', surface: 'xpanel', activeRoute: '/home', locale: 'en' })
     expect(shell).not.toContain('data-nav-route="/design/system"')
     expect(resolveWebDocumentRoute('/design/system')).toBeNull()
-    const opened = withDesignPages(() => renderWebApp({ surface: 'xpanel', activeRoute: '/design/system', locale: 'en' }))
+    const opened = withDesignPages(() => renderWebApp({ uiTheme: 'classic', surface: 'xpanel', activeRoute: '/design/system', locale: 'en' }))
     expect(opened).toContain('data-design-page="/design/system"')
     // Rendering a development specimen does not register it as an authorized product destination.
     expect(opened).not.toContain('data-nav-route="/design/system"')
@@ -138,7 +138,7 @@ describe('design board routes', () => {
       const visibility = surface === 'xwhm'
         ? { principal: { kind: 'root' as const, id: 'fixture-root', username: 'root' } }
         : { principal: { kind: 'user' as const, id: 'fixture-owner', username: 'owner', accountId: 'fixture-account' }, disabledFeatures: new Set<string>() }
-      const html = renderWebApp({ surface, activeRoute: route, locale: 'en', visibility })
+      const html = renderWebApp({ uiTheme: 'classic', surface, activeRoute: route, locale: 'en', visibility })
       const marker = route === '/software/php' || route === '/advanced/cron' || route === '/files/backup'
         ? `data-approved-xpanel-workspace="${route}"`
         : `data-whm-detail-route="${route}"`

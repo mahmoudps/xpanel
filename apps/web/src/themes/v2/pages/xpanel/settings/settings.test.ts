@@ -15,7 +15,8 @@ const readonly: PanelSettingsAuthority = { canRead: true, canManage: false }
 const props = (activeRoute: string, extra: Partial<PanelSurfaceProps> = {}): PanelSurfaceProps => ({ activeRoute, locale: 'en', account, domains: [domain], serviceUsers: [user], certificates: [certificate], ...extra })
 const render = (route: string, authority: PanelSettingsAuthority = allowed, extra: Partial<PanelSurfaceProps> = {}): string => renderV2PanelSettingsPage(props(route, extra), authority)!
 const nodes = (html: string, selector: HookSelector) => parseMarkup(html).filter(node => matchesHook(node, selector))
-const liveControls = (html: string) => parseMarkup(html).filter(node => node.template < 0 && ['input', 'textarea', 'select', 'button'].includes(node.tag))
+// Presentation tabs only switch the visible panel; they carry no operation and stay usable on a locked page.
+const liveControls = (html: string) => parseMarkup(html).filter(node => node.template < 0 && ['input', 'textarea', 'select', 'button'].includes(node.tag) && node.attrs.get('role') !== 'tab')
 
 describe('v2 remaining account workspaces', () => {
   it('dispatches the exact 31 owned documents without absorbing other families or an absent route', () => {
@@ -110,7 +111,35 @@ describe('v2 remaining account workspaces', () => {
     expect(nodes(html, '[data-acct-team-save]')[0]!.attrs.has('disabled')).toBe(true)
     expect(nodes(html, '[data-acct-team-signin-state]')[0]!.attrs.get('data-state-chip')).toBe('unread')
     expect(nodes(html, '[data-acct-team-link-url]')).toHaveLength(1)
-    expect(html).toContain('<aside class="v2-panel-settings__groups"><section class="v2-card" id="v2-team-help"')
+    // The editor and the help run full width; the six help facts sit in three columns.
+    expect(html).not.toContain('v2-panel-settings__split')
+    expect(html.slice(html.indexOf('id="v2-team-help"'))).toContain('data-cols="3"')
+  })
+
+  it('shows every security section on the overview, as the board does, and narrows each other tab to its own area', () => {
+    const html = render('/security/account', allowed)
+    expect(html.indexOf('role="tablist"')).toBeLessThan(html.indexOf('id="v2-team-audit"'))
+    for (const [view, id] of [['overview sessions', 'v2-account-sessions'], ['overview tokens', 'v2-account-tokens'], ['overview signin', 'v2-account-password'], ['overview ssh" data-v2-row="wide', 'v2-account-ssh'], ['overview ssh" data-v2-row="narrow', 'v2-account-shell'], ['overview site" data-v2-row="wide', 'v2-account-ip'], ['overview site" data-v2-row="narrow', 'v2-account-hotlink'], ['overview site', 'v2-account-privacy'], ['overview', 'v2-team-audit']]) {
+      expect(html).toContain(`data-presentation-tab-visible="${view}"><section class="v2-card" id="${id}"`)
+    }
+    // The shell card reads the saved account; the header chips and the checks never invent a count.
+    expect(html).toContain('data-v2-account-shell><bdi dir="ltr" class="v2-mono">jailed</bdi>')
+    expect(html).toContain('SSH keys: Not read')
+    expect(render('/security/account', { canRead: false, canManage: false })).toContain('data-v2-account-shell>Not read<')
+  })
+
+  it('lays the service user form out full width under the list and keeps its controls closed until read', () => {
+    const html = render('/preferences/users', allowed)
+    expect(html).not.toContain('<aside')
+    expect(html.indexOf('id="v2-service-users-list"')).toBeLessThan(html.indexOf('id="v2-service-user-access"'))
+    expect(nodes(html, '[data-service-user-save]')[0]!.attrs.has('disabled')).toBe(true)
+  })
+
+  it('summarizes the virus scanner in the shared tile row without inventing scan values', () => {
+    const html = render('/security/virus-scanner', allowed)
+    expect(html).toContain('class="v2-kpi-row"')
+    expect(nodes(html, '[data-vscan-kpi]').map(node => node.attrs.get('data-vscan-kpi'))).toEqual(['last-scan', 'infected', 'signatures', 'next-scan'])
+    expect(html).not.toContain('v2-panel-settings__kpis')
   })
 
   it('keeps ACME names account-owned and disables unsupported sources without dropping the wizard', () => {
@@ -125,6 +154,13 @@ describe('v2 remaining account workspaces', () => {
     expect(uploaded).toBeDefined()
     expect(uploaded!.attrs.has('disabled')).toBe(true)
     expect(html).not.toContain('Certificate issued')
+  })
+
+  it('lays the certificate files out in full-width pairs and names table columns for phone rows', () => {
+    const html = render('/security/ssl/files', allowed)
+    expect(html).not.toContain('v2-panel-settings__split')
+    expect(html.indexOf('id="v2-certificate-file-limits"')).toBeLessThan(html.indexOf('id="v2-certificate-installed"'))
+    expect(html).toContain(`<table id="v2-certificate-installed-table" style="--v2-pl2:'Source';--v2-pl3:'Expires';--v2-pl4:'Private key'">`)
   })
 
   it('shows certificate names while hiding stored keys and foreign certificate metadata', () => {
@@ -144,7 +180,7 @@ describe('v2 remaining account workspaces', () => {
     const virus = render('/security/virus-scanner')
     for (const hook of ['[data-vscan-engine]', '[data-vscan-version]', '[data-vscan-signatures]', '[data-vscan-signature-date]', '[data-vscan-next]', '[data-vscan-status]', '[data-vscan-rows]'] as const) expect(nodes(virus, hook).length).toBe(1)
     expect(virus).toContain('15 minutes')
-    expect(virus).toContain('400 MB')
+    expect(virus).toContain('400 MiB')
     expect(virus).toContain('Quarantine and automatic deletion are not available')
     expect(virus).not.toContain('48,213')
   })
@@ -235,7 +271,7 @@ describe('v2 remaining account workspaces', () => {
   it('retains team role, one-time password-link and expiry controls without showing a generated credential', () => {
     const html = render('/preferences/team')
     expect(nodes(html, '[data-acct-team-role]').map(node => node.attrs.get('value'))).toEqual(['administrator', 'database', 'email', 'web'])
-    expect(nodes(html, '[data-acct-team-input="expiresAt"]')[0]!.attrs.get('type')).toBe('datetime-local')
+    expect(nodes(html, '[data-acct-team-input="expiresAt"]')[0]!.attrs.get('placeholder')).toBe('YYYY-MM-DDTHH:mm')
     expect(nodes(html, '[data-acct-team-link]')[0]!.attrs.has('hidden')).toBe(true)
     expect(nodes(html, '[data-acct-team-link-url]')[0]!.attrs.get('value')).toBeUndefined()
     expect(html).toContain('Up to 7 members can hold a role.')
@@ -270,7 +306,7 @@ describe('v2 remaining account workspaces', () => {
     expect(html).toContain('Headers to the upstream')
     expect(html).toContain('X-Upstream-Test')
     expect(html).toContain('request-value')
-    expect(nodes(html, '#v2-site-expiry')[0]!.attrs.get('type')).toBe('date')
+    expect(nodes(html, '#v2-site-expiry')[0]!.attrs.get('placeholder')).toBe('YYYY-MM-DD')
     expect(nodes(html, '#v2-site-review-ack')[0]!.attrs.has('disabled')).toBe(true)
     expect(html).toContain('The web server configuration test runs before any reload.')
     expect(liveControls(html).every(node => node.attrs.has('disabled'))).toBe(true)

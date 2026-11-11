@@ -6,7 +6,7 @@ import type { PanelSurfaceProps, ThemeViewProps, WhmSurfaceProps } from '../../c
 import { parseMarkup } from '../../markup.ts'
 import { V2_SECURITY_SLOT } from './slots.ts'
 import { createV2PanelSurface } from './xpanel.ts'
-import { createV2WhmSurface } from './xwhm.ts'
+import { createV2WhmSurface, renderV2WhmBody } from './xwhm.ts'
 
 const catalog = tools.map(tool => ({ ...tool, status: 'verified' as const, delivery: { ...tool.delivery, status: 'verified' as const } }))
 const account: Account = { id: 'account-internal', username: 'alice', uid: 20001, gid: 20001, home: '/home/alice', primaryDomain: 'alice.test', planId: 'plan-internal', ownerId: null, status: 'active', suspendReason: null, contactEmail: 'owner@example.test', ipv4: '192.0.2.10', shell: 'none', createdAt: '2026-10-29T00:00:00Z' }
@@ -91,6 +91,20 @@ describe('complete v2 operator surface dispatch', () => {
     expect(html.match(/<h1\b/g)).toHaveLength(1)
     expect(html).not.toContain('xp-board-port')
     expect(html.split(V2_SECURITY_SLOT).length - 1).toBe(activeRoute === '/whm/security/sign-in' ? 1 : 0)
+  })
+
+  it('opens the default site and server-owned zones to root only', () => {
+    // Same admitted authority, reseller principal: only the surface's root rule differs.
+    const actor: Principal = { kind: 'reseller', id: 'partner-internal', username: 'partner' }
+    const asReseller = (activeRoute: string) => { const view = projectWhmSurface({ ...whm, activeRoute })!; return renderV2WhmBody({ ...view, props: { ...view.props, principal: actor, accounts: [{ ...account, ownerId: actor.id }] } })! }
+    const zoneAccounts = (html: string) => { const nodes = parseMarkup(html), at = nodes.findIndex(node => node.tag === 'select' && node.attrs.has('data-dns-account')); return nodes.filter(node => node.tag === 'option' && node.parent === at).map(node => node.attrs.get('value')) }
+    expect(renderWhm({ ...whm, activeRoute: '/whm/domains' })).toContain('data-default-site-enabled="true"')
+    const rootDns = renderWhm({ ...whm, activeRoute: '/whm/dns' })
+    expect(zoneAccounts(rootDns)).toEqual(['', account.id])
+    expect(rootDns).toContain('<option value="" selected>Unassigned (server)</option>')
+    const domains = asReseller('/whm/domains'), dns = asReseller('/whm/dns')
+    expect(domains).toContain('data-default-site-enabled="false"')
+    expect(zoneAccounts(dns)).toEqual([account.id])
   })
 
   it('forwards genuine denied inputs and throws for qualified missing implementations', () => {

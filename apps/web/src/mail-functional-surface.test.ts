@@ -122,7 +122,7 @@ describe.each(['en', 'ar'] as const)('functional mail surface in %s', locale => 
 describe('registered mail app documents and qualified attachment reads', () => {
   const parseResponse = async (route: string, locale: 'en' | 'ar', options: { visibility?: VisibilityContext; catalog?: readonly CatalogTool[]; mailbox?: string } = {}) => {
     const response = await serveWebUi(new Request('http://localhost' + route + '?lang=' + locale + '&mailbox=foreign-query%40example.test&uid=1&uidValidity=1&attachmentReadEnabled=true'), () => ({
-      surface: 'xmail', visibility, catalog: qualified, ...options,
+      surface: 'xmail', uiTheme: 'classic', visibility, catalog: qualified, ...options,
       mail: { mailbox: options.mailbox ?? mailbox, messages: [] },
     }))
     return { response, document: new DOMParser().parseFromString(await response.text(), 'text/html') }

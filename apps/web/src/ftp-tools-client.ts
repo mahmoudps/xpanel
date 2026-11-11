@@ -1,6 +1,9 @@
 /// <reference lib="dom" />
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { ASCII_BYTES_BINDING, formatIsolatedBytes as canonicalFormatClientBytes } from './display-format.ts'
+// Module-local alias: the binding source defines it again from ASCII_BYTES_BINDING.
+const formatClientBytes = canonicalFormatClientBytes
 
 export interface FtpSettingsForm { enabled: boolean; tls: string; tlsCipherSuite: string; anonymous: boolean; anonymousUploads: boolean; maxIdleMinutes: number; maxConnections: number; maxConnectionsPerIp: number; passivePorts: { min: number; max: number }; brokenClients: boolean; listingLimit: number }
 export type FtpRequest = (method: string, path: string, body?: unknown) => Promise<unknown>
@@ -21,8 +24,9 @@ function bindFtpTools(askDialog: ((options: Record<string, unknown>) => Promise<
   const blocked = (root: HTMLElement): boolean => !transport || !!root.closest('[data-wiring="unavailable"],[data-readonly="true"],[data-capability-state="unavailable"],fieldset:disabled')
   const say = (node: HTMLElement | null, state: string, message: string): void => { if (!node) return; node.dataset.state = state; node.textContent = message; node.setAttribute('role', state === 'failed' || state === 'uncertain' ? 'alert' : 'status') }
   const reason = (error: unknown): string => { const details = record(record(error).details); return details.stateChanged === false ? t('Nothing was changed.') : t('The outcome is unknown. Read the page again before you retry.') }
-  const cell = (row: HTMLTableRowElement, value: string, ltr = false): void => { const td = row.insertCell(); td.textContent = value; if (ltr) td.dir = 'ltr' }
-  const size = (bytes: number): string => bytes >= 1048576 ? (bytes / 1048576).toFixed(1) + ' MiB' : bytes >= 1024 ? (bytes / 1024).toFixed(1) + ' KiB' : bytes + ' B'
+  // A technical value sits in its own left-to-right run; the cell keeps the page direction and its phone label.
+  const cell = (row: HTMLTableRowElement, value: string, ltr = false): void => { const td = row.insertCell(); if (!ltr) { td.textContent = value; return } const bdi = document.createElement('bdi'); bdi.dir = 'ltr'; bdi.textContent = value; td.append(bdi) }
+  const size = (bytes: number): string => formatClientBytes(bytes)
 
   document.querySelectorAll<HTMLElement>('[data-ftp-server-settings]').forEach(root => {
     if (root.dataset.ftpBound === 'true') return
@@ -153,4 +157,4 @@ function bindFtpTools(askDialog: ((options: Record<string, unknown>) => Promise<
   })
 }
 
-export const FTP_TOOLS_CLIENT_BINDING = `(()=>{const record=${record.toString()};const readFtpSettingsForm=${readFtpSettingsForm.toString()};return ${bindFtpTools.toString()};})()`
+export const FTP_TOOLS_CLIENT_BINDING = `(()=>{const formatClientBytes=${ASCII_BYTES_BINDING};const record=${record.toString()};const readFtpSettingsForm=${readFtpSettingsForm.toString()};return ${bindFtpTools.toString()};})()`

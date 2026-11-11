@@ -35,7 +35,7 @@ export function renderV2WhmSecurityTool(input: WhmObservationInput, kind: Securi
         + help(t, msgid('The update runs freshclam as a host job. When the clamav-freshclam service is running it already keeps signatures current, and a manual update may fail while it holds the update lock.')))
         + section(t, 'antivirus-scan', msgid('Scan an account'), fields(account('v2-antivirus-account')) + actions(button(t, msgid('Start scan'), { 'data-whm-security-tools-scan': true }, false, true)
           + `<a class="v2-btn" href="/whm/jobs" data-whm-security-tools-job-link hidden>${esc(t(msgid('Open job')))}</a>`)
-          + help(t, msgid('The scan runs as a host job on the account home only. Symbolic links are not followed, files over 100 MB and archives over 400 MB of content are skipped, and a scan can use about 1 GB of memory.'))
+          + help(t, msgid('The scan runs as a host job on the account home only. Symbolic links are not followed, files over 100 MiB and archives over 400 MiB of content are skipped, and a scan can use about 1 GiB of memory.'))
           + help(t, msgid('Infected files are reported only. Quarantine and deletion are not available here.')) + result)
         + section(t, 'antivirus-scans', msgid('Recent scans'), table(t, msgid('Recent scans'), [msgid('Started (UTC)'), msgid('Account'), msgid('Result'), msgid('Scanned files'), msgid('Infected files'), msgid('Job')], { 'data-whm-security-tools-rows': 'scans' }, msgid('No scans have been read.')))
         + section(t, 'antivirus-findings', msgid('Infected files'), `<p class="v2-muted" data-whm-security-tools-incomplete hidden>${esc(t(msgid('Some scans list only part of their findings. The infected file count comes from the scan summary.')))}</p>`

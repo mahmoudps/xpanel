@@ -7,6 +7,9 @@ import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayD
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
 import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+import { ASCII_BYTES_BINDING, formatIsolatedBytes as canonicalFormatClientBytes } from './display-format.ts'
+// Module-local alias: the binding source defines it again from ASCII_BYTES_BINDING.
+const formatClientBytes = canonicalFormatClientBytes
 const frameRequest = canonicalFrameRequest
 const formatDisplayDateTime = sharedFormatDisplayDateTime
 
@@ -129,7 +132,7 @@ function bindDbEngines(ask: ((options: Record<string, unknown>) => Promise<unkno
       for(const cells of items){const row=cloneClientTemplate(contract.template,'tr',contract.slots);contract.slots.forEach((slot,index)=>clientTemplateSlot(row,slot).replaceChildren(cells[index]!));contract.body.append(row)}
       if(!items.length){const row=cloneClientTemplate(contract.empty,'tr',['message']);clientTemplateSlot(row,'message','td').textContent=empty;contract.body.append(row)}
     }
-    const bytes = (value: number): string => { const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB']; let size = value, unit = 0; while (size >= 1024 && unit < units.length - 1) { size /= 1024; unit++ } return (unit === 0 ? String(size) : size.toFixed(1)) + ' ' + units[unit] }
+    const bytes = (value: number): string => formatClientBytes(value)
     const serviceState = (active: string): string => ({ active: t(msgctxt('db-engines-client', 'Running')), inactive: t(msgctxt('db-engines-client', 'Stopped')), failed: t(msgctxt('db-engines-client', 'Failed')), activating: t('Starting'), deactivating: t('Stopping') } as Record<string, string>)[active] ?? active
     const bootState = (enabled: string): string => ({ enabled: t(msgctxt('db-engines-client', 'Yes')), disabled: t(msgctxt('db-engines-client', 'No')), static: t(msgctxt('db-engines-client', 'Static')), masked: t('Masked') } as Record<string, string>)[enabled] ?? enabled
     const signonState = (state: unknown): string => ({ ready: t('Ready'), 'not-installed': t('Not installed'), 'no-package': t('No package for this operating system'), 'not-configured': t('Not configured'), unavailable: t(msgctxt('db-engines-client', 'Unavailable')) } as Record<string, string>)[String(state)] ?? unknown()
@@ -330,4 +333,4 @@ function bindDbEngines(ask: ((options: Record<string, unknown>) => Promise<unkno
   })
 }
 export { dbReadReply }
-export const DB_ENGINES_CLIENT_BINDING = withFrameRequest(`(()=>{${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const dbObject=${dbObject.toString()};const dbExact=${dbExact.toString()};const dbReadReply=${dbReadReply.toString()};return ${bindDbEngines.toString()};})()`)
+export const DB_ENGINES_CLIENT_BINDING = withFrameRequest(`(()=>{const formatClientBytes=${ASCII_BYTES_BINDING};${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const dbObject=${dbObject.toString()};const dbExact=${dbExact.toString()};const dbReadReply=${dbReadReply.toString()};return ${bindDbEngines.toString()};})()`)

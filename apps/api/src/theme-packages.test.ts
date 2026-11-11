@@ -59,7 +59,7 @@ describe('theme manager', { tags: ['unit'] }, () => {
     expect(resolveUiTheme('mine').baseId).toBe('v2')
     const remaining = await h.themes(await h.send('DELETE', '/api/server/themes/acme'))
     expect(remaining.map(row => row.id)).toEqual(['classic', 'v2', 'acme-blue', 'mine'])
-    expect(resolveUiTheme('acme').id).toBe('classic')
+    expect(resolveUiTheme('acme').id).toBe('v2')
   })
 
   it('refuses invalid packages with their reason, duplicates, built-in changes and resellers', async () => {

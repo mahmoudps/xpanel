@@ -121,18 +121,18 @@ async function geometry(page) {
     const fields=[...root.querySelectorAll('label[for]')].filter(visible).map(label=>{
       const control=document.getElementById(label.htmlFor);if(!control||!visible(control)||['checkbox','radio'].includes(control.type))return null
       const range=document.createRange();range.selectNodeContents(label);const text=range.getBoundingClientRect(),box=rect(control),style=getComputedStyle(control),rtl=getComputedStyle(root).direction==='rtl'
-      const anchor=style.textAlign==='start'?(style.direction==='rtl'?'right':'left'):style.textAlign==='end'?(style.direction==='rtl'?'left':'right'):style.textAlign
+      const anchor=['match-parent','-webkit-match-parent'].includes(style.textAlign)?(rtl?'right':'left'):style.textAlign==='start'?(style.direction==='rtl'?'right':'left'):style.textAlign==='end'?(style.direction==='rtl'?'left':'right'):style.textAlign
       const actualEdge=anchor==='right'?box.right-parseFloat(style.paddingRight)-parseFloat(style.borderRightWidth):anchor==='left'?box.left+parseFloat(style.paddingLeft)+parseFloat(style.borderLeftWidth):(box.left+box.right)/2
       return {label:label.textContent.trim(),textGap:box.top-text.bottom,height:box.height,controlDirection:style.direction,textAlign:style.textAlign,resolvedAnchor:anchor,alignment:Math.abs((rtl?text.right:text.left)-actualEdge)}
     }).filter(Boolean)
     const gaps=(nodes)=>nodes.slice(1).map((node,index)=>rect(node).top-rect(nodes[index]).bottom)
     const form=root.querySelector('[data-filter-editor]')
-    const siblings=[...form.querySelectorAll('.xp-form-group')].flatMap(group=>gaps([...group.children].filter(visible)))
+    const siblings=[...form.querySelectorAll('[data-filter-group],.xp-form-group')].flatMap(group=>gaps([...group.children].filter(visible)))
     const conditionFields=[...form.querySelectorAll('[data-filter-condition],[data-filter-action-row]')].flatMap(group=>gaps([...group.children].filter(visible)))
     const groups=gaps([...form.children].filter(visible))
-    const extension=root.closest('.xp-extension'),sections=gaps([...extension.children].filter(node=>node.tagName!=='STYLE'&&visible(node)))
-    const cards=[...extension.querySelectorAll('.xp-extension__card')].filter(visible).map(card=>{
-      const content=[...card.children].filter(node=>node.tagName!=='STYLE'&&visible(node)),first=rect(content[0]),last=rect(content.at(-1)),bounds=rect(card),style=getComputedStyle(card)
+    const extension=root.closest('.xp-extension')||root,sections=gaps([...extension.children].filter(node=>node.tagName!=='STYLE'&&node.tagName!=='TEMPLATE'&&visible(node)))
+    const cards=[...extension.querySelectorAll('.v2-card,.xp-extension__card')].filter(visible).map(card=>{
+      const content=[...card.children].filter(node=>node.tagName!=='STYLE'&&node.tagName!=='TEMPLATE'&&visible(node)),first=rect(content[0]),last=rect(content.at(-1)),bounds=rect(card),style=getComputedStyle(card)
       return {left:first.left-bounds.left-parseFloat(style.borderLeftWidth),right:bounds.right-first.right-parseFloat(style.borderRightWidth),top:first.top-bounds.top-parseFloat(style.borderTopWidth),bottom:bounds.bottom-last.bottom-parseFloat(style.borderBottomWidth)}
     })
     const conditionPadding=[...root.querySelectorAll('[data-filter-condition],[data-filter-action-row]')].filter(visible).map(card=>{const content=[...card.children].filter(visible),first=rect(content[0]),last=rect(content.at(-1)),bounds=rect(card),style=getComputedStyle(card);return {left:first.left-bounds.left-parseFloat(style.borderLeftWidth),right:bounds.right-first.right-parseFloat(style.borderRightWidth),top:first.top-bounds.top-parseFloat(style.borderTopWidth),bottom:bounds.bottom-last.bottom-parseFloat(style.borderBottomWidth)}})

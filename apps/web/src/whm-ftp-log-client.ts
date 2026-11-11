@@ -4,6 +4,9 @@ import type { MessageValues } from './i18n.ts'
 import { assertWhmClientTemplates as canonicalAssertWhmClientTemplates, clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate, WHM_CLIENT_TEMPLATE_BINDING } from './whm-client-templates.ts'
 import './i18n.ts'
 import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+import { ASCII_BYTES_BINDING, formatIsolatedBytes as canonicalFormatClientBytes } from './display-format.ts'
+// Module-local alias: the binding source defines it again from ASCII_BYTES_BINDING.
+const formatClientBytes = canonicalFormatClientBytes
 const frameRequest = canonicalFrameRequest
 const formatDisplayDateTime = sharedFormatDisplayDateTime
 const assertWhmClientTemplates = canonicalAssertWhmClientTemplates, clientTemplate = canonicalClientTemplate, clientTemplateSlot = canonicalClientTemplateSlot, cloneClientTemplate = canonicalCloneClientTemplate
@@ -179,7 +182,7 @@ function bindWhmFtpLog(): void {
       const facts = detail.querySelector<HTMLElement>('[data-ftp-log-detail-facts]')!, clients = detail.querySelector<HTMLElement>('[data-ftp-log-detail-clients]')!
       const own = summary.topUsers.find(item => item.user === user)
       facts.textContent = ''
-      for (const [label, value, technical] of [[t('User'), userText(user), user !== ''], [t('Account'), own?.account ?? notMapped, !!own?.account], [t('Successful sign-ins'), String(summary.logins.succeeded), true], [t(msgctxt('whm-ftp-log-client', 'Failed sign-ins')), String(summary.logins.failed), true], [t('Uploads'), String(summary.transfers.uploads), true], [t('Uploaded bytes'), String(summary.transfers.uploadBytes), true], [t('Downloads'), String(summary.transfers.downloads), true], [t('Downloaded bytes'), String(summary.transfers.downloadBytes), true], [t('Deletions'), String(summary.transfers.deletes), true]] as const) {
+      for (const [label, value, technical] of [[t('User'), userText(user), user !== ''], [t('Account'), own?.account ?? notMapped, !!own?.account], [t('Successful sign-ins'), String(summary.logins.succeeded), true], [t(msgctxt('whm-ftp-log-client', 'Failed sign-ins')), String(summary.logins.failed), true], [t('Uploads'), String(summary.transfers.uploads), true], [t('Uploaded bytes'), formatClientBytes(summary.transfers.uploadBytes), true], [t('Downloads'), String(summary.transfers.downloads), true], [t('Downloaded bytes'), formatClientBytes(summary.transfers.downloadBytes), true], [t('Deletions'), String(summary.transfers.deletes), true]] as const) {
         const item = document.createElement('div'), dt = document.createElement('dt'), dd = document.createElement('dd'); dt.textContent = label; dd.append(technical ? bdi(value) : value); item.append(dt, dd); facts.append(item)
       }
       clients.textContent = ''
@@ -193,7 +196,7 @@ function bindWhmFtpLog(): void {
       for (const event of events.slice(page * 50, page * 50 + 50)) {
         const row = document.createElement('tr')
         cell(row, formatDisplayDateTime(event.at), true); cell(row, kindLabel[event.kind]!); cell(row, userText(event.user), event.user !== null && event.user !== ''); cell(row, event.account ?? '-', !!event.account); cell(row, event.client, true)
-        cell(row, event.path === null ? '-' : event.pathBase === 'home' ? '~/' + event.path : event.path, event.path !== null); cell(row, event.bytes === null ? '-' : String(event.bytes), event.bytes !== null)
+        cell(row, event.path === null ? '-' : event.pathBase === 'home' ? '~/' + event.path : event.path, event.path !== null); cell(row, event.bytes === null ? '-' : formatClientBytes(event.bytes), event.bytes !== null)
         body.append(row)
       }
       if (!events.length) empty(body, 7, t('No FTP events match these filters in this window. Widen the range or clear a filter.'))
@@ -246,4 +249,4 @@ function bindWhmFtpLog(): void {
   })
 }
 
-export const WHM_FTP_LOG_CLIENT_BINDING = withFrameRequest(`(()=>{${WHM_CLIENT_TEMPLATE_BINDING}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const ftpLogObject=${ftpLogObject.toString()};const ftpLogText=${ftpLogText.toString()};const ftpLogNullable=${ftpLogNullable.toString()};const ftpLogAccount=${ftpLogAccount.toString()};const ftpLogInstant=${ftpLogInstant.toString()};const ftpLogCount=${ftpLogCount.toString()};const ftpLogClient=${ftpLogClient.toString()};const readFtpLogEvent=${readFtpLogEvent.toString()};const readFtpLogSummary=${readFtpLogSummary.toString()};const readFtpLogView=${readFtpLogView.toString()};return ${bindWhmFtpLog.toString()};})()`)
+export const WHM_FTP_LOG_CLIENT_BINDING = withFrameRequest(`(()=>{const formatClientBytes=${ASCII_BYTES_BINDING};${WHM_CLIENT_TEMPLATE_BINDING}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const ftpLogObject=${ftpLogObject.toString()};const ftpLogText=${ftpLogText.toString()};const ftpLogNullable=${ftpLogNullable.toString()};const ftpLogAccount=${ftpLogAccount.toString()};const ftpLogInstant=${ftpLogInstant.toString()};const ftpLogCount=${ftpLogCount.toString()};const ftpLogClient=${ftpLogClient.toString()};const readFtpLogEvent=${readFtpLogEvent.toString()};const readFtpLogSummary=${readFtpLogSummary.toString()};const readFtpLogView=${readFtpLogView.toString()};return ${bindWhmFtpLog.toString()};})()`)

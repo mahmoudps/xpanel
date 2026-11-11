@@ -42,9 +42,9 @@ export function rowMenu(props: RowMenuProps): string {
 // Without CSS anchor positioning the popover keeps the browser's centered placement.
 export const ROW_MENU_CSS = `.v2-menu{display:inline-flex}
 .v2-menu>.v2-btn:has(+:popover-open){border-color:var(--accent);border-width:1.5px}
-.v2-menu__list{min-inline-size:220px;list-style:none;padding:4px;border-radius:var(--radius-notice);background:var(--surface);color:var(--text);border:1px solid var(--line-strong);box-shadow:0 8px 24px rgba(0,0,0,.16);text-align:start}
+.v2-menu__list{min-inline-size:220px;max-block-size:calc(100dvh - 16px);overflow-y:auto;list-style:none;padding:4px;border-radius:var(--radius-notice);background:var(--surface);color:var(--text);border:1px solid var(--line-strong);box-shadow:var(--shadow);text-align:start}
 .v2-menu__list:popover-open{display:flex;flex-direction:column}
-@supports (position-area:block-end){.v2-menu__list{inset:auto;margin:4px 0 0;position-area:block-end span-inline-start;position-try-fallbacks:flip-block}}
+@supports (position-area:block-end){.v2-menu__list{inset:auto;margin:4px 0 0;position-area:block-end span-inline-start;position-try-fallbacks:flip-block,flip-inline,flip-block flip-inline}}
 .v2-menu__list [role=separator]{height:1px;margin:4px;background:var(--line)}
 .v2-menu__item{display:flex;align-items:center;justify-content:space-between;gap:12px;inline-size:100%;min-height:var(--target);padding:0 12px;border:0;border-radius:var(--radius-chip);background:transparent;color:var(--text);font-size:14px;text-align:start;text-decoration:none;cursor:pointer}
 .v2-menu__item:hover,.v2-menu__item:focus-visible{background:var(--subtle);color:var(--text)}

@@ -2,7 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderWhmServiceDetailWorkspace } from './board-port/whm-service-detail-workspace.ts'
 import { renderV2WhmServiceDetail } from './themes/v2/pages/xwhm/service-tools/details.ts'
-import { translator } from './i18n.ts'
+import { isolateClientValues, translator } from './i18n.ts'
 import type { WhmServiceDetailKind } from './board-port/whm-service-detail-workspace.ts'
 import { readServiceDetailView, readZoneCheckView, WHM_SERVICE_DETAIL_CLIENT_BINDING } from './whm-service-detail-client.ts'
 
@@ -75,7 +75,7 @@ describe('service detail client binding', () => {
     expect(rows()).toHaveLength(3)
     expect(rows()[0]!.querySelector('bdi[dir="ltr"]')!.textContent).toBe('example.com')
     expect(rows()[0]!.textContent).toContain('2026102702')
-    expect(rows()[0]!.textContent).toContain('2.0 KB')
+    expect(rows()[0]!.textContent).toContain('\u20662.00\u00a0KiB\u2069')
     expect(rows()[2]!.textContent).toContain('Not in saved state')
     expect(rows()[2]!.textContent).toContain('Not rendered by xPanel')
     expect(document.querySelectorAll('[data-whm-service-detail-check-zone]')).toHaveLength(2)
@@ -166,7 +166,7 @@ describe('service detail client binding', () => {
     expect(document.querySelector('tr[data-endpoint="panel"]')!.textContent).toContain('موجود (لم يُقرأ)')
     mount('dns', 'ar'); boot(async (_method: string, path: string) => path.includes('zone-check') ? { zone: 'example.com', observedAt: at, state: 'failed', records: 3, errors: 1, warnings: 0, messages: [] } : dns()); await tick()
     document.querySelector<HTMLButtonElement>('[data-whm-service-detail-check-zone="example.com"]')!.click(); await tick()
-    expect(document.querySelector('[data-whm-service-detail-check]')!.textContent).toBe('لم تجتز المنطقة example.com فحص pdnsutil check-zone: السجلات 3، الأخطاء 1، التحذيرات 0.')
+    expect(document.querySelector('[data-whm-service-detail-check]')!.textContent).toBe('لم تجتز المنطقة \u2066example.com\u2069 فحص pdnsutil check-zone: السجلات 3، الأخطاء 1، التحذيرات 0.')
   })
 })
 
@@ -225,7 +225,7 @@ describe.each(['classic', 'v2'] as const)('%s DNS finite button contract', theme
     const button = document.querySelector<HTMLButtonElement>('[data-whm-service-detail-check-zone="example.com"]')!
     expect(button.className).toBe(prototype.className)
     expect(button.textContent).toBe(translator(locale)('Check zone'))
-    expect(button.getAttribute('aria-label')).toBe(translator(locale)('Check zone {zone}', { zone: 'example.com' }))
+    expect(button.getAttribute('aria-label')).toBe(translator(locale)('Check zone {zone}', isolateClientValues(locale, { zone: 'example.com' })))
     expect(button.type).toBe('button'); expect(button.disabled).toBe(false); expect(prototype.disabled).toBe(true)
     if (theme === 'v2') expect(button.classList.contains('xp-btn')).toBe(false)
     button.click(); await tick()

@@ -31,6 +31,9 @@ describe('v2 stylesheet asset', () => {
     expect(Object.isFrozen(v2Assets)).toBe(true)
     // The shared foundation remains under a fifth of the 60 KB per-route budget.
     expect(compressedBytes(foundationAssets)).toBeLessThan(12 * 1024)
+    // Template families no route renders stay out of the foundation; the shared controls every page uses stay in.
+    for (const unused of ['.v2-matrix', '.v2-editor', '.v2-log__', '.v2-wizard__', '.v2-status-list', '.v2-filter__', '.v2-bulk']) expect(css).not.toContain(unused)
+    for (const shared of ['.v2-btn--soft-danger', '.v2-kpi__value--text', '::file-selector-button', '::-webkit-meter-bar', '.v2-tools[open]>summary::after']) expect(css).toContain(shared)
     for (const entry of v2RouteStylesheets) {
       for (const route of entry.routes) {
         for (const viewKind of ['workspace', 'unavailable'] as const) {
@@ -118,6 +121,15 @@ describe('v2 stylesheet asset', () => {
     expect(v2StylesheetsForDocument({ surface: 'xpanel', route: '/mail/search' })).toEqual([])
   })
 
+  it('loads the shared BoxTrapper, moderation and device guide rules on every route that renders those fragments', () => {
+    const rules = (surface: 'xpanel' | 'xmail', route: string): string => v2StylesheetsForDocument({ surface, route }).map(sheet => sheet.body).join('\n')
+    for (const [surface, route] of [['xpanel', '/email/spam-filters'], ['xmail', '/mail/settings/spam']] as const) expect(rules(surface, route), route).toContain('.v2-boxtrapper__group')
+    for (const [surface, route] of [['xpanel', '/email/mailing-lists'], ['xmail', '/mail/tools/mailing-lists']] as const) expect(rules(surface, route), route).toContain('.v2-list-moderation__queue')
+    for (const [surface, route] of [['xpanel', '/files/web-disk'], ['xpanel', '/email/calendars-contacts'], ['xmail', '/mail/settings/calendars']] as const) expect(rules(surface, route), route).toContain('.v2-dav-guide.v2-dav-guide')
+    expect(rules('xpanel', '/domains')).toContain('.v2-segmented')
+    expect(rules('xpanel', '/home')).not.toContain('.v2-boxtrapper__group')
+  })
+
   it('maps every registered document to exactly its listener surface without adding alias descendants', () => {
     const canonical = navigation.flatMap(surface => surface.sections.flatMap(section => section.pages.map(page => ({ route: page.route, surface: surface.surface }))))
     const byCanonicalRoute = new Map(canonical.map(document => [document.route, document.surface]))
@@ -142,7 +154,9 @@ describe('v2 stylesheet asset', () => {
     expect(editor[1]!.path).toBe('/assets/themes/v2/panel-htaccess.css')
     expect(editor[1]!.body).toContain('.v2-settings-code-editor')
     expect(settings.body).not.toContain('.v2-settings-code-editor')
-    expect(v2StylesheetsForDocument({ surface: 'xpanel', route: '/software/store/install' })).toEqual([settings])
+    const store = v2StylesheetsForDocument({ surface: 'xpanel', route: '/software/store/install' })
+    expect(store[0]).toBe(settings)
+    expect(store.map(asset => asset.path)).toEqual([settings.path, '/assets/themes/v2/panel-software-pages.css'])
     expect(v2Assets.filter(asset => asset.path === settings.path)).toEqual([settings])
   })
 
@@ -186,7 +200,7 @@ describe('v2 stylesheet asset', () => {
       ['xmail', '/mail/contacts', 'mail-tools', '.v2-organizer'],
       ['xpanel', '/domains/site-settings', 'panel-settings', '.v2-panel-settings'],
       ['xpanel', '/email/encryption', 'panel-email-observations', '.v2-panel-extra'],
-      ['xpanel', '/metrics/logs', 'panel-email-observations', '.v2-panel-extra'],
+      ['xpanel', '/metrics/logs', 'panel-observations', '.v2-panel-extra'],
       ['xwhm', '/whm/security/ssh', 'whm-observations', '.v2-observation'],
       ['xwhm', '/whm/audit', 'whm-observations', '.v2-observation'],
       ['xwhm', '/whm/accounts/health', 'whm-account-recovery', '.v2-account-tools'],

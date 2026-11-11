@@ -72,7 +72,7 @@ describe('readable date closure account logs', () => {
       Object.assign(window, { xpanelSessionRequest: send }); document.body.innerHTML = renderAccountLogsWorkspace({ lang, accountId, domains, kinds: ['access'] }); new Function('return ' + ACCOUNT_LOGS_CLIENT_BINDING)()(undefined)
       $<HTMLButtonElement>('[data-logs-read]').click(); await settle(); await settle()
       expect($('[data-logs-status]').textContent).toBe((lang === 'ar' ? 'قُرئ السجل في' : 'Log read at') + ' 2026-10-27 09:01 UTC.')
-      expect($('[data-logs-summary]').textContent).toBe(lang === 'ar' ? 'عرض 3 / 3 من إدخالات الموقع example.test · تعذر تحليل سطر واحد' : 'Showing 3 / 3 entries of the site example.test · 1 lines could not be parsed')
+      expect($('[data-logs-summary]').textContent).toBe(lang === 'ar' ? 'عرض 3 / 3 من إدخالات الموقع \u2066example.test\u2069 · تعذر تحليل سطر واحد' : 'Showing 3 / 3 entries of the site example.test · 1 lines could not be parsed')
       expect($('[data-logs-status] bdi').textContent).toBe('2026-10-27 09:01 UTC'); expect($('[data-logs-status] bdi').getAttribute('dir')).toBe('ltr')
       expect(JSON.stringify(source)).toBe(before); expect(readAccountLogsView(source, accountId, domainId, 'access').observedAt).toBe('2026-10-27T09:01:02.123Z')
       expect(send.mock.calls).toEqual([['GET', '/api/account/logs/' + domainId + '/access']])
@@ -116,7 +116,7 @@ describe('readable date closure account logs', () => {
     const link = $<HTMLAnchorElement>('[data-raw-access-rows] a')
     expect(link.getAttribute('href')).toBe('/api/account/logs/archives/example.test-2026-10-26.gz')
     expect($('[data-raw-access-source]').textContent).toContain('server defaults')
-    expect($('[data-raw-access-pending]').textContent).toBe('2 archives wait on the server to be copied into ~/logs (4.0 KiB, oldest from 2026-10-25 00:05 UTC): the account is over its disk quota. Each daily rotation tries again.')
+    expect($('[data-raw-access-pending]').textContent).toBe('2 archives wait on the server to be copied into ~/logs (\u20664.00\u00a0KiB\u2069, oldest from 2026-10-25 00:05 UTC): the account is over its disk quota. Each daily rotation tries again.')
     $<HTMLInputElement>('[data-raw-access="retentionDays"]').value = '7'
     $<HTMLButtonElement>('[data-raw-access-save]').click(); await settle()
     expect(calls).toContainEqual(['PUT', '/api/account/logs/settings', { settings: { archive: true, removePreviousMonthArchive: false, retentionDays: 7 } }])

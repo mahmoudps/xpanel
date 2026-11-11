@@ -3,7 +3,9 @@ import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canoni
 const clientTemplate = canonicalClientTemplate
 const clientTemplateSlot = canonicalClientTemplateSlot
 const cloneClientTemplate = canonicalCloneClientTemplate
+import { ASCII_BYTES_BINDING, formatIsolatedBytes as canonicalFormatAsciiBytes } from './display-format.ts'
 import './i18n.ts'
+const formatAsciiBytes = canonicalFormatAsciiBytes
 
 /** Local archive listing never applies a restore: the separate file workflow owns review and acknowledgement. */
 function bindLocalArchives(): void {
@@ -36,10 +38,11 @@ function bindLocalArchives(): void {
           names.add(item.file)
           const row = cloneClientTemplate(template, 'tr', ['archive', 'bytes', 'review'])
           clientTemplateSlot(row, 'archive').textContent = item.file
-          clientTemplateSlot(row, 'bytes').textContent = String(item.bytes)
+          clientTemplateSlot(row, 'bytes').textContent = formatAsciiBytes(Number(item.bytes))
           const review = clientTemplateSlot(row, 'review', 'a') as HTMLAnchorElement
           review.href = '/whm/backups/files?' + new URLSearchParams({ lang: document.documentElement.lang })
-          review.textContent = xpT('Restore files') + ': ' + item.file
+          const name = document.createElement('bdi'); name.dir = 'ltr'; name.textContent = item.file
+          review.replaceChildren(xpT('Restore files') + ': ', name)
           return row
         })
         if (!admitted() || account.value !== username) return
@@ -63,4 +66,4 @@ function bindLocalArchives(): void {
   })
 }
 
-export const WHM_LOCAL_ARCHIVES_CLIENT_BINDING = `(()=>{${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};return ${bindLocalArchives.toString()};})()`
+export const WHM_LOCAL_ARCHIVES_CLIENT_BINDING = `(()=>{${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const formatAsciiBytes=${ASCII_BYTES_BINDING};return ${bindLocalArchives.toString()};})()`

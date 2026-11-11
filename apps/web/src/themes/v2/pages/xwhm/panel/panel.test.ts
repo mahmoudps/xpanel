@@ -4,7 +4,7 @@ import { translator } from '../../../../../i18n.ts'
 import type { WhmSurfaceProps } from '../../../../contract.ts'
 import { parseMarkup } from '../../../../markup.ts'
 import type { WhmAdminAuthority } from '../server/common.ts'
-import { renderV2WhmPanelPage, V2_WHM_PANEL_ROUTES, V2_PANEL_TOKEN_SCOPES, V2_PANEL_NOTIFICATION_EVENTS } from './index.ts'
+import { renderV2WhmPanelPage, V2_WHM_PANEL_ROUTES, V2_PANEL_TOKEN_SCOPES, V2_PANEL_NOTIFICATION_EVENTS, WHM_PANEL_CSS } from './index.ts'
 
 const principal = { kind: 'root' as const, id: 'root-fixture', username: 'operator' }
 const authority: WhmAdminAuthority = { canRead: true, canManage: true }
@@ -94,6 +94,13 @@ describe('v2 panel administration family', () => {
     expect(loaded).toContain('&lt;script&gt;unsafe&lt;/script&gt;'); expect(loaded).not.toContain('<script>unsafe')
     expect(loaded).toContain('data-generation-id="9" disabled')
   })
+  it('gives the generation table the page width and pairs the two recovery tools under it', () => {
+    const html = render('/whm/panel/data')
+    expect(html).toMatch(/<div class="v2-admin-stack" data-section="config-generations" data-whm-generations/)
+    expect(html.indexOf('id="v2-panel-data-history"')).toBeLessThan(html.indexOf('v2-panel-data__rules'))
+    expect(html.indexOf('v2-panel-data__rules')).toBeLessThan(html.indexOf('<div class="v2-panel-data__tools">'))
+    expect(WHM_PANEL_CSS).toContain('.v2-panel-page .v2-panel-data__tools{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr)')
+  })
   it('allows the personal preferences layout for a reseller while keeping root panel settings inert', () => {
     const reseller = { kind: 'reseller' as const, id: 'reseller-fixture', username: 'provider' }
     const prefs = render('/whm/preferences', { principal: reseller, locale: 'ar' })
@@ -109,5 +116,10 @@ describe('v2 panel administration family', () => {
     expect(one(html, 'data-whm-notifications-webhook-url')?.attrs.get('maxlength')).toBe('2048')
     expect(one(html, 'data-whm-notifications-test')?.attrs.has('disabled')).toBe(true)
     expect(html).toContain('the other events are not sent yet.')
+  })
+
+  it('lays the token scope matrix out as phone rows: area with its key under it, read and write opposite', () => {
+    expect(render('/whm/panel/api-tokens')).toContain('<table id="v2-panel-token-scopes" style="')
+    expect(WHM_PANEL_CSS).toMatch(/@media\(max-width:640px\)\{[^@]*#v2-panel-token-scopes tr\{display:grid;grid-template-columns:minmax\(0,1fr\) 56px 56px/)
   })
 })

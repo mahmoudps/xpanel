@@ -9,8 +9,9 @@ export const V2_MAIL_CARD_CSS = `.v2-mail-cards{display:flex;flex-direction:colu
 .v2-mail-card :is(p,dl,dd){margin:0}
 .v2-mail-card__fields,.v2-mail-card__facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(220px,100%),1fr));gap:var(--space-2);min-inline-size:0}
 .v2-mail-card__facts>div{display:flex;flex-direction:column;gap:var(--space-1);min-inline-size:0}
+.v2-mail-card .v2-field>label,.v2-mail-card__facts dt{text-box-trim:trim-end;text-box-edge:text}
 .v2-mail-card__facts dt{font-size:13px;font-weight:600;color:var(--text-2)}
-.v2-mail-card__facts dd{overflow-wrap:anywhere}
+.v2-mail-card__facts dd{overflow-wrap:anywhere;text-box-trim:trim-start;text-box-edge:text}
 .v2-mail-card__actions{display:flex;flex-wrap:wrap;gap:var(--space-1)}
 .v2-mail-card__scroll{overflow-x:auto;min-inline-size:0}
 .v2-mail-card__list{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(180px,100%),1fr));gap:var(--space-1);max-block-size:320px;overflow-y:auto}
@@ -40,7 +41,7 @@ ${card.list ? `<div class="v2-mail-card__list" role="group" aria-label="${escape
 ${card.actions.length ? `<div class="v2-mail-card__actions">${card.actions.map(action => `<button type="button" class="v2-btn${action.tone ? ` v2-btn--${action.tone}` : ''}" data-mail-card-action="${action.key}"${action.write ? ' data-mail-card-write' : ''} disabled>${escapeHtml(action.label)}</button>`).join('')}</div>` : ''}
 ${interactive ? `<p data-mail-card-status data-state="unread" role="status">${escapeHtml(card.unread)}</p>` : ''}
 ${card.facts.length ? `<dl class="v2-mail-card__facts">${card.facts.map(([key, label]) => `<div><dt>${escapeHtml(label)}</dt><dd data-mail-card-fact="${key}"></dd></div>`).join('')}</dl>` : ''}
-${card.tables.map(table => `<div class="v2-mail-card__scroll" role="region" tabindex="0" aria-label="${escapeHtml(table.caption)}"><table class="v2-table"><caption class="v2-sr">${escapeHtml(table.caption)}</caption><thead><tr>${table.columns.map(label => `<th scope="col">${escapeHtml(label)}</th>`).join('')}</tr></thead><tbody data-mail-card-rows="${table.key}"></tbody></table></div>${xpTemplate(`mail-card-${table.key}`, `<tr>${table.slots.map(slot => `<td data-xp-slot="${slot}"></td>`).join('')}</tr>`)}`).join('')}
+${card.tables.map(table => `<div class="v2-mail-card__scroll" role="region" tabindex="0" aria-label="${escapeHtml(table.caption)}"><table class="v2-table"><caption class="v2-sr">${escapeHtml(table.caption)}</caption><thead><tr>${table.columns.map(label => `<th scope="col">${escapeHtml(label)}</th>`).join('')}</tr></thead><tbody data-mail-card-rows="${table.key}"><tr><td data-table-empty colspan="${table.columns.length}">${escapeHtml(card.unread)}</td></tr></tbody></table></div>${xpTemplate(`mail-card-${table.key}`, `<tr>${table.slots.map(slot => `<td data-xp-slot="${slot}"></td>`).join('')}</tr>`)}`).join('')}
 ${card.notes.map(note => `<p>${escapeHtml(note)}</p>`).join('')}
 ${interactive ? xpTemplate('mail-card-button', '<button type="button" class="v2-btn" data-xp-slot="content" disabled></button>') + xpTemplate('mail-card-link', '<a data-xp-slot="content"></a>') + xpTemplate('mail-card-select', '<select data-xp-slot="content" disabled></select>') + xpTemplate('mail-card-check', '<label class="v2-mail-card__check"><input type="checkbox" data-xp-slot="control" disabled><span data-xp-slot="label"></span></label>') : ''}
 </div>`

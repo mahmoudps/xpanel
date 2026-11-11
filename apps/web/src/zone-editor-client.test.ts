@@ -175,7 +175,7 @@ describe('zone editor boundary validation', () => {
     const arabic = zoneEditorMessage(stateOf({ status: 'saved', zone: zone() }))
     const deleteBody = xpT('Delete the saved desired-state zone for {zone}? This does not delete the domain and does not claim DNS propagation or serving changes.', { zone: 'alpha.test' })
     document.documentElement.lang = 'en'; document.documentElement.dir = 'ltr'
-    expect(deleteBody).toBe('هل تريد حذف المنطقة المحفوظة في الحالة المطلوبة للنطاق alpha.test؟ لا يحذف هذا النطاق نفسه ولا يدّعي تغيير نشر DNS أو الخدمة.')
+    expect(deleteBody).toBe('هل تريد حذف المنطقة المحفوظة في الحالة المطلوبة للنطاق \u2066alpha.test\u2069؟ لا يحذف هذا النطاق نفسه ولا يدّعي تغيير نشر DNS أو الخدمة.')
     expect(arabic).toMatch(/[\u0600-\u06ff]/)
     expect(arabic).not.toMatch(/[\u0660-\u0669\u06f0-\u06f9]/)
     expect(zoneEditorMessage(stateOf({ status: 'unavailable' }))).toMatch(/unavailable/)

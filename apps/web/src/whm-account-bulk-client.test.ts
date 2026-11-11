@@ -64,6 +64,26 @@ describe('bulk account bar', { tags: ['feature'] }, () => {
     expect(box(3).checked).toBe(true)
   })
 
+  it('keeps a clicked row checked, counts it, and select-all checks and clears every loaded row', () => {
+    boot(async () => reply([]), async () => true)
+    const count = () => bar().querySelector('[data-account-selected-count]')!.textContent
+    const all = document.querySelector<HTMLInputElement>('[data-account-select-all]')!
+    box(1).click()
+    expect(box(1).checked).toBe(true)
+    expect(count()).toBe('1 selected')
+    expect(control('suspend').disabled).toBe(false)
+    box(1).click()
+    expect(box(1).checked).toBe(false)
+    expect(control('suspend').disabled).toBe(true)
+    all.click()
+    expect([1, 2, 3].map(n => box(n).checked)).toEqual([true, true, true])
+    expect(all.checked).toBe(true)
+    expect(count()).toBe('3 selected')
+    all.click()
+    expect([1, 2, 3].map(n => box(n).checked)).toEqual([false, false, false])
+    expect(control('suspend').disabled).toBe(true)
+  })
+
   it('locks the bar for review when the reply cannot be verified and sends nothing without confirmation', async () => {
     let calls = 0
     let confirmed = false

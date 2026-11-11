@@ -9,7 +9,7 @@ import { createVisualFixture } from './visual-fixture.mjs'
 process.env.PLAYWRIGHT_BROWSERS_PATH ||= resolve('.tools/playwright-browsers')
 const { chromium } = await import('@playwright/test')
 const output = resolve(process.env.XPANEL_DATABASE_WORKSPACE_OUTPUT || 'test-results/completion-database-workspace')
-const sourcePaths = ['apps/web/src/database-workspace-client.ts', 'apps/web/src/board-port/extensions/account-databases.ts', 'apps/web/src/board-port/approved-xpanel-workspaces.ts', 'apps/web/src/board-port/approved-xpanel-pages.ts', 'apps/web/src/surfaces/xpanel.ts', 'apps/web/src/ws-client.ts', 'apps/web/src/login-client.ts', 'apps/web/src/password-generate-client.ts', 'apps/web/src/board-port/extensions/shared.ts', 'tests/browser/visual-fixture.mjs', 'tests/browser/completion-database-workspace.mjs']
+const sourcePaths = ['apps/web/src/database-workspace-client.ts', 'apps/web/src/themes/v2/pages/xpanel/databases/common.ts', 'apps/web/src/themes/v2/pages/xpanel/databases/mariadb.ts', 'apps/web/src/themes/v2/pages/xpanel/databases/styles.ts', 'apps/web/src/themes/v2/pages/xpanel/databases/wizard.ts', 'apps/web/src/themes/v2/client-templates/data-workspaces.ts', 'apps/web/src/themes/v2/surfaces/xpanel.ts', 'apps/web/src/ws-client.ts', 'apps/web/src/login-client.ts', 'apps/web/src/password-generate-client.ts', 'tests/browser/visual-fixture.mjs', 'tests/browser/completion-database-workspace.mjs']
 const snapshot = () => sourcePaths.map(path => ({ path, sha256: createHash('sha256').update(readFileSync(path)).digest('hex') }))
 const clone = value => JSON.parse(JSON.stringify(value))
 const accountId = 'visual-account', username = 'preview', api = '/api/databases'
@@ -146,6 +146,10 @@ async function mockSession(page, model) {
     catch (error) { model.errors.push(String(error)); await route.fulfill({ status: 500, json: { status: 500, code: 'mock_contract_failure', details: { unknownOutcome: true, verificationRequired: true } } }) }
   })
 }
+async function openDbTab(page, key) {
+  const panel = page.locator('#v2-db-section-' + key)
+  if (await panel.isHidden()) await page.locator('#v2-db-tab-' + key).click()
+}
 async function state(page, wanted) {
   await page.waitForFunction(({ selector, wanted }) => {
     const root = document.querySelector(selector), status = root?.querySelector('[data-db-status]')
@@ -165,6 +169,7 @@ async function reload(page) {
   await state(page, 'read')
 }
 async function confirmLifecycle(page, kind, id, name, accept = true) {
+  await openDbTab(page, 'databases')
   await lifecycleAction(page, kind, id).click()
   const confirm = page.locator('[data-xp-prompt-confirm]'); await confirm.waitFor({ state: 'visible' })
   assert.ok((await page.locator('[data-xp-prompt-body]').textContent()).includes(name), 'Named confirmation identifies the captured database')
@@ -172,6 +177,7 @@ async function confirmLifecycle(page, kind, id, name, accept = true) {
   await settle(page)
 }
 async function selectGrant(page, userId, databaseId) {
+  await openDbTab(page, 'privileges')
   await grantField(page, 'userId').selectOption(userId)
   await grantField(page, 'databaseId').selectOption(databaseId)
 }
@@ -183,6 +189,7 @@ async function editGrant(page, privileges) {
 }
 const currentGrant = (model, userId, databaseId) => model.users.find(user => user.id === userId)?.grants.find(grant => grant.databaseId === databaseId)?.privileges ?? null
 async function geometry(page) {
+  await page.evaluate(() => document.fonts.ready)
   return page.locator(rootSelector).evaluate(root => {
     const visible = node => !!node.getClientRects().length && !node.closest('[hidden]') && getComputedStyle(node).visibility !== 'hidden'
     const rect = node => { const value = node.getBoundingClientRect(); return { x: value.x, y: value.y, width: value.width, height: value.height, right: value.right, bottom: value.bottom } }
@@ -198,26 +205,27 @@ async function geometry(page) {
       return { name: control.name || control.id, box, label: label?.textContent.replace(/\s+/g, ' ').trim(), gap, alignment, textAlign: style.textAlign, direction: style.direction }
     })
     const controls = [...root.querySelectorAll('button,summary,input,select')].filter(visible).map(node => ({ type: node.type || node.tagName, box: rect(node), label: node.getAttribute('aria-label') || (node.tagName === 'BUTTON' ? node.textContent : '') }))
-    const technical = [...root.querySelectorAll('tbody bdi')].filter(visible).map(node => { const range = document.createRange(); range.selectNodeContents(node); const style = getComputedStyle(node); return { text: node.textContent, lines: new Set([...range.getClientRects()].map(value => Math.round(value.top))).size, direction: style.direction, isolation: style.unicodeBidi } })
-    const tables = [...root.querySelectorAll('table')].map(table => { const wrap = table.closest('[role=region]'); return { columns: table.querySelectorAll('thead th').length, width: rect(table).width, wrap: wrap ? { box: rect(wrap), tabIndex: wrap.tabIndex, label: wrap.getAttribute('aria-label') || wrap.getAttribute('aria-labelledby') } : null } })
+    const technical = [...root.querySelectorAll('tbody bdi, .v2-db-check bdi')].filter(visible).map(node => { const range = document.createRange(); range.selectNodeContents(node); const style = getComputedStyle(node); return { text: node.textContent, inTable: Boolean(node.closest('tbody')), lines: new Set([...range.getClientRects()].map(value => Math.round(value.top))).size, direction: style.direction, isolation: style.unicodeBidi } })
+    const tables = [...root.querySelectorAll('table[data-database-table]')].map(table => { const wrap = table.closest('[role=region]'); return { columns: table.querySelectorAll('thead th').length, width: rect(table).width, visible: visible(table), wrap: wrap ? { box: rect(wrap), tabIndex: wrap.tabIndex, label: wrap.getAttribute('aria-label') || wrap.getAttribute('aria-labelledby') } : null } })
     const choices = [...root.querySelectorAll('input[type=checkbox],input[type=radio]')].filter(visible).map(control => { const label = control.closest('label'); return { label: label ? rect(label) : null, control: rect(control) } })
-    const cards = [...root.querySelectorAll('.xp-extension__card')].filter(visible).map(card => { const style = getComputedStyle(card); return { top: parseFloat(style.paddingTop), right: parseFloat(style.paddingRight), bottom: parseFloat(style.paddingBottom), left: parseFloat(style.paddingLeft) } })
-    const groups = [...root.querySelectorAll('.xp-db-form')].filter(visible).map(node => parseFloat(getComputedStyle(node).rowGap))
-    const siblings = [...root.querySelectorAll('.xp-db-fields')].filter(visible).map(node => ({ row: parseFloat(getComputedStyle(node).rowGap), column: parseFloat(getComputedStyle(node).columnGap) }))
+    const cards = [...root.querySelectorAll('.v2-card:not(.v2-card--flush)')].filter(visible).map(card => { const style = getComputedStyle(card); return { top: parseFloat(style.paddingTop), right: parseFloat(style.paddingRight), bottom: parseFloat(style.paddingBottom), left: parseFloat(style.paddingLeft) } })
+    const groups = [...root.querySelectorAll('.v2-db-form, .v2-db-stack')].filter(visible).map(node => parseFloat(getComputedStyle(node).rowGap))
+    const siblings = [...root.querySelectorAll('.v2-db-fields')].filter(visible).map(node => ({ row: parseFloat(getComputedStyle(node).rowGap), column: parseFloat(getComputedStyle(node).columnGap) }))
     return { width: innerWidth, pageWidth: document.documentElement.scrollWidth, direction: getComputedStyle(root).direction, sectionGap: parseFloat(getComputedStyle(root).rowGap), fields, controls, technical, tables, choices, cards, groups, siblings }
   })
 }
-function assertGeometry(value, lang, width) {
+function assertGeometry(value, lang, width, stage = 'initial-grant') {
   assert.equal(value.direction, lang === 'ar' ? 'rtl' : 'ltr'); assert.ok(value.pageWidth <= width + 1, 'Affected page must contain overflow')
-  assert.ok(value.fields.length >= 4, 'Actual expanded database and initial-grant controls measured')
+  assert.ok(value.fields.length >= (stage === 'grant-edit' ? 3 : 4), 'Actual expanded database controls measured')
   for (const field of value.fields) { assert.ok(field.box.height >= 43.5, 'Field target: ' + field.name); assert.ok(field.label, 'Associated field label: ' + field.name); if (field.gap !== null) assert.ok(Math.abs(field.gap - 8) <= 1, 'Label/control gap: ' + field.name); if (field.alignment !== null) assert.ok(field.alignment <= 1, 'Field value anchor: ' + field.name) }
   for (const control of value.controls) if (!['checkbox', 'radio'].includes(control.type)) assert.ok(control.box.width >= 43.5 && control.box.height >= 43.5, 'Visible control target: ' + control.label)
   assert.equal(value.tables.length, 3, 'Rich database, user and trash tables retained')
-  for (const table of value.tables) { assert.ok(table.columns >= 3); assert.ok(table.wrap?.tabIndex >= 0 && table.wrap.label, 'Labelled keyboard-reachable table overflow'); assert.ok(table.wrap.box.width <= width + 1) }
-  assert.ok(value.technical.length > 0, 'Actual technical table values measured')
-  for (const token of value.technical) { assert.equal(token.direction, 'ltr'); assert.ok(token.isolation.includes('isolate')); assert.ok(token.lines <= 1, 'Intact technical value: ' + token.text) }
-  assert.ok(value.choices.length >= 5, 'Expanded initial-grant choices measured'); for (const choice of value.choices) assert.ok(choice.label && choice.label.width >= 43.5 && choice.label.height >= 43.5, 'Actual associated choice target')
-  assert.ok(value.cards.length > 0); for (const card of value.cards) for (const padding of Object.values(card)) assert.ok(Math.abs(padding - (width < 600 ? 16 : 24)) <= 1, 'Affected card content padding')
+  for (const table of value.tables) { assert.ok(table.columns >= 3); assert.ok(table.wrap?.tabIndex >= 0 && table.wrap.label, 'Labelled keyboard-reachable table overflow'); if (table.visible) assert.ok(table.wrap.box.width <= width + 1) }
+  assert.ok(value.technical.length > 0, 'Actual technical values measured')
+  for (const token of value.technical) { assert.equal(token.direction, 'ltr'); assert.ok(token.isolation.includes('isolate')); if (!token.inTable || width > 600) assert.ok(token.lines <= 1, 'Intact technical value: ' + token.text) }
+  if (stage !== 'trash') assert.ok(value.choices.length >= 5, 'Expanded grant choices measured')
+  for (const choice of value.choices) assert.ok(choice.label && choice.label.width >= 43.5 && choice.label.height >= 43.5, 'Actual associated choice target')
+  assert.ok(value.cards.length > 0); for (const card of value.cards) for (const padding of Object.values(card)) assert.ok(Math.abs(padding - (width <= 600 ? 16 : 24)) <= 1, 'Affected card content padding')
   for (const gap of value.groups) assert.ok(Math.abs(gap - 24) <= 1, 'Actual form group gap')
   for (const gap of value.siblings) { assert.ok(Math.abs(gap.row - 16) <= 1); assert.ok(Math.abs(gap.column - 16) <= 1) }
   assert.ok(Math.abs(value.sectionGap - 32) <= 1, 'Workspace section hierarchy')
@@ -238,10 +246,12 @@ try {
     assert.equal(await page.locator(rootSelector).getAttribute('data-db-account'), accountId)
     assert.equal(await page.locator('[data-db-rows] tr').count(), 1); assert.equal(await page.locator('[data-dbu-rows] tr').count(), 1); assert.equal(await page.locator('[data-db-trash-rows] tr').count(), 1)
     checkpoint = lang + '-' + width + ':create-database'
+    await openDbTab(page, 'databases')
     await field(page, 'name').fill('shop'); await form(page).locator('button[type=submit]').click(); await state(page, 'saved')
     const created = model.databases.find(row => row.name === 'preview_shop'); assert.ok(created)
     assert.equal(model.calls.filter(call => call.method === 'POST')[0].body.name, 'preview_shop')
     checkpoint = lang + '-' + width + ':initial-grant-expanded'
+    await openDbTab(page, 'users')
     await field(page, 'name', true).fill('Reader'); assert.equal(await field(page, 'password', true).getAttribute('type'), 'password'); await field(page, 'password', true).fill('Synthetic-browser-only-42!')
     await field(page, 'databaseId', true).selectOption(created.id)
     const privileges = form(page, true).locator('[name=privileges]'); for (const control of await privileges.all()) await control.uncheck(); await form(page, true).locator('[name=privileges][value=SELECT]').check(); await form(page, true).locator('[name=privileges][value=INSERT]').check()
@@ -249,7 +259,7 @@ try {
     writeFileSync(output + '/' + lang + '-' + width + '-geometry.json', JSON.stringify({ lang, width, checkpoint, geometry: measured }, null, 2))
     const capturePath = output + '/' + lang + '-' + width + '-initial-grant.png'
     await page.screenshot({ path: capturePath, fullPage: true }); activeCapture = capturePath
-    assertGeometry(measured, lang, width)
+    assertGeometry(measured, lang, width, 'initial-grant')
     await form(page, true).locator('button[type=submit]').click(); await state(page, 'saved')
     const createdUser = model.users.find(row => row.name === 'preview_reader'); assert.ok(createdUser); assert.deepEqual(createdUser.grants, [{ databaseId: created.id, privileges: ['INSERT', 'SELECT'] }])
     assert.equal(await field(page, 'password', true).inputValue(), '', 'Password cleared after dispatch')
@@ -270,7 +280,7 @@ try {
     writeFileSync(output + '/' + lang + '-' + width + '-grant-geometry.json', JSON.stringify({ lang, width, checkpoint, geometry: grantMeasured }, null, 2))
     const grantCapture = output + '/' + lang + '-' + width + '-grant-edit.png'
     await page.screenshot({ path: grantCapture, fullPage: true }); activeCapture = grantCapture
-    assertGeometry(grantMeasured, lang, width)
+    assertGeometry(grantMeasured, lang, width, 'grant-edit')
     await grantForm(page).locator('[data-db-grant-save]').click(); await state(page, 'saved')
     const edited = grantSaves(model).at(-1)
     assert.equal(edited.path, api + '/users/' + createdUser.id + '/grants')
@@ -297,7 +307,7 @@ try {
     writeFileSync(output + '/' + lang + '-' + width + '-trash-geometry.json', JSON.stringify({ lang, width, checkpoint, geometry: lifecycleMeasured }, null, 2))
     const lifecycleCapture = output + '/' + lang + '-' + width + '-trash.png'
     await page.screenshot({ path: lifecycleCapture, fullPage: true }); activeCapture = lifecycleCapture
-    assertGeometry(lifecycleMeasured, lang, width)
+    assertGeometry(lifecycleMeasured, lang, width, 'trash')
     checkpoint = lang + '-' + width + ':restore-confirmed'
     await confirmLifecycle(page, 'restore', created.id, created.name); await state(page, 'saved')
     assert.deepEqual(lifecycleSaves(model).at(-1).body, { expectedTrashedAt: trashed.trashedAt, confirmation: created.name })
@@ -307,6 +317,7 @@ try {
     assert.deepEqual(model.users, usersBeforeLifecycle, 'Restore preserves existing grants and other users')
     if (lang === 'en' && width === 1440) {
       checkpoint = 'lifecycle-CAS-conflict'
+      await openDbTab(page, 'databases')
       await field(page, 'name').fill('preserved_lifecycle_draft')
       model.lifecycleRace = { id: created.id, trashedAt: '2026-10-26T11:00:00.000Z' }
       await confirmLifecycle(page, 'trash', created.id, created.name); await state(page, 'stale')
@@ -355,29 +366,33 @@ try {
         await reload(page)
       }
       checkpoint = 'pending-refresh-draft'
+      await openDbTab(page, 'databases')
       const refresh = model.hold(api); await action(page, 'refresh').click(); await entered(refresh)
       await field(page, 'name').fill('typed_during_read'); refresh.release(); await state(page, 'read'); assert.equal(await field(page, 'name').inputValue(), 'typed_during_read'); await reload(page)
       checkpoint = 'raw-invalid-database-name'
+      await openDbTab(page, 'databases')
       const rawCount = mutationCount(model); await field(page, 'name').fill(' invalid'); await form(page).locator('button[type=submit]').click(); await state(page, 'failed'); assert.equal(mutationCount(model), rawCount); assert.equal(await field(page, 'name').inputValue(), ' invalid'); await reload(page)
-      checkpoint = 'known-refusal'; model.mode = 'explicit-refusal'; await field(page, 'name').fill('refused'); await form(page).locator('button[type=submit]').click(); await state(page, 'failed'); assert.equal(await field(page, 'name').inputValue(), 'refused'); assert.equal(model.databases.some(row => row.name === 'preview_refused'), false); model.mode = null; await reload(page)
+      checkpoint = 'known-refusal'; model.mode = 'explicit-refusal'; await openDbTab(page, 'databases'); await field(page, 'name').fill('refused'); await form(page).locator('button[type=submit]').click(); await state(page, 'failed'); assert.equal(await field(page, 'name').inputValue(), 'refused'); assert.equal(model.databases.some(row => row.name === 'preview_refused'), false); model.mode = null; await reload(page)
       for (const mode of ['unknown-write', 'unknown-403', 'foreign-ack', 'missing-readback', 'false-native-proof']) {
-        checkpoint = mode; model.mode = mode; const suffix = mode.replaceAll('-', '_'); await field(page, 'name').fill(suffix); await form(page).locator('button[type=submit]').click(); await state(page, 'uncertain')
+        checkpoint = mode; model.mode = mode; const suffix = mode.replaceAll('-', '_'); await openDbTab(page, 'databases'); await field(page, 'name').fill(suffix); await form(page).locator('button[type=submit]').click(); await state(page, 'uncertain')
         assert.equal(await form(page).locator('button[type=submit]').isDisabled(), true); const count = mutationCount(model); model.mode = null; await action(page, 'refresh').click(); await settle(page); await state(page, 'uncertain'); assert.equal(mutationCount(model), count, 'Review never retries an uncertain creation'); await reload(page)
       }
       checkpoint = 'unknown-user-password-disposal'; model.mode = 'unknown-write'
+      await openDbTab(page, 'users')
       await field(page, 'name', true).fill('unknown_user'); await field(page, 'password', true).fill('Synthetic-browser-only-42!'); await field(page, 'databaseId', true).selectOption(created.id)
       await form(page, true).locator('button[type=submit]').click(); await state(page, 'uncertain')
       assert.equal(await field(page, 'password', true).inputValue(), ''); assert.equal(await field(page, 'name', true).inputValue(), 'unknown_user'); assert.equal(await form(page, true).locator('button[type=submit]').isDisabled(), true)
       model.mode = null; await reload(page)
       for (const mode of ['foreign-context', 'foreign-row', 'foreign-name']) { checkpoint = mode; model.mode = mode; const count = mutationCount(model); await action(page, 'refresh').click(); await state(page, 'failed'); assert.equal(mutationCount(model), count); model.mode = null; await action(page, 'refresh').click(); await state(page, 'read') }
       checkpoint = 'dispatch-time-qualification'
+      await openDbTab(page, 'databases')
       await field(page, 'name').fill('qualification_draft'); const gate = model.hold(api), count = mutationCount(model)
       await form(page).locator('button[type=submit]').click(); await entered(gate)
       await page.locator(rootSelector).evaluate(root => root.setAttribute('data-capability-unavailable', 'true')); gate.release(); await state(page, 'failed')
       assert.equal(mutationCount(model), count); assert.equal(await field(page, 'name').inputValue(), 'qualification_draft'); assert.equal(await form(page).locator('button[type=submit]').isDisabled(), true)
     }
     assert.deepEqual(model.errors, []); assert.deepEqual(pageErrors, [])
-    cases.push({ lang, width, status: 'passed', geometry: measured, grantGeometry: grantMeasured, lifecycleGeometry: lifecycleMeasured, calls: model.calls, pageErrors, checks: ['trusted account pin and full lists', 'prefixed database create/readback', 'new user with selected initial grant', 'password removed after dispatch and redacted from evidence', 'visible expanded field/technical/table geometry', 'grant ADD with explicit absent baseline', 'grant EDIT with exact current-value baseline and sibling preservation', 'expanded grant editor geometry in the same context', 'named soft trash and restore with exact state readback', 'trash preserves users and grants and excludes initial-grant targets', 'trash state geometry in the same locale and viewport', ...(lang === 'en' && width === 1440 ? ['cancelled named lifecycle confirmation sends zero POST', 'lifecycle CAS409 preserves draft and Refresh lock until explicit reload', 'unknown or wrong-target lifecycle acknowledgement never retries', 'POST-time grant CAS409 preserves draft through refresh', 'explicit reload/reselection admits a new grant baseline', 'unknown or wrong-user acknowledgement locks without retry', 'late refresh preserves draft', 'raw invalid input and known refusal preserve draft', 'unknown outcome locks and explicit review without retry', 'strict malformed/foreign acknowledgement and list rejection', 'dispatch-time qualification suppression'] : [])] })
+    cases.push({ lang, width, status: 'passed', geometry: measured, grantGeometry: grantMeasured, lifecycleGeometry: lifecycleMeasured, calls: model.calls, pageErrors, checks: ['trusted account pin and full lists', 'prefixed database create/readback', 'new user with selected initial grant', 'password removed after dispatch and redacted from evidence', 'visible expanded field/technical/table geometry', 'grant ADD with explicit absent baseline', 'grant EDIT with exact current-value baseline and sibling preservation', 'expanded grant editor geometry in the same context', 'named soft trash and restore with exact state readback', 'trash preserves users and grants and excludes initial-grant targets', 'trash state geometry in the same locale and viewport', ...(lang === 'en' && width === 1440 ? ['cancelled named lifecycle confirmation sends zero POST', 'lifecycle CAS409 preserves draft and Refresh lock until explicit reload', 'unknown or wrong-target lifecycle acknowledgement never retries', 'POST-time grant CAS409 preserves draft through refresh', 'explicit reload/reselection binds a new grant baseline', 'unknown or wrong-user acknowledgement locks without retry', 'late refresh preserves draft', 'raw invalid input and known refusal preserve draft', 'unknown outcome locks and explicit review without retry', 'strict malformed/foreign acknowledgement and list rejection', 'dispatch-time qualification suppression'] : [])] })
     await context.close()
   }
 } catch (error) {

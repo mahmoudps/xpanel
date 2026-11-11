@@ -3,11 +3,13 @@ import { HOST_TOOL_CARDS, hostToolSpec, type HostToolCardId, type HostToolField 
 import { card } from '../../../components/card.ts'
 import { formField } from '../../../components/form-field.ts'
 import { escapeHtml } from '../../../html.ts'
+import { whmPolish } from '../monitoring/common.ts'
 
 export const WHM_HOST_TOOLS_ROUTES = ['/whm/server/cron', '/whm/server/terminal', '/whm/server/networking', '/whm/server/setup', '/whm/services/more', '/whm/software/php', '/whm/monitoring/logs'] as const
 export const WHM_HOST_TOOLS_CSS = `.v2-host-tools,.v2-host-tools__form{display:flex;flex-direction:column;gap:var(--space-3);min-inline-size:0}
 .v2-host-tools :is(p,dl,dd,pre){margin:0}
 .v2-host-tools__fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-2);min-inline-size:0}
+.v2-host-tools dl.v2-host-tools__fields>div{display:flex;flex-direction:column;gap:var(--space-1);min-inline-size:0}
 .v2-host-tools__fields textarea{inline-size:100%;box-sizing:border-box}
 .v2-host-tools__actions,.v2-host-tools [data-host-tool-row-actions]{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-1)}
 .v2-host-tools__actions{gap:var(--space-2)}
@@ -18,7 +20,7 @@ export const WHM_HOST_TOOLS_CSS = `.v2-host-tools,.v2-host-tools__form{display:f
 .v2-host-tools pre{max-block-size:320px;overflow:auto;padding:var(--space-2);border:1px solid var(--line);border-radius:8px;white-space:pre-wrap;overflow-wrap:anywhere}
 .v2-host-tools code{display:block;overflow-wrap:anywhere}
 .v2-host-tools [hidden]{display:none!important}
-@media(max-width:600px){.v2-host-tools__fields{grid-template-columns:minmax(0,1fr)}}
+${whmPolish('.v2-host-tools')}@media(max-width:600px){.v2-host-tools__fields{grid-template-columns:minmax(0,1fr)}}
 `
 
 /** V2 cards of the scheduler and host tools, with the hooks the shared client binds. */

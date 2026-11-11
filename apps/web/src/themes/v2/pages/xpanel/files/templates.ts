@@ -1,15 +1,18 @@
 import { xpTemplate, escapeHtml } from '../../../html.ts'
 import type { Translate } from '../../../../../i18n.ts'
 
-export function fileWorkspaceTemplates(): string {
+/** Phone rows name the modified time, mode and owner, because the column header is not shown there. */
+export function fileWorkspaceTemplates(t: Translate, trash = false): string {
+  const label = (message: string): string => ` data-label="${escapeHtml(t(message))}"`
+  const facts = `<td${label(trash ? msgctxt('xpanel', 'Deleted (UTC)') : msgctxt('xpanel', 'Modified (UTC)'))}><time dir="ltr" class="v2-mono" data-xp-slot="modified"></time></td><td${label(msgid('Permissions'))}><bdi dir="ltr" class="v2-mono" data-xp-slot="mode"></bdi></td><td${label(msgid('Owner'))}><span data-xp-slot="owner"></span></td>`
   return [
-    xpTemplate('file-row', '<tr><td><label><input type="checkbox" data-xp-slot="select" disabled></label></td><td><bdi dir="ltr" class="v2-mono" data-xp-slot="name"></bdi><span data-xp-slot="kind"></span></td><td><bdi dir="ltr" class="v2-mono" data-xp-slot="size"></bdi></td><td><time dir="ltr" class="v2-mono" data-xp-slot="modified"></time></td><td><bdi dir="ltr" class="v2-mono" data-xp-slot="mode"></bdi></td><td><span data-xp-slot="owner"></span></td><td data-xp-slot="actions"></td></tr>'),
+    xpTemplate('file-row', '<tr><td><label><input type="checkbox" data-xp-slot="select" disabled></label></td><td><bdi dir="ltr" class="v2-mono" data-xp-slot="name"></bdi><span data-xp-slot="kind"></span></td><td><bdi dir="ltr" class="v2-mono" data-xp-slot="size"></bdi></td>' + facts + '<td data-xp-slot="actions"></td></tr>'),
     xpTemplate('file-action', '<button type="button" class="v2-btn" data-xp-slot="label"></button>'),
     xpTemplate('file-empty-row', '<tr><td colspan="7" data-xp-slot="message"></td></tr>'),
-    xpTemplate('trash-row', '<tr><td><label><input type="checkbox" data-xp-slot="select" disabled></label></td><td><bdi dir="ltr" class="v2-mono" data-xp-slot="name"></bdi><span data-xp-slot="kind"></span></td><td><bdi dir="ltr" class="v2-mono" data-xp-slot="size"></bdi></td><td><time dir="ltr" class="v2-mono" data-xp-slot="modified"></time></td><td><bdi dir="ltr" class="v2-mono" data-xp-slot="mode"></bdi></td><td><span data-xp-slot="owner"></span></td><td data-xp-slot="actions"></td></tr>'),
+    xpTemplate('trash-row', '<tr><td><label><input type="checkbox" data-xp-slot="select" disabled></label></td><td><bdi dir="ltr" class="v2-mono" data-xp-slot="name"></bdi><span data-xp-slot="kind"></span></td><td><bdi dir="ltr" class="v2-mono" data-xp-slot="size"></bdi></td>' + facts + '<td data-xp-slot="actions"></td></tr>'),
     xpTemplate('trash-action', '<button type="button" class="v2-btn" data-xp-slot="label"></button>'),
     xpTemplate('trash-purge-action', '<button type="button" class="v2-btn v2-file-purge" data-xp-slot="label"></button>'),
-    xpTemplate('file-upload-row', '<li class="v2-file-view-upload"><bdi dir="ltr" data-xp-slot="name"></bdi><bdi dir="ltr" data-xp-slot="bytes"></bdi><span data-xp-slot="state"></span><div class="v2-file-view-progress" data-xp-slot="progress" role="progressbar" aria-label="Uploads" hidden></div><button type="button" data-xp-slot="dismiss" data-capability-unavailable="true" disabled></button></li>'),
+    xpTemplate('file-upload-row', '<li class="v2-file-view-upload"><bdi dir="ltr" data-xp-slot="name"></bdi><bdi dir="ltr" data-xp-slot="bytes"></bdi><span data-xp-slot="state"></span><div class="v2-file-view-progress" data-xp-slot="progress" role="progressbar" aria-label="Uploads" hidden></div><button type="button" class="v2-btn" data-xp-slot="dismiss" data-capability-unavailable="true" disabled></button></li>'),
   ].join('')
 }
 
