@@ -49,8 +49,8 @@ const lineValues = (stdout: string, label: string): string[] => {
 // The current bootstrap compiles native helpers and preserves its existing PostgreSQL
 // PHP extension and distro FPM prerequisites. These exact extras are not profile roles.
 const bootstrapExtras = (family: 'debian' | 'rhel', php: string): string[] => family === 'debian'
-  ? ['curl', 'gcc', 'libc6-dev', `php${php}-pgsql`]
-  : ['gcc', 'glibc-devel', 'php-fpm']
+  ? ['curl', 'gcc', 'git', 'libc6-dev', `php${php}-pgsql`]
+  : ['gcc', 'git', 'glibc-devel', 'php-fpm']
 
 const cases = SUPPORTED_OS.flatMap(os => os.versions.flatMap(versionId => ['8.3', '7.4'].flatMap(php =>
   [false, true].map(withServices => ({ id: os.id, name: os.name, versionId, php, withServices })),
@@ -266,6 +266,10 @@ describe('local mail directories of the installer', () => {
     const body = source.slice(source.indexOf('install_local_mail() {'), source.indexOf('\n}\n', source.indexOf('install_local_mail() {')))
     const lines = body.split('\n').filter(line => line.includes('/var/spool/postfix/private') && line.trim().startsWith('install '))
     expect(lines.map(line => line.trim())).toEqual(['install -d -o postfix -g root -m 0700 /var/spool/postfix/private'])
+    expect(body).not.toContain('backup_config /etc/postfix/main.cf')
+    expect(body).toContain('apply_managed_block /etc/postfix/main.cf render_main_block')
+    expect(body).toContain("postconf -c /etc/postfix -e 'inet_interfaces=all'")
+    expect(body.indexOf('apply_managed_block /etc/postfix/main.cf render_main_block')).toBeLessThan(body.indexOf("postconf -c /etc/postfix -e 'inet_interfaces=all'"))
   })
 })
 
@@ -287,15 +291,21 @@ describe('SELinux settings of the EL installer', () => {
     expect(run.status, run.stdout + run.stderr).toBe(0)
     const calls = run.stdout.trim().split('\n')
     expect(calls).toContain('semanage port -m -t http_port_t -p tcp 2083')
-    for (const port of ['2087', '2096']) expect(calls).toContain(`semanage port -a -t http_port_t -p tcp ${port}`)
+    for (const port of ['2078', '2080', '2087', '2096']) expect(calls).toContain(`semanage port -a -t http_port_t -p tcp ${port}`)
     expect(calls).toContain('setsebool -P httpd_can_network_connect 1')
     expect(calls).toContain("semanage fcontext -m -t httpd_log_t /var/log/xpanel(/.*)?")
     expect(calls).toContain('restorecon -R /var/log/xpanel')
     expect(calls).toContain('setsebool -P httpd_enable_homedirs 1')
     expect(calls.some(call => call.startsWith('semanage fcontext -m -t httpd_sys_rw_content_t /home/'))).toBe(true)
+    for (const dir of ['xpanel-account-probe', 'xpanel-webdisk', 'xpanel-webdiskd', 'xpanel-webdisk-state', 'xpanel-caldav', 'xpanel-app-proxy', 'xpanel-apps', 'xpanel-fpm']) {
+      expect(calls).toContain(`semanage fcontext -m -t httpd_var_run_t /var/run/${dir}(/.*)?`)
+    }
     expect(calls).toContain('semanage fcontext -a -e /var/lib/pdns /var/lib/powerdns')
     expect(calls).toContain('  d /run/xpanel-account-probe 0711 root root -')
     expect(calls).toContain('  (allow httpd_t unconfined_service_t (unix_stream_socket (connectto)))')
+    expect(calls).toContain('  (allow httpd_t systemd_socket_proxyd_t (unix_stream_socket (connectto)))')
+    expect(calls).toContain('  (allow init_t systemd_socket_proxyd_t (process2 (nnp_transition)))')
+    expect(calls).toContain('  (allow httpd_t tmpfs_t (file (read open getattr)))')
     expect(calls.indexOf('systemd-tmpfiles --create /etc/tmpfiles.d/xpanel-account-probe.conf')).toBeLessThan(calls.indexOf('restorecon -R /run/xpanel-account-probe'))
     expect(calls).toContain("semanage fcontext -m -t dkim_milter_data_t /var/spool/postfix/opendkim(/.*)?")
     expect(calls.indexOf('install -d -o opendkim -g postfix -m 0750 /var/spool/postfix/opendkim')).toBeLessThan(calls.indexOf('restorecon -R /var/spool/postfix/opendkim'))

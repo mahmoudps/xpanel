@@ -176,6 +176,7 @@ describe('MongoDB tools', () => {
     const fake = fakeHost()
     const view = await (await call('/host/databases/services/mongodb', undefined, deps(fake))).json() as { installed: boolean; runtime: { state: string } }
     expect(view).toMatchObject({ installed: false, runtime: { state: 'not-read' } })
+    expect((await refused(call('/host/databases/services/mongodb/control', { action: 'kill' }, deps(fake))))?.code).toBe('VALIDATION')
     expect((await refused(call('/host/databases/services/mongodb/control', { action: 'start' }, deps(fake))))?.detail.reason).toBe('mongodb_not_installed')
     expect(fake.argv.some(argv => argv[1] === 'start')).toBe(false)
   })

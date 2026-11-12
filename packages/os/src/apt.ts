@@ -81,7 +81,7 @@ export const aptProfile = (release: OsRelease): XpanelOsProfile => {
     },
     phpPackages: v => {
       const ver = php(v)
-      return [...PHP_MODULES.map(m => `php${ver}-${m}`), ...(ver === '7.4' ? ['php7.4-json'] : [])]
+      return [...PHP_MODULES.map(m => `php${ver}-${m}`), 'php-pear', ...(ver === '7.4' ? ['php7.4-json'] : [])]
     },
     phpFpmService: v => `php${php(v)}-fpm`,
     phpFpmPoolDir: v => `/etc/php/${php(v)}/fpm/pool.d`,

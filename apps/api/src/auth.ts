@@ -11,7 +11,8 @@ import {
   parseCidr,
   parseIp,
 } from '@xpanel/core'
-import type { CookieIpMode, MfaRuntimePolicy, Principal, TeamPrincipal, TeamRole } from '@xpanel/core'
+import type { CookieIpMode, MfaRuntimePolicy, OsProfile, Principal, TeamPrincipal, TeamRole } from '@xpanel/core'
+import { sha512Crypt } from '../../agent/src/directory-privacy.ts'
 import {
   findActiveApiTokenByHash,
   findActiveSessionByTokenHash,
@@ -158,6 +159,23 @@ const parsePasswordHashArgon2id = (encodedHash: unknown): { params: PasswordPara
   return { params, expected }
 }
 
+export type ServiceHashScheme = 'ARGON2ID' | 'SHA512-CRYPT'
+/** RHEL-family Dovecot and Pure-FTPd link libcrypt without libsodium, so service accounts use SHA512-CRYPT there. */
+export const serviceHashSchemeForOs = (os?: Pick<OsProfile, 'family'> | null): ServiceHashScheme =>
+  os?.family === 'rhel' ? 'SHA512-CRYPT' : 'ARGON2ID'
+
+const MAX_SHA512_CRYPT_ROUNDS = 100_000
+const SHA512_CRYPT_PARSE_RE = /^\$6\$(?:rounds=(\d{1,9})\$)?([./0-9A-Za-z]{1,16})\$([./0-9A-Za-z]{86})$/
+
+const parsePasswordHashSha512Crypt = (encodedHash: unknown): { rounds: number; salt: string; body: string } | null => {
+  if (typeof encodedHash !== 'string' || encodedHash.length > 256) return null
+  const match = SHA512_CRYPT_PARSE_RE.exec(encodedHash)
+  if (!match) return null
+  const rounds = match[1] === undefined ? 5000 : Number(match[1])
+  if (!Number.isSafeInteger(rounds) || rounds < 1000 || rounds > MAX_SHA512_CRYPT_ROUNDS) return null
+  return { rounds, salt: match[2]!, body: encodedHash }
+}
+
 /** Validates a supplied credential without trusting its label or allocating its requested KDF memory. */
 export const assertPasswordHashArgon2id = (encodedHash: unknown): string => {
   if (!parsePasswordHashArgon2id(encodedHash)) fail('VALIDATION', 'password hash must use supported Argon2id parameters and canonical encoding')
@@ -168,36 +186,41 @@ export const assertPasswordHashArgon2id = (encodedHash: unknown): string => {
 export const passwordHashFromInput = async (
   input: { password?: unknown; passwordHash?: unknown },
   /** service: what a mail, FTP or Web Disk user's password signs in to; absent means a panel password */
-  opts: { service?: readonly PasswordService[] } = {},
+  opts: { service?: readonly PasswordService[]; scheme?: ServiceHashScheme } = {},
 ): Promise<string> => {
   if (input.password !== undefined && input.passwordHash !== undefined) {
     fail('VALIDATION', 'supply a password or passwordHash, not both')
   }
-  let hash: string
   if (input.passwordHash !== undefined) {
     const encoded = input.passwordHash
     if (opts.service) {
-      if (typeof encoded !== 'string' || !encoded.startsWith('{ARGON2ID}')) {
-        return fail('VALIDATION', 'service passwordHash must use the {ARGON2ID} scheme')
+      if (typeof encoded === 'string' && encoded.startsWith('{ARGON2ID}')) {
+        return `{ARGON2ID}${assertPasswordHashArgon2id(encoded.slice('{ARGON2ID}'.length))}`
       }
-      hash = assertPasswordHashArgon2id(encoded.slice('{ARGON2ID}'.length))
-    } else {
-      hash = assertPasswordHashArgon2id(encoded)
+      if (typeof encoded === 'string' && encoded.startsWith('{SHA512-CRYPT}')) {
+        const parsed = parsePasswordHashSha512Crypt(encoded.slice('{SHA512-CRYPT}'.length))
+        if (!parsed) return fail('VALIDATION', 'password hash must use supported SHA512-CRYPT parameters and canonical encoding')
+        return `{SHA512-CRYPT}${parsed.body}`
+      }
+      return fail('VALIDATION', 'service passwordHash must use the {ARGON2ID} or {SHA512-CRYPT} scheme')
     }
-  } else {
-    if (typeof input.password !== 'string') return fail('VALIDATION', 'password must contain at least 8 characters')
-    const services = opts.service ?? ['panel']
-    if (services.length === 0) return fail('VALIDATION', 'a service password needs at least one service')
-    for (const service of services) assertPasswordAllowed(input.password, service)
-    if (
-      input.password.includes('\0') ||
-      /[\r\n]/.test(input.password) ||
-      Buffer.byteLength(input.password, 'utf8') > MAX_PASSWORD_BYTES
-    ) {
-      return fail('VALIDATION', `password must be a single line of 8..${MAX_PASSWORD_BYTES} UTF-8 bytes`)
-    }
-    hash = await hashPasswordArgon2id(input.password)
+    return assertPasswordHashArgon2id(encoded)
   }
+  if (typeof input.password !== 'string') return fail('VALIDATION', 'password must contain at least 8 characters')
+  const services = opts.service ?? ['panel']
+  if (services.length === 0) return fail('VALIDATION', 'a service password needs at least one service')
+  for (const service of services) assertPasswordAllowed(input.password, service)
+  if (
+    input.password.includes('\0') ||
+    /[\r\n]/.test(input.password) ||
+    Buffer.byteLength(input.password, 'utf8') > MAX_PASSWORD_BYTES
+  ) {
+    return fail('VALIDATION', `password must be a single line of 8..${MAX_PASSWORD_BYTES} UTF-8 bytes`)
+  }
+  if (opts.service && opts.scheme === 'SHA512-CRYPT') {
+    return `{SHA512-CRYPT}${sha512Crypt(input.password)}`
+  }
+  const hash = await hashPasswordArgon2id(input.password)
   return opts.service ? `{ARGON2ID}${hash}` : hash
 }
 
@@ -209,6 +232,22 @@ export const verifyPasswordArgon2id = async (password: string, encodedHash: stri
   const { params, expected } = parsed
   const actual = await deriveArgon2idDigest(password, params, expected.byteLength)
   return actual.byteLength === expected.byteLength && timingSafeEqual(actual, expected)
+}
+
+/** Verifies a scheme-tagged service account hash ({ARGON2ID} or {SHA512-CRYPT}). */
+export const verifyServicePassword = async (password: string, storedHash: string | null | undefined): Promise<boolean> => {
+  if (!validPassword(password) || typeof storedHash !== 'string') return false
+  if (storedHash.startsWith('{ARGON2ID}')) {
+    return verifyPasswordArgon2id(password, storedHash.slice('{ARGON2ID}'.length))
+  }
+  if (storedHash.startsWith('{SHA512-CRYPT}')) {
+    const parsed = parsePasswordHashSha512Crypt(storedHash.slice('{SHA512-CRYPT}'.length))
+    if (!parsed) return false
+    const actual = sha512Crypt(password, parsed.salt, parsed.rounds)
+    const a = Buffer.from(actual, 'utf8'), b = Buffer.from(parsed.body, 'utf8')
+    return a.byteLength === b.byteLength && timingSafeEqual(a, b)
+  }
+  return false
 }
 
 // ---- RFC 4648 Base32 & RFC 6238 TOTP -------------------------------------------------
@@ -506,20 +545,25 @@ export const authenticateRequest = async (
   const authHeader = req.headers.get('authorization')
   // A browser repeats panel basic authentication on every request; it never names the signed-in person.
   if (authHeader && !(opts.entryPoint && /^basic\s/i.test(authHeader))) {
-    // Interactive listeners have no audience-scoped API token contract yet.
-    if (opts.entryPoint) return null
+    if (opts.entryPoint === 'xmail') return null
+    if (opts.entryPoint) {
+      if (req.headers.get('cookie')) return null
+      const { pathname } = new URL(req.url, 'http://localhost')
+      if (!pathname.startsWith('/api/') || pathname.startsWith('/api/auth/') || pathname === '/api/ws' || pathname.startsWith('/api/handoff/') || pathname.startsWith('/api/security/')) return null
+    }
     const bearerMatch = /^Bearer\s+(\S+)$/i.exec(authHeader.trim())
     if (!bearerMatch) return null
     const rawToken = bearerMatch[1]!
     const tokenHash = sha256Hex(rawToken)
     const apiToken = await findActiveApiTokenByHash(db, tokenHash)
     if (!apiToken) return null
+    const principalRecord = await getPrincipal(db, apiToken.principalId)
+    if (!principalRecord || principalRecord.disabled) return null
+    if (opts.entryPoint && !entryPointAdmitsPrincipal(opts.entryPoint, principalRecord)) return null
     if (!isClientIpAllowed(apiToken.allowedIps, opts.clientIp ?? null)) {
       opts.onTokenAddressDenied?.()
       return null
     }
-    const principalRecord = await getPrincipal(db, apiToken.principalId)
-    if (!principalRecord || principalRecord.disabled) return null
     const principal = principalRecordToPrincipal(principalRecord)
     await recordApiTokenUse(db, apiToken.id, parseIp(opts.clientIp) ? opts.clientIp! : null)
     return {

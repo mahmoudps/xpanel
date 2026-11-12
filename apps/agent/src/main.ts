@@ -33,7 +33,7 @@ import { system } from '@xpanel/render'
 import { ApplicationInstallCoordinator, isApplicationInstallCommand } from './application-install.ts'
 import { createApplicationArtifactStore, createApplicationProvider } from './application-provider.ts'
 import { createNativeApplicationWorkerRun } from './application-worker.ts'
-import { DATABASE_REMOTE_ACCESS_JOURNAL_DIR, pendingDatabaseRemoteAccessJournals, qualifyDatabaseRemoteAccessNative, recoverPendingDatabaseRemoteAccess } from './db-remote-provider.ts'
+import { DATABASE_REMOTE_ACCESS_JOURNAL_DIR, pendingDatabaseRemoteAccessJournals, qualifyDatabaseRemoteAccessNative, recoverPendingDatabaseRemoteAccess, type QualifiedDatabaseRemoteAccessNative } from './db-remote-provider.ts'
 import { createHostJobRun } from './host-job-exec.ts'
 import { createHostMetricsCollector } from './host-metrics.ts'
 import { createBackupTransportProvider } from './acct-backup-sftp.ts'
@@ -380,15 +380,35 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
         })
         // Remote database access stays unavailable unless the nft sets, the 0700 journal directory and MariaDB admin all qualify.
         await mkdir(DATABASE_REMOTE_ACCESS_JOURNAL_DIR, { recursive: true, mode: 0o700 }).catch(() => undefined)
-        const databaseRemoteAccessNative = await qualifyDatabaseRemoteAccessNative({
+        const qualifyRemoteDatabase = () => qualifyDatabaseRemoteAccessNative({
           mariadb: mariadbAdmin,
           run: argv => executor.runCommand([...argv]),
-          readAllEntries: async () => (await store.readSnapshot()).accounts.map(account => ({ accountId: account.id, status: account.status, entries: account.databaseRemoteAccess ?? [] })),
+          readAllEntries: async () => (await store.listAccounts()).map(account => ({ accountId: account.id, status: account.status, entries: account.databaseRemoteAccess ?? [] })),
         })
-        if (databaseRemoteAccessNative) {
-          const report = await recoverPendingDatabaseRemoteAccess(databaseRemoteAccessNative, accountId => store.readDatabaseRemoteAccess(accountId)).catch(() => [{ accountId: null, outcome: 'review' as const }])
+        let databaseRemoteAccessNative = await qualifyRemoteDatabase()
+        const recoverRemoteDatabaseJournals = async (qualified: QualifiedDatabaseRemoteAccessNative) => {
+          const report = await recoverPendingDatabaseRemoteAccess(qualified, accountId => store.readDatabaseRemoteAccess(accountId)).catch(() => [{ accountId: null, outcome: 'review' as const }])
           for (const row of report) if (row.outcome === 'review') process.stderr.write(`xpanel-agent remote database recovery: journal ${row.accountId ?? 'unknown'} requires review\n`)
+        }
+        if (databaseRemoteAccessNative) {
+          await recoverRemoteDatabaseJournals(databaseRemoteAccessNative)
         } else if (await pendingDatabaseRemoteAccessJournals() !== 0) process.stderr.write('xpanel-agent remote database recovery: pending journals remain; the provider is not qualified\n')
+        let pendingRemoteDatabaseQualification: Promise<QualifiedDatabaseRemoteAccessNative | null> | null = null
+        const resolveDatabaseRemoteAccessNative = async (): Promise<QualifiedDatabaseRemoteAccessNative | null> => {
+          if (databaseRemoteAccessNative) return databaseRemoteAccessNative
+          pendingRemoteDatabaseQualification ??= (async () => {
+            try {
+              const qualified = await qualifyRemoteDatabase()
+              if (!qualified) return null
+              await recoverRemoteDatabaseJournals(qualified)
+              databaseRemoteAccessNative = qualified
+              return qualified
+            } finally {
+              pendingRemoteDatabaseQualification = null
+            }
+          })()
+          return pendingRemoteDatabaseQualification
+        }
 
         await ensureAcmeWebRoot(executor, os.paths.nginxUser).catch((error: unknown) => {
           process.stderr.write(`xpanel-agent ACME webroot: ${error instanceof Error ? error.message : String(error)}\n`)
@@ -488,7 +508,7 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
             dump: async (account, database, outputPath) => { const dumped = await backupDumps.streamLogicalDump({ database, username: account.username, outputPath }); return { bytes: dumped.sizeBytes, sha256: dumped.sha256 } },
             restore: async (account, database, inputPath, sha256) => { await backupDumps.streamLogicalRestore({ targetDatabase: database, username: account.username, inputPath, expectedSha256: sha256 }) },
           },
-          ...(databaseRemoteAccessNative ? { databaseRemoteAccessNative } : {}),
+          databaseRemoteAccessNative: resolveDatabaseRemoteAccessNative,
           readBackupDestination,
           backupDestinationProvider,
           backupRuns,

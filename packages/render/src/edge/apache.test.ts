@@ -257,12 +257,12 @@ describe('account pages', () => {
   it('falls back to the root-owned default page after the index list, outside the document root', () => {
     const { content } = renderApacheVhost(account(), domain(), settings(), debianOs, { pageScope: '' })
     expect(content).toContain('Alias /.xpanel-page "/usr/share/xpanel/default"')
-    expect(content).toMatch(/DirectoryIndex disabled\n\s*DirectoryIndex index\.php .*\/\.xpanel-page\/index\.html/)
+    expect(content).toMatch(/DirectoryIndex disabled\n\s*DirectoryIndex index\.php .* \.xpanel-page\/index\.html/)
     expect(renderApacheVhost(account(), domain(), settings(), debianOs, {}).content).not.toContain('.xpanel-page')
   })
   it('keeps a domain index list and serves the page set of the owner', () => {
     const { content } = renderApacheVhost(account(), domain({ indexFiles: ['home.html'] }), settings(), debianOs, { pageScope: 'r-abc' })
-    expect(content).toContain('DirectoryIndex home.html /.xpanel-page/index.html')
+    expect(content).toContain('DirectoryIndex home.html .xpanel-page/index.html')
     expect(content).toContain('Alias /.xpanel-page "/usr/share/xpanel/default/r-abc"')
   })
   it('serves the suspended page of the owner', () => {

@@ -207,6 +207,7 @@ describe('firewall workspace safe apply', () => {
     expect(deleted.body!.rules.some((rule: FirewallRule) => rule.list === 'office_v4')).toBe(false)
     // a list whose rule would drop the panel for the session address is refused before anything is written
     await expect(call('PUT', '/api/firewall/prefix-lists/everyone', { entries: '203.0.113.0/24', action: 'drop', expectedRevision: await revision() })).rejects.toMatchObject({ code: 'SELF_LOCKOUT' })
+    await expect(call('PUT', '/api/firewall/prefix-lists/bad%20name', { entries: '203.0.113.0/28', expectedRevision: await revision() })).rejects.toMatchObject({ code: 'VALIDATION' })
   })
 
   it('reads the live bans and audits an unban of several addresses', async () => {

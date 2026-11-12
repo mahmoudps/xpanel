@@ -17,6 +17,7 @@ import { apacheQuote, iniValue, shQuote } from './quote.ts'
 import { renderApacheAuthLog } from './apache-auth-log.ts'
 import { groupSites, siteMode, type RenderTime, type SiteGroup } from './sites.ts'
 import { assertAccount, assertBackendPort, assertDomainName, assertInt, assertSafeAbsPath, assertSystemUser, invalid } from './validate.ts'
+import type { WafSitePolicy } from './waf.ts'
 import { assertWebDirectives, includeLines } from './web-directives.ts'
 
 const indent = (lines: string[], n = 1): string[] => lines.map((l) => (l === '' ? l : `${'    '.repeat(n)}${l}`))
@@ -209,6 +210,8 @@ export interface ApacheVhostOptions {
   maxClientsVHost?: number
   /** the account's Web Template Editor page set; absent keeps the web server's own answer for a site with no index */
   pageScope?: string
+  /** per-site WAF policy so Apache mod_security2 honours per-domain ModSecurity switches */
+  waf?: Record<string, Pick<WafSitePolicy, 'modsecurity'>>
 }
 
 interface DefaultPage { scope: string | undefined; fallbackIndex: string[] }
@@ -223,10 +226,10 @@ const serverNameLines = (g: SiteGroup): string[] => {
   return lines
 }
 
-/** cPanel's default page for a site with no index: the last index entry is a root-owned page outside the document root. */
+/** cPanel's default page for a site with no index: a relative entry resolves to the root-owned alias only at `/`, leaving subfolder `Indexes` untouched. */
 const defaultPage = (page: DefaultPage | undefined, indexFiles: string[] | undefined): { lines: string[]; index: string[] | undefined } => !page ? { lines: [], index: indexFiles === undefined ? undefined : validateDomainIndexFiles(indexFiles) } : {
   lines: [`Alias ${ACCOUNT_PAGE_ALIAS} ${apacheQuote(accountPageDir('default', page.scope))}`, ...section(`Directory ${apacheQuote(accountPageDir('default', page.scope))}`, 'Directory', ['AllowOverride None', 'Options None', 'Require all granted'])],
-  index: [...(indexFiles === undefined ? page.fallbackIndex : validateDomainIndexFiles(indexFiles)), `${ACCOUNT_PAGE_ALIAS}/index.html`],
+  index: [...(indexFiles === undefined ? page.fallbackIndex : validateDomainIndexFiles(indexFiles)), `${ACCOUNT_PAGE_ALIAS.slice(1)}/index.html`],
 }
 
 const docDirectory = (docRoot: string, extra: string[], execCgi: boolean, indexFiles?: string[]): string[] =>
@@ -245,7 +248,7 @@ const vhostBody = (
   os: OsProfile,
   mpm: ApacheMpm,
   settings: ServerSettings,
-  opts: { now?: RenderTime; maxClientsVHost?: number; pageScope?: string } = {},
+  opts: { now?: RenderTime; maxClientsVHost?: number; pageScope?: string; waf?: Record<string, Pick<WafSitePolicy, 'modsecurity'>> } = {},
 ): string[] => {
   const d = g.main
   const user = account.username
@@ -255,6 +258,7 @@ const vhostBody = (
     const a = assertApacheTuning(settings)
     identity.push(`MaxClientsVHost ${assertInt('MaxClientsVHost', opts.maxClientsVHost, 1, a.maxRequestWorkers)}`)
   }
+  const modsecOff = opts.waf?.[d.name]?.modsecurity === false ? section('IfModule mod_security2.c', 'IfModule', ['SecRuleEngine Off']) : []
   const wiring = d.siteType === 'php' ? phpWiring(d.php.handler, mpm) : null
   const mode = siteMode(account, d, opts.now)
 
@@ -263,12 +267,13 @@ const vhostBody = (
       ...names,
       `DocumentRoot ${apacheQuote(accountPageDir('suspended', opts.pageScope))}`,
       ...identity,
+      ...modsecOff,
       ...section(`Directory ${apacheQuote(accountPageDir('suspended', opts.pageScope))}`, 'Directory', ['AllowOverride None', 'Options None', 'Require all granted']),
       'RedirectMatch 302 "^/(?!index\\.html$)" "/index.html"',
     ]
   }
   const page = defaultPage(opts.pageScope === undefined ? undefined : { scope: opts.pageScope, fallbackIndex: assertWebDirectives(settings).directoryIndex }, d.indexFiles)
-  const head = [...names, `DocumentRoot ${apacheQuote(d.docRoot)}`, ...identity, ...page.lines]
+  const head = [...names, `DocumentRoot ${apacheQuote(d.docRoot)}`, ...identity, ...modsecOff, ...page.lines]
   if (mode === 'redirect' && d.redirect) {
     return [...head, `RedirectMatch ${d.redirect.code} "^/" ${apacheQuote(d.redirect.to)}`]
   }
@@ -309,7 +314,7 @@ const renderGroupVhost = (
   g: SiteGroup,
   settings: ServerSettings,
   os: OsProfile,
-  opts: { now?: RenderTime; maxClientsVHost?: number; pageScope?: string } = {},
+  opts: { now?: RenderTime; maxClientsVHost?: number; pageScope?: string; waf?: Record<string, Pick<WafSitePolicy, 'modsecurity'>> } = {},
 ): RenderedFile => {
   const mpm = assertApacheEngine(settings)
   const addr = `127.0.0.1:${assertBackendPort(settings)}`
@@ -342,6 +347,7 @@ export const renderApacheVhost = (
     ...(opts.now !== undefined && { now: opts.now }),
     ...(opts.maxClientsVHost !== undefined && { maxClientsVHost: opts.maxClientsVHost }),
     ...(opts.pageScope !== undefined && { pageScope: opts.pageScope }),
+    ...(opts.waf !== undefined && { waf: opts.waf }),
   })
 }
 
@@ -351,7 +357,7 @@ export const renderApacheVhosts = (
   domains: Domain[],
   settings: ServerSettings,
   os: OsProfile,
-  opts: { now?: RenderTime; maxClientsVHost?: number; pageScope?: string } = {},
+  opts: { now?: RenderTime; maxClientsVHost?: number; pageScope?: string; waf?: Record<string, Pick<WafSitePolicy, 'modsecurity'>> } = {},
 ): RenderedFile[] => {
   assertApacheEngine(settings)
   return groupSites(account, domains).map((g) => renderGroupVhost(account, g, settings, os, opts))

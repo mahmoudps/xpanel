@@ -847,6 +847,7 @@ service auth {
 }
 
 service lmtp {
+  vsz_limit = 0
   unix_listener ${spool}/private/dovecot-lmtp {
     mode = 0600
     user = postfix
@@ -933,6 +934,7 @@ mail_plugins = $mail_plugins quota
 recipient_delimiter = +
 ${tls}
 service lmtp {
+  vsz_limit = 0
   unix_listener ${spool}/private/dovecot-lmtp {
     mode = 0600
     user = postfix

@@ -27,6 +27,15 @@ export interface QualifiedCatalogProvider {
   qualificationMode(): boolean
 }
 
+const hostProfile = (os: unknown): string | undefined => {
+  if (!os || typeof os !== 'object' || Array.isArray(os)) return undefined
+  const { id, versionId } = os as Record<string, unknown>
+  if (id === 'ubuntu' && (versionId === '22.04' || versionId === '24.04')) return `ubuntu-${versionId}`
+  if ((id === 'almalinux' || id === 'rocky') && typeof versionId === 'string' && /^9(?:\.|$)/.test(versionId)) return `${id}-9`
+  if (id === 'centos' && typeof versionId === 'string' && /^9(?:\.|$)/.test(versionId)) return 'centos-stream-9'
+  return undefined
+}
+
 const freeze = <T>(value: T): T => {
   if (value && typeof value === 'object' && !Object.isFrozen(value)) {
     Object.freeze(value)
@@ -71,8 +80,10 @@ export const createQualifiedCatalogProvider = (acceptance?: TrustedAcceptanceOpt
           const body: unknown = await response.json()
           if (body && typeof body === 'object' && !Array.isArray(body)) {
             const value = body as Record<string, unknown>
+            const profile = hostProfile(value.os)
             if (value.probes && typeof value.probes === 'object' && !Array.isArray(value.probes)) report = {
               executor: value.executor === 'linux' || value.executor === 'fake' ? value.executor : 'unknown',
+              ...(profile !== undefined ? { profile } : {}),
               // The agent never reports control-plane: this authenticated health answer is what proves it live.
               probes: { ...value.probes as HostQualificationReport['probes'], 'control-plane': 'passed' },
             }

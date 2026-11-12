@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { fail, msgid, parseIp } from '@xpanel/core'
-import { MONGODUMP, MONGO_ADMIN_FILE, MONGO_ADMIN_USER, MONGO_BACKUP_DIR, MONGO_DATABASE, MONGO_TOOLS_CONFIG, MONGORESTORE, dbBackupDirArgv, dbBackupRemoveArgv, isDatabaseServiceCommand, isMongoBackupName, isMongoLogPath, mongodumpArgv, mongorestoreArgv } from '../../../packages/os/src/db-services-command.ts'
+import { DB_SERVICE_ACTIONS, MONGODUMP, MONGO_ADMIN_FILE, MONGO_ADMIN_USER, MONGO_BACKUP_DIR, MONGO_DATABASE, MONGO_TOOLS_CONFIG, MONGORESTORE, dbBackupDirArgv, dbBackupRemoveArgv, isDatabaseServiceCommand, isMongoBackupName, isMongoLogPath, mongodumpArgv, mongorestoreArgv } from '../../../packages/os/src/db-services-command.ts'
 import type { HostJobPlan } from './host-job-contract.ts'
 import { parseMongodConfig } from './db-engines.ts'
 import type { MongodConfigFacts } from './db-engines.ts'
@@ -254,4 +254,8 @@ export async function deleteMongodbBackup(ctx: DbServiceContext, body: unknown) 
   if (!(await ctx.run(dbBackupRemoveArgv('mongodb', archive))).ok) return fail('CONFIG_TEST_FAILED', 'the backup could not be removed', { ...unchanged, reason: 'database_backup_step_failed' })
   return { removed: archive }
 }
-export const controlMongodb = async (ctx: DbServiceContext, body: unknown) => controlUnit(ctx, (await mongoFile(ctx)).unit, 'mongodb', body)
+export const controlMongodb = async (ctx: DbServiceContext, body: unknown) => {
+  const { action } = exactBody(body, ['action'])
+  if (!(DB_SERVICE_ACTIONS as readonly unknown[]).includes(action)) return fail('VALIDATION', 'unsupported service action', unchanged)
+  return controlUnit(ctx, (await mongoFile(ctx)).unit, 'mongodb', body)
+}

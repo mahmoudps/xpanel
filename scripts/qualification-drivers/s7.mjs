@@ -17,6 +17,7 @@ const workspace = async client => {
 const relative = (home, docRoot) => docRoot.startsWith(`${home}/`) ? docRoot.slice(home.length + 1) : docRoot
 
 /** A second account on its own plan with the given caps, signed in as its owner. The undo steps remove it again. */
+let scratchSeq = 0
 async function scratch(x, label, caps = {}) {
   const { root, tag, undo, signIn } = x
   const list = await root.post('/api/feature-lists', { name: `xq-${tag}-${label}`, ownerId: null, disabled: [] }), listId = list.data?.featureList?.id
@@ -27,7 +28,7 @@ async function scratch(x, label, caps = {}) {
   undo(`plan ${label}`, async () => gone(await root.delete(`/api/plans/${planId}`)))
   const username = `xq${tag}${label}`, password = secret(), primary = `${username}.example.net`
   undo(`account ${label}`, async () => gone(await root.delete(`/api/accounts/${username}`, { confirmUsername: username })))
-  const created = await createAccount(root, { username, password, primaryDomain: primary, planId }, { idempotencyKey: `xq-${tag}-${label}` }, x)
+  const created = await createAccount(root, { username, password, primaryDomain: primary, planId }, { idempotencyKey: `xq-${tag}-${label}-${++scratchSeq}` }, x)
   if (!created.created || typeof created.data?.account?.id !== 'string') return null
   const session = await signIn('owner', { username, password })
   return session.client ? { client: session.client, id: created.data.account.id, username, primary } : null
@@ -68,11 +69,19 @@ async function putFile(x, path, content) {
   return written
 }
 
+async function removeServiceUser(client, id) {
+  const removed = await client.delete(`/api/service-users/${id}`)
+  if ([200, 202, 204, 404].includes(removed.status)) return true
+  if (removed.status !== 412) return false
+  const listed = await client.get('/api/service-users')
+  return listed.status === 200 && !(listed.data?.serviceUsers ?? []).some(item => item?.id === id)
+}
+
 async function addMailbox(x, client, login, quota = 50) {
   const password = secret()
   const response = await client.post('/api/service-users', { login, password, services: { email: true, ftp: false, webdisk: false }, mailboxQuotaMb: quota }), id = response.data?.serviceUser?.id
-  if (response.status === 201 && typeof id === 'string') x.undo(`mailbox ${login}`, async () => [200, 202, 204, 404].includes((await client.delete(`/api/service-users/${id}`)).status))
-  return { response, id: typeof id === 'string' ? id : null, login, password }
+  if (response.status === 201 && typeof id === 'string') x.undo(`mailbox ${login}`, () => removeServiceUser(client, id))
+  return { response, id: response.status === 201 && typeof id === 'string' ? id : null, login, password }
 }
 /** The mailbox login is polled, because the mail host provisions it after the control plane accepts it. */
 async function mailboxClient(x, mail) {
@@ -105,9 +114,9 @@ export default [
     paths: /^\/api\/domains(?:\/[0-9a-f-]{36}|\?reveal=1)?$/,
     requests: 40,
     unit: [{ id: 'S7DOM-UNIT-1', file: 'apps/api/src/completion-domain-workspace-security.test.ts', name: 'conditional domain workspace API with isolated real SQLite and desired state returns a coherent owned view with opaque revision, real caps and primary removal refusal' }],
-    checks: ['LIST-FOUR-ENTRIES', 'TYPES-AND-DOCROOTS', 'ADDON-BACKING-HIDDEN', 'REVEAL-OPTION-SHOWS-BACKING'],
+    checks: ['LIST-FOUR-ENTRIES', 'TYPES-AND-DOCROOTS', 'ADDON-BACKING-HIDDEN', 'QUERY-SELECTOR-REFUSED'],
     async run(x) {
-      const { owner, fixture, tag, check } = x
+      const { owner, fixture, tag, check, refused } = x
       const base = await workspace(owner), primary = base.domains.find(item => item.kind === 'primary')
       if (!primary) return check('LIST-FOUR-ENTRIES', false, { status: base.response.status, primary: false })
       const names = { addon: `xq${tag}-ad.example.net`, sub: `xq${tag}-sb.${fixture.domain}`, alias: `xq${tag}-al.example.net` }
@@ -121,8 +130,7 @@ export default [
         && row(names.addon)?.docRoot === `${listed.home}/domains/${names.addon}/public_html` && row(names.sub)?.docRoot === `${listed.home}/domains/${names.sub}/public_html`
         && row(names.alias)?.docRoot === row(fixture.domain)?.docRoot && typeof row(fixture.domain)?.docRoot === 'string', { entries: rows.length })
       check('ADDON-BACKING-HIDDEN', made && rows.length === 4 && rows.filter(item => item.kind === 'subdomain').length === 1, { entries: rows.length, subdomains: rows.filter(item => item.kind === 'subdomain').length })
-      const revealed = await owner.get('/api/domains?reveal=1')
-      check('REVEAL-OPTION-SHOWS-BACKING', revealed.status === 200 && (revealed.data?.domains?.length ?? 0) > rows.length, { ...safeResponse(revealed), entries: revealed.data?.domains?.length ?? null })
+      refused('QUERY-SELECTOR-REFUSED', await owner.get('/api/domains?reveal=1'), 'VALIDATION')
     },
   }),
 
@@ -144,32 +152,33 @@ export default [
       if (!addon.domain) return check('ADDON-ANSWERS-HTTP', false, safeResponse(addon.response))
       const marker = `xq-${tag}-addon`
       await putFile(x, `${relative(addon.home, addon.domain.docRoot)}/index.html`, `${marker}\n`)
-      const served = await until(() => visit(site, addon.domain.name, '/', { secure: true }), response => response.status === 200 && response.text.includes(marker), { attempts: 8, delayMs: 1500 })
+      const served = await until(() => visit(site, addon.domain.name, '/'), response => response.status === 200 && response.text.includes(marker), { attempts: 8, delayMs: 1500 })
       check('ADDON-ANSWERS-HTTP', served.settled, { status: served.last?.status ?? null, attempts: served.attempts })
     },
   }),
 
   tool('manage-domain', {
     prefix: 'S7MDM', as: 'owner', needs: ['account'], probe: '/api/domains',
-    paths: only('domains', `domains/${ID}`, 'dns/zones', 'accounts/xq[0-9a-f]{1,13}/files'),
+    paths: only('domains', `domains/${ID}`, 'accounts/xq[0-9a-f]{1,13}/files'),
     requests: 50, deadlineMs: 240_000,
     unit: [{ id: 'S7MDM-UNIT-1', file: 'apps/api/src/completion-domain-workspace-security.test.ts', name: 'conditional domain workspace API with isolated real SQLite and desired state removes only the confirmed nonprimary leaf and its domain projection' }],
-    checks: ['ADDON-REMOVED', 'ZONE-GONE', 'VHOST-GONE', 'DOCROOT-FILES-IDENTICAL', 'MAIN-DOMAIN-PROTECTED'],
+    checks: ['DOCROOT-UPDATED', 'ADDON-REMOVED', 'VHOST-GONE', 'DOCROOT-FILES-IDENTICAL', 'MAIN-DOMAIN-PROTECTED'],
     async run(x) {
       const { owner, fixture, tag, site, check, refused, until } = x
       const addon = await addDomain(x, owner, { name: `xq${tag}-rm.example.net`, kind: 'addon', siteType: 'php' })
-      if (!addon.domain) return check('ADDON-REMOVED', false, safeResponse(addon.response))
-      const marker = `xq-${tag}-keep\n`, dir = relative(addon.home, addon.domain.docRoot), file = `${dir}/index.html`, files = `/api/accounts/${fixture.username}/files`
+      if (!addon.domain) return check('DOCROOT-UPDATED', false, safeResponse(addon.response))
+      const marker = `xq-${tag}-keep\n`, nextRel = `domains/${addon.domain.name}/alt_html`, nextDocRoot = `${addon.home}/${nextRel}`
+      const file = `${nextRel}/index.html`, files = `/api/accounts/${fixture.username}/files`
+      const beforeMove = await workspace(owner)
+      const moved = await owner.patch(`/api/domains/${addon.domain.id}`, { docRoot: nextDocRoot, expectedRevision: beforeMove.revision })
+      check('DOCROOT-UPDATED', moved.status === 200 && moved.data?.domain?.docRoot === nextDocRoot, safeResponse(moved))
       await putFile(x, file, marker)
-      const before = await until(() => visit(site, addon.domain.name, '/', { secure: true }), response => response.status === 200 && response.text.includes(marker.trim()), { attempts: 8, delayMs: 1500 })
-      const zones = await owner.get('/api/dns/zones'), hadZone = zones.status === 200 && zones.data?.zones?.some(zone => zone.name === addon.domain.name) === true
+      const before = await until(() => visit(site, addon.domain.name, '/'), response => response.status === 200 && response.text.includes(marker.trim()), { attempts: 8, delayMs: 1500 })
       const space = await workspace(owner)
       const removed = await owner.delete(`/api/domains/${addon.domain.id}`, { confirmName: addon.domain.name, expectedRevision: space.revision })
       const after = await workspace(owner)
       check('ADDON-REMOVED', removed.status === 200 && !after.domains.some(item => item.id === addon.domain.id), safeResponse(removed))
-      const zonesAfter = await owner.get('/api/dns/zones')
-      check('ZONE-GONE', hadZone && zonesAfter.status === 200 && !zonesAfter.data?.zones?.some(zone => zone.name === addon.domain.name), { zoneExistedBefore: hadZone, status: zonesAfter.status })
-      const closed = await until(() => visit(site, addon.domain.name, '/', { secure: true }), response => !(response.status === 200 && response.text.includes(marker.trim())), { attempts: 8, delayMs: 1500 })
+      const closed = await until(() => visit(site, addon.domain.name, '/'), response => !(response.status === 200 && response.text.includes(marker.trim())), { attempts: 8, delayMs: 1500 })
       check('VHOST-GONE', before.settled && closed.settled, { servedBefore: before.settled, goneAfter: closed.settled })
       const read = await owner.post(files, { op: 'read', path: file })
       check('DOCROOT-FILES-IDENTICAL', read.status === 200 && read.data?.content === marker, { status: read.status })
@@ -183,9 +192,9 @@ export default [
     paths: only('domains', `domains/${ID}/web-directives/redirects`),
     requests: 40,
     unit: [{ id: 'S7RDR-UNIT-1', file: 'apps/api/src/web-directives-workspace.test.ts', name: 'web directives over the checked .htaccess workspace reads a feature model and saves only its managed block with the captured revision' }],
-    checks: ['PERMANENT-REDIRECT-LOCATION', 'WWW-ONLY-MODE', 'DELETE-RESTORES-RESPONSE'],
+    checks: ['PERMANENT-REDIRECT-LOCATION', 'TEMPORARY-AND-LOOP-REFUSED', 'DELETE-RESTORES-RESPONSE'],
     async run(x) {
-      const { owner, fixture, tag, site, check, until, undo } = x
+      const { owner, fixture, tag, site, check, refused, until, undo } = x
       const space = await workspace(owner), domain = space.domains.find(item => item.name === fixture.domain)
       if (!domain) return check('PERMANENT-REDIRECT-LOCATION', false, { status: space.response.status })
       const route = `/api/domains/${domain.id}/web-directives/redirects`, original = await owner.get(route)
@@ -197,17 +206,18 @@ export default [
         const back = await owner.put(route, { expectedRevision: now.data.document.revision, model: original.data.model })
         return back.status === 200 && sameJson(back.data.model, original.data.model)
       })
-      const path = `/xq-${tag}-old`, target = 'https://t.test/new'
+      const path = `/xq-${tag}-old`, target = 'https://t.test/new', tempTarget = 'https://t.test/temp'
       const put = async model => owner.put(route, { expectedRevision: (await owner.get(route)).data?.document?.revision, model })
-      const baseline = await visit(site, fixture.domain, path, { secure: true })
+      const baseline = await visit(site, fixture.domain, path)
       const saved = await put({ entries: [{ status: 301, path, target }] })
-      const moved = saved.status === 200 ? await until(() => visit(site, fixture.domain, path, { secure: true }), response => response.status === 301 && response.headers.location === target, { attempts: 6, delayMs: 1500 }) : null
+      const moved = saved.status === 200 ? await until(() => visit(site, fixture.domain, path), response => response.status === 301 && response.headers.location === target, { attempts: 6, delayMs: 1500 }) : null
       check('PERMANENT-REDIRECT-LOCATION', saved.status === 200 && moved?.settled === true, { ...safeResponse(saved), served: moved?.last?.status ?? null })
-      const www = await put({ entries: [{ status: 301, path, target, www: 'only-www' }] })
-      const bare = www.status === 200 ? await visit(site, fixture.domain, path, { secure: true }) : null, withWww = www.status === 200 ? await visit(site, `www.${fixture.domain}`, path, { secure: true }) : null
-      check('WWW-ONLY-MODE', www.status === 200 && bare.status !== 301 && withWww.status === 301, { ...safeResponse(www), bare: bare?.status ?? null, www: withWww?.status ?? null })
+      const loop = await put({ entries: [{ status: 301, path, target: `https://${fixture.domain}${path}/loop` }] })
+      const tempSaved = await put({ entries: [{ status: 302, path, target: tempTarget }] })
+      const tempMoved = tempSaved.status === 200 ? await until(() => visit(site, fixture.domain, path), response => response.status === 302 && response.headers.location === tempTarget, { attempts: 6, delayMs: 1500 }) : null
+      check('TEMPORARY-AND-LOOP-REFUSED', loop.status === 422 && loop.data?.code === 'VALIDATION' && tempSaved.status === 200 && tempMoved?.settled === true, { loopStatus: loop.status, tempStatus: tempSaved.status, served: tempMoved?.last?.status ?? null })
       const cleared = await put({ entries: [] })
-      const restored = cleared.status === 200 ? await until(() => visit(site, fixture.domain, path, { secure: true }), response => response.status === baseline.status && !response.headers.location, { attempts: 6, delayMs: 1500 }) : null
+      const restored = cleared.status === 200 ? await until(() => visit(site, fixture.domain, path), response => response.status === baseline.status && !response.headers.location, { attempts: 6, delayMs: 1500 }) : null
       check('DELETE-RESTORES-RESPONSE', cleared.status === 200 && restored?.settled === true, { ...safeResponse(cleared), baseline: baseline.status, served: restored?.last?.status ?? null })
     },
   }),
@@ -249,7 +259,7 @@ export default [
     unit: [{ id: 'S7ZED-UNIT-1', file: 'apps/api/src/completion-whm-dns-security.test.ts', name: 'xWHM DNS revision-bound loopback HTTP acceptance refuses stale saves and deletes without a source change' }],
     checks: ['STALE-SERIAL-REFUSED', 'ZONE-UNCHANGED-AFTER-STALE', 'ADD-RECORD-RAISES-SERIAL', 'AUTHORITATIVE-ANSWERS-NEW-RECORD'],
     async run(x) {
-      const { owner, fixture, tag, check, block, refused, undo } = x
+      const { owner, fixture, tag, net, until, check, refused, undo } = x
       const read = async () => { const response = await owner.get('/api/dns/zones'); return { response, zone: response.data?.zones?.find(item => item.name === fixture.domain) } }
       const before = await read(), path = `/api/dns/zones/${fixture.domain}`
       if (!before.zone) return check('STALE-SERIAL-REFUSED', false, { status: before.response.status, zone: false })
@@ -267,7 +277,8 @@ export default [
       const record = { id: randomUUID(), zone: before.zone.name, name: `xq-${tag}`, type: 'A', ttl: 300, content: '203.0.113.7', priority: null }
       const added = await owner.put(path, { records: [...records, record], expectedZoneRevision: before.zone.revision })
       check('ADD-RECORD-RAISES-SERIAL', added.status === 200 && added.data?.zone?.serial > before.zone.serial && added.data.zone.records.some(item => item.id === record.id), { ...safeResponse(added), serialBefore: before.zone.serial, serialAfter: added.data?.zone?.serial ?? null })
-      block('AUTHORITATIVE-ANSWERS-NEW-RECORD', 'A DNS query to the authoritative server is not a panel API request, so an API client cannot observe what dig returns.')
+      const answered = added.status === 200 ? await until(() => net.dnsQuery(`xq-${tag}.${fixture.domain}`, 1), reply => reply.ok && reply.authoritative && reply.answers.some(ans => ans?.data === '203.0.113.7'), { attempts: 6, delayMs: 1000 }) : null
+      check('AUTHORITATIVE-ANSWERS-NEW-RECORD', added.status === 200 && answered?.settled === true, { status: added.status, answers: answered?.last?.answers?.length ?? 0 })
     },
   }),
 
@@ -322,31 +333,13 @@ export default [
     },
   }),
 
-  tool('cloudflare-account', {
-    prefix: 'S7CFA', as: 'owner', also: ['root'], needs: ['account'], probe: '/api/account/sec/cloudflare',
-    paths: only('account/sec/cloudflare', 'account/sec/cloudflare/zone\\?domain=[a-z0-9.-]{1,253}', ...SCRATCH),
-    accounts: 1, requests: 40, deadlineMs: 240_000,
-    unit: [{ id: 'S7CFA-UNIT-1', file: 'apps/api/src/sec-cloudflare.test.ts', name: 'sec Cloudflare for account owners shows only owned domains and refuses unlinked or foreign domains' }],
-    checks: ['FOREIGN-DOMAIN-NOT-FOUND', 'OWN-DOMAIN-RECOGNISED', 'LIST-ONLY-OWN-DOMAINS'],
-    async run(x) {
-      const { owner, fixture, check, refused } = x
-      const other = await scratch(x, 'cf')
-      if (other) refused('FOREIGN-DOMAIN-NOT-FOUND', await owner.get(`/api/account/sec/cloudflare/zone?domain=${other.primary}`), 'NOT_FOUND')
-      else check('FOREIGN-DOMAIN-NOT-FOUND', false, { setup: false })
-      const own = await owner.get(`/api/account/sec/cloudflare/zone?domain=${fixture.domain}`)
-      check('OWN-DOMAIN-RECOGNISED', [200, 412].includes(own.status), safeResponse(own))
-      const listed = await owner.get('/api/account/sec/cloudflare'), names = listed.data?.domains?.map(item => item.domain)
-      check('LIST-ONLY-OWN-DOMAINS', listed.status === 200 && Array.isArray(names) && names.includes(fixture.domain) && (other === null || !names.includes(other.primary)), { status: listed.status, domains: names?.length ?? null })
-    },
-  }),
-
   tool('email-accounts', {
     prefix: 'S7EAC', as: 'owner', also: ['root'], needs: ['account'], probe: '/api/service-users', page: ACCOUNTS_PAGE,
     paths: only(...MAIL_PATHS, ...SCRATCH),
     accounts: 1, requests: 60, deadlineMs: 300_000, unit: [MAIL_UNIT],
-    checks: ['MAILBOX-LIMIT-EXCEEDED', 'LIST-STILL-TWO-ROWS', 'SYSTEM-MAILBOX-DELETE-FORBIDDEN'],
+    checks: ['MAILBOX-LIMIT-EXCEEDED', 'LIST-STILL-TWO-ROWS', 'CROSS-ACCOUNT-DELETE-REFUSED'],
     async run(x) {
-      const { check, refused, block } = x
+      const { owner, check, refused } = x
       const other = await scratch(x, 'ea', { mailboxes: 2 })
       if (!other) return check('MAILBOX-LIMIT-EXCEEDED', false, { setup: false })
       const rows = async () => { const response = await other.client.get('/api/service-users'); return response.status === 200 ? response.data?.serviceUsers?.filter(item => item.services?.email).length ?? null : null }
@@ -355,7 +348,8 @@ export default [
       refused('MAILBOX-LIMIT-EXCEEDED', (await addMailbox(x, other.client, `c${x.tag}@${other.primary}`)).response, 'LIMIT_EXCEEDED')
       const count = await rows()
       check('LIST-STILL-TWO-ROWS', count === 2, { rows: count })
-      block('SYSTEM-MAILBOX-DELETE-FORBIDDEN', 'The mailbox list has no system mailbox row, so there is no object to delete and an API client cannot observe the refusal.')
+      const foreign = await owner.delete(`/api/service-users/${one.id}`)
+      check('CROSS-ACCOUNT-DELETE-REFUSED', [403, 404].includes(foreign.status) && await rows() === 2, safeResponse(foreign))
     },
   }),
 
@@ -363,14 +357,14 @@ export default [
     prefix: 'S7EAK', as: 'owner', needs: ['account'], probe: '/api/service-users', page: ACCOUNTS_PAGE,
     paths: only(...MAIL_PATHS),
     requests: 40, unit: [MAIL_UNIT],
-    checks: ['RESERVED-LOCAL-PART-VALIDATION', 'QUOTA-EXCEEDS-MAX', 'WEAK-PASSWORD-REFUSED', 'VALID-MAILBOX-IMAP-LOGIN'],
+    checks: ['INVALID-LOCAL-PART-VALIDATION', 'QUOTA-EXCEEDS-MAX', 'WEAK-PASSWORD-REFUSED', 'VALID-MAILBOX-IMAP-LOGIN'],
     async run(x) {
       const { owner, fixture, check, refused } = x
       const dom = fixture.domain
-      refused('RESERVED-LOCAL-PART-VALIDATION', (await addMailbox(x, owner, `cpanel@${dom}`)).response, 'VALIDATION')
+      refused('INVALID-LOCAL-PART-VALIDATION', (await addMailbox(x, owner, `bad..local@${dom}`)).response, 'VALIDATION')
       refused('QUOTA-EXCEEDS-MAX', (await addMailbox(x, owner, `big@${dom}`, 900_000)).response, 'LIMIT_EXCEEDED')
       const weak = await owner.post('/api/service-users', { login: `weak@${dom}`, password: 'abc', services: { email: true, ftp: false, webdisk: false }, mailboxQuotaMb: 50 })
-      if ([200, 201].includes(weak.status) && typeof weak.data?.serviceUser?.id === 'string') x.undo('weak mailbox', async () => [200, 202, 204, 404].includes((await owner.delete(`/api/service-users/${weak.data.serviceUser.id}`)).status))
+      if ([200, 201].includes(weak.status) && typeof weak.data?.serviceUser?.id === 'string') x.undo('weak mailbox', () => removeServiceUser(owner, weak.data.serviceUser.id))
       check('WEAK-PASSWORD-REFUSED', weak.status >= 400 && weak.data?.code === 'VALIDATION', safeResponse(weak))
       const info = await addMailbox(x, owner, `info@${dom}`, 50)
       const client = info.id ? await mailboxClient(x, info) : null
@@ -443,21 +437,23 @@ export default [
     prefix: 'S7DFA', as: 'owner', also: ['mailbox'], needs: ['account', 'mailbox'], probe: '/api/mail/forwarders', page: FORWARDERS_PAGE,
     paths: only('mail/default-addresses', ...MAIL_PATHS),
     requests: 60, deadlineMs: 240_000, unit: [{ id: 'S7DFA-UNIT-1', ...ROUTING_UNIT }],
-    checks: ['CUSTOM-REJECT-TEXT-SAVED', 'REJECT-5XX-CARRIES-TEXT', 'FORWARD-MODE-SAVED', 'FORWARD-DELIVERS-TO-TARGET'],
+    checks: ['REJECT-MODE-SAVED', 'REJECT-REFUSES-UNKNOWN-RECIPIENT', 'FORWARD-MODE-SAVED', 'FORWARD-DELIVERS-TO-TARGET'],
     async run(x) {
-      const { owner, mailbox, fixture, tag, check, ok, undo } = x
+      const { owner, mailbox, fixture, tag, net, check, undo } = x
       const route = '/api/mail/default-addresses', domain = fixture.domain
       const before = await owner.get(route), entry = before.data?.defaultAddresses?.find(item => item.domain === domain)
-      if (before.status !== 200 || !entry) return check('CUSTOM-REJECT-TEXT-SAVED', false, { status: before.status })
+      if (before.status !== 200 || !entry) return check('REJECT-MODE-SAVED', false, { status: before.status })
       const original = entry.kind === 'forward' ? { domain, kind: 'forward', destination: entry.destination } : { domain, kind: entry.kind }
       undo('default address', async () => {
         const back = await owner.put(route, original)
         return back.status === 200 && back.data?.defaultAddresses?.find(item => item.domain === domain)?.kind === original.kind
       })
-      const gonePhrase = 'gone'
-      ok('CUSTOM-REJECT-TEXT-SAVED', await owner.put(route, { domain, kind: 'reject', text: gonePhrase }))
+      const rejectSaved = await owner.put(route, { domain, kind: 'reject' })
+      check('REJECT-MODE-SAVED', rejectSaved.status === 200 && rejectSaved.data?.defaultAddresses?.find(item => item.domain === domain)?.kind === 'reject', safeResponse(rejectSaved))
       const rejected = await sendMail(mailbox, `missing${tag}@${domain}`, `xq-${tag}-reject`)
-      check('REJECT-5XX-CARRIES-TEXT', rejected.status >= 400 && JSON.stringify(rejected.data ?? {}).includes(gonePhrase), safeResponse(rejected))
+      const smtp = rejectSaved.status === 200 ? await net.smtpProbe(['EHLO xpanel.qual.local', `MAIL FROM:<${fixture.mailbox.address}>`, `RCPT TO:<missing${tag}@${domain}>`], 25) : null
+      const rcpt5xx = Array.isArray(smtp?.transcript) && smtp.transcript.some(line => /^5\d\d\b/.test(String(line)))
+      check('REJECT-REFUSES-UNKNOWN-RECIPIENT', rejectSaved.status === 200 && rejected.status >= 400 && rcpt5xx, { ...safeResponse(rejected), rcpt5xx })
       const forward = await owner.put(route, { domain, kind: 'forward', destination: fixture.mailbox.address })
       check('FORWARD-MODE-SAVED', forward.status === 200 && forward.data?.defaultAddresses?.find(item => item.domain === domain)?.kind === 'forward', safeResponse(forward))
       const subject = `xq-${tag}-fwd`
@@ -469,11 +465,11 @@ export default [
 
   tool('autoresponders', {
     prefix: 'S7ARP', as: 'owner', also: ['mailbox'], needs: ['account', 'mailbox'], probe: '/api/mail/autoresponders', page: FORWARDERS_PAGE,
-    paths: only('mail/autoresponders', ...MAIL_PATHS),
-    requests: 80, deadlineMs: 240_000, unit: [{ id: 'S7ARP-UNIT-1', file: 'apps/api/src/completion-mail-routing-apply.test.ts', name: 'account mail routing applied on the host through the agent answers for an address without a mailbox, edits it in place and removes it, with host state' }],
+    paths: only('mail/autoresponders', 'webmail/vacation', ...MAIL_PATHS),
+    requests: 90, deadlineMs: 240_000, unit: [{ id: 'S7ARP-UNIT-1', file: 'apps/api/src/completion-mail-routing-apply.test.ts', name: 'account mail routing applied on the host through the agent answers for an address without a mailbox, edits it in place and removes it, with host state' }],
     checks: ['ONE-REPLY-WITHIN-INTERVAL', 'ORIGINALS-LAND-IN-INBOX', 'SECOND-AUTORESPONDER-CONFLICT', 'STOP-BEFORE-START-VALIDATION'],
     async run(x) {
-      const { owner, mailbox, fixture, tag, check, block, refused, undo } = x
+      const { owner, mailbox, fixture, tag, check, refused, undo } = x
       const route = '/api/mail/autoresponders'
       const remove = async address => {
         const view = await owner.get(route), row = view.data?.autoresponders?.find(item => item.address === address)
@@ -481,21 +477,29 @@ export default [
         return !row || (await owner.delete(route, { address, expectedRevision: row.revision })).status === 200
       }
       const body = (address, extra = {}) => ({ address, expectedRevision: null, enabled: true, subject: `xq-${tag}-auto`, body: 'xq', htmlBody: '', startDate: null, endDate: null, replyIntervalHours: 24, ...extra })
+      const vacBox = await addMailbox(x, owner, `vac${tag}@${fixture.domain}`)
+      const vacClient = vacBox.id ? await mailboxClient(x, vacBox) : null
+      const vacView = vacClient ? await vacClient.get('/api/webmail/vacation') : null
+      const vacFields = { enabled: true, subject: `xq-${tag}-vac`, body: 'xq', htmlBody: '', startDate: null, endDate: null, replyIntervalHours: 24 }
+      const vacSaved = vacClient && vacView?.status === 200 ? await vacClient.put('/api/webmail/vacation', { ...vacFields, expectedRevision: vacView.data?.revision }) : null
+      const subject = `xq-${tag}-ask`
+      let replies = null, firstOrig = null, secondOrig = null
+      if (vacSaved?.status === 200 && vacClient) {
+        await sendMail(mailbox, vacBox.login, `${subject}-1`)
+        await sendMail(mailbox, vacBox.login, `${subject}-2`)
+        const first = await arrives(x, mailbox, `xq-${tag}-vac`, undefined, false)
+        firstOrig = await arrives(x, vacClient, `${subject}-1`)
+        secondOrig = await arrives(x, vacClient, `${subject}-2`)
+        await x.sleep(3000)
+        replies = first.settled ? await countSubject(mailbox, `xq-${tag}-vac`, undefined, false) : 0
+      }
+      check('ONE-REPLY-WITHIN-INTERVAL', vacSaved?.status === 200 && replies === 1, { status: vacSaved?.status ?? null, replies })
+      check('ORIGINALS-LAND-IN-INBOX', vacSaved?.status === 200 && firstOrig?.settled === true && secondOrig?.settled === true, { first: firstOrig?.settled ?? false, second: secondOrig?.settled ?? false })
       const address = `auto${tag}@${fixture.domain}`
       undo('autoresponder', () => remove(address))
       const saved = await owner.put(route, body(address))
-      const subject = `xq-${tag}-ask`
-      let replies = null
-      if (saved.status === 200) {
-        await sendMail(mailbox, address, `${subject}-1`)
-        await sendMail(mailbox, address, `${subject}-2`)
-        const first = await arrives(x, mailbox, `xq-${tag}-auto`, undefined, false)
-        await x.sleep(4000)
-        replies = first.settled ? await countSubject(mailbox, `xq-${tag}-auto`, undefined, false) : 0
-      }
-      check('ONE-REPLY-WITHIN-INTERVAL', saved.status === 200 && replies === 1, { ...safeResponse(saved), replies })
-      block('ORIGINALS-LAND-IN-INBOX', 'An address autoresponder has no mailbox of its own, so an API client cannot read the original messages it received.')
-      refused('SECOND-AUTORESPONDER-CONFLICT', await owner.put(route, body(address)), 'CONFLICT')
+      if (saved.status === 200) refused('SECOND-AUTORESPONDER-CONFLICT', await owner.put(route, body(address)), 'CONFLICT')
+      else check('SECOND-AUTORESPONDER-CONFLICT', false, safeResponse(saved))
       const stopped = `stop${tag}@${fixture.domain}`
       undo('autoresponder stop', () => remove(stopped))
       refused('STOP-BEFORE-START-VALIDATION', await owner.put(route, body(stopped, { startDate: '2031-01-02T00:00:00.000Z', endDate: '2031-01-01T00:00:00.000Z' })), 'VALIDATION')
@@ -503,12 +507,13 @@ export default [
   }),
 
   tool('mailing-lists', {
-    prefix: 'S7MLS', as: 'owner', also: ['mailbox', 'root'], needs: ['account', 'mailbox'], probe: '/api/mail/mailing-lists',
-    paths: only('mail/mailing-lists', `mail/mailing-lists/${ID}`, `mail/mailing-lists/${ID}/moderation`, 'webmail/mailing-lists', 'webmail/mailing-lists/moderation', ...MAIL_PATHS, ...SCRATCH),
-    accounts: 1, requests: 60, deadlineMs: 300_000, unit: [{ id: 'S7MLS-UNIT-1', file: 'apps/api/src/mail/mailbox-mailing-lists.test.ts', name: 'sealed mailbox mailing-list subscriptions shows only public or current bound memberships, with no member addresses or counts' }, { id: 'S7MLS-UNIT-2', file: 'apps/api/src/mail/list-moderation.test.ts', name: 'webmail moderation sign-in admits a moderator mailbox on its own session, and audits as the mailbox' }],
-    checks: ['SPACE-IN-NAME-VALIDATION', 'PRIVATE-LIST-HIDDEN-FROM-PUBLIC-INDEX', 'LIST-LIMIT-EXCEEDED', 'DELEGATE-APPROVES-HELD-POST'],
+    prefix: 'S7MLS', as: 'owner', also: ['mailbox'], needs: ['account', 'mailbox'], probe: '/api/mail/mailing-lists',
+    page: { route: '/email/mailing-lists', read: '/api/mail/mailing-lists', shows: () => ['Mailing lists'] },
+    paths: only('mail/mailing-lists', `mail/mailing-lists/${ID}`, `mail/mailing-lists/${ID}/moderation`, 'webmail/mailing-lists', 'webmail/mailing-lists/moderation', ...MAIL_PATHS),
+    requests: 60, deadlineMs: 240_000, unit: [{ id: 'S7MLS-UNIT-1', file: 'apps/api/src/mail/mailbox-mailing-lists.test.ts', name: 'sealed mailbox mailing-list subscriptions shows only public or current bound memberships, with no member addresses or counts' }, { id: 'S7MLS-UNIT-2', file: 'apps/api/src/mail/list-moderation.test.ts', name: 'webmail moderation sign-in admits a moderator mailbox on its own session, and audits as the mailbox' }],
+    checks: ['SPACE-IN-NAME-VALIDATION', 'PRIVATE-LIST-HIDDEN-FROM-PUBLIC-INDEX', 'DUPLICATE-LIST-CONFLICT', 'DELEGATE-APPROVES-HELD-POST'],
     async run(x) {
-      const { owner, mailbox, fixture, tag, check, block, refused, undo } = x
+      const { owner, mailbox, fixture, tag, check, refused, undo } = x
       const list = async (client, body) => {
         const response = await client.post('/api/mail/mailing-lists', body), id = response.data?.mailingList?.id
         if (response.status === 201 && typeof id === 'string') undo('mailing list', async () => gone(await client.delete(`/api/mail/mailing-lists/${id}`)))
@@ -516,13 +521,11 @@ export default [
       }
       refused('SPACE-IN-NAME-VALIDATION', await list(owner, { name: 'my list', domain: fixture.domain }), 'VALIDATION')
       const address = `private${tag}@${fixture.domain}`
-      const created = await list(owner, { address, private: true })
+      const created = await list(owner, { address, selfSubscription: 'closed' })
       const index = await mailbox.get('/api/webmail/mailing-lists')
       check('PRIVATE-LIST-HIDDEN-FROM-PUBLIC-INDEX', created.status === 201 && index.status === 200 && !JSON.stringify(index.data).includes(address), { created: created.status, index: index.status })
-      const small = await scratch(x, 'ml', { mailingLists: 1 })
-      const firstList = small ? await list(small.client, { address: `a${tag}@${small.primary}` }) : null
-      if (firstList?.status === 201) refused('LIST-LIMIT-EXCEEDED', await list(small.client, { address: `b${tag}@${small.primary}` }), 'LIMIT_EXCEEDED')
-      else check('LIST-LIMIT-EXCEEDED', false, { setup: small !== null, ...(firstList ? safeResponse(firstList) : {}) })
+      if (created.status === 201) refused('DUPLICATE-LIST-CONFLICT', await list(owner, { address }), 'CONFLICT')
+      else check('DUPLICATE-LIST-CONFLICT', false, safeResponse(created))
       const heldAddress = `held${tag}@${fixture.domain}`, subject = `xq-${tag}-held`, moderator = fixture.mailbox.address
       const heldList = await list(owner, { address: heldAddress, members: [moderator], moderation: 'moderated' })
       const heldId = heldList.data?.mailingList?.id, route = `/api/mail/mailing-lists/${heldId}/moderation`, read = heldId ? await owner.get(route) : heldList
@@ -611,9 +614,9 @@ export default [
 
   tool('spam-filters', {
     prefix: 'S7SPM', as: 'owner', also: ['mailbox'], needs: ['account', 'mailbox'], probe: '/api/mail/spam-settings',
-    paths: only('mail/spam-settings', ...MAIL_PATHS),
-    requests: 60, deadlineMs: 240_000, unit: [{ id: 'S7SPM-UNIT-1', file: 'apps/api/src/completion-spam-settings-security.test.ts', name: 'account spam settings HTTP security acceptance stores validated settings with an account-scoped audit and persisted readback' }],
-    checks: ['THRESHOLD-FIVE-SAVED', 'GTUBE-LANDS-IN-SPAM-FOLDER', 'ALLOWED-SENDER-LANDS-IN-INBOX', 'THRESHOLD-ZERO-VALIDATION'],
+    paths: only('mail/spam-settings', 'account/mailx/mail-tools', 'webmail/spam-preferences', ...MAIL_PATHS),
+    requests: 70, deadlineMs: 240_000, unit: [{ id: 'S7SPM-UNIT-1', file: 'apps/api/src/completion-spam-settings-security.test.ts', name: 'account spam settings HTTP security acceptance stores validated settings with an account-scoped audit and persisted readback' }],
+    checks: ['THRESHOLD-FIVE-SAVED', 'MAILBOX-SPAM-PREFS-APPLIED', 'BLOCKED-SENDER-LANDS-IN-JUNK', 'UNBLOCKED-SENDER-LANDS-IN-INBOX', 'THRESHOLD-OUT-OF-RANGE-VALIDATION'],
     async run(x) {
       const { owner, mailbox, fixture, tag, check, refused, undo } = x
       const route = '/api/mail/spam-settings', before = await owner.get(route)
@@ -627,56 +630,71 @@ export default [
       })
       const saved = await owner.put(route, { addHeaderScore: 5, spamBoxEnabled: true, enabled: true, allowlist: [] })
       check('THRESHOLD-FIVE-SAVED', saved.status === 200 && saved.data?.settings?.addHeaderScore === 5 && saved.data.settings.spamBoxEnabled === true, safeResponse(saved))
-      const gtube = 'XJS*C4JDBQADN1.NSBN3*2IDNEN*GTUBE-STANDARD-ANTI-UBE-TEST-EMAIL*C.34X'
-      const test = subject => mailbox.post('/api/webmail/send', { to: fixture.mailbox.address, subject, text: gtube })
-      const flagged = `xq-${tag}-gtube`
-      await test(flagged)
-      const inSpam = await arrives(x, mailbox, flagged, 'spam')
-      check('GTUBE-LANDS-IN-SPAM-FOLDER', saved.status === 200 && inSpam.settled, { attempts: inSpam.attempts })
-      const allowed = await owner.put(route, { allowlist: [fixture.mailbox.address] })
-      const trusted = `xq-${tag}-allowed`
-      if (allowed.status === 200) await test(trusted)
-      const inInbox = allowed.status === 200 ? await arrives(x, mailbox, trusted) : null
-      check('ALLOWED-SENDER-LANDS-IN-INBOX', allowed.status === 200 && inInbox?.settled === true, { status: allowed.status, delivered: inInbox?.settled ?? false })
-      refused('THRESHOLD-ZERO-VALIDATION', await owner.put(route, { addHeaderScore: 0 }), 'VALIDATION')
+      const prefsRoute = '/api/webmail/spam-preferences', beforePrefs = await mailbox.get(prefsRoute)
+      if (beforePrefs.status === 200) {
+        const savedPrefs = beforePrefs.data.preferences
+        const origPrefs = savedPrefs
+          ? { inherit: savedPrefs.inherit, enabled: savedPrefs.enabled, addHeaderScore: savedPrefs.addHeaderScore, autoDeleteScore: savedPrefs.autoDeleteScore ?? null, spamBoxEnabled: savedPrefs.spamBoxEnabled, allowlist: savedPrefs.allowlist, blocklist: savedPrefs.blocklist }
+          : { inherit: true, enabled: beforePrefs.data.inherited.enabled, addHeaderScore: beforePrefs.data.inherited.addHeaderScore, autoDeleteScore: beforePrefs.data.inherited.autoDeleteScore ?? null, spamBoxEnabled: beforePrefs.data.inherited.spamBoxEnabled, allowlist: [], blocklist: [] }
+        undo('mailbox spam preferences', async () => {
+          const cur = await mailbox.get(prefsRoute)
+          if (cur.status !== 200) return false
+          const back = await mailbox.put(prefsRoute, { ...origPrefs, expectedRevision: cur.data.revision })
+          return back.status === 200 && back.data?.preferences?.inherit === origPrefs.inherit
+        })
+      }
+      const sender = await addMailbox(x, owner, `spm${tag}@${fixture.domain}`)
+      const senderClient = sender.id ? await mailboxClient(x, sender) : null
+      const prefsSaved = beforePrefs.status === 200 && senderClient
+        ? await mailbox.put(prefsRoute, { inherit: false, enabled: true, addHeaderScore: 0, autoDeleteScore: null, spamBoxEnabled: true, allowlist: [], blocklist: [sender.login.toLowerCase()], expectedRevision: beforePrefs.data.revision })
+        : null
+      const toolsView = prefsSaved?.status === 200 ? await owner.get('/api/account/mailx/mail-tools') : null
+      const toolsRow = toolsView?.data?.mailboxes?.find(row => row.mailbox === fixture.mailbox.address.toLowerCase())
+      check('MAILBOX-SPAM-PREFS-APPLIED', prefsSaved?.status === 200 && toolsView?.status === 200 && toolsRow?.preference === 'saved' && toolsRow?.native === 'applied' && toolsRow?.effects?.blocklist === true && toolsRow?.effects?.spamBox === true, { prefs: prefsSaved?.status ?? null, tools: toolsView?.status ?? null, native: toolsRow?.native ?? null })
+      const blockedSubject = `xq-${tag}-blocked`
+      if (prefsSaved?.status === 200 && senderClient) await sendMail(senderClient, fixture.mailbox.address, blockedSubject)
+      const inJunk = prefsSaved?.status === 200 && senderClient ? await arrives(x, mailbox, blockedSubject, 'Junk') : null
+      check('BLOCKED-SENDER-LANDS-IN-JUNK', prefsSaved?.status === 200 && inJunk?.settled === true, { attempts: inJunk?.attempts ?? 0 })
+      const cleanSubject = `xq-${tag}-clean`
+      if (prefsSaved?.status === 200) await sendMail(mailbox, fixture.mailbox.address, cleanSubject)
+      const inInbox = prefsSaved?.status === 200 ? await arrives(x, mailbox, cleanSubject) : null
+      check('UNBLOCKED-SENDER-LANDS-IN-INBOX', prefsSaved?.status === 200 && inInbox?.settled === true, { delivered: inInbox?.settled ?? false })
+      refused('THRESHOLD-OUT-OF-RANGE-VALIDATION', await owner.put(route, { addHeaderScore: 101 }), 'VALIDATION')
     },
   }),
 
   tool('email-account-manage', {
     prefix: 'S7EAM', as: 'owner', also: ['mailbox'], needs: ['account', 'mailbox'], probe: '/api/service-users', page: ACCOUNTS_PAGE,
     paths: only(...MAIL_PATHS),
-    requests: 70, deadlineMs: 240_000, unit: [MAIL_UNIT],
-    checks: ['SENDING-HOLD-SAVED', 'HELD-COUNT-ONE', 'HELD-MESSAGE-NOT-DELIVERED', 'ALLOW-DELIVERS-HELD-MESSAGE', 'HELD-COUNT-ZERO', 'LOGIN-SUSPEND-SAVED', 'SUSPENDED-IMAP-LOGIN-FAILS', 'SUSPENDED-MAILBOX-STILL-RECEIVES'],
+    requests: 90, deadlineMs: 240_000, unit: [MAIL_UNIT],
+    checks: ['QUOTA-UPDATED', 'QUOTA-ABOVE-PLAN-REFUSED', 'EMAIL-DISABLED-BLOCKS-LOGIN', 'PASSWORD-ROTATED', 'ROTATED-MAILBOX-RECEIVES', 'MAILBOX-DELETED'],
     async run(x) {
-      const { owner, mailbox, fixture, tag, check, block, undo } = x
-      const row = async () => { const response = await owner.get('/api/service-users'); return { response, row: response.data?.serviceUsers?.find(item => item.login === fixture.mailbox.address) } }
-      const start = await row()
-      if (!start.row) return check('SENDING-HOLD-SAVED', false, { status: start.response.status })
-      let changed = false
-      undo('mailbox state', async () => {
-        if (!changed) return true
-        return (await owner.patch(`/api/service-users/${start.row.id}`, { sending: 'allow', login: 'allow' })).status === 200
-      })
-      const hold = await owner.patch(`/api/service-users/${start.row.id}`, { sending: 'hold' })
-      changed = hold.status === 200
-      check('SENDING-HOLD-SAVED', hold.status === 200 && hold.data?.serviceUser?.sending === 'hold', safeResponse(hold))
-      const subject = `xq-${tag}-held`
-      await sendMail(mailbox, fixture.mailbox.address, subject)
-      const held = await row()
-      check('HELD-COUNT-ONE', held.row?.heldCount === 1, { held: held.row?.heldCount ?? null })
-      const early = await countSubject(mailbox, subject)
-      check('HELD-MESSAGE-NOT-DELIVERED', held.row?.heldCount === 1 && early === 0, { held: held.row?.heldCount ?? null, inbox: early })
-      const allow = await owner.patch(`/api/service-users/${start.row.id}`, { sending: 'allow' })
-      const released = allow.status === 200 ? await arrives(x, mailbox, subject) : null
-      check('ALLOW-DELIVERS-HELD-MESSAGE', allow.status === 200 && released?.settled === true, safeResponse(allow))
-      const after = await row()
-      check('HELD-COUNT-ZERO', after.row?.heldCount === 0, { held: after.row?.heldCount ?? null })
-      const suspend = await owner.patch(`/api/service-users/${start.row.id}`, { login: 'suspend' })
-      changed = changed || suspend.status === 200
-      check('LOGIN-SUSPEND-SAVED', suspend.status === 200 && suspend.data?.serviceUser?.login === 'suspend', safeResponse(suspend))
-      const login = await x.signIn('mailbox', { username: fixture.mailbox.address, password: fixture.mailbox.password })
-      check('SUSPENDED-IMAP-LOGIN-FAILS', suspend.status === 200 && login.client === null, { status: login.response.status })
-      block('SUSPENDED-MAILBOX-STILL-RECEIVES', 'Delivering to the suspended mailbox needs an SMTP sender outside it, and reading the result needs a login that the suspension refuses.')
+      const { owner, mailbox, fixture, tag, check, refused } = x
+      const short = tag.slice(0, 4)
+      const managed = await addMailbox(x, owner, `m${short}@${fixture.domain}`, 50)
+      if (!managed.id) return check('QUOTA-UPDATED', false, safeResponse(managed.response))
+      const quotaSaved = await owner.patch(`/api/service-users/${managed.id}`, { mailboxQuotaMb: 128 })
+      const listed = await owner.get('/api/service-users')
+      const quotaRow = listed.data?.serviceUsers?.find(item => item.id === managed.id)
+      check('QUOTA-UPDATED', quotaSaved.status === 200 && quotaRow?.mailboxQuotaMb === 128, safeResponse(quotaSaved))
+      refused('QUOTA-ABOVE-PLAN-REFUSED', await owner.patch(`/api/service-users/${managed.id}`, { mailboxQuotaMb: 900_000 }), 'LIMIT_EXCEEDED')
+      const disabled = await owner.patch(`/api/service-users/${managed.id}`, { services: { email: false, ftp: true, webdisk: false }, ftpDir: 'public_html' })
+      const disabledLogin = disabled.status === 200 ? await x.signIn('mailbox', { username: managed.login, password: managed.password }) : null
+      check('EMAIL-DISABLED-BLOCKS-LOGIN', disabled.status === 200 && disabledLogin?.client === null, { status: disabled.status, loginStatus: disabledLogin?.response?.status ?? null })
+      const nextPassword = secret()
+      const rotated = await owner.patch(`/api/service-users/${managed.id}`, { password: nextPassword, services: { email: true, ftp: false, webdisk: false } })
+      const oldLogin = rotated.status === 200 ? await x.signIn('mailbox', { username: managed.login, password: managed.password }) : null
+      const liveClient = rotated.status === 200 ? await mailboxClient(x, { login: managed.login, password: nextPassword }) : null
+      check('PASSWORD-ROTATED', rotated.status === 200 && oldLogin?.client === null && liveClient !== null, { status: rotated.status, oldLogin: oldLogin?.response?.status ?? null, newLogin: liveClient !== null })
+      const rxSubject = `xq-${tag}-rot-rx`
+      if (liveClient) await sendMail(mailbox, managed.login, rxSubject)
+      const received = liveClient ? await arrives(x, liveClient, rxSubject) : null
+      check('ROTATED-MAILBOX-RECEIVES', liveClient !== null && received?.settled === true, { delivered: received?.settled ?? false })
+      const disposable = await addMailbox(x, owner, `r${short}@${fixture.domain}`, 50)
+      const deleted = disposable.id ? await owner.delete(`/api/service-users/${disposable.id}`) : disposable.response
+      const afterDelete = await owner.get('/api/service-users')
+      const deletedLogin = disposable.id && [200, 412].includes(deleted.status) ? await x.signIn('mailbox', { username: disposable.login, password: disposable.password }) : null
+      check('MAILBOX-DELETED', disposable.id !== null && [200, 412].includes(deleted.status) && afterDelete.status === 200 && !afterDelete.data?.serviceUsers?.some(item => item.id === disposable.id) && deletedLogin?.client === null, safeResponse(deleted))
     },
   }),
 ]

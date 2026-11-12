@@ -303,6 +303,12 @@ export interface CompileOptions {
 
 const DEFAULT_ZONE_DIR = '/var/lib/powerdns/zones'
 
+const docRootContextPaths = (home: string, docRoot: string): string[] => {
+  if (!docRoot.startsWith(`${home}/`)) return [docRoot]
+  const parts = docRoot.slice(home.length + 1).split('/').filter(Boolean)
+  return parts.map((_, index) => `${home}/${parts.slice(0, index + 1).join('/')}`)
+}
+
 /** A domain can point at a folder that already holds files labelled for the home, so its whole tree is relabelled. */
 const newDocRootContextActions = (snapshot: StateSnapshot, applied: StateSnapshot | null): HostAction[] => {
   const known = new Set(applied?.domains.map(domain => domain.docRoot))
@@ -411,9 +417,9 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
       postActions.push(...containerGuard.actions)
     }
 
-    // Firewall: nothing to render until a rule or the ping block exists; the switch and the ping block live in the same table
+    // Firewall: real hosts (managementPorts) always maintain table inet xpanel (policy accept while off) for remote-db/ban/guard sets
     const firewall = firewallPolicy(snapshot.firewall)
-    if (firewall.rules.length > 0 || firewall.blockPing) {
+    if (firewall.rules.length > 0 || firewall.blockPing || opts.managementPorts !== undefined || opts.secEdge?.flood != null || opts.svcHost?.smtpRestricted === true) {
       const prefixLists = Object.fromEntries(firewall.prefixLists.map((l) => [l.name, l.entries]))
       const nftSettings = system.nftSettingsFromServer(settings, {
         prefixLists,
@@ -544,7 +550,7 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
     preActions.push(...system.accountProvisionActions(account, plan, os, { quotaFilesystem: quotaFor(account) }))
     // Directories created under /home inherit its home_root_t, which Apache and PHP-FPM may not read.
     if (os.family === 'rhel' && opts.selinux) {
-      preActions.push(system.accountContextAction(account.username, [...new Set([...system.accountDirPaths(account.home), ...accountDomains.map(domain => domain.docRoot)])]))
+      preActions.push(system.accountContextAction(account.username, [...new Set([...system.accountDirPaths(account.home), ...accountDomains.flatMap(domain => docRootContextPaths(account.home, domain.docRoot))])]))
     }
 
     // Account systemd slice & logind user slice drop-in. The drop-in directory is
@@ -619,7 +625,7 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
       // root-granted disable_functions exceptions follow the account on every handler and version
       const allowedFunctions = settings.phpFunctionExceptions?.find(item => item.account === account.username)?.functions ?? []
       if (settings.engine === 'apache') {
-        files.push(...edge.renderApacheVhosts(account, edge.servedDomains(accountDomains), settings, os, { now, ...(opts.accountPages ? { pageScope: opts.accountPages.scopeOf.get(account.id) ?? '' } : {}) }))
+        files.push(...edge.renderApacheVhosts(account, edge.servedDomains(accountDomains), settings, os, { now, ...(opts.secEdge ? { waf: opts.secEdge.sites } : {}), ...(opts.accountPages ? { pageScope: opts.accountPages.scopeOf.get(account.id) ?? '' } : {}) }))
         for (const dom of accountDomains) {
           if (dom.siteType === 'php' && dom.php.handler !== 'fpm') {
             preActions.push(...edge.cgiWrapperDirs(account, settings, os))
@@ -1161,6 +1167,10 @@ export const rollbackReloadActions = (unit: string): HostAction[] => {
   }
   // sshd exits when a reload cannot bind its port: the restored file needs a daemon started again, not signalled.
   if (unit === 'ssh' || unit === 'sshd') return [{ kind: 'systemd', verb: 'restart', unit }]
+  // pure-ftpd and database/cache daemons have no ExecReload job; restarting applies the restored definition cleanly.
+  if (/^(?:pure-ftpd|mariadb|mysql|postgresql|redis|redis-server|valkey|valkey-server|memcached)(?:\.service)?$/.test(unit)) {
+    return [{ kind: 'systemd', verb: 'restart', unit }]
+  }
   // Slice units have no reload job; restoring their file needs only a daemon reload.
   // `systemctl reload xpanel-<uid>.slice` fails and would strand the rollback.
   if (unit.endsWith('.slice')) return [{ kind: 'systemd-daemon-reload' }]
@@ -1464,6 +1474,17 @@ export class HostReconciler {
         if (introducedUnits.has(unit)) {
           await this.deps.executor.runAction({ kind: 'systemd', verb: 'stop', unit })
           stoppedNewUnits.push(unit)
+          continue
+        }
+        if (
+          unit === 'nftables.service' ||
+          unit === 'nftables' ||
+          unit === this.deps.os.services.nftables ||
+          unit === `${this.deps.os.services.nftables}.service`
+        ) {
+          if (journalRecord.previousFilesBackup.some(entry => entry.existed && entry.path === this.deps.os.paths.nftablesConf)) {
+            for (const action of system.nftApplyActions(this.deps.os)) await this.deps.executor.runAction(action)
+          }
           continue
         }
         if (unit === 'pdns.service' && dnsWasTouched) {
@@ -2191,11 +2212,64 @@ export class HostReconciler {
       actor,
     })
 
+    const activePreActionSet = Array.isArray(previousManifest?.preActionHashes)
+      ? new Set(previousManifest.preActionHashes)
+      : currentGen && appliedSnapshot
+        ? new Set(compileDesiredGeneration(appliedSnapshot, {
+          os: this.deps.os,
+          ...(this.deps.managementHosts ? { managementHosts: this.deps.managementHosts } : {}),
+          ...(managementPorts ? { managementPorts } : {}),
+          ...(this.deps.davIngress ? { davIngress: this.deps.davIngress } : {}),
+          ...(this.deps.panelRedirects && redirection.panelPaths ? { panelRedirects: this.deps.panelRedirects } : {}),
+          ...(accountPages ? { accountPages } : {}),
+          quotaFilesystems,
+          quotaFilesystem: this.deps.quotaFilesystem ?? null,
+          ...(this.deps.ioDevices && { ioDevices: this.deps.ioDevices }),
+          ...(accountIoDevices ? { ioDevicesByAccount: accountIoDevices } : {}),
+          ...(this.deps.zoneDir && { zoneDir: this.deps.zoneDir }),
+          ...(mailAuth ? { mailAuth } : {}),
+          mailForwarding,
+          mailFx,
+          ...(mailTls !== undefined ? { mailTls } : {}),
+          secEdge,
+          compilerAccess,
+          sourceBuildHook,
+          svcHost,
+          nfsClients,
+          panelLogRotateDays: panelRotateDays,
+          ...(trustedProxyAuthority ? { trustedProxyAuthority } : {}),
+          runtime: (await readRuntimeGeneration(this.deps.store.rootDir, currentGen.id).catch(() => null)) ?? new Map(),
+          containerRegistries,
+          retirements,
+          accountEdge,
+          ...(etcHosts !== undefined ? { etcHosts } : {}),
+          ...(observedHostname !== undefined ? { observedHostname } : {}),
+          ...(selinux !== undefined ? { selinux } : {}),
+          ...(nginxHttp2 && { nginxHttp2 }),
+          ...(ipAliases && { ipAliases }),
+          remoteServiceIps,
+          serverOperations,
+          ...(mailLimitPolicy !== undefined && { mailLimitPolicy }),
+          ...(ftpServer && { ftpServer: { ...ftpServer, roleEnabled: ftpRoleEnabled } }),
+          ...(mariadbServer && { mariadbServer }),
+          ...(databaseClientHost && { databaseClientHost }),
+          ...(phpMyAdminAccess && { phpMyAdminAccess }),
+          ...(dbQuotaLocks && { dbQuotaLocks }),
+          now: new Date(),
+        }).preActions.map(action => sha256Text(JSON.stringify(action))))
+        : null
+    const preActionsRequireVerification = isRealLinuxExecutor && (
+      Boolean(opts.effectAuthority)
+      || activePreActionSet === null
+      || compiled.preActions.some(action => !activePreActionSet.has(sha256Text(JSON.stringify(action))))
+    )
+
     const candidateManifest = buildGenerationManifest({
       generationId: pendingGen.id,
       stateChecksum: snapshot.checksum,
       filesChecksum,
       effectsChecksum,
+      preActions: compiled.preActions,
       actor,
       files: compiled.files,
       postActions: compiled.postActions,
@@ -2289,7 +2363,7 @@ export class HostReconciler {
         } else {
           if (isRealLinuxExecutor && !preActionsExecutedDuringTest) {
             await runJournaledPreActions(journalRecord, compiled.preActions, this.deps.executor,
-              record => this.journal.saveJournal(record), true)
+              record => this.journal.saveJournal(record), true, preActionsRequireVerification)
             preActionsExecutedDuringTest = true
           }
           const fpmConfigIdx = isRealLinuxExecutor ? test.argv.indexOf('--fpm-config') : -1
@@ -2398,7 +2472,7 @@ export class HostReconciler {
 
         if (!preActionsExecutedDuringTest) {
           await runJournaledPreActions(journalRecord, compiled.preActions, this.deps.executor,
-            record => this.journal.saveJournal(record), isRealLinuxExecutor)
+            record => this.journal.saveJournal(record), isRealLinuxExecutor, preActionsRequireVerification)
         }
 
         for (const file of verifiedStagedFiles) {

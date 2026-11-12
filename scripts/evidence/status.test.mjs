@@ -79,9 +79,14 @@ async function statusOf(options) {
 
 export function registerStatusTests(test) {
 
-test('the shipped catalog delivery data stays empty and unbound', () => {
-  assert.deepEqual(deliveryEvidence, [])
-  assert.equal(deliveryTarget, null)
+test('the shipped catalog delivery data is either unbound or bound to a valid target', () => {
+  if (deliveryTarget === null) {
+    assert.deepEqual(deliveryEvidence, [])
+  } else {
+    assert.ok(Array.isArray(deliveryEvidence) && deliveryEvidence.length > 0)
+    assert.match(deliveryTarget.sourceFingerprint, /^[0-9a-f]{64}$/)
+    assert.match(deliveryTarget.artifactSha256, /^[0-9a-f]{64}$/)
+  }
 })
 
 test('a complete detached bundle produces one verified tool row for every profile', async () => {

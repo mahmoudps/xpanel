@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { fail } from '@xpanel/core'
 import type { AuthenticatedCaller } from './auth.ts'
+import { policyForRequest } from './authorization.ts'
 import { handleMailLogWorkspaceRoute, handleMailTrackDeliveryRoute } from './mail-log-workspace.ts'
 
 const root = { principal: { kind: 'root', id: 'fixture-root', username: 'root' } } as AuthenticatedCaller
@@ -51,6 +52,8 @@ describe('root mail log workspace', () => {
     expect(await handleMailLogWorkspaceRoute(...get('/api/server/mail-queue'), h)).toBeNull()
     expect((await handleMailLogWorkspaceRoute(...get('/api/server/mail-log/delivery', 'POST'), h))!.status).toBe(405)
     await expect(handleMailLogWorkspaceRoute(...get('/api/server/mail-log/delivery'), h)).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' })
+    expect(policyForRequest('/api/server/mail-log/delivery', 'GET')).toEqual({ resource: 'server', rootOnly: false, acl: 'list-accounts', scopeAccess: 'read' })
+    expect(policyForRequest('/api/server/mail-log/delivery', 'POST')).toEqual({ resource: 'server', rootOnly: true, acl: 'list-accounts', scopeAccess: 'read' })
   })
 })
 

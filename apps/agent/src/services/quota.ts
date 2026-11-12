@@ -217,7 +217,8 @@ export const applyObservedUserQuota = async (run: QuotaCommandRunner, action: Ex
   }
   const result = await run(['/usr/sbin/setquota', '-u', action.user, String(action.blockSoftKb), String(action.blockHardKb), '0', '0', action.filesystem])
   const after = await observeUserQuota(run, action.filesystem)
-  if (!result.ok || after.status !== 'enabled' || !sameMount(before, after)) {
+  const clearedAbsentUser = !result.ok && action.blockSoftKb === 0 && action.blockHardKb === 0 && result.stderr.includes(`user ${action.user} does not exist`)
+  if ((!result.ok && !clearedAbsentUser) || after.status !== 'enabled' || !sameMount(before, after)) {
     fail('SERVICE_UNAVAILABLE', 'account quota mutation could not be confirmed on the same enforcing filesystem', {
       stateChanged: true, unknownOutcome: true, verificationRequired: true,
     })

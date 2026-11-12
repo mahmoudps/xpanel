@@ -49,7 +49,7 @@ describe('server mail routing in the generation', () => {
     expect(file(compiled, `/${services.autoreplyDomain(account.id)}.passwd`)).toContain(gate)
     expect(file(compiled, '.list.json')).toContain('"posting":"members"')
     expect(file(compiled, '/95-xpanel-sieve.conf')).toContain('sieve_extprograms')
-    expect(compiled.postActions).toContainEqual({ kind: 'exec', argv: ['/usr/bin/sievec', paths.script] })
+    expect(compiled.postActions).toContainEqual({ kind: 'exec', argv: ['/usr/bin/sievec', '-P', 'sieve_extprograms', '-x', '+vnd.dovecot.execute', paths.script] })
     const allowed = createProductionHostTargetMatcher()
     for (const path of [services.LIST_GATE_PROGRAM, paths.rules, paths.script]) expect(allowed(path, 'write'), path).toBe(true)
   })

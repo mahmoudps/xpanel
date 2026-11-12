@@ -19,9 +19,10 @@ describe('detached delivery catalog', () => {
       artifactSha256: target.artifactSha256, profile: 'test-linux', observedAt: '2026-10-29T12:00:00Z',
       runArtifact: 'synthetic-catalog-guard.json', runArtifactSha256: 'c'.repeat(64),
     }))
+    const unbound = buildDeliveryCatalog([], null)
     const accepted = buildDeliveryCatalog(evidence, target)
     expect(accepted.filter(tool => tool.status === 'verified').map(tool => tool.id)).toEqual([spec.id])
-    expect(tools.some(tool => tool.status === 'verified')).toBe(false)
+    expect(unbound.some(tool => tool.status === 'verified')).toBe(false)
     expect(accepted.find(tool => tool.id === spec.id)).not.toBe(tools.find(tool => tool.id === spec.id))
     expect(buildDeliveryCatalog(evidence, { ...target, artifactSha256: 'd'.repeat(64) }).some(tool => tool.status === 'verified')).toBe(false)
     expect(buildDeliveryCatalog(evidence, null).some(tool => tool.status === 'verified')).toBe(false)

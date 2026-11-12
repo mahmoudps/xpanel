@@ -62,7 +62,7 @@ export async function readPearInventory(files: AccountPackageFiles): Promise<Acc
 }
 
 export const pearUnitName = (username: string): string => `xpanel-pear-${system.assertUsername(username)}.service`
-const pearDirs = (home: string): string[] => ['php_dir=' + home + '/' + ACCOUNT_PEAR_LIBRARY, ...['data', 'doc', 'test', 'www', 'cfg', 'bin', 'cache', 'download', 'temp'].map(key => key + '_dir=' + home + '/' + PEAR_STATE + '/' + key)].flatMap(value => ['-d', value])
+const pearDirs = (home: string): string[] => ['preferred_state=beta', 'php_dir=' + home + '/' + ACCOUNT_PEAR_LIBRARY, ...['data', 'doc', 'test', 'www', 'cfg', 'bin', 'cache', 'download', 'temp'].map(key => key + '_dir=' + home + '/' + PEAR_STATE + '/' + key)].flatMap(value => ['-d', value])
 const VERBS: Readonly<Record<AccountPackageOp, readonly string[]>> = { install: ['install'], update: ['upgrade'], reinstall: ['install', '--force'], remove: ['uninstall'] }
 const PHP = /^(?:\/usr\/bin\/php[5-9]\.[0-9]{1,2}|\/opt\/remi\/php[5-9][0-9]{1,2}\/root\/usr\/bin\/php)$/
 const PEARCMD = /^(?:\/usr\/share\/php\/pearcmd\.php|\/opt\/remi\/php[5-9][0-9]{1,2}\/root\/usr\/share\/pear\/pearcmd\.php)$/

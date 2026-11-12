@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { HostAction } from '@xpanel/core'
 import { hasUnverifiedPreActions, runJournaledPreActions, sha256Text, type ReconcileJournalRecord } from './reconciler-journal.ts'
+import { removedMaildirPaths } from './services/mail.ts'
 
 const record = (): ReconcileJournalRecord => ({
   schemaVersion: 1, journalId: 'test-journal', generationId: 1, previousActiveGenerationId: null,
@@ -87,5 +88,40 @@ describe('durable reconciliation prerequisite effects', () => {
     expect(journal.completedPreActions).toBe(1)
     expect(save).not.toHaveBeenCalled()
     expect(hasUnverifiedPreActions(journal)).toBe(false)
+  })
+
+  it('scopes removed maildir paths to retained non-terminating accounts', () => {
+    const previous = {
+      accounts: [
+        { id: 'acc-active', home: '/home/alice', status: 'active' as const },
+        { id: 'acc-gone', home: '/home/bob', status: 'terminating' as const },
+        { id: 'acc-purged', home: '/home/carol', status: 'active' as const },
+      ],
+      domains: [
+        { id: 'dom-alice', name: 'alice.example.com' },
+        { id: 'dom-bob', name: 'bob.example.com' },
+        { id: 'dom-carol', name: 'carol.example.com' },
+      ],
+      serviceUsers: [
+        { accountId: 'acc-active', domainId: 'dom-alice', localPart: 'keep', services: { email: true } },
+        { accountId: 'acc-active', domainId: 'dom-alice', localPart: 'old', services: { email: true } },
+        { accountId: 'acc-gone', domainId: 'dom-bob', localPart: 'info', services: { email: true } },
+        { accountId: 'acc-purged', domainId: 'dom-carol', localPart: 'info', services: { email: true } },
+      ],
+    }
+    const next = {
+      accounts: [
+        { id: 'acc-active', home: '/home/alice', status: 'active' as const },
+        { id: 'acc-purged', home: '/home/carol', status: 'terminating' as const },
+      ],
+      domains: [
+        { id: 'dom-alice', name: 'alice.example.com' },
+        { id: 'dom-carol', name: 'carol.example.com' },
+      ],
+      serviceUsers: [
+        { accountId: 'acc-active', domainId: 'dom-alice', localPart: 'keep', services: { email: true } },
+      ],
+    }
+    expect(removedMaildirPaths(previous, next)).toEqual(['/home/alice/mail/alice.example.com/old'])
   })
 })

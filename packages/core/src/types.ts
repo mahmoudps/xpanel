@@ -404,6 +404,8 @@ export interface ServerSettings {
   ftp?: ServerFtpSettings
   /** SSH sign-in policy, login alarm and shell jail; absent keeps DEFAULT_SERVER_SSH_SETTINGS. */
   ssh?: ServerSshSettings
+  /** Optional default DNS record TTL in seconds (1..2147483647) for new zones. */
+  defaultTtl?: number
 }
 
 export type SshRootLogin = 'yes' | 'prohibit-password' | 'forced-commands-only' | 'no'

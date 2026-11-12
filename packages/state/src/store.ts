@@ -2107,8 +2107,13 @@ export class StateStore {
       )
       if (domain.ipv4 != null) assertIpAssignableToDomain(domain.ipv4, { expectedVersion: 4, account })
       if (domain.ipv6 != null) assertIpAssignableToDomain(domain.ipv6, { expectedVersion: 6, account })
-      const applyProjection = await this.prepareDomainMutation(lease, journal, opts, account, [], [domain])
+      const zonePath = (kind === 'addon' || kind === 'alias') && opts?.defaultZone ? this.path('zones', `${domain.name}.json`) : null
+      const createZone = zonePath !== null && await readJsonIfExists(zonePath) === null
+        ? validateDnsZoneFile({ ...opts!.defaultZone!, name: domain.name, accountId: account.id })
+        : null
+      const applyProjection = await this.prepareDomainMutation(lease, journal, opts, account, [], [domain], createZone && zonePath ? [zonePath] : [])
       await this.writeStateJson(lease, join(this.accountDir(account.username), 'domains', `${domain.name}.json`), domain)
+      if (createZone && zonePath) await this.writeStateJson(lease, zonePath, createZone)
       await applyProjection?.()
       return domain
     })
@@ -2308,12 +2313,21 @@ export class StateStore {
         if ((raw?.domainId && toDelete.has(raw.domainId)) || (raw?.login && names.has(raw.login.slice(raw.login.lastIndexOf('@') + 1).toLowerCase()))) userFiles.push(file)
       }
       const userdata = removing.map(domain => join(this.accountDir(account.username), 'userdata', `${domain.id}.json`))
-      const applyProjection = await this.prepareDomainMutation(lease, journal, opts, account, removing, [], [...userdata, ...userFiles])
+      const zoneFiles: string[] = []
+      for (const d of removing) {
+        if (d.kind === 'addon' || d.kind === 'alias') {
+          const zonePath = this.path('zones', `${d.name}.json`)
+          const rawZone = await readJsonIfExists<{ accountId?: string | null }>(zonePath)
+          if (rawZone?.accountId === account.id) zoneFiles.push(zonePath)
+        }
+      }
+      const applyProjection = await this.prepareDomainMutation(lease, journal, opts, account, removing, [], [...userdata, ...userFiles, ...zoneFiles])
       for (const d of removing) {
         await this.removeStatePath(lease, join(this.accountDir(account.username), 'domains', `${d.name}.json`))
         await this.removeStatePath(lease, join(this.accountDir(account.username), 'userdata', `${d.id}.json`))
       }
       for (const file of userFiles) await this.removeStatePath(lease, file)
+      for (const file of zoneFiles) await this.removeStatePath(lease, file)
       await applyProjection?.()
       return true
     })

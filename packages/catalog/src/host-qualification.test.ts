@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { tools } from './data/index.ts'
+import { buildDeliveryCatalog, tools } from './data/index.ts'
 import { navigation } from './data/navigation.ts'
-import { HOST_PROBES, PHASE1_TOOL_PROBES, QUALIFIED_SCOPE, qualifyHostTools, type HostProbe, type HostQualificationReport } from './host-qualification.ts'
+import { UNIMPLEMENTED_TOOL_REASONS } from './delivery.ts'
+import { admitForQualification, HOST_PROBES, PHASE1_TOOL_PROBES, QUALIFIED_SCOPE, qualifyHostTools, type HostProbe, type HostQualificationReport } from './host-qualification.ts'
 import { visibleNavigation } from './navigation.ts'
 import type { VisibilityContext } from './visibility.ts'
 
@@ -54,10 +55,11 @@ describe('host qualification', () => {
     expect(qualifyHostTools([input], report, true)[0]?.status).toBe('implemented')
   })
 
-  it('leaves the production catalog unqualified', () => {
-    expect(tools.filter(tool => tool.status === 'verified')).toEqual([])
-    expect(qualifyHostTools(tools, null).filter(tool => tool.status === 'verified')).toEqual([])
-    expect(qualifyHostTools(tools, passed('linux', Object.fromEntries(HOST_PROBES.map(probe => [probe, 'passed'])))).filter(tool => tool.status === 'verified')).toEqual([])
+  it('leaves an unbound catalog unqualified', () => {
+    const unbound = buildDeliveryCatalog([], null)
+    expect(unbound.filter(tool => tool.status === 'verified')).toEqual([])
+    expect(qualifyHostTools(unbound, null).filter(tool => tool.status === 'verified')).toEqual([])
+    expect(qualifyHostTools(unbound, passed('linux', Object.fromEntries(HOST_PROBES.map(probe => [probe, 'passed'])))).filter(tool => tool.status === 'verified')).toEqual([])
     expect(qualifyHostTools(acceptedTools, passed('fake', { 'control-plane': 'passed', apache: 'passed', 'linux-account': 'passed' })).filter(tool => tool.status === 'verified')).toEqual([])
   })
 
@@ -333,12 +335,39 @@ describe('host qualification', () => {
   }
 
   it('declares the host needs of every implemented effect without an exception', () => {
+    const unbound = buildDeliveryCatalog([], null)
     expect(Object.fromEntries(Object.keys(IMPLEMENTED_EFFECT_PROBES).map(id => [id, PHASE1_TOOL_PROBES[id]]))).toEqual(IMPLEMENTED_EFFECT_PROBES)
     for (const id of Object.keys(IMPLEMENTED_EFFECT_PROBES)) {
-      // A probe list is readiness only: the shipped catalog keeps each tool researched on a fully passing host.
-      expect(qualifyHostTools(tools, allPassed).find(tool => tool.id === id)?.status, id).toBe('researched')
+      // A probe list is readiness only: an unbound catalog keeps each tool researched on a fully passing host.
+      expect(qualifyHostTools(unbound, allPassed).find(tool => tool.id === id)?.status, id).toBe('researched')
       // Partial workspaces name what they leave undelivered; these two deliver their whole declared behavior.
       if (!['restart-ssh', 'domain-htaccess'].includes(id)) expect(QUALIFIED_SCOPE[id], id).toBeDefined()
+    }
+  })
+
+  it('demotes and refuses qualification admission for OS-excluded capabilities with their exact profile reason', () => {
+    const ubuntuReport: HostQualificationReport = { ...allPassed, profile: 'ubuntu-24.04' }
+    const elReport: HostQualificationReport = { ...allPassed, profile: 'almalinux-9' }
+    const onUbuntu = new Map(qualifyHostTools(acceptedTools, ubuntuReport).map(tool => [tool.id, tool]))
+    expect(onUbuntu.get('wheel-group-users')?.status).toBe('researched')
+    expect(onUbuntu.get('wheel-group-users')?.delivery.reason).toContain('sudo group')
+    expect(onUbuntu.get('sudo-group-users')?.status).toBe('verified')
+    expect(admitForQualification(buildDeliveryCatalog([], null), ubuntuReport).find(tool => tool.id === 'wheel-group-users')?.status).toBe('researched')
+    expect(admitForQualification(buildDeliveryCatalog([], null), ubuntuReport).find(tool => tool.id === 'sudo-group-users')?.status).toBe('verified')
+
+    const onEl = new Map(qualifyHostTools(acceptedTools, elReport).map(tool => [tool.id, tool]))
+    expect(onEl.get('sudo-group-users')?.status).toBe('researched')
+    expect(onEl.get('sudo-group-users')?.delivery.reason).toContain('wheel group')
+    expect(onEl.get('wheel-group-users')?.status).toBe('verified')
+    expect(admitForQualification(buildDeliveryCatalog([], null), elReport).find(tool => tool.id === 'sudo-group-users')?.status).toBe('researched')
+    expect(admitForQualification(buildDeliveryCatalog([], null), elReport).find(tool => tool.id === 'wheel-group-users')?.status).toBe('verified')
+  })
+
+  it('refuses qualification admission for unimplemented standalone-host and external-provider tools', () => {
+    const admitted = new Map(admitForQualification(buildDeliveryCatalog([], null), allPassed).map(tool => [tool.id, tool]))
+    for (const [id, reason] of Object.entries(UNIMPLEMENTED_TOOL_REASONS)) {
+      expect(admitted.get(id)?.status, id).toBe('researched')
+      expect(admitted.get(id)?.delivery.reason, id).toBe(reason)
     }
   })
 

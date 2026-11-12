@@ -4,9 +4,9 @@ Owner decisions 3, 4, 5 and 9 of 2026-11-07 apply. cPanel is the reference; thes
 
 ## Default page for an empty public_html
 
-Apache gets the page as the last `DirectoryIndex` entry, an alias to a root-owned directory outside the document root. It answers 200 in the document root. An `.htaccess` `DirectoryIndex` still wins, because that file merges after the vhost `Directory` section.
+Apache gets the page as the last relative `DirectoryIndex` entry (`.xpanel-page/index.html`), resolving at `/` to an alias for a root-owned directory outside the document root. It answers 200 in the document root. An `.htaccess` `DirectoryIndex` still wins, because that file merges after the vhost `Directory` section.
 
-Rejected: nginx `error_page 403` with `proxy_intercept_errors`, which also hides a site's own 403. A `<Location>` section, which overrides `.htaccess` and would break a site's custom index. The fallback is therefore inherited, so a subfolder without an index shows the same page instead of 403.
+Rejected: nginx `error_page 403` with `proxy_intercept_errors`, which also hides a site's own 403. A `<Location>` section, which overrides `.htaccess` and would break a site's custom index. Because the fallback entry is relative rather than root-anchored, subfolders without an index file fall through to `Options +/-Indexes` (403 or directory listing).
 
 OpenLiteSpeed has no index fallback, so it keeps its own answer for an empty site and gets the suspended page only.
 

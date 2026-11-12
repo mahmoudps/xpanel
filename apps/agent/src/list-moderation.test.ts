@@ -31,7 +31,7 @@ describe('list gate host render', { tags: ['unit'] }, () => {
     expect(out.files.find(file => file.path === services.LIST_GATE_PROGRAM)).toMatchObject({ mode: 0o755, owner: 'root' })
     expect(out.files.find(file => file.path === paths.rules)).toMatchObject({ mode: 0o640, owner: 'root', group: 'alice' })
     expect(out.files.find(file => file.path === paths.script)!.content).toContain(`if execute :pipe "xpanel-list-gate" ["filter", "${paths.rules}"] {\n  discard;\n  stop;\n}`)
-    expect(out.postActions).toContainEqual({ kind: 'exec', argv: ['/usr/bin/sievec', paths.script] })
+    expect(out.postActions).toContainEqual({ kind: 'exec', argv: ['/usr/bin/sievec', '-P', 'sieve_extprograms', '-x', '+vnd.dovecot.execute', paths.script] })
     expect(out.postActions).toContainEqual({ kind: 'exec', argv: ['/usr/bin/chown', 'root:alice', paths.binary] })
     expect(services.listGateMaildir('/home/alice', gate)).toBe(`/home/alice/mail/${gate.slice(gate.indexOf('@') + 1)}/${gate.slice(0, gate.indexOf('@'))}`)
     expect(gate).not.toBe(services.autoreplyAddress(ACC, address))

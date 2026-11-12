@@ -1191,7 +1191,8 @@ export const createDefaultWebRenderer = async (deps: {
       } } : {}),
       ...(surface === 'xmail' ? { mail: await (async () => {
         if (documentRoute.activeRoute === '/mail/contacts') {
-          const access = await requireMailboxPrincipalAccess(deps.store, caller).catch(() => null)
+          const access = await authorizeMailboxSessionBinding(deps.db, deps.store, caller)
+            .catch(() => requireMailboxPrincipalAccess(deps.store, caller).catch(() => null))
           return { mailbox: access?.mailbox ?? '' }
         }
         let postfixMain: string | null = null

@@ -1,4 +1,4 @@
-import { constants, type Stats } from 'node:fs'
+import { constants, readFileSync, type Stats } from 'node:fs'
 import { lstat, open, type FileHandle } from 'node:fs/promises'
 import { posix } from 'node:path'
 import { fail, isUuid, isXpanelError } from '@xpanel/core'
@@ -72,15 +72,27 @@ export const readProtectedLogFrom = async (path: string, offset: number, maxByte
 export const LOG_DOWNLOAD_MAX_BYTES = 2 * 1024 * 1024 * 1024
 type OpenedLog = { handle: FileHandle; metadata: Stats }
 
+const resolveXpanelSystemUid = (): number | null => {
+  try {
+    for (const line of readFileSync('/etc/passwd', 'utf8').split('\n')) {
+      const [user, , uidText] = line.split(':')
+      if (user === 'xpanel') { const uid = Number(uidText); return Number.isInteger(uid) && uid >= 0 ? uid : null }
+    }
+  } catch { /* fall through */ }
+  return null
+}
+
 /** Opens an edge log under the protected directory; null when it does not exist. The caller closes the handle. */
 const openProtectedLog = async (path: string): Promise<OpenedLog | null> => {
-  const directory = edge.XP_PATHS.nginxLogDir, owned = [directory, posix.dirname(directory)]
+  const directory = edge.XP_PATHS.nginxLogDir, parent = posix.dirname(directory), owned = [directory, parent]
   if (posix.normalize(path) !== path || posix.dirname(path) !== directory || !/^[a-z0-9.-]+\.(?:access\.log(?:\.1)?|error\.log)$/.test(posix.basename(path))) return fail('PRECONDITION_FAILED', 'the log path is not an xPanel edge log', { stateChanged: false })
+  const xpanelUid = resolveXpanelSystemUid()
   const ancestors = async (): Promise<string> => {
     const identity: string[] = []
     for (let current: string = directory; current !== '/'; current = posix.dirname(current)) {
       const metadata = await lstat(current)
-      if (!metadata.isDirectory() || metadata.isSymbolicLink() || metadata.uid !== 0 || owned.includes(current) && (metadata.mode & 0o022) !== 0) return fail('PRECONDITION_FAILED', 'the log directory is not protected', { stateChanged: false })
+      const ownerOk = metadata.uid === 0 || (current === parent && xpanelUid !== null && metadata.uid === xpanelUid)
+      if (!metadata.isDirectory() || metadata.isSymbolicLink() || !ownerOk || owned.includes(current) && (metadata.mode & 0o022) !== 0) return fail('PRECONDITION_FAILED', 'the log directory is not protected', { stateChanged: false })
       identity.push(metadata.dev + ':' + metadata.ino)
     }
     return identity.join('/')
@@ -158,6 +170,7 @@ export async function handleAccountLogsRoute(req: Request, url: URL, method: str
     const body = size === 0 ? Readable.from([]) : opened.handle.createReadStream({ start: 0, end: size - 1 })
     if (size === 0) await opened.handle.close()
     const stream = body.pipe(createGzip({ level: 6 }))
+    stream.on('close', () => { body.destroy() })
     return new Response(Readable.toWeb(stream) as ReadableStream<Uint8Array>, { headers: { 'content-type': 'application/gzip', 'content-disposition': `attachment; filename="${target.site}.access.log.gz"`, 'cache-control': 'no-store', 'x-xpanel-log-bytes': String(size), 'x-xpanel-log-truncated': String(opened.metadata.size > size) } })
   }
   let tail: LogTail

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { stat } from 'node:fs/promises'
+import { rm, stat } from 'node:fs/promises'
 import { fail } from '@xpanel/core'
 import { atomicWriteJson, readJsonIfExists } from '@xpanel/state'
 import type { StateStore } from '@xpanel/state'
@@ -18,6 +18,7 @@ export interface PanelConfigFile<T> {
   /** The last good value for per-request effects; a missing or invalid file yields the defaults. */
   current(): Promise<T>
   write(next: T, expectedRevision: string, assertAuthority: () => Promise<void>): Promise<{ raw: unknown; value: T }>
+  reset(expectedRevision: string, assertAuthority: () => Promise<void>): Promise<{ raw: null; value: T }>
 }
 
 const unchanged = { stateChanged: false }
@@ -74,6 +75,28 @@ export function stateConfigFile<T>(store: Pick<StateStore, 'rootDir' | 'getWrite
         } catch {
           cached = null
           return fail('SERVICE_UNAVAILABLE', 'the save could not be verified; reload before retrying', { stateChanged: true, verificationRequired: true, unknownOutcome: true })
+        }
+      } finally { await lease.release() }
+    },
+    reset: async (expectedRevision, assertAuthority) => {
+      const lease = await store.getWriterLock().acquire()
+      try {
+        await assertAuthority()
+        const { raw, value } = await read()
+        if (raw !== null && value === null) return fail('PRECONDITION_FAILED', 'the saved panel configuration requires review before it can be changed', unchanged)
+        if (panelConfigRevision(namespace, raw) !== expectedRevision) return fail('CONFLICT', 'the configuration changed; reload before saving', unchanged)
+        await lease.assertFencingToken()
+        try {
+          await assertAuthority()
+          await lease.assertFencingToken()
+          await rm(path, { force: true })
+          cached = null
+          const saved = await read()
+          if (saved.raw !== null) throw new Error('panel_config_reset_readback_failed')
+          return { raw: null, value: saved.value as T }
+        } catch {
+          cached = null
+          return fail('SERVICE_UNAVAILABLE', 'the reset could not be verified; reload before retrying', { stateChanged: true, verificationRequired: true, unknownOutcome: true })
         }
       } finally { await lease.release() }
     },

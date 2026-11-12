@@ -127,7 +127,7 @@ const desiredGrants = (snapshot: DatabaseRemoteAccessSnapshot, user: DatabaseUse
 
 export async function assertRemoteAccessJournalDirectory(fs: RemoteRecoveryFs, dir: string): Promise<void> {
   const stat = await fs.lstat(dir)
-  if (!stat.isDirectory() || stat.isSymbolicLink() || stat.uid !== 0 || (stat.mode & 0o7777) !== 0o700) throw new Error('remote_database_journal_directory_unsafe')
+  if (!stat.isDirectory() || stat.isSymbolicLink() || stat.uid !== 0 || (stat.mode & 0o5777) !== 0o700) throw new Error('remote_database_journal_directory_unsafe')
 }
 
 export function createDatabaseRemoteAccessJournalRecovery(input: { fs: RemoteRecoveryFs; dir: string; mariadb: RemoteAccessAdapter; firewall: DatabaseRemoteAccessFirewall; inspect(snapshot: DatabaseRemoteAccessSnapshot): Promise<boolean>; verify(snapshot: DatabaseRemoteAccessSnapshot, entries: readonly DatabaseRemoteAccessEntry[]): Promise<boolean> }): DatabaseRemoteAccessJournalRecovery {

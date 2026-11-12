@@ -70,7 +70,9 @@ export async function saveAndReconcile<T>(ctx: Context, file: PanelConfigFile<T>
   const reconcile = await ctx.helpers.triggerReconcile(ctx.caller)
   const failedTest = reconcile?.body.status === 'failed' && reconcile.body.verificationRequired !== true && typeof reconcile.body.failedTest === 'string' ? reconcile.body.failedTest : null
   if (failedTest) {
-    await file.write(previous, panelConfigRevision(namespace, saved.raw), authority(ctx))
+    const savedRevision = panelConfigRevision(namespace, saved.raw)
+    if (previous === null) await file.reset(savedRevision, authority(ctx))
+    else await file.write(previous, savedRevision, authority(ctx))
     return fail('CONFIG_TEST_FAILED', 'the configuration test refused this change; the previous setting stays saved and running', { ...unchanged, failedTest, reason: 'config_test_refused' })
   }
   return { reconcile: reconcile?.body ?? null, revision: panelConfigRevision(namespace, saved.raw) }

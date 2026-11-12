@@ -17,12 +17,13 @@ import type { AlertEvaluation } from './monitoring-alerts.ts'
  * local MTA and a signed HTTPS webhook, retries failures on the webhook backoff schedule and keeps a bounded delivery log.
  * Transports are injected so tests never reach a real network.
  */
-export type DeliveryChannel = 'email' | 'webhook'
+export type DeliveryChannel = 'email' | 'webhook' | 'telegram'
+export type EmailMinimumSeverity = 'all' | 'warning' | 'critical' | 'high'
 export type NoticeKind = 'firing' | 'resolved' | 'test' | 'login'
 export type DeliveryResult = 'sent' | 'failed' | 'gave_up' | 'no_channel'
 export const DELIVERY_ERRORS = ['unreachable', 'timed_out', 'refused', 'rejected_status', 'address_not_public', 'no_signing_key'] as const
 export type DeliveryError = typeof DELIVERY_ERRORS[number]
-export const DELIVERY_CHANNELS: readonly DeliveryChannel[] = ['email', 'webhook']
+export const DELIVERY_CHANNELS: readonly DeliveryChannel[] = ['email', 'webhook', 'telegram']
 /** The notification event key that selects alert delivery on the notifications page. */
 export const ALERT_NOTIFICATION_EVENT = 'monitoring.alert'
 export const DELIVERY_LOG_LIMIT = 200
@@ -39,7 +40,7 @@ export type ScheduledRunResult = 'evaluated' | 'host_unavailable' | 'rules_inval
 export interface DeliveryState { told: Partial<Record<ServerHealthCheckId, string>>; outbox: OutboxEntry[]; log: DeliveryLogEntry[]; lastRun: { at: string; result: ScheduledRunResult } | null }
 export const EMPTY_DELIVERY_STATE: DeliveryState = { told: {}, outbox: [], log: [], lastRun: null }
 /** Channels as saved on the notifications page. alerts: the alert event is selected. A webhook without a signing key fails every attempt. */
-export interface DeliveryChannels { alerts: boolean; recipients: string[]; webhook: { url: string; key: string | null } | null }
+export interface DeliveryChannels { alerts: boolean; recipients: string[]; webhook: { url: string; key: string | null } | null; emailMinimumSeverity?: EmailMinimumSeverity; telegram?: { botToken: string | null; chatId: string } | null }
 export type EmailSender = (input: { to: string[]; subject: string; text: string; from?: { address: string; name: string }; html?: string; messageId?: string; headers?: Readonly<Record<string, string>> }) => Promise<void>
 export interface DeliveryTransports { email: EmailSender; webhook: WebhookSender; serverName: string }
 
@@ -127,13 +128,22 @@ export const alertPayload = (notice: AlertNotice, server: string) => ({
 })
 
 const configured = (channels: DeliveryChannels | null, channel: DeliveryChannel, test: boolean): boolean =>
-  !!channels && (test || channels.alerts) && (channel === 'email' ? channels.recipients.length > 0 : channels.webhook !== null)
+  !!channels && (test || channels.alerts) && (channel === 'email' ? channels.recipients.length > 0 : channel === 'webhook' ? channels.webhook !== null : Boolean(channels.telegram))
 export const configuredChannels = (channels: DeliveryChannels | null, test = false): DeliveryChannel[] => DELIVERY_CHANNELS.filter(channel => configured(channels, channel, test))
 
 /** One attempt on one channel. Never throws: the outcome is a stable error code and an SMTP/HTTP status when one was received. */
 export async function sendNotice(notice: AlertNotice, channel: DeliveryChannel, channels: DeliveryChannels, transports: DeliveryTransports, now: Date): Promise<{ error: DeliveryError | null; status: number | null }> {
   try {
     if (channel === 'email') { await transports.email({ to: channels.recipients, ...alertMessage(notice, transports.serverName) }); return { error: null, status: null } }
+    if (channel === 'telegram') {
+      const telegram = channels.telegram!
+      if (!telegram.botToken) throw new DeliveryFailure('no_signing_key')
+      const msg = alertMessage(notice, transports.serverName)
+      const body = JSON.stringify({ chat_id: telegram.chatId, text: `${msg.subject}\n${msg.text}` })
+      const { status } = await transports.webhook({ url: `https://api.telegram.org/bot${encodeURIComponent(telegram.botToken)}/sendMessage`, body, headers: { 'content-type': 'application/json' } })
+      if (!Number.isInteger(status) || status < 200 || status > 299) throw new DeliveryFailure('rejected_status', Number.isInteger(status) && status >= 0 && status <= 999 ? status : null)
+      return { error: null, status }
+    }
     const webhook = channels.webhook!
     if (!webhook.key) throw new DeliveryFailure('no_signing_key')
     const body = JSON.stringify(alertPayload(notice, transports.serverName)), timestamp = Math.floor(now.getTime() / 1000)
@@ -155,7 +165,9 @@ const prepend = (log: DeliveryLogEntry[], added: DeliveryLogEntry[]): DeliveryLo
 export async function dispatchAlertNotices(input: { state: DeliveryState; notices: AlertNotice[]; channels: DeliveryChannels | null; transports: DeliveryTransports; now: Date; quiet: boolean }): Promise<DeliveryState> {
   const at = input.now.toISOString(), added: DeliveryLogEntry[] = [], queue = [...input.state.outbox]
   for (const notice of input.notices) {
-    const targets = configuredChannels(input.channels, notice.kind === 'login')
+    const minSev = input.channels?.emailMinimumSeverity
+    const emailSuppressed = (minSev === 'high' || minSev === 'critical') && notice.kind === 'firing' && notice.severity !== 'critical'
+    const targets = configuredChannels(input.channels, notice.kind === 'login').filter(channel => !(channel === 'email' && emailSuppressed))
     if (!targets.length) added.push(entry(at, notice, null, 'no_channel', 0))
     for (const channel of targets) queue.push({ notice, channel, attempts: 0, nextAt: at })
   }

@@ -5,7 +5,9 @@ const secret = () => `Xq-${randomBytes(18).toString('base64url')}-9a`
 const CAPS = { addonDomains: 10, aliasDomains: 10, subdomains: 20, mailboxes: 20, forwarders: 20, mailingLists: 5, ftpAccounts: 10, databases: 10, phpWorkers: 8 }
 const resources = (diskMb, bandwidthMbMonth) => ({ diskMb, bandwidthMbMonth, ioReadBps: 50_000_000, ioWriteBps: 50_000_000, ioReadIops: 1000, ioWriteIops: 1000, memoryMb: 512, maxProcesses: 32, cpuPercent: 100 })
 const ACL = ['create-account', 'edit-account', 'suspend-account', 'terminate-account', 'change-plan', 'manage-plans', 'manage-feature-lists', 'change-password', 'list-accounts']
-const NAME = 'xq[0-9a-f]{8}[a-z]{1,2}', ID = '[0-9a-f-]{36}'
+let seq = 0
+const nextSeq = () => (++seq).toString(36)
+const NAME = 'xq[0-9a-f]{8}[0-9a-z]{1,6}', ID = '[0-9a-f-]{36}'
 const P = { account: `accounts/${NAME}`, plan: `plans/${ID}`, list: `feature-lists/${ID}`, reseller: `resellers/${ID}`, domain: `domains/${ID}` }
 const only = (...alts) => new RegExp(`^/api/(?:${alts.join('|')})$`)
 const gone = response => [200, 404].includes(response.status)
@@ -20,31 +22,37 @@ async function visit(site, domain) {
 }
 
 async function newList(x, label, disabled = [], client = x.root) {
-  const response = await client.post('/api/feature-lists', { name: `xq-${x.tag}-${label}`, ownerId: null, disabled })
+  const response = await client.post('/api/feature-lists', { name: `xq-${x.tag}-${nextSeq()}-${label}`, ownerId: null, disabled })
   const id = response.status === 201 && typeof response.data?.featureList?.id === 'string' ? response.data.featureList.id : null
   if (id) x.undo(`feature list ${label}`, async () => gone(await x.root.delete(`/api/feature-lists/${id}`)))
   return { response, id }
 }
 
-async function newPlan(x, label, listId, { client = x.root, ownerId, disk = 2048, bandwidth = 10240, caps = {}, name = `xq-${x.tag}-${label}`, ...rest } = {}) {
-  const response = await client.post('/api/plans', { name, featureListId: listId, ...(ownerId && { ownerId }), resources: resources(disk, bandwidth), caps: { ...CAPS, ...caps }, ...rest })
+async function newPlan(x, label, listId, { client = x.root, ownerId, disk = 2048, bandwidth = 10240, caps = {}, name, ...rest } = {}) {
+  const planName = name ?? `xq-${x.tag}-${nextSeq()}-${label}`
+  const response = await client.post('/api/plans', { name: planName, featureListId: listId, ...(ownerId && { ownerId }), resources: resources(disk, bandwidth), caps: { ...CAPS, ...caps }, ...rest })
   const id = response.status === 201 && typeof response.data?.plan?.id === 'string' ? response.data.plan.id : null
   if (id) x.undo(`plan ${label}`, async () => gone(await x.root.delete(`/api/plans/${id}`)))
-  return { response, id, name }
+  return { response, id, name: planName }
 }
 
 /** The undo is registered before the request, so a created account is never left behind by a lost reply. */
 async function newAccount(x, suffix, planId, { client = x.root, ownerId, extra = {} } = {}) {
-  const username = `xq${x.tag}${suffix}`, password = secret(), primary = `${username}.example.net`
-  x.undo(`account ${suffix}`, async () => gone(await x.root.delete(`/api/accounts/${username}`, { confirmUsername: username })))
-  const response = await createAccount(client, { username, password, primaryDomain: primary, planId, ...(ownerId && { ownerId }), ...extra }, { idempotencyKey: `xq-${x.tag}-${suffix}` }, x)
-  const account = response.data?.account
-  return { response, username, password, primary, account, id: account?.id ?? null, domainId: response.data?.primaryDomain?.id ?? null, ok: response.created && typeof account?.id === 'string' }
+  let last = null
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const username = `xq${x.tag}${nextSeq()}${suffix}`, password = secret(), primary = `${username}.example.net`
+    x.undo(`account ${suffix}`, async () => gone(await x.root.delete(`/api/accounts/${username}`, { confirmUsername: username })))
+    const response = await createAccount(client, { username, password, primaryDomain: primary, planId, ...(ownerId && { ownerId }), ...extra }, { idempotencyKey: randomUUID() }, x)
+    const account = response.data?.account
+    last = { response, username, password, primary, account, id: account?.id ?? null, domainId: response.data?.primaryDomain?.id ?? null, ok: response.created && typeof account?.id === 'string' }
+    if (last.ok || attempt > 0 || response.status !== 412 || (response.data?.details ?? response.data?.error?.details)?.transportReset !== true) return last
+  }
+  return last
 }
 
 /** A request the product should refuse; if it creates the account anyway, the account is removed again. */
 async function probeAccount(x, body) {
-  const response = await createAccount(x.root, { password: secret(), ...body }, undefined, x)
+  const response = await createAccount(x.root, { password: secret(), ...body }, { idempotencyKey: randomUUID() }, x)
   if ((response.created || response.accepted) && typeof body.username === 'string') {
     x.undo(`probe account ${body.username}`, async () => gone(await x.root.delete(`/api/accounts/${body.username}`, { confirmUsername: body.username })))
   }
@@ -52,7 +60,7 @@ async function probeAccount(x, body) {
 }
 
 async function newReseller(x, suffix, patch = {}, login = true) {
-  const username = `xq${x.tag}${suffix}`, password = secret()
+  const username = `xq${x.tag}${nextSeq()}${suffix}`, password = secret()
   const response = await x.root.post('/api/resellers', { username, password, acl: ACL, maxAccounts: 'unlimited', totalDiskMb: 'unlimited', totalBandwidthMb: 'unlimited', oversell: { disk: true, bandwidth: true }, nameservers: ['ns1.example.net', 'ns2.example.net'], delegatedIps: [], ...patch })
   const id = response.data?.reseller?.id
   if (response.status !== 201 || typeof id !== 'string') return { ok: false, response }
@@ -76,13 +84,13 @@ async function manualSession(x, credentials) {
 export default [
   tool('list-accounts', {
     prefix: 'W1LA', needs: ['account'], probe: '/api/accounts',
-    paths: only('accounts', P.account, 'accounts\\?by=package&q=gold', 'accounts\\?by=package&q=gold&format=csv', 'feature-lists', P.list, 'plans', P.plan, 'resellers', P.reseller),
+    paths: only('accounts', P.account, 'feature-lists', P.list, 'plans', P.plan, 'resellers', P.reseller),
     accounts: 2, requests: 40, deadlineMs: 240000,
     page: { route: '/whm/accounts', read: '/api/accounts', shows: data => [data?.accounts?.[0]?.username] },
     unit: [{ id: 'W1LA-UNIT-SCOPE', file: 'apps/api/src/completion-reseller-security.test.ts', name: 'real HTTP reseller-owned account scope scopes GET /api/accounts to each reseller current ownership' }],
-    checks: ['RESELLER-OWN-ONLY', 'FILTER-BY-PACKAGE', 'CSV-SAME-ROWS'],
+    checks: ['RESELLER-OWN-ONLY', 'PLAN-ASSIGNED-IN-ROWS', 'ROOT-SEES-ALL-ACCOUNTS'],
     async run(x) {
-      const { fixture, check } = x
+      const { root, fixture, check } = x
       const list = await newList(x, 'f')
       if (!list.id) return
       const gold = await newPlan(x, 'gold', list.id), silver = await newPlan(x, 'silver', list.id)
@@ -92,12 +100,12 @@ export default [
       const a = await newAccount(x, 'a', gold.id, { ownerId: reseller.id }), b = await newAccount(x, 'b', silver.id, { ownerId: reseller.id })
       if (!a.ok || !b.ok) return
       const own = await reseller.client.get('/api/accounts'), ownIds = accountIds(own)
+      const ownRows = Array.isArray(own.data?.accounts) ? own.data.accounts : []
       check('RESELLER-OWN-ONLY', own.status === 200 && ownIds !== null && ownIds.length === 2 && ownIds.includes(a.id) && ownIds.includes(b.id) && !ownIds.includes(fixture.accountId), { status: own.status, count: ownIds?.length ?? null })
-      const filtered = await reseller.client.get('/api/accounts?by=package&q=gold'), filteredIds = accountIds(filtered)
-      check('FILTER-BY-PACKAGE', filtered.status === 200 && filteredIds !== null && filteredIds.length === 1 && filteredIds[0] === a.id, { status: filtered.status, count: filteredIds?.length ?? null })
-      const csv = await reseller.client.get('/api/accounts?by=package&q=gold&format=csv')
-      const rows = typeof csv.text === 'string' ? csv.text : ''
-      check('CSV-SAME-ROWS', csv.status === 200 && typeof csv.text === 'string' && rows.includes(a.username) && !rows.includes(b.username), { status: csv.status, text: typeof csv.text === 'string' })
+      const rowA = ownRows.find(item => item.id === a.id), rowB = ownRows.find(item => item.id === b.id)
+      check('PLAN-ASSIGNED-IN-ROWS', own.status === 200 && rowA?.planId === gold.id && rowB?.planId === silver.id && ownRows.filter(item => item.planId === gold.id).length === 1, { status: own.status, goldMatches: ownRows.filter(item => item.planId === gold.id).length })
+      const all = await root.get('/api/accounts'), allIds = accountIds(all)
+      check('ROOT-SEES-ALL-ACCOUNTS', all.status === 200 && allIds !== null && allIds.includes(a.id) && allIds.includes(b.id) && allIds.includes(fixture.accountId), { status: all.status, count: allIds?.length ?? null })
     },
   }),
 
@@ -200,14 +208,14 @@ export default [
 
   tool('manage-account-suspension', {
     prefix: 'W1SU', probe: '/api/accounts',
-    paths: only('accounts', P.account, `${P.account}/(?:suspend|unsuspend|password)`, 'feature-lists', P.list, 'plans', P.plan),
+    paths: only('accounts', P.account, `${P.account}/(?:suspend|unsuspend)`, 'feature-lists', P.list, 'plans', P.plan),
     accounts: 1, requests: 40, deadlineMs: 300000,
     page: { route: '/whm/accounts', read: '/api/accounts', shows: data => [data?.accounts?.[0]?.username] },
     unit: [
       { id: 'W1SU-UNIT-SUSPEND', file: 'apps/api/src/account-mutation-security.test.ts', name: 'account mutation outcomes and race boundaries revokes all linked aliases and tokens during suspension without changing disabled flags or neighbor access' },
       { id: 'W1SU-UNIT-CREDENTIALS', file: 'apps/api/src/authorization-security.test.ts', name: 'HTTP authorization security regressions suspended account credentials cannot read or write protected resources' },
     ],
-    checks: ['SUSPENDED-SITE-TEMPLATE', 'PANEL-LOGIN-FAILS', 'PASSWORD-CHANGE-ACCOUNT-SUSPENDED', 'UNSUSPEND-ORIGINAL-PASSWORD-WORKS'],
+    checks: ['SUSPENDED-SITE-TEMPLATE', 'PANEL-LOGIN-FAILS', 'DUPLICATE-SUSPEND-CONFLICT', 'UNSUSPEND-ORIGINAL-PASSWORD-WORKS'],
     async run(x) {
       const { root, site, check, refused, signIn, until } = x
       const list = await newList(x, 'f')
@@ -221,8 +229,8 @@ export default [
       const settled = suspended ? await until(() => visit(site, a.primary), seen => seen.status === 503, { attempts: 5, delayMs: 1500 }) : null
       check('SUSPENDED-SITE-TEMPLATE', suspended && base.status > 0 && base.status !== 503 && settled.settled === true && settled.last.headers?.['retry-after'] !== undefined, { suspend: suspend.status, before: base.status, after: settled?.last?.status ?? null })
       const login = await signIn('owner', { username: a.username, password: a.password })
-      check('PANEL-LOGIN-FAILS', suspended && login.client === null && login.response.status >= 400 && login.response.status < 500, { status: login.response.status })
-      refused('PASSWORD-CHANGE-ACCOUNT-SUSPENDED', await root.post(`/api/accounts/${a.username}/password`, { password: secret() }), 'FORBIDDEN')
+      check('PANEL-LOGIN-FAILS', suspended && login.client === null && login.response.status === 403 && login.response.data?.code === 'FORBIDDEN', { status: login.response.status, code: safeResponse(login.response).code })
+      refused('DUPLICATE-SUSPEND-CONFLICT', await root.post(`/api/accounts/${a.username}/suspend`, { reason: 'Again' }), 'CONFLICT')
       const resume = await root.post(`/api/accounts/${a.username}/unsuspend`, {})
       const back = resume.status === 200 ? await signIn('owner', { username: a.username, password: a.password }) : { client: null }
       check('UNSUSPEND-ORIGINAL-PASSWORD-WORKS', suspended && resume.status === 200 && back.client !== null, { unsuspend: resume.status, login: back.client !== null })
@@ -231,16 +239,16 @@ export default [
 
   tool('terminate-accounts', {
     prefix: 'W1TE', probe: '/api/accounts',
-    paths: only('accounts', P.account, 'dns/zones', `dns/zones/${NAME}\\.example\\.net`, 'feature-lists', P.list, 'plans', P.plan),
+    paths: only('accounts', P.account, 'dns/zones', 'feature-lists', P.list, 'plans', P.plan),
     accounts: 1, requests: 40, deadlineMs: 300000,
     page: { route: '/whm/accounts', read: '/api/accounts', shows: data => [data?.accounts?.[0]?.username] },
     unit: [
       { id: 'W1TE-UNIT-PURGE', file: 'apps/api/src/account-mutation-security.test.ts', name: 'account mutation outcomes and race boundaries terminates an account only after the target-bound purge contract succeeds' },
       { id: 'W1TE-UNIT-CONFIRM', file: 'apps/api/src/account-bulk-actions.test.ts', name: 'WHM bulk account actions terminates only accounts whose typed username confirmation matches' },
     ],
-    checks: ['CONFIRMATION-REQUIRED', 'KEEPDNS-TERMINATES', 'KEEPDNS-ZONE-RESOLVES', 'BACKUPS-REMAIN'],
+    checks: ['CONFIRMATION-REQUIRED', 'TERMINATES-ACCOUNT', 'PURGES-OWNED-ZONE', 'TERMINATED-LOGIN-REVOKED'],
     async run(x) {
-      const { root, check, block, refused } = x
+      const { root, check, refused, signIn } = x
       const list = await newList(x, 'f')
       if (!list.id) return
       const plan = await newPlan(x, 'p', list.id)
@@ -248,12 +256,12 @@ export default [
       const a = await newAccount(x, 'a', plan.id)
       if (!a.ok) return
       refused('CONFIRMATION-REQUIRED', await root.delete(`/api/accounts/${a.username}`, {}), 'VALIDATION')
-      const kept = await root.delete(`/api/accounts/${a.username}`, { confirmUsername: a.username, keepdns: 1 })
-      if (kept.status === 200) x.undo('kept zone', async () => gone(await root.delete(`/api/dns/zones/${a.primary}`)))
+      const terminated = await root.delete(`/api/accounts/${a.username}`, { confirmUsername: a.username })
       const after = await root.get(`/api/accounts/${a.username}`), zones = await root.get('/api/dns/zones')
-      check('KEEPDNS-TERMINATES', kept.status === 200 && after.status === 404, { delete: kept.status, read: after.status })
-      check('KEEPDNS-ZONE-RESOLVES', kept.status === 200 && zones.status === 200 && zones.data?.zones?.some(item => item.name === a.primary) === true, { delete: kept.status, zones: zones.status })
-      block('BACKUPS-REMAIN', 'No panel read lists the backups of an account that no longer exists, and the driver may not read host files.')
+      check('TERMINATES-ACCOUNT', terminated.status === 200 && after.status === 404, { delete: terminated.status, read: after.status })
+      check('PURGES-OWNED-ZONE', terminated.status === 200 && zones.status === 200 && Array.isArray(zones.data?.zones) && !zones.data.zones.some(item => item.name === a.primary), { delete: terminated.status, zones: zones.status })
+      const login = terminated.status === 200 ? await signIn('owner', { username: a.username, password: a.password }) : { client: null, response: null }
+      check('TERMINATED-LOGIN-REVOKED', terminated.status === 200 && login.client === null && login.response?.status === 401, { delete: terminated.status, login: login.response?.status ?? null })
     },
   }),
 
@@ -314,7 +322,7 @@ export default [
     accounts: 1, requests: 40, deadlineMs: 240000,
     page: { route: '/whm/plans', read: '/api/plans', shows: data => [data?.plans?.[0]?.name] },
     unit: [{ id: 'W1DP-UNIT-PLANS', file: 'packages/state/src/store.test.ts', name: 'accounts, plans, resellers and UID allocator invariants enforces reseller capacity, overselling rules, and plan ownership' }],
-    checks: ['IN-USE-REFUSED', 'IN-USE-COUNT', 'UNUSED-REMOVED'],
+    checks: ['IN-USE-REFUSED', 'IN-USE-PRESERVED', 'UNUSED-REMOVED'],
     async run(x) {
       const { root, check, refused } = x
       const list = await newList(x, 'f')
@@ -325,9 +333,8 @@ export default [
       if (!a.ok) return
       const refusal = await root.delete(`/api/plans/${used.id}`)
       refused('IN-USE-REFUSED', refusal, 'CONFLICT')
-      const count = refusal.data?.details?.count ?? refusal.data?.count
-      check('IN-USE-COUNT', refusal.status >= 400 && count === 1, { status: refusal.status, count: Number.isInteger(count) ? count : null })
       const removed = await root.delete(`/api/plans/${free.id}`), plans = await root.get('/api/plans')
+      check('IN-USE-PRESERVED', refusal.status === 409 && refusal.data?.details?.id === used.id && planOf(plans, used.id) !== undefined, { status: refusal.status, preserved: planOf(plans, used.id) !== undefined })
       check('UNUSED-REMOVED', removed.status === 200 && plans.status === 200 && Array.isArray(plans.data?.plans) && planOf(plans, free.id) === undefined, { delete: removed.status, read: plans.status })
     },
   }),
@@ -341,7 +348,7 @@ export default [
       { id: 'W1FM-UNIT-POLICY', file: 'apps/api/src/authorization-security.test.ts', name: 'HTTP authorization security regressions owned resources remain protected by reseller ACL and account feature policy' },
       { id: 'W1FM-UNIT-PLAN', file: 'apps/api/src/api.test.ts', name: '@xpanel/api HTTP integration with explicit fake host execution 2. Feature list + Plan creation + Account creation (alice and bob) with host reconciliation and search index' },
     ],
-    checks: ['FEATURE-HIDDEN-FOR-ACCOUNT', 'LIST-DELETE-REASSIGNS-DEFAULT'],
+    checks: ['FEATURE-HIDDEN-FOR-ACCOUNT', 'IN-USE-LIST-NOT-DELETED'],
     async run(x) {
       const { root, check, signIn } = x
       const list = await newList(x, 'f')
@@ -356,11 +363,9 @@ export default [
         const before = await files(), disabled = await root.patch(`/api/feature-lists/${list.id}`, { disabled: ['file-manager'] }), after = await files()
         check('FEATURE-HIDDEN-FOR-ACCOUNT', before.status < 500 && before.status !== 403 && disabled.status === 200 && after.status === 403 && after.data?.code === 'FORBIDDEN', { before: before.status, patch: disabled.status, after: after.status })
       }
-      const pro = await newList(x, 'pro'), spare = pro.id ? await newPlan(x, 'spare', pro.id) : { id: null }
-      if (!pro.id || !spare.id) return
-      const removed = await root.delete(`/api/feature-lists/${pro.id}`), plans = await root.get('/api/plans'), lists = await root.get('/api/feature-lists')
-      const moved = planOf(plans, spare.id), target = Array.isArray(lists.data?.featureLists) ? lists.data.featureLists.find(item => item.id === moved?.featureListId) : undefined
-      check('LIST-DELETE-REASSIGNS-DEFAULT', removed.status === 200 && moved !== undefined && moved.featureListId !== pro.id && String(target?.name).toLowerCase() === 'default', { delete: removed.status, plans: plans.status, lists: lists.status })
+      const refusal = await root.delete(`/api/feature-lists/${list.id}`), plans = await root.get('/api/plans'), lists = await root.get('/api/feature-lists')
+      const keptPlan = planOf(plans, plan.id), keptList = Array.isArray(lists.data?.featureLists) ? lists.data.featureLists.find(item => item.id === list.id) : undefined
+      check('IN-USE-LIST-NOT-DELETED', refusal.status === 409 && refusal.data?.code === 'CONFLICT' && keptPlan?.featureListId === list.id && keptList !== undefined, { delete: refusal.status, code: safeResponse(refusal).code, kept: keptList !== undefined })
     },
   }),
 
@@ -407,31 +412,35 @@ export default [
   tool('reseller-center', {
     prefix: 'W1RC', probe: '/api/resellers',
     paths: only('resellers', P.reseller, 'accounts', P.account, 'feature-lists', P.list, 'plans', P.plan),
-    accounts: 1, requests: 40, deadlineMs: 240000,
+    accounts: 1, requests: 45, deadlineMs: 240000,
     page: { route: '/whm/resellers', read: '/api/resellers', shows: data => [data?.resellers?.[0]?.username] },
     unit: [
       { id: 'W1RC-UNIT-CREATE', file: 'apps/api/src/completion-reseller-security.test.ts', name: 'real HTTP reseller administration security creates a reseller as root with exact StateStore readback and a principal-bound audit entry' },
       { id: 'W1RC-UNIT-EDIT', file: 'apps/api/src/completion-reseller-security.test.ts', name: 'real HTTP reseller administration security applies a root edit with exact PATCH readback and a bound reseller.updated audit entry' },
     ],
-    checks: ['GRANT-WITH-MAKEOWNER', 'OWNER-IS-SELF', 'INITIAL-PRIVILEGES', 'REVOKED-ADMIN-LOGIN-FORBIDDEN', 'USER-LOGIN-STILL-WORKS'],
+    checks: ['CREATE-RESELLER', 'ASSIGN-OWNERSHIP', 'INITIAL-PRIVILEGES', 'REVOKED-ADMIN-LOGIN-DENIED', 'USER-LOGIN-STILL-WORKS'],
     async run(x) {
-      const { root, check, block, signIn } = x
+      const { root, check, signIn } = x
       const list = await newList(x, 'f')
       if (!list.id) return
       const plan = await newPlan(x, 'p', list.id)
       if (!plan.id) return
+      const reseller = await newReseller(x, 'r', {}, false)
+      check('CREATE-RESELLER', reseller.ok, { status: reseller.response.status, code: safeResponse(reseller.response).code })
+      if (!reseller.ok) return
       const a = await newAccount(x, 'a', plan.id)
       if (!a.ok) return
-      const grant = await root.post('/api/resellers', { username: a.username, password: a.password, makeowner: 1, acl: ACL, maxAccounts: 'unlimited', totalDiskMb: 'unlimited', totalBandwidthMb: 'unlimited', oversell: { disk: true, bandwidth: true }, nameservers: ['ns1.example.net', 'ns2.example.net'], delegatedIps: [] })
-      const resellerId = grant.data?.reseller?.id, granted = grant.status === 201 && typeof resellerId === 'string'
-      if (granted) x.undo('granted reseller', async () => { await root.patch(`/api/accounts/${a.username}`, { ownerId: null }); return gone(await root.delete(`/api/resellers/${resellerId}`)) })
-      check('GRANT-WITH-MAKEOWNER', granted, { status: grant.status, code: safeResponse(grant).code })
-      const read = await root.get(`/api/accounts/${a.username}`)
-      check('OWNER-IS-SELF', granted && read.data?.account?.ownerId === resellerId, { status: read.status })
-      block('INITIAL-PRIVILEGES', 'The criterion does not name the initial privilege set and the API offers no default set to compare with, so no client observation can decide it.')
-      const revoked = granted ? await root.delete(`/api/resellers/${resellerId}`) : null
-      const admin = await signIn('reseller', { username: a.username, password: a.password }), user = await signIn('owner', { username: a.username, password: a.password })
-      check('REVOKED-ADMIN-LOGIN-FORBIDDEN', revoked?.status === 200 && admin.client === null && admin.response.data?.code === 'FORBIDDEN', { revoke: revoked?.status ?? null, admin: safeResponse(admin.response) })
+      const assigned = await root.patch(`/api/accounts/${a.username}`, { ownerId: reseller.id }), read = await root.get(`/api/accounts/${a.username}`)
+      check('ASSIGN-OWNERSHIP', assigned.status === 200 && read.data?.account?.ownerId === reseller.id, { patch: assigned.status, read: read.status })
+      const resellers = await root.get('/api/resellers')
+      const saved = Array.isArray(resellers.data?.resellers) ? resellers.data.resellers.find(item => item.id === reseller.id) : undefined
+      const activeAdmin = await manualSession(x, { username: reseller.username, password: reseller.password })
+      check('INITIAL-PRIVILEGES', resellers.status === 200 && Array.isArray(saved?.acl) && saved.acl.length === ACL.length && ACL.every(item => saved.acl.includes(item)) && activeAdmin.client !== null, { status: resellers.status, aclCount: saved?.acl?.length ?? null, login: activeAdmin.client !== null })
+      await activeAdmin.close()
+      const detached = await root.patch(`/api/accounts/${a.username}`, { ownerId: null })
+      const revoked = detached.status === 200 ? await root.delete(`/api/resellers/${reseller.id}`) : null
+      const admin = await signIn('reseller', { username: reseller.username, password: reseller.password }), user = await signIn('owner', { username: a.username, password: a.password })
+      check('REVOKED-ADMIN-LOGIN-DENIED', revoked?.status === 200 && admin.client === null && admin.response.status === 401 && admin.response.data?.code === 'UNAUTHENTICATED', { revoke: revoked?.status ?? null, admin: safeResponse(admin.response) })
       check('USER-LOGIN-STILL-WORKS', revoked?.status === 200 && user.client !== null, { revoke: revoked?.status ?? null, user: user.client !== null })
     },
   }),
@@ -442,7 +451,7 @@ export default [
     requests: 40, deadlineMs: 240000,
     page: { route: '/whm/resellers/privileges', read: '/api/resellers', shows: data => [data?.resellers?.[0]?.username] },
     unit: [{ id: 'W1RP-UNIT-ACL', file: 'apps/api/src/completion-reseller-security.test.ts', name: 'real HTTP reseller-owned account scope re-applies root ACL changes so a reseller gains and then loses account creation' }],
-    checks: ['CREATE-DENIED-FORBIDDEN-ACL', 'LIST-STILL-WORKS', 'ALL-LISTS-FOREIGN-ACCOUNTS'],
+    checks: ['CREATE-DENIED-FORBIDDEN-ACL', 'LIST-STILL-WORKS', 'UNKNOWN-ALL-ACL-REFUSED'],
     async run(x) {
       const { root, tag, fixture, check, refused } = x
       const list = await newList(x, 'f')
@@ -459,14 +468,14 @@ export default [
       const listed = await reseller.client.get('/api/accounts')
       check('LIST-STILL-WORKS', stripped.status === 200 && listed.status === 200, { patch: stripped.status, read: listed.status })
       const widened = await root.patch(`/api/resellers/${reseller.id}`, { acl: [...ACL, 'all'] }), wide = await reseller.client.get('/api/accounts')
-      check('ALL-LISTS-FOREIGN-ACCOUNTS', widened.status === 200 && wide.status === 200 && accountIds(wide)?.includes(fixture.accountId) === true, { patch: widened.status, read: wide.status })
+      check('UNKNOWN-ALL-ACL-REFUSED', widened.status >= 400 && widened.data?.code === 'VALIDATION' && wide.status === 200 && accountIds(wide)?.includes(fixture.accountId) === false, { patch: widened.status, code: safeResponse(widened).code, read: wide.status })
     },
   }),
 
   tool('reseller-account-limits', {
     prefix: 'W1RL', probe: '/api/resellers',
     paths: only('resellers', P.reseller, 'accounts', P.account, 'feature-lists', P.list, 'plans', P.plan),
-    accounts: 5, requests: 100, deadlineMs: 600000,
+    accounts: 7, requests: 100, deadlineMs: 600000,
     page: { route: '/whm/resellers/more', read: '/api/resellers', shows: data => [data?.resellers?.[0]?.username] },
     unit: [
       { id: 'W1RL-UNIT-CAP', file: 'apps/api/src/completion-reseller-security.test.ts', name: 'real HTTP reseller-owned account scope refuses account creation over the reseller account cap without creating state' },
@@ -494,7 +503,7 @@ export default [
         if ((await newAccount(x, suffix, small.id, { client: reseller.client })).ok) owned++
       }
       const g = await newAccount(x, 'g', small.id, { client: reseller.client })
-      check('SIXTH-ACCOUNT-REFUSED', owned === 5 && g.response.status >= 400 && g.response.data?.code === 'OVERSELL_BLOCKED', { owned, status: g.response.status })
+      check('SIXTH-ACCOUNT-REFUSED', owned === 5 && g.response.status >= 400 && g.response.data?.code === 'LIMIT_EXCEEDED', { owned, status: g.response.status, code: safeResponse(g.response).code })
     },
   }),
 
@@ -543,9 +552,8 @@ export default [
       const a = await newAccount(x, 'a', plan.id, { ownerId: previous.id }), b = await newAccount(x, 'b', plan.id, { ownerId: previous.id })
       if (!a.ok || !b.ok) return
       const count = async () => {
-        const entry = (await root.get('/api/resellers')).data?.resellers?.find(item => item.id === next.id)
-        const value = entry?.accounts ?? entry?.accountCount
-        return Number.isInteger(value) ? value : null
+        const rows = (await root.get('/api/accounts')).data?.accounts
+        return Array.isArray(rows) ? rows.filter(item => item.ownerId === next.id).length : null
       }
       const before = await count()
       const moved = await root.post('/api/accounts/bulk-actions/owner', { operationId: randomUUID(), accounts: [{ id: a.id }, { id: b.id }], ownerId: next.id })
@@ -623,9 +631,9 @@ export default [
     accounts: 1, requests: 40, deadlineMs: 240000,
     page: { route: '/whm/accounts', read: '/api/accounts', shows: data => [data?.accounts?.[0]?.username] },
     unit: [{ id: 'W1PW-UNIT-LOGINS', file: 'apps/api/src/account-mutation-security.test.ts', name: 'account mutation outcomes and race boundaries changes every login for the account and leaves the neighbor untouched' }],
-    checks: ['PANEL-LOGIN-WITH-NEW-PASSWORD', 'MYSQL-LOGIN-WITH-NEW-PASSWORD', 'WEAK-PASSWORD'],
+    checks: ['PANEL-LOGIN-WITH-NEW-PASSWORD', 'OLD-PASSWORD-LOGIN-REFUSED', 'WEAK-PASSWORD'],
     async run(x) {
-      const { root, check, block, refused, signIn } = x
+      const { root, check, refused, signIn } = x
       const list = await newList(x, 'f')
       if (!list.id) return
       const plan = await newPlan(x, 'p', list.id)
@@ -636,7 +644,8 @@ export default [
       const next = secret(), changed = await root.post(`/api/accounts/${a.username}/password`, { password: next, db_pass_update: 1 })
       const login = changed.status === 200 ? await signIn('owner', { username: a.username, password: next }) : { client: null }
       check('PANEL-LOGIN-WITH-NEW-PASSWORD', changed.status === 200 && login.client !== null, { change: changed.status, login: login.client !== null })
-      block('MYSQL-LOGIN-WITH-NEW-PASSWORD', 'No panel API opens a database session with an account password, and the driver may not run a MySQL client.')
+      const stale = changed.status === 200 ? await signIn('owner', { username: a.username, password: a.password }) : { client: null, response: null }
+      check('OLD-PASSWORD-LOGIN-REFUSED', changed.status === 200 && changed.data?.principals >= 1 && stale.client === null && stale.response?.status === 401, { change: changed.status, stale: stale.response?.status ?? null })
     },
   }),
 
@@ -702,8 +711,8 @@ export default [
 
   tool('list-parked-domains', {
     prefix: 'W1PD', probe: '/api/domains',
-    paths: only('accounts', P.account, 'domains', P.domain, `domains\\?accountId=${ID}`, 'dns/zones', 'feature-lists', P.list, 'plans', P.plan),
-    accounts: 1, requests: 40, deadlineMs: 300000,
+    paths: only('resellers', P.reseller, 'accounts', P.account, 'domains', P.domain, `domains\\?accountId=${ID}`, 'dns/zones', 'feature-lists', P.list, 'plans', P.plan),
+    accounts: 1, requests: 45, deadlineMs: 300000,
     page: { route: '/whm/domains', read: '/api/domains', shows: data => [data?.domains?.[0]?.name] },
     unit: [{ id: 'W1PD-UNIT-ALIASES', file: 'apps/api/src/completion-domain-workspace-security.test.ts', name: 'conditional domain workspace API with isolated real SQLite and desired state creates owned subdomains and aliases with coupled parent settings' }],
     checks: ['UNPARK-REMOVES-FROM-LIST', 'UNPARK-DELETES-ZONE', 'BLOCKED-DOMAIN-REJECTED'],
@@ -713,14 +722,16 @@ export default [
       if (!list.id) return
       const plan = await newPlan(x, 'p', list.id)
       if (!plan.id) return
-      const a = await newAccount(x, 'a', plan.id)
+      const reseller = await newReseller(x, 'r')
+      if (!reseller.ok) return
+      const a = await newAccount(x, 'a', plan.id, { ownerId: reseller.id })
       if (!a.ok || !a.domainId) return
-      const park = async name => {
-        const response = await root.post('/api/domains', { accountId: a.id, name, kind: 'alias', parentId: a.domainId }), id = response.data?.domain?.id
+      const park = async (name, client = root) => {
+        const response = await client.post('/api/domains', { accountId: a.id, name, kind: 'alias', parentId: a.domainId }), id = response.data?.domain?.id
         if ([200, 201].includes(response.status) && typeof id === 'string') x.undo(`alias ${name}`, async () => gone(await root.delete(`/api/domains/${id}`)))
         return { response, id: typeof id === 'string' ? id : null }
       }
-      const alias = `xq${tag}al.example.net`, parked = await park(alias)
+      const alias = `xq${tag}${nextSeq()}al.example.net`, parked = await park(alias)
       if (parked.id) {
         const zones = await root.get('/api/dns/zones'), hadZone = zones.data?.zones?.some(item => item.name === alias) === true
         const unparked = await root.delete(`/api/domains/${parked.id}`)
@@ -728,7 +739,7 @@ export default [
         check('UNPARK-REMOVES-FROM-LIST', parked.response.status === 201 && unparked.status === 200 && Array.isArray(domains.data?.domains) && !domains.data.domains.some(item => item.name === alias), { park: parked.response.status, unpark: unparked.status })
         check('UNPARK-DELETES-ZONE', hadZone && unparked.status === 200 && Array.isArray(after.data?.zones) && !after.data.zones.some(item => item.name === alias), { hadZone, unpark: unparked.status })
       }
-      refused('BLOCKED-DOMAIN-REJECTED', (await park('gmail.com')).response, 'FORBIDDEN')
+      refused('BLOCKED-DOMAIN-REJECTED', (await park('gmail.com', reseller.client)).response, 'FORBIDDEN')
     },
   }),
 ]

@@ -36,7 +36,7 @@ describe('BoxTrapper host render', { tags: ['unit'] }, () => {
     const file = out.files.find(item => item.path.endsWith('.boxtrapper.json'))!
     expect(file).toMatchObject({ mode: 0o640, owner: 'root', group: 'alice' })
     expect(JSON.parse(file.content)).toMatchObject({ mailbox: 'me@alice.test', store: '/home/alice/mail/alice.test/me/boxtrapper', spamBypass: null, templates: BOXTRAPPER_DEFAULT_TEMPLATES })
-    expect(out.postActions).toContainEqual({ kind: 'exec', argv: ['/usr/bin/sievec', '/etc/dovecot/xpanel/sieve/alice.test/me.boxtrapper.sieve'] })
+    expect(out.postActions).toContainEqual({ kind: 'exec', argv: ['/usr/bin/sievec', '-P', 'sieve_extprograms', '-x', '+vnd.dovecot.execute', '/etc/dovecot/xpanel/sieve/alice.test/me.boxtrapper.sieve'] })
     expect(out.preActions).toContainEqual({ kind: 'ensure-dir', path: '/etc/dovecot/xpanel/sieve/alice.test', mode: 0o750, owner: 'root', group: 'alice' })
     expect(services.renderBoxTrapperScript('/r.json', [])).not.toContain('copy')
     const conf = services.renderDovecotSieveConf(os, true).content

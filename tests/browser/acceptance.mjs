@@ -50,6 +50,7 @@ export async function runBrowserAcceptance({ chromium, expect }) {
   }
 
   async function submit(page, form, endpoint, record) {
+    await expect(page.locator(form)).not.toHaveAttribute('aria-busy', 'true')
     const [response] = await Promise.all([
       page.waitForResponse(response => new URL(response.url()).pathname === endpoint && response.request().method() === 'POST'),
       page.locator(`${form} button[type="submit"]`).click(),
@@ -179,9 +180,12 @@ export async function runBrowserAcceptance({ chromium, expect }) {
       const recoveryCodes = recoveryText.match(/\b[0-9a-f]{32}\b/g) ?? []
       record('recovery_codes_presented', { count: recoveryCodes.length })
       expect(recoveryCodes.length, 'Recovery codes are displayed once before acknowledgement').toBe(8)
-      await page.locator('[data-action="acknowledge-recovery"]').click()
+      await Promise.all([
+        page.waitForResponse(response => new URL(response.url()).pathname === '/whm/security/sign-in' && response.request().resourceType() === 'document'),
+        page.locator('[data-action="acknowledge-recovery"]').click(),
+      ])
+      await page.waitForLoadState('domcontentloaded')
       record('recovery_codes_acknowledged')
-      await page.waitForURL(url => url.pathname === '/whm/security/sign-in')
       await expect(page.locator('[data-mfa-enabled="true"]')).toBeVisible()
       await page.goto(`${panel.baseUrl}/whm`)
       const enrolled = await panel.rootState()

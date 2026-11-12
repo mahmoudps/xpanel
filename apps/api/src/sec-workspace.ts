@@ -1,3 +1,4 @@
+import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fail, isXpanelError } from '@xpanel/core'
 import { atomicWriteJson, readJsonIfExists } from '@xpanel/state'
@@ -164,6 +165,23 @@ export async function writeSecRecord(helpers: Pick<SecWorkspaceHelpers, 'store'>
   } finally { await lease.release() }
 }
 
+export async function resetSecRecord(helpers: Pick<SecWorkspaceHelpers, 'store'>, kind: SecKind, expectedRevision: string, fresh: () => Promise<unknown>): Promise<void> {
+  const lease = await helpers.store.getWriterLock().acquire()
+  let attempted = false
+  try {
+    await fresh()
+    const raw = await readSecRaw(helpers.store, kind)
+    if (raw !== null && !readSecRecord(kind, raw)) return fail('PRECONDITION_FAILED', 'saved configuration requires review before changing it', unchanged)
+    if (secRevision(kind, raw) !== expectedRevision) return fail('CONFLICT', 'saved configuration changed; reload before resetting', unchanged)
+    await lease.assertFencingToken(); attempted = true
+    await rm(join(helpers.store.rootDir, SEC_STATE_PATHS[kind]), { force: true })
+    if (await readSecRaw(helpers.store, kind) !== null) throw new Error('readback_mismatch')
+  } catch (error) {
+    if (attempted) return fail('SERVICE_UNAVAILABLE', 'the default configuration could not be verified; review before retrying', { stateChanged: true, verificationRequired: true, unknownOutcome: true })
+    throw error
+  } finally { await lease.release() }
+}
+
 /** A PUT changes only the switches of vendors that install already verified; their metadata stays as installed. */
 const keepInstalledVendors = (next: typeof SEC_DEFAULTS['waf-vendors'], raw: unknown): typeof SEC_DEFAULTS['waf-vendors'] => {
   const saved = raw === null ? [] : readSecRecord('waf-vendors', raw)!.policy.vendors
@@ -192,13 +210,14 @@ const compilerAccounts = async (store: StateStore): Promise<{ id: string; userna
 export async function handleSecWorkspaceRoute(request: Request, url: URL, method: string, helpers: SecWorkspaceHelpers): Promise<Response | null> {
   if (url.pathname === ACCOUNT_WAF) return accountWaf(request, url, method, helpers)
   const verify = url.pathname === '/api/server/sec/dns-cluster/verify', apply = url.pathname === '/api/server/sec/dns-cluster/apply'
-  const route = SERVER[url.pathname] ?? (verify || apply ? SERVER['/api/server/sec/dns-cluster']! : null)
+  const resetMatch = /^\/api\/server\/sec\/(flood|compiler-access)\/reset$/.exec(url.pathname)
+  const route = SERVER[url.pathname] ?? (verify || apply ? SERVER['/api/server/sec/dns-cluster']! : resetMatch ? SERVER[`/api/server/sec/${resetMatch[1]}`]! : null)
   if (!route) return null
   const action = `server.sec.${route.kind}.${method === 'GET' ? 'read' : apply ? 'apply' : 'update'}`
   const caller = await helpers.requireCaller(request)
   await helpers.assertRoot(caller, action)
   const fresh = async (): Promise<AuthenticatedCaller> => { const current = await helpers.requireCaller(request); await helpers.assertRoot(current, action); return same(caller, current) ? current : fail('FORBIDDEN', 'root authorization changed', unchanged) }
-  const allowed = verify ? 'GET' : apply ? 'POST' : 'GET, PUT'
+  const allowed = verify ? 'GET' : apply || resetMatch ? 'POST' : 'GET, PUT'
   if (!allowed.split(', ').includes(method)) return new Response(null, { status: 405, headers: { allow: allowed } })
   const query = [...url.searchParams]
   if (verify ? query.length !== 1 || query[0]![0] !== 'peer' || !/^[a-z0-9.-]{1,253}$/.test(query[0]![1]) : url.search) return invalid(verify ? 'exactly one peer name is required' : 'security workspaces accept no query selectors')
@@ -227,6 +246,17 @@ export async function handleSecWorkspaceRoute(request: Request, url: URL, method
     if (observation.application !== 'applied' && observation.application !== 'single_node') return fail('SERVICE_UNAVAILABLE', 'the PowerDNS apply outcome requires review', { stateChanged: true, verificationRequired: true, unknownOutcome: true })
     await helpers.emitAudit({ actor: actor.principal.username, action: 'server.sec.dns-cluster.applied', target: 'dns:cluster', principalId: actor.principal.id, outcome: 'ok', detail: { outcome: ack.outcome } }).catch(() => {})
     return workspaceJson({ outcome: ack.outcome, observation })
+  }
+  if (resetMatch) {
+    const body = await secBody(request, 512)
+    if (Object.keys(body).join() !== 'expectedRevision') return invalid('only expectedRevision is accepted')
+    const expectedRevision = secRevisionOf(body.expectedRevision)
+    await resetSecRecord(helpers, kind, expectedRevision, fresh)
+    const current = await fresh().catch(() => null)
+    try { await helpers.emitAudit({ actor: caller.principal.username, action: `server.sec.${kind}.reset`, target: 'server:sec:' + kind, principalId: caller.principal.id, outcome: 'ok', detail: { revision: secRevision(kind, null) } }) }
+    catch { return fail('SERVICE_UNAVAILABLE', 'the configuration was reset but its audit record requires review', { stateChanged: true, verificationRequired: true }) }
+    const reconcile = route.reconcile && current ? await reconcileSecOutcome(helpers, current) : null
+    return workspaceJson({ ...viewOf(kind, null), reconcile })
   }
 
   if (method === 'GET') {

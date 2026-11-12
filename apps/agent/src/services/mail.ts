@@ -104,13 +104,17 @@ const normalizeAddress = (local: string, domain: string): string => {
  * map rebuild + Dovecot auth cache flush on mailbox deletion or password rotation.
  */
 export interface MaildirSnapshot {
-  accounts: readonly { id: string; home: string }[]
+  accounts: readonly { id: string; home: string; status?: Account['status'] }[]
   domains: readonly { id: string; name: string }[]
   serviceUsers: readonly { accountId: string; domainId: string; localPart: string; services: { email: boolean } }[]
 }
 
-const maildirPaths = (snapshot: MaildirSnapshot): Set<string> => {
-  const accounts = new Map(snapshot.accounts.map(account => [account.id, account.home]))
+const maildirPaths = (snapshot: MaildirSnapshot, retainedAccountIds?: ReadonlySet<string>): Set<string> => {
+  const accounts = new Map(
+    snapshot.accounts
+      .filter(account => account.status !== 'terminating' && (!retainedAccountIds || retainedAccountIds.has(account.id)))
+      .map(account => [account.id, account.home]),
+  )
   const domains = new Map(snapshot.domains.map(domain => [domain.id, domain.name]))
   const paths = new Set<string>()
   for (const user of snapshot.serviceUsers) {
@@ -123,10 +127,11 @@ const maildirPaths = (snapshot: MaildirSnapshot): Set<string> => {
   return paths
 }
 
-/** Maildir roots present in the applied generation and absent from the desired generation. */
+/** Maildir roots present in the applied generation and absent from the desired generation for retained accounts. */
 export const removedMaildirPaths = (previous: MaildirSnapshot, next: MaildirSnapshot): string[] => {
-  const kept = maildirPaths(next)
-  return [...maildirPaths(previous)].filter(path => !kept.has(path)).sort()
+  const retainedAccounts = new Set(next.accounts.filter(account => account.status !== 'terminating').map(account => account.id))
+  const kept = maildirPaths(next, retainedAccounts)
+  return [...maildirPaths(previous, retainedAccounts)].filter(path => !kept.has(path)).sort()
 }
 
 export class MailServiceAdapter {

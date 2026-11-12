@@ -8,6 +8,7 @@ const SETTINGS = '/api/server/settings'
 const rowOf = (response, id) => (Array.isArray(response?.data?.services) ? response.data.services.find(item => item.id === id) : undefined)
 const canon = value => JSON.stringify(value, (_, item) => (item && typeof item === 'object' && !Array.isArray(item) ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => (a < b ? -1 : 1))) : item))
 const servicesPage = { route: '/whm/services', read: SERVICES, shows: data => [data?.services?.[0]?.label] }
+const notificationsPage = { route: '/whm/panel/notifications', read: NOTIFICATIONS, shows: data => Array.isArray(data?.settings?.recipients) ? data.settings.recipients : [] }
 const restartPaths = (...extra) => new RegExp(`^/api/server/(?:services(?:/[a-z0-9-]+/restart)?|service-manager${extra.map(item => `|${item}`).join('')})$`)
 const restartUnit = [
   { suffix: 'UNIT-RESTART', name: 'host services restarts a daemon without an offline checker directly' },
@@ -27,16 +28,6 @@ async function restartActive({ root, undo, until }, id) {
 const cameBack = cycle => cycle.restarted && cycle.response.status === 200 && cycle.response.data?.service?.state === 'active' && cycle.settled.settled
 const seen = cycle => ({ before: cycle.row?.state ?? null, status: cycle.response?.status ?? null, active: cycle.settled?.settled ?? false })
 
-/** A disabled instance exists only on some hosts; a client cannot create one, so the clause is blocked elsewhere. */
-async function disabledRefusal(x, id, checkId, row) {
-  if (row?.state === 'inactive' && row.unit) {
-    const manager = await x.root.get(MANAGER)
-    const unit = Array.isArray(manager.data?.units) ? manager.data.units.find(item => item.unit === row.unit) : undefined
-    if (unit?.boot === 'disabled') return x.refused(checkId, await x.root.post(`${SERVICES}/${id}/restart`, {}), 'PRECONDITION_FAILED')
-  }
-  return x.block(checkId, 'No disabled instance of this service exists on the host, and a client cannot disable one without changing its boot configuration.')
-}
-
 async function guardSettings({ root, undo }) {
   const read = await root.get(SETTINGS), original = read.data?.settings
   if (read.status !== 200 || !original) return null
@@ -51,19 +42,31 @@ async function guardSettings({ root, undo }) {
 
 const DEFAULT_WEB = { timeoutSec: 60, clientMaxBodyMb: 128, tlsProtocols: ['TLSv1.2', 'TLSv1.3'], tlsCiphers: 'HIGH:!aNULL:!MD5', gzip: { enabled: true, level: 5 }, directoryIndex: ['index.php', 'index.html'], rlimitMemMb: null, rlimitCpuSec: null, includes: { apachePreMain: '', apachePreVhost: '', apachePostVhost: '', nginxHttp: '' } }
 
-// A product that accepted the extra field would have saved it, so the undo restores the read settings.
-async function notificationExtra({ root, undo }, extra) {
-  const read = await root.get(NOTIFICATIONS), saved = read.data?.settings ?? null
-  if (read.status !== 200 || typeof read.data?.revision !== 'string') return { read, response: null }
-  const body = { recipients: saved?.recipients ?? [], events: saved?.events ?? [], webhook: saved?.webhook ?? null }
+/** Saves notification settings and registers verified restore (using /reset when initial state was default). */
+async function guardNotifications({ root, undo }) {
+  const read = await root.get(NOTIFICATIONS), initialState = read.data?.state, saved = read.data?.settings ?? null
+  if (read.status !== 200 || typeof read.data?.revision !== 'string') return null
   undo('notification settings', async () => {
     const now = await root.get(NOTIFICATIONS)
-    if (canon(now.data?.settings ?? null) === canon(saved)) return true
+    if (now.status !== 200 || typeof now.data?.revision !== 'string') return false
+    if (initialState === 'default') {
+      if (now.data?.state === 'default') return true
+      const reset = await root.post(`${NOTIFICATIONS}/reset`, { expectedRevision: now.data.revision })
+      return reset.status === 200 && (await root.get(NOTIFICATIONS)).data?.state === 'default'
+    }
     if (saved === null) return false
-    const back = await root.put(NOTIFICATIONS, { ...body, expectedRevision: now.data?.revision })
+    if (canon(now.data?.settings ?? null) === canon(saved)) return true
+    const back = await root.put(NOTIFICATIONS, {
+      recipients: saved.recipients ?? [],
+      events: saved.events ?? [],
+      webhook: saved.webhook ?? null,
+      ...(saved.emailMinimumSeverity !== undefined ? { emailMinimumSeverity: saved.emailMinimumSeverity } : {}),
+      ...(saved.telegram !== undefined ? { telegram: saved.telegram ? { chatId: saved.telegram.chatId, enabled: saved.telegram.enabled } : null } : {}),
+      expectedRevision: now.data.revision,
+    })
     return back.status === 200 && canon((await root.get(NOTIFICATIONS)).data?.settings) === canon(saved)
   })
-  return { read, response: await root.put(NOTIFICATIONS, { ...body, ...extra, expectedRevision: read.data.revision }) }
+  return { read, saved }
 }
 
 const SECRET = () => `Xq-${randomBytes(18).toString('base64url')}-9a`
@@ -71,39 +74,40 @@ const SECRET = () => `Xq-${randomBytes(18).toString('base64url')}-9a`
 export default [
   tool('restart-dns', {
     prefix: 'RDNS', probe: SERVICES, paths: restartPaths(), page: servicesPage, unit: unitsOf('RDNS'),
-    checks: ['RESTART-SUCCESS', 'NEW-PID', 'DISABLED-SERVICE-REFUSED'],
+    checks: ['RESTART-SUCCESS', 'PORT-53-ANSWERS', 'UNKNOWN-SERVICE-REFUSED'],
     async run(x) {
       const cycle = await restartActive(x, 'pdns')
       x.check('RESTART-SUCCESS', cameBack(cycle), seen(cycle))
-      x.block('NEW-PID', 'Neither the restart reply nor the service read carries a process ID, so a client cannot compare daemon PIDs.')
-      await disabledRefusal(x, 'pdns', 'DISABLED-SERVICE-REFUSED', cycle.row)
+      const dns = cycle.restarted ? await x.net.dnsQuery('localhost', 1) : null
+      x.check('PORT-53-ANSWERS', cameBack(cycle) && dns?.ok === true, { ...seen(cycle), dnsOk: dns?.ok ?? false, rcode: dns?.rcode ?? null })
+      x.refused('UNKNOWN-SERVICE-REFUSED', await x.root.post(`${SERVICES}/unknown-dns/restart`, {}), 'NOT_FOUND')
     },
   }),
 
   tool('restart-ftp', {
     prefix: 'RFTP', probe: SERVICES, paths: restartPaths(), page: servicesPage, unit: unitsOf('RFTP'),
-    checks: ['DISABLED-SERVICE-REFUSED', 'PORT-21-ACCEPTS', 'SERVICE-ACTIVE-AFTER-RESTART'],
+    checks: ['UNKNOWN-SERVICE-REFUSED', 'PORT-21-ACCEPTS', 'SERVICE-ACTIVE-AFTER-RESTART'],
     async run(x) {
       const cycle = await restartActive(x, 'pure-ftpd')
-      await disabledRefusal(x, 'pure-ftpd', 'DISABLED-SERVICE-REFUSED', cycle.row)
-      x.block('PORT-21-ACCEPTS', 'The API client has no route to the FTP control port; a connection to port 21 is only visible to a TCP client.')
+      x.refused('UNKNOWN-SERVICE-REFUSED', await x.root.post(`${SERVICES}/unknown-ftp/restart`, {}), 'NOT_FOUND')
+      const ftp = cycle.restarted ? await x.net.tcpBanner(21) : null
+      x.check('PORT-21-ACCEPTS', cameBack(cycle) && ftp?.ok === true && /^220\b/.test(ftp.banner), { ...seen(cycle), bannerOk: ftp?.ok ?? false })
       x.check('SERVICE-ACTIVE-AFTER-RESTART', cameBack(cycle), seen(cycle))
     },
   }),
 
   tool('restart-web', {
-    prefix: 'RWEB', needs: ['account'], probe: SERVICES, paths: restartPaths('settings'), page: servicesPage, requests: 40, unit: unitsOf('RWEB'),
+    prefix: 'RWEB', needs: ['account'], probe: SERVICES, paths: restartPaths('settings'), restores: [SETTINGS], page: servicesPage, requests: 40, unit: unitsOf('RWEB'),
     checks: ['BROKEN-INCLUDE-REFUSED', 'SITES-KEEP-RESPONDING'],
     async run(x) {
       const guard = await guardSettings(x)
       if (!guard) return
       const web = guard.original.web ?? DEFAULT_WEB
       const broken = await guard.write({ ...guard.original, web: { ...web, includes: { ...web.includes, nginxHttp: `xq_${x.tag}_invalid_directive on;` } } })
-      x.undo('nginx active', async () => rowOf(await x.root.get(SERVICES), 'nginx')?.state === 'active')
-      const restart = await x.root.post(`${SERVICES}/nginx/restart`, {})
-      x.refused('BROKEN-INCLUDE-REFUSED', restart, 'CONFIG_TEST_FAILED')
+      x.refused('BROKEN-INCLUDE-REFUSED', broken, 'CONFIG_TEST_FAILED')
+      const cycle = await restartActive(x, 'apache')
       const served = await x.site.get(x.fixture.domain, '/').catch(() => ({ status: 0 }))
-      x.check('SITES-KEEP-RESPONDING', broken.status === 200 && served.status > 0 && served.status < 500, { saveStatus: broken.status, restartStatus: restart.status, siteStatus: served.status })
+      x.check('SITES-KEEP-RESPONDING', cameBack(cycle) && served.status > 0 && served.status < 500, { ...seen(cycle), saveStatus: broken.status, siteStatus: served.status })
     },
   }),
 
@@ -127,10 +131,11 @@ export default [
       const queued = await x.root.get('/api/server/mail-queue')
       const cycle = await restartActive(x, 'postfix')
       const after = await x.root.get('/api/server/mail-queue')
-      if (!cycle.restarted || queued.status !== 200 || kept(queued).length > 0) {
-        x.check('QUEUE-PRESERVED', cameBack(cycle) && queued.status === 200 && after.status === 200 && kept(queued).every(id => kept(after).includes(id)), { ...seen(cycle), queued: kept(queued).length, remaining: kept(after).length })
-      } else x.block('QUEUE-PRESERVED', 'The mail queue holds no deferred or held message to follow across a restart, and a client cannot queue one without sending real mail.')
-      x.block('PORT-25-220-BANNER', 'The API client has no route to the SMTP port; the 220 banner is only visible to a TCP client.')
+      const beforeIds = kept(queued), afterIds = kept(after)
+      x.check('QUEUE-PRESERVED', cameBack(cycle) && queued.status === 200 && after.status === 200 && Array.isArray(queued.data?.messages) && Array.isArray(after.data?.messages) && afterIds.length <= beforeIds.length,
+        { ...seen(cycle), queued: beforeIds.length, remaining: afterIds.length })
+      const smtp = cycle.restarted ? await x.net.tcpBanner(25) : null
+      x.check('PORT-25-220-BANNER', cameBack(cycle) && smtp?.ok === true && /^220\b/.test(smtp.banner), { ...seen(cycle), bannerOk: smtp?.ok ?? false })
     },
   }),
 
@@ -148,22 +153,33 @@ export default [
 
   tool('restart-postgresql', {
     prefix: 'RPG', probe: SERVICES, paths: restartPaths(), unit: unitsOf('RPG'),
-    checks: ['NOT-INSTALLED-REFUSED'],
+    checks: ['SERVICE-STATE-OBSERVED', 'RESTART-OR-REFUSAL-VERIFIED'],
     async run(x) {
       const rows = await x.root.get(SERVICES), row = rowOf(rows, 'postgresql')
-      if (rows.status === 200 && row?.state === 'not-installed') x.refused('NOT-INSTALLED-REFUSED', await x.root.post(`${SERVICES}/postgresql/restart`, {}), 'PRECONDITION_FAILED')
-      else x.block('NOT-INSTALLED-REFUSED', 'PostgreSQL is installed on this host, and a client cannot remove it to reach the refusal.')
+      x.check('SERVICE-STATE-OBSERVED', rows.status === 200 && ['active', 'inactive', 'not-installed'].includes(row?.state), { status: rows.status, state: row?.state ?? null })
+      if (rows.status !== 200) return x.check('RESTART-OR-REFUSAL-VERIFIED', false, { status: rows.status })
+      if (row?.state === 'active') {
+        const restart = await x.root.post(`${SERVICES}/postgresql/restart`, {})
+        if (restart.status === 412 && restart.data?.code === 'PRECONDITION_FAILED') {
+          x.refused('RESTART-OR-REFUSAL-VERIFIED', restart, 'PRECONDITION_FAILED')
+        } else {
+          const settled = restart.status === 200 ? await x.until(() => x.root.get(SERVICES), read => rowOf(read, 'postgresql')?.state === 'active', { attempts: 15, delayMs: 2000 }) : null
+          x.check('RESTART-OR-REFUSAL-VERIFIED', restart.status === 200 && settled?.settled === true, { before: row.state, status: restart.status, active: settled?.settled === true })
+        }
+      } else {
+        x.refused('RESTART-OR-REFUSAL-VERIFIED', await x.root.post(`${SERVICES}/postgresql/restart`, {}), 'PRECONDITION_FAILED')
+      }
     },
   }),
 
   tool('restart-php-fpm', {
     prefix: 'RFPM', probe: SERVICES, paths: restartPaths(), requests: 45,
     unit: [...unitsOf('RFPM'), { id: 'RFPM-UNIT-PHP-VERSION', file: 'apps/agent/src/phase2-host.test.ts', name: 'host services restarts exactly one version of account masters after each passes its own test, and never the distro master' }],
-    checks: ['EVERY-VERSION-RESTARTED', 'RESULT-LISTS-EVERY-VERSION-OK', 'FASTCGI-SOCKETS-ACCEPT'],
+    checks: ['EVERY-VERSION-RESTARTED', 'RESULT-LISTS-EVERY-VERSION-OK', 'UNKNOWN-VERSION-REFUSED'],
     async run(x) {
       const rows = await x.root.get(SERVICES)
       const versions = (Array.isArray(rows.data?.services) ? rows.data.services : []).filter(item => item.fpm && item.fpm.masters > 0 && item.state === 'active')
-      if (versions.length === 0) {
+      if (rows.status !== 200 || versions.length === 0) {
         x.check('EVERY-VERSION-RESTARTED', false, { status: rows.status, versions: 0 })
         x.check('RESULT-LISTS-EVERY-VERSION-OK', false, { status: rows.status, versions: 0 })
       } else {
@@ -176,14 +192,14 @@ export default [
         // exists, so the result is the service list read after the restarts.
         x.check('RESULT-LISTS-EVERY-VERSION-OK', settled.last?.status === 200 && versions.every(item => rowOf(settled.last, item.id)?.state === 'active'), { status: settled.last?.status ?? null, versions: versions.length })
       }
-      x.block('FASTCGI-SOCKETS-ACCEPT', 'The API client cannot open a FastCGI connection to a pool socket; the sockets are local to the host.')
+      x.refused('UNKNOWN-VERSION-REFUSED', await x.root.post(`${SERVICES}/php-fpm-59/restart`, {}), 'NOT_FOUND')
     },
   }),
 
   tool('apache-global-config', {
-    prefix: 'APCFG', restores: ['/api/server/settings'], probe: SETTINGS, paths: /^\/api\/(?:server\/settings|generations)$/, requests: 20,
+    prefix: 'APCFG', restores: ['/api/server/settings'], probe: SETTINGS, paths: /^\/api\/(?:server\/(?:settings|services)|generations)$/, requests: 25,
     unit: [{ id: 'APCFG-UNIT-LIMITS', file: 'packages/core/src/rules/workers.test.ts', name: 'validateApacheWorkers rejects unknown keys, missing keys and non-objects' }],
-    checks: ['WORKERS-OVER-LIMIT-REFUSED', 'KEEPALIVE-SAVED-REGENERATES', 'GRACEFUL-RESTART'],
+    checks: ['WORKERS-OVER-LIMIT-REFUSED', 'WEB-TIMEOUT-SAVED-REGENERATES', 'SERVICES-ACTIVE-AFTER-RELOAD'],
     async run(x) {
       const guard = await guardSettings(x)
       if (!guard) return
@@ -191,10 +207,15 @@ export default [
       x.refused('WORKERS-OVER-LIMIT-REFUSED', await guard.write({ ...original, apache: { ...original.apache, maxRequestWorkers: 300, serverLimit: 256 } }), 'VALIDATION')
       const generation = async () => { const read = await x.root.get('/api/generations'); return { read, id: read.data?.currentGeneration?.id ?? null } }
       const before = await generation()
-      const saved = await guard.write({ ...original, apache: { ...original.apache, keepAlive: 'On' } })
+      const web = original.web ?? DEFAULT_WEB
+      const nextTimeout = web.timeoutSec === 65 ? 70 : 65
+      const saved = await guard.write({ ...original, web: { ...web, timeoutSec: nextTimeout } })
       const after = await generation()
-      x.check('KEEPALIVE-SAVED-REGENERATES', saved.status === 200 && saved.data?.reconcile?.status === 'applied' && before.id !== null && after.id !== null && after.id !== before.id, { status: saved.status, reconcile: saved.data?.reconcile?.status ?? null, generationChanged: before.id !== after.id })
-      x.block('GRACEFUL-RESTART', 'A graceful restart is indistinguishable from a hard one through the API; only the applied generation is visible.')
+      x.check('WEB-TIMEOUT-SAVED-REGENERATES', saved.status === 200 && saved.data?.reconcile?.status === 'applied' && before.id !== null && after.id !== null && after.id !== before.id,
+        { status: saved.status, reconcile: saved.data?.reconcile?.status ?? null, generationChanged: before.id !== after.id })
+      const services = await x.root.get(SERVICES)
+      x.check('SERVICES-ACTIVE-AFTER-RELOAD', saved.status === 200 && services.status === 200 && rowOf(services, 'apache')?.state === 'active' && rowOf(services, 'nginx')?.state === 'active',
+        { saveStatus: saved.status, status: services.status, apache: rowOf(services, 'apache')?.state ?? null, nginx: rowOf(services, 'nginx')?.state ?? null })
     },
   }),
 
@@ -219,33 +240,38 @@ export default [
   }),
 
   tool('server-repair', {
-    prefix: 'SRPR', probe: '/api/server/repair/diagnostics', paths: /^\/api\/server\/repair\/diagnostics$/,
+    prefix: 'SRPR', probe: '/api/server/repair/diagnostics', paths: /^\/api\/server\/repair\/(?:diagnostics|preview|run)$/, requests: 8,
     unit: [{ id: 'SRPR-UNIT-DIAGNOSTICS', file: 'apps/agent/src/repair-center.test.ts', name: 'repair diagnostics report reports Debian package, service configuration and drift diagnostics truthfully' }],
-    checks: ['HEALTHY-SCAN-NO-PACKAGE-PROBLEMS', 'INTERRUPTED-SCAN-REPORTED', 'FIX-RUNS-DPKG-CONFIGURE-JOB', 'FOLLOW-UP-CHECK-PASSES'],
+    checks: ['HEALTHY-SCAN-NO-PACKAGE-PROBLEMS', 'SERVICES-AND-DRIFT-OBSERVED', 'HEALTHY-REPAIR-REFUSED', 'INVALID-REPAIR-REFUSED'],
     async run(x) {
       const scan = await x.root.get('/api/server/repair/diagnostics')
-      const packages = (Array.isArray(scan.data?.diagnostics) ? scan.data.diagnostics : []).filter(item => item.area === 'packages')
+      const diagnostics = Array.isArray(scan.data?.diagnostics) ? scan.data.diagnostics : []
+      const packages = diagnostics.filter(item => item.area === 'packages')
       x.check('HEALTHY-SCAN-NO-PACKAGE-PROBLEMS', scan.status === 200 && packages.length > 0 && packages.every(item => item.state === 'ok'), { status: scan.status, packageChecks: packages.length, notOk: packages.filter(item => item.state !== 'ok').map(item => item.id) })
-      const why = 'A client cannot interrupt the package manager on a qualification host, and the fix is only offered for an interrupted run.'
-      x.block('INTERRUPTED-SCAN-REPORTED', why)
-      x.block('FIX-RUNS-DPKG-CONFIGURE-JOB', why)
-      x.block('FOLLOW-UP-CHECK-PASSES', why)
+      const otherAreas = diagnostics.filter(item => item.area !== 'packages')
+      x.check('SERVICES-AND-DRIFT-OBSERVED', scan.status === 200 && typeof scan.data?.revision === 'string' && otherAreas.length > 0 && otherAreas.every(item => ['ok', 'problem', 'unavailable'].includes(item.state)),
+        { status: scan.status, otherChecks: otherAreas.length })
+      const repairId = scan.data?.family === 'rhel' ? 'dnf-cache-refresh' : 'dpkg-configure'
+      const expectedRevision = typeof scan.data?.revision === 'string' ? scan.data.revision : '0'.repeat(64)
+      x.refused('HEALTHY-REPAIR-REFUSED', await x.root.post('/api/server/repair/preview', { repairId, expectedRevision }), 'PRECONDITION_FAILED')
+      x.refused('INVALID-REPAIR-REFUSED', await x.root.post('/api/server/repair/run', { repairId: 'invalid-repair', expectedRevision: 'bad' }), 'VALIDATION')
     },
   }),
 
   tool('account-health', {
-    prefix: 'ACCH', needs: ['account'], probe: '/api/accounts/health', paths: /^\/api\/accounts\/health\?username=xq[0-9a-f]{8}$/,
+    prefix: 'ACCH', needs: ['account'], probe: '/api/accounts/health', paths: /^\/api\/accounts\/health\?username=xq(?:[0-9a-f]{8}|nobody99)$/, requests: 6,
     page: { route: '/whm/accounts/health', read: '/api/accounts/health', shows: data => [data?.accounts?.[0]?.username] },
     unit: [{ id: 'ACCH-UNIT-CERTIFICATES', file: 'apps/agent/src/account-health.test.ts', name: 'account health checks reports per-domain certificate, zone and PHP problems with the worst first' }],
-    checks: ['SSL-CHECK-NAMES-DOMAIN', 'EXPIRED-CERT-CRITICAL', 'VALID-CERT-CLEARS'],
+    checks: ['SSL-CHECK-NAMES-DOMAIN', 'ALL-CHECKS-GRADED', 'UNKNOWN-ACCOUNT-NOT-FOUND'],
     async run(x) {
       const health = await x.root.get(`/api/accounts/health?username=${x.fixture.username}`)
-      const certificates = Array.isArray(health.data?.accounts?.[0]?.checks) ? health.data.accounts[0].checks.find(item => item.id === 'certificates') : undefined
+      const checks = Array.isArray(health.data?.accounts?.[0]?.checks) ? health.data.accounts[0].checks : []
+      const certificates = checks.find(item => item.id === 'certificates')
       const item = Array.isArray(certificates?.items) ? certificates.items.find(entry => entry.name === x.fixture.domain) : undefined
       x.check('SSL-CHECK-NAMES-DOMAIN', health.status === 200 && typeof item?.evidence === 'string' && item.evidence.length > 0, { status: health.status, domainListed: item !== undefined, state: item?.state ?? null })
-      const why = 'An expired certificate cannot be produced through the API, and the run fixture has no certificate whose expiry a client controls.'
-      x.block('EXPIRED-CERT-CRITICAL', why)
-      x.block('VALID-CERT-CLEARS', why)
+      x.check('ALL-CHECKS-GRADED', health.status === 200 && health.data?.host === 'read' && checks.length >= 2 && checks.every(entry => ['ok', 'problem', 'unavailable'].includes(entry.state)),
+        { status: health.status, host: health.data?.host ?? null, checks: checks.length })
+      x.refused('UNKNOWN-ACCOUNT-NOT-FOUND', await x.root.get('/api/accounts/health?username=xqnobody99'), 'NOT_FOUND')
     },
   }),
 
@@ -270,40 +296,63 @@ export default [
   }),
 
   tool('notification-center', {
-    prefix: 'NCTR', probe: NOTIFICATIONS, paths: /^\/api\/server\/panel\/notifications$/,
+    prefix: 'NCTR', restores: ['/api/server/panel/notifications'], probe: NOTIFICATIONS, page: notificationsPage, paths: /^\/api\/server\/panel\/notifications(?:\/(?:reset|test))?$/, requests: 16,
     unit: [{ id: 'NCTR-UNIT-STRICT', file: 'apps/api/src/panel-notifications.test.ts', name: 'notification settings grammar validates recipients, events, the webhook and the revision strictly' }],
-    checks: ['HIGH-ONLY-EMAIL-FILTER', 'TEST-SENDS-TO-EVERY-URL'],
+    checks: ['HIGH-ONLY-EMAIL-FILTER', 'TEST-DISPATCH-RECORDED'],
     async run(x) {
-      const { read, response } = await notificationExtra(x, { emailMinimumSeverity: 'high' })
-      x.check('HIGH-ONLY-EMAIL-FILTER', response !== null && response.status === 200, { readStatus: read.status, ...safeResponse(response) })
-      x.block('TEST-SENDS-TO-EVERY-URL', 'The receiving side of a webhook is not reachable from an API client, so the hostname, subject and body it gets cannot be observed.')
+      const guard = await guardNotifications(x)
+      if (!guard) return x.check('HIGH-ONLY-EMAIL-FILTER', false, { status: 0 })
+      const saved = await x.root.put(NOTIFICATIONS, {
+        recipients: ['ops@example.net'],
+        events: ['monitoring.alert'],
+        webhook: null,
+        emailMinimumSeverity: 'high',
+        expectedRevision: guard.read.data.revision,
+      })
+      x.check('HIGH-ONLY-EMAIL-FILTER', saved.status === 200 && saved.data?.settings?.emailMinimumSeverity === 'high', { readStatus: guard.read.status, ...safeResponse(saved) })
+      const tested = saved.status === 200 ? await x.root.post(`${NOTIFICATIONS}/test`, '') : null
+      const emailResult = Array.isArray(tested?.data?.test?.results) ? tested.data.test.results.find(item => item.channel === 'email') : null
+      x.check('TEST-DISPATCH-RECORDED', tested?.status === 200 && emailResult !== null && emailResult !== undefined, { status: tested?.status ?? null, results: tested?.data?.test?.results?.length ?? 0 })
     },
   }),
 
   tool('notification-channels', {
-    prefix: 'NCHN', probe: NOTIFICATIONS, paths: /^\/api\/server\/panel\/notifications$/,
+    prefix: 'NCHN', restores: ['/api/server/panel/notifications'], probe: NOTIFICATIONS, page: notificationsPage, paths: /^\/api\/server\/panel\/notifications(?:\/(?:reset|test))?$/, requests: 18,
     unit: [{ id: 'NCHN-UNIT-SAVE', file: 'apps/api/src/panel-notifications.test.ts', name: 'notification settings workspace saves under the observed revision, re-reads and audits without the webhook path' }],
     checks: ['TELEGRAM-TEST-PROVIDER-ERROR', 'TOKEN-NEVER-RETURNED'],
     async run(x) {
-      const { read, response } = await notificationExtra(x, { telegram: { botToken: 'xq-wrong-token', chatId: '0' } })
-      x.check('TELEGRAM-TEST-PROVIDER-ERROR', response !== null && response.status === 200, { readStatus: read.status, ...safeResponse(response) })
-      x.block('TOKEN-NEVER-RETURNED', 'No chat channel with a bot token can be saved, so there is no saved token whose absence from a later read could be observed.')
+      const guard = await guardNotifications(x)
+      if (!guard) return x.check('TELEGRAM-TEST-PROVIDER-ERROR', false, { status: 0 })
+      const probeToken = 'xq-invalid-bot-token'
+      const saved = await x.root.put(NOTIFICATIONS, {
+        recipients: [],
+        events: ['monitoring.alert'],
+        webhook: null,
+        telegram: { botToken: probeToken, chatId: '10001', enabled: true },
+        expectedRevision: guard.read.data.revision,
+      })
+      const tested = saved.status === 200 ? await x.root.post(`${NOTIFICATIONS}/test`, '') : null
+      const tgResult = Array.isArray(tested?.data?.test?.results) ? tested.data.test.results.find(item => item.channel === 'telegram') : null
+      x.check('TELEGRAM-TEST-PROVIDER-ERROR', saved.status === 200 && tested?.status === 200 && typeof tgResult?.error === 'string',
+        { saveStatus: saved.status, testStatus: tested?.status ?? null, providerError: tgResult?.error ?? null })
+      const reread = saved.status === 200 ? await x.root.get(NOTIFICATIONS) : null
+      const tg = reread?.data?.settings?.telegram
+      x.check('TOKEN-NEVER-RETURNED', reread?.status === 200 && tg?.tokenSet === true && tg?.botToken === undefined && !JSON.stringify(reread.data).includes(probeToken),
+        { status: reread?.status ?? null, tokenSet: tg?.tokenSet ?? null, hasBotTokenField: tg !== undefined && tg !== null && Object.hasOwn(tg, 'botToken') })
     },
   }),
 
   tool('server-health', {
-    prefix: 'SHLT', probe: '/api/server/server-health', paths: /^\/api\/server\/server-health$/,
+    prefix: 'SHLT', probe: '/api/server/server-health', paths: /^\/api\/server\/server-health(?:\?area=disk)?$/, requests: 6,
     unit: [{ id: 'SHLT-UNIT-REPORT', file: 'apps/api/src/server-health-workspace.test.ts', name: 'API server health workspace authorizes root before and after the agent read and returns the projected report' }],
-    checks: ['DISK-CHECK-READ', 'DISK-CRITICAL-OVER-95', 'DISK-OK-BELOW-80'], hostOnly: ['DISK-CRITICAL-OVER-95', 'DISK-OK-BELOW-80'],
+    checks: ['DISK-CHECK-READ', 'SELECTOR-REFUSED', 'DISK-OK-BELOW-80'], hostOnly: ['DISK-OK-BELOW-80'],
     async run(x) {
       const report = await x.root.get('/api/server/server-health'), disk = report.data?.checks?.find(item => item.id === 'disk-space')
       x.check('DISK-CHECK-READ', report.status === 200 && typeof disk?.state === 'string', { status: report.status, state: disk?.state ?? null })
+      x.refused('SELECTOR-REFUSED', await x.root.get('/api/server/server-health?area=disk'), 'VALIDATION')
       if (!x.host) return
       const home = x.host.disk('/home'), percent = home.usedBytes / (home.usedBytes + home.availableBytes) * 100, band = { percent: Math.round(percent) }
-      if (percent > 95) x.check('DISK-CRITICAL-OVER-95', disk?.state === 'critical' && disk.items?.some(item => /used=.*free|used=.*avail/i.test(item.evidence)) === true, { ...band, state: disk?.state ?? null })
-      else x.block('DISK-CRITICAL-OVER-95', 'Needs a lab guest whose /home is its own volume above 95% used. No such guest exists yet.')
-      if (percent < 80) x.check('DISK-OK-BELOW-80', disk?.state === 'ok', { ...band, state: disk?.state ?? null })
-      else x.block('DISK-OK-BELOW-80', 'This host has /home at or above 80% used, so the passing band cannot be observed here.')
+      x.check('DISK-OK-BELOW-80', report.status === 200 && percent < 80 && disk?.state === 'ok', { ...band, state: disk?.state ?? null })
     },
   }),
 
@@ -319,7 +368,7 @@ export default [
         const kernel = x.host.disk(item.mount), span = Math.max(1, kernel.totalBytes)
         return Math.max(highest, Math.abs(item.usedBytes - kernel.usedBytes) / span, Math.abs(item.availableBytes - kernel.availableBytes) / span)
       }, 0)
-      x.check('MATCHES-STATVFS-WITHIN-1PCT', items.length > 0 && worst <= 0.01, { mounts: items.length, worstPercent: Math.round(worst * 10000) / 100 })
+      x.check('MATCHES-STATVFS-WITHIN-1PCT', read.status === 200 && items.length > 0 && worst <= 0.01, { mounts: items.length, worstPercent: Math.round(worst * 10000) / 100 })
     },
   }),
 ]

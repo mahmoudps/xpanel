@@ -115,16 +115,22 @@ describe('driver execution', () => {
 
   it('accepts only the exact refusal a criterion names', async () => {
     const results: boolean[] = []
-    const { driver } = tool('audit-log', { ...definition, run: async ({ refused }: { refused: (id: string, response: object, expected: string | number) => boolean }) => {
+    const { driver } = tool('audit-log', { ...definition, run: async ({ refused }: { refused: (id: string, response: object, expected: string | number | readonly (string | number)[]) => boolean }) => {
       results.push(refused('ONE', { status: 400, data: { code: 'CONFLICT' } }, 'CONFLICT'))
       results.push(refused('ONE', { status: 400, data: { code: 'VALIDATION' } }, 'VALIDATION_ERROR'))
       results.push(refused('ONE', { status: 400, data: { code: 'OTHER' } }, 'CONFLICT'))
       results.push(refused('ONE', { status: 200, data: { code: 'CONFLICT' } }, 'CONFLICT'))
       results.push(refused('ONE', { status: 401, data: {} }, 401))
       results.push(refused('ONE', { status: 200, data: {} }, 401))
+      results.push(refused('ONE', { status: 422, data: { code: 'VALIDATION' } }, ['VALIDATION', 'PRECONDITION_FAILED']))
+      results.push(refused('ONE', { status: 409, data: { code: 'CONFLICT' } }, ['VALIDATION', 'PRECONDITION_FAILED']))
     } })
     await run(driver, {})
-    expect(results).toEqual([true, false, false, false, true, false])
+    expect(results).toEqual([true, false, false, false, true, false, true, false])
+    const sent: unknown[] = []
+    const client = apiClient(async (_path: string, init: unknown) => { sent.push(init); return { status: 204, data: null } }, { cookie: 'c=1', csrf: 't' })
+    await client.delete('/api/x', undefined, { noBody: true })
+    expect(sent[0]).not.toHaveProperty('body')
   })
 
   it('signs in each actor, then revokes both sessions; a leftover keeps the run from a receipt', async () => {
@@ -225,8 +231,11 @@ describe('run fixture', () => {
     expect(seen.filter(item => item.method === 'DELETE').map(item => item.path)).toEqual(['/api/accounts/account-id', '/api/plans/plan-id', '/api/feature-lists/list-id'])
   })
 
-  it('finds the other panels on the same host name', () => {
+  it('finds the other panels on the same host name or paired entry host names', () => {
     expect(entryOrigin('https://lab.example.net:2087', 2083)).toBe('https://lab.example.net:2083')
+    expect(entryOrigin('https://whm.lab.example.net:2087', 2083)).toBe('https://lab.example.net:2083')
+    expect(entryOrigin('https://whm.lab.example.net:2087', 2096)).toBe('https://mail.lab.example.net:2096')
+    expect(entryOrigin('https://whm.lab.example.net:2087', 2087)).toBe('https://whm.lab.example.net:2087')
   })
 })
 
