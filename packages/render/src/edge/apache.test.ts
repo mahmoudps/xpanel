@@ -251,6 +251,20 @@ describe('renderApacheVhost', () => {
     for (const l of lines) expect(l.length).toBeLessThan(8192)
     expect(lines.join(' ')).toContain('www.parked39.example')
   })
+
+  it('renders Apache mod_security2 rule engine per site and server policy', () => {
+    const on = renderApacheVhost(a, domain(), settings(), debianOs, { modsecurityRuleEngine: 'On' }).content
+    expect(on).toContain('<IfModule mod_security2.c>')
+    expect(on).toContain('SecRuleEngine On')
+    const detect = renderApacheVhost(a, domain(), settings(), debianOs, { modsecurityRuleEngine: 'DetectionOnly' }).content
+    expect(detect).toContain('SecRuleEngine DetectionOnly')
+    const siteOff = renderApacheVhost(a, domain(), settings(), debianOs, {
+      modsecurityRuleEngine: 'On',
+      waf: { 'example.com': { modsecurity: false } },
+    }).content
+    expect(siteOff).toContain('SecRuleEngine Off')
+    expect(siteOff).not.toContain('SecRuleEngine On')
+  })
 })
 
 describe('account pages', () => {

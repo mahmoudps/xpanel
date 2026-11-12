@@ -80,7 +80,7 @@ function verifyAdapterInputs(targetDocument) {
   readProtectedBytes({ file: fileURLToPath(new URL('../vm/source-snapshot.mjs', import.meta.url)), expectedSha256: snapshot.sha256, maxBytes: 1024 * 1024 })
 }
 
-function processIdentity(role, expected, root, runnerExecutableSha256) {
+function processIdentity(role, expected, root, runnerExecutableSha256, runnerExecutablePath, runnerStat) {
   const base = `/proc/${expected.pid}`
   const startTicks = parseProcStartTicks(readFileSync(`${base}/stat`, 'utf8'))
   const status = readFileSync(`${base}/status`, 'utf8')
@@ -92,7 +92,10 @@ function processIdentity(role, expected, root, runnerExecutableSha256) {
   const entryArg = parts.find(value => value.endsWith(`/apps/${role}/src/main.ts`) || value === `apps/${role}/src/main.ts`)
   requireValue(entryArg !== undefined && realpathSync(resolve(root, entryArg)) === realpathSync(entry) && sha256(command) === expected.commandSha256, 'Measured process entrypoint or command changed')
   const executable = realpathSync(`${base}/exe`), procStat = statSync(`${base}/exe`), fileStat = statSync(executable)
-  requireValue(procStat.dev === fileStat.dev && procStat.ino === fileStat.ino && expected.executableSha256 === runnerExecutableSha256 && hashArtifact(executable).sha256 === expected.executableSha256, 'Measured process does not use the reviewed pinned executable')
+  const executableSha256 = executable === runnerExecutablePath && fileStat.dev === runnerStat.dev && fileStat.ino === runnerStat.ino
+    ? runnerExecutableSha256
+    : hashArtifact(executable).sha256
+  requireValue(procStat.dev === fileStat.dev && procStat.ino === fileStat.ino && expected.executableSha256 === runnerExecutableSha256 && executableSha256 === expected.executableSha256, 'Measured process does not use the reviewed pinned executable')
   return { pid: expected.pid, uid: expected.uid, startTicks, commandSha256: expected.commandSha256, executableSha256: expected.executableSha256, mountNamespace: readlinkSync(`${base}/ns/mnt`) }
 }
 
@@ -126,8 +129,8 @@ export function verifyInstalledRelease({ binding, targetDocument, artifact, dead
   requireValue(provenance.verificationSource?.algorithm === targetDocument.source.algorithm && provenance.verificationSource?.sourceFingerprint === targetDocument.target.sourceFingerprint && provenance.verificationSource?.commit === targetDocument.source.commit && provenance.verificationSource?.dirty === false, 'Installed provenance does not match the clean qualification source')
   const archive = hashArtifact(artifact)
   requireValue(archive.sha256 === targetDocument.target.artifactSha256 && archive.bytes === targetDocument.provenance.document.artifact.bytes, 'Available release archive differs from the installed target binding')
-  const runnerExecutableSha256 = hashArtifact(process.execPath).sha256
-  const roles = Object.fromEntries(['api', 'agent'].map(role => { checkDeadline(); return [role, processIdentity(role, binding.roles[role], root, runnerExecutableSha256)] }))
+  const runnerExecutablePath = realpathSync(process.execPath), runnerStat = statSync(runnerExecutablePath), runnerExecutableSha256 = hashArtifact(runnerExecutablePath).sha256
+  const roles = Object.fromEntries(['api', 'agent'].map(role => { checkDeadline(); return [role, processIdentity(role, binding.roles[role], root, runnerExecutableSha256, runnerExecutablePath, runnerStat)] }))
   requireValue(process.pid !== roles.agent.pid && process.pid !== roles.api.pid, 'The observer runner cannot be the measured service')
   return { sourceFingerprint: provenance.verificationSource.sourceFingerprint, artifactSha256: archive.sha256, manifestSha256: binding.manifestSha256, inventoryFiles: entries.length, inventoryBytes: total, roles, bootId: binding.bootId, qualificationAdmission: binding.qualificationAdmission }
 }

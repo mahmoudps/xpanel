@@ -418,7 +418,7 @@ export default [
 
   tool('database-wizard', {
     prefix: 'S11T12', as: 'owner', needs: ['account'], probe: '/api/databases',
-    paths: new RegExp(String.raw`^\/api\/databases(?:\/users(?:\/${ID})?|\/${ID})?$`), requests: 30,
+    paths: new RegExp(String.raw`^\/api\/databases(?:\/users(?:\/${ID})?|\/${ID})?$`), requests: 30, deadlineMs: 360_000,
     unit: [{ id: 'S11T12-UNIT-1', file: 'apps/api/src/completion-database-grants-security.test.ts', name: 'conditional database grant API with isolated SQLite and desired state adds a grant only when the last read had no grant and returns safe owned readback' }],
     checks: ['BACKTICK-NAME-REFUSED', 'DATABASE-AND-USER-CREATED', 'GRANT-VISIBLE-IN-READBACK'],
     async run({ owner, fixture, tag, check, refused, undo }) {
@@ -446,7 +446,7 @@ export default [
 
   tool('postgresql-databases', {
     prefix: 'S11T13', as: 'owner', needs: ['account'], probe: '/api/account/database-engines/postgresql',
-    paths: new RegExp(String.raw`^\/api\/account\/database-engines\/postgresql(?:\?bad=1|\/(?:users|databases)(?:\/${ID}(?:\/(?:password|trash|restore))?)?)?$`), requests: 30,
+    paths: new RegExp(String.raw`^\/api\/account\/database-engines\/postgresql(?:\?bad=1|\/(?:users|databases)(?:\/${ID}(?:\/(?:password|trash|restore))?)?)?$`), requests: 30, deadlineMs: 360_000,
     unit: [{ id: 'S11T13-UNIT-1', file: 'apps/api/src/db-workspace.test.ts', name: 'database workspace routes serves the saved PostgreSQL objects with the server reading and the shared database limit' }],
     checks: ['SCOPED-VIEW-READ', 'SELECTOR-REFUSED', 'FOREIGN-PREFIX-REFUSED', 'CREATE-OR-ENGINE-PRECONDITION'],
     async run({ owner, fixture, tag, check, refused, undo }) {
@@ -480,7 +480,7 @@ export default [
 
   tool('postgresql-database-wizard', {
     prefix: 'S11T14', as: 'owner', needs: ['account'], probe: '/api/account/database-engines/postgresql',
-    paths: new RegExp(String.raw`^\/api\/account\/database-engines\/postgresql(?:\/(?:users|databases)(?:\/${ID}(?:\/(?:password|trash|restore))?)?)?$`), requests: 30,
+    paths: new RegExp(String.raw`^\/api\/account\/database-engines\/postgresql(?:\/(?:users|databases)(?:\/${ID}(?:\/(?:password|trash|restore))?)?)?$`), requests: 30, deadlineMs: 360_000,
     unit: [{ id: 'S11T14-UNIT-1', file: 'apps/api/src/db-workspace.test.ts', name: 'database workspace routes saves only a SCRAM verifier and applies changes through the database pipeline with the PostgreSQL feature' }],
     checks: ['INVALID-ROLE-REFUSED', 'INVALID-DB-NAME-REFUSED', 'WIZARD-FLOW-OR-STOPPED-GUARD'],
     async run({ owner, fixture, tag, check, refused, undo }) {

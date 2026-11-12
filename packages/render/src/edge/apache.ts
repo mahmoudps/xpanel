@@ -212,6 +212,8 @@ export interface ApacheVhostOptions {
   pageScope?: string
   /** per-site WAF policy so Apache mod_security2 honours per-domain ModSecurity switches */
   waf?: Record<string, Pick<WafSitePolicy, 'modsecurity'>>
+  /** server-wide Apache mod_security2 rule engine for vhosts without an explicit off switch */
+  modsecurityRuleEngine?: 'On' | 'Off' | 'DetectionOnly'
 }
 
 interface DefaultPage { scope: string | undefined; fallbackIndex: string[] }
@@ -248,7 +250,7 @@ const vhostBody = (
   os: OsProfile,
   mpm: ApacheMpm,
   settings: ServerSettings,
-  opts: { now?: RenderTime; maxClientsVHost?: number; pageScope?: string; waf?: Record<string, Pick<WafSitePolicy, 'modsecurity'>> } = {},
+  opts: { now?: RenderTime; maxClientsVHost?: number; pageScope?: string; waf?: Record<string, Pick<WafSitePolicy, 'modsecurity'>>; modsecurityRuleEngine?: 'On' | 'Off' | 'DetectionOnly' } = {},
 ): string[] => {
   const d = g.main
   const user = account.username
@@ -258,7 +260,8 @@ const vhostBody = (
     const a = assertApacheTuning(settings)
     identity.push(`MaxClientsVHost ${assertInt('MaxClientsVHost', opts.maxClientsVHost, 1, a.maxRequestWorkers)}`)
   }
-  const modsecOff = opts.waf?.[d.name]?.modsecurity === false ? section('IfModule mod_security2.c', 'IfModule', ['SecRuleEngine Off']) : []
+  const siteModsec = opts.waf?.[d.name]?.modsecurity === false ? 'Off' : opts.modsecurityRuleEngine
+  const modsecOff = siteModsec ? section('IfModule mod_security2.c', 'IfModule', [`SecRuleEngine ${siteModsec}`]) : []
   const wiring = d.siteType === 'php' ? phpWiring(d.php.handler, mpm) : null
   const mode = siteMode(account, d, opts.now)
 
@@ -314,7 +317,7 @@ const renderGroupVhost = (
   g: SiteGroup,
   settings: ServerSettings,
   os: OsProfile,
-  opts: { now?: RenderTime; maxClientsVHost?: number; pageScope?: string; waf?: Record<string, Pick<WafSitePolicy, 'modsecurity'>> } = {},
+  opts: { now?: RenderTime; maxClientsVHost?: number; pageScope?: string; waf?: Record<string, Pick<WafSitePolicy, 'modsecurity'>>; modsecurityRuleEngine?: 'On' | 'Off' | 'DetectionOnly' } = {},
 ): RenderedFile => {
   const mpm = assertApacheEngine(settings)
   const addr = `127.0.0.1:${assertBackendPort(settings)}`
@@ -348,6 +351,7 @@ export const renderApacheVhost = (
     ...(opts.maxClientsVHost !== undefined && { maxClientsVHost: opts.maxClientsVHost }),
     ...(opts.pageScope !== undefined && { pageScope: opts.pageScope }),
     ...(opts.waf !== undefined && { waf: opts.waf }),
+    ...(opts.modsecurityRuleEngine !== undefined && { modsecurityRuleEngine: opts.modsecurityRuleEngine }),
   })
 }
 
@@ -357,7 +361,7 @@ export const renderApacheVhosts = (
   domains: Domain[],
   settings: ServerSettings,
   os: OsProfile,
-  opts: { now?: RenderTime; maxClientsVHost?: number; pageScope?: string; waf?: Record<string, Pick<WafSitePolicy, 'modsecurity'>> } = {},
+  opts: { now?: RenderTime; maxClientsVHost?: number; pageScope?: string; waf?: Record<string, Pick<WafSitePolicy, 'modsecurity'>>; modsecurityRuleEngine?: 'On' | 'Off' | 'DetectionOnly' } = {},
 ): RenderedFile[] => {
   assertApacheEngine(settings)
   return groupSites(account, domains).map((g) => renderGroupVhost(account, g, settings, os, opts))

@@ -625,7 +625,11 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
       // root-granted disable_functions exceptions follow the account on every handler and version
       const allowedFunctions = settings.phpFunctionExceptions?.find(item => item.account === account.username)?.functions ?? []
       if (settings.engine === 'apache') {
-        files.push(...edge.renderApacheVhosts(account, edge.servedDomains(accountDomains), settings, os, { now, ...(opts.secEdge ? { waf: opts.secEdge.sites } : {}), ...(opts.accountPages ? { pageScope: opts.accountPages.scopeOf.get(account.id) ?? '' } : {}) }))
+        files.push(...edge.renderApacheVhosts(account, edge.servedDomains(accountDomains), settings, os, {
+          now,
+          ...(opts.secEdge ? { waf: opts.secEdge.sites, ...(opts.secEdge.edge.apacheRuleEngine ? { modsecurityRuleEngine: opts.secEdge.edge.apacheRuleEngine } : {}) } : {}),
+          ...(opts.accountPages ? { pageScope: opts.accountPages.scopeOf.get(account.id) ?? '' } : {}),
+        }))
         for (const dom of accountDomains) {
           if (dom.siteType === 'php' && dom.php.handler !== 'fpm') {
             preActions.push(...edge.cgiWrapperDirs(account, settings, os))

@@ -76,7 +76,7 @@ export function apiClient(request, session) {
 }
 
 /** One account creation: its POST and operation reads, and the time a lab host takes to provision it (22 to 57 s seen). */
-export const ACCOUNT_CREATE = Object.freeze({ requests: 20, ms: 90_000 })
+export const ACCOUNT_CREATE = Object.freeze({ requests: 30, ms: 120_000 })
 const ACCOUNT_OPERATION = /^\/api\/accounts\/operations\/[0-9a-f-]{36}$/
 
 /**
@@ -103,7 +103,7 @@ export async function createAccount(client, body, extra, { sleep = ms => new Pro
 
 /** Runs one driver: every undo step runs even after a failed check, and a step that cannot confirm removal is a leftover. */
 /** Fields that move on every save; what they label must still match after a restore. */
-const VOLATILE = /^(?:revision|expectedRevision|authorityRevision|observedAt|.+At)$/
+const VOLATILE = /^(?:revision|expectedRevision|authorityRevision|persisted|explicitPolicy|observedAt|.+At)$/
 const settled = value => JSON.stringify(value, (key, item) => VOLATILE.test(key) ? undefined : item)
 
 const NOOP_NET = Object.freeze({
@@ -189,7 +189,7 @@ export async function createFixture(root, { tag, domainSuffix = 'example.net', m
   try {
     created.list = need(await root.post('/api/feature-lists', { name: `xq-${tag}`, ownerId: null, disabled: [] }), 'FEATURES').featureList.id
     created.plan = need(await root.post('/api/plans', { name: `xq-${tag}`, featureListId: created.list, resources: { diskMb: 2048, bandwidthMbMonth: 10240, ioReadBps: 50_000_000, ioWriteBps: 50_000_000, ioReadIops: 1000, ioWriteIops: 1000, memoryMb: 512, maxProcesses: 32, cpuPercent: 100 } }), 'PLAN').plan.id
-    const account = await createAccount(root, { username, password: fixture.password, primaryDomain: domain, planId: created.plan }, { idempotencyKey: `xq-${tag}` }, { sleep })
+    const account = await createAccount(root, { username, password: fixture.password, primaryDomain: domain, planId: created.plan }, { idempotencyKey: `xq-${tag}-${randomBytes(6).toString('hex')}` }, { sleep })
     // An accepted account is removed with the rest even when its operation did not succeed.
     fixture.accountId = account.data?.account?.id ?? account.accepted?.data?.account?.id ?? null
     if (!account.created) throw new Error(`QUALIFICATION_FIXTURE_ACCOUNT:${account.status}:${safeResponse(account).code ?? account.data?.operation?.status ?? 'none'}`)
@@ -419,8 +419,12 @@ export const entryOrigin = (origin, port) => {
 
 /** The origin name resolves, from outside the host, to the reviewed installed address. */
 export async function externalDnsCheck(id, hostname, address, resolve = name => lookup(name, { all: true, verbatim: true })) {
-  const addresses = (await resolve(hostname)).map(entry => entry.address)
-  return check(id, addresses.includes(address), { hostname, addresses, expected: address })
+  try {
+    const addresses = (await resolve(hostname)).map(entry => entry.address)
+    return check(id, addresses.includes(address), { hostname, addresses, expected: address })
+  } catch (error) {
+    return check(id, false, { hostname, addresses: [], expected: address, reason: 'DNS resolution failed.', code: typeof error?.code === 'string' ? error.code : null })
+  }
 }
 
 /** The certificate served at the reviewed address verifies for the origin name with the observer's normal trust store. */

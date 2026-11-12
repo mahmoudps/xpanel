@@ -56,15 +56,19 @@ export default [
     prefix: 'DDZ', as: 'root', probe: '/api/dns/zones',
     paths: new RegExp(`^\\/api\\/${zonePath}$`),
     unit: [{ id: 'DDZ-UNIT-1', file: 'apps/api/src/completion-whm-dns-security.test.ts', name: 'xWHM DNS revision-bound loopback HTTP acceptance deletes only the exact reviewed zone and leaves other zones intact' }],
-    checks: ['AUTHORITATIVE-GONE', 'SECOND-DELETE-NOT-FOUND'],
-    async run({ root, net, tag, check, refused, undo }) {
+    checks: ['AUTHORITATIVE-GONE', 'SECOND-DELETE-NOT-FOUND'], hostOnly: ['AUTHORITATIVE-GONE'],
+    async run({ root, net, host, tag, check, refused, undo }) {
       const name = `xq-${tag}.example.net`
       undo('DNS zone', dropZone(root, name))
       const created = await putZone(root, name, [record(name, '@', 'A', '192.0.2.78')], null), body = { expectedZoneRevision: created.data?.revision ?? null }
       const deleted = await root.delete(`/api/dns/zones/${name}`, body)
-      const remaining = await listZones(root), dns = await net.dnsQuery(name, 1)
-      check('AUTHORITATIVE-GONE', created.status === 200 && deleted.status === 200 && Array.isArray(remaining) && !remaining.some(zone => zone.name === name) && dns.ok && (dns.rcode === 3 || dns.rcode === 5 || (!dns.authoritative && dns.answers.length === 0)), { deleted: deleted.status, listed: Array.isArray(remaining), dnsOk: dns.ok, rcode: dns.rcode, authoritative: dns.authoritative ?? false })
-      refused('SECOND-DELETE-NOT-FOUND', await root.delete(`/api/dns/zones/${name}`, body), 'NOT_FOUND')
+      const remaining = await listZones(root)
+      if (host) {
+        const dns = await net.dnsQuery(name, 1)
+        check('AUTHORITATIVE-GONE', created.status === 200 && deleted.status === 200 && Array.isArray(remaining) && !remaining.some(zone => zone.name === name) && dns.ok && (dns.rcode === 3 || dns.rcode === 5 || (!dns.authoritative && dns.answers.length === 0)), { deleted: deleted.status, listed: Array.isArray(remaining), dnsOk: dns.ok, rcode: dns.rcode, authoritative: dns.authoritative ?? false })
+      }
+      const second = created.status === 200 && deleted.status === 200 && Array.isArray(remaining) && !remaining.some(zone => zone.name === name) ? await root.delete(`/api/dns/zones/${name}`, body) : { status: 0 }
+      refused('SECOND-DELETE-NOT-FOUND', second, 'NOT_FOUND')
     },
   }),
 
@@ -155,7 +159,7 @@ export default [
     paths: new RegExp(`^\\/api\\/(?:${zonePath}|server\\/dns-ops\\/mail-auth|ips)$`),
     unit: [{ id: 'DSB-UNIT-1', file: 'apps/api/src/dkim-provisioning.test.ts', name: 'DNS email-auth public key provisioning publishes the actual public key and active selector without leaking a private key' }],
     checks: ['SPF-HAS-MAIN-IPV4', 'SPF-KEEPS-INCLUDE', 'DKIM-SELECTOR-TXT-ADDED'],
-    async run({ root, net, fixture, check, undo, until }) {
+    async run({ root, net, host, fixture, check, undo, until }) {
       const domain = fixture.domain, original = await zoneOf(root, domain)
       undo('fixture zone', restoreZone(root, domain, original))
       const kept = (original?.records ?? []).filter(item => !(item.type === 'TXT' && (item.name === '@' && /^v=spf1/i.test(item.content) || item.name.endsWith('._domainkey'))))
@@ -174,7 +178,7 @@ export default [
       const stamp = date => `xp${date.getUTCFullYear()}${String(date.getUTCMonth() + 1).padStart(2, '0')}`
       const now = new Date(), prev = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1))
       let dkimOk = false
-      if (okJob) {
+      if (okJob && host) {
         for (const selector of new Set([stamp(now), stamp(prev)])) {
           const dns = await net.dnsQuery(`${selector}._domainkey.${domain}`, 16)
           if (dns.answers.some(item => item.type === 16 && /^v=DKIM1\b/i.test(item.data))) { dkimOk = true; break }
@@ -188,12 +192,12 @@ export default [
     prefix: 'CHN', restores: ['/api/server/settings'], as: 'root', probe: '/api/server/settings',
     paths: /^\/api\/server\/(?:settings|hostname|ftp\/settings)$/,
     unit: [{ id: 'CHN-UNIT-1', file: 'packages/state/src/hostname-consistency.test.ts', name: 'canonical hostname mutation authority advances canonical authority once and preserves unrelated server settings' }],
-    checks: ['INVALID-LEADING-WWW', 'INVALID-LEADING-DIGIT', 'INVALID-TRAILING-HYPHEN', 'INVALID-61-CHARACTERS', 'VALID-NAME-RETURNED', 'VALID-NAME-USED-BY-MTA'],
-    async run({ root, net, check, refused, undo }) {
+    checks: ['INVALID-LEADING-WWW', 'INVALID-LEADING-DIGIT', 'INVALID-TRAILING-HYPHEN', 'INVALID-61-CHARACTERS', 'VALID-NAME-RETURNED', 'VALID-NAME-USED-BY-MTA'], hostOnly: ['VALID-NAME-USED-BY-MTA'],
+    async run({ root, net, host, check, refused, undo }) {
       const before = await root.get('/api/server/settings'), original = before.data?.settings, hostname = original?.hostname
       if (typeof hostname !== 'string') {
         check('VALID-NAME-RETURNED', false, { status: before.status })
-        check('VALID-NAME-USED-BY-MTA', false, { status: before.status })
+        if (host) check('VALID-NAME-USED-BY-MTA', false, { status: before.status })
         return
       }
       undo('host name', async () => {
@@ -208,8 +212,10 @@ export default [
       refused('INVALID-61-CHARACTERS', await root.post('/api/server/hostname', { hostname: `${'a'.repeat(49)}.example.com` }), 'VALIDATION')
       const set = await root.post('/api/server/hostname', { hostname }), read = await root.get('/api/server/settings')
       check('VALID-NAME-RETURNED', set.status === 200 && set.data?.hostname === hostname && read.data?.settings?.hostname === hostname, { set: set.status, read: read.status })
-      const smtp = set.status === 200 ? await net.tcpBanner(25) : { ok: false, banner: '' }
-      check('VALID-NAME-USED-BY-MTA', set.status === 200 && smtp.ok && /^220\b/.test(smtp.banner) && smtp.banner.toLowerCase().includes(hostname.toLowerCase()), { set: set.status, smtpOk: smtp.ok, bannerHasHostname: smtp.banner.toLowerCase().includes(hostname.toLowerCase()) })
+      if (host) {
+        const smtp = set.status === 200 ? await net.tcpBanner(25) : { ok: false, banner: '' }
+        check('VALID-NAME-USED-BY-MTA', set.status === 200 && smtp.ok && /^220\b/.test(smtp.banner) && smtp.banner.toLowerCase().includes(hostname.toLowerCase()), { set: set.status, smtpOk: smtp.ok, bannerHasHostname: smtp.banner.toLowerCase().includes(hostname.toLowerCase()) })
+      }
     },
   }),
 
