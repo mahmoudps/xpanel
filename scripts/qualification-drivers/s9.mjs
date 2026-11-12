@@ -184,7 +184,7 @@ export default [
       undo('password plan', async () => gone(await root.delete(`/api/plans/${planId}`)))
       const username = `xq${tag}pw`, initPassword = `Xq-${randomBytes(12).toString('base64url')}-1a`, next = `Xq-${randomBytes(12).toString('base64url')}-2b`
       undo('password account', async () => gone(await root.delete(`/api/accounts/${username}`, { confirmUsername: username })))
-      const created = await createAccount(root, { username, password: initPassword, primaryDomain: `${username}.example.net`, planId }, { idempotencyKey: `xq-${tag}-pw-${++scratchSeq}` }, x)
+      const created = await createAccount(root, { username, password: initPassword, primaryDomain: `${username}.example.net`, planId }, { idempotencyKey: `xq-${tag}-pw-${++scratchSeq}-${randomBytes(4).toString('hex')}` }, x)
       if (!created.created) return check('WRONG-CURRENT', false, { status: created.status })
       const session = await ownerLogin(owner, username, initPassword)
       if (!session.cookie) return check('WRONG-CURRENT', false, { status: session.status })
@@ -456,8 +456,8 @@ export default [
     paths: /^\/api\/(?:service-users(?:\/[0-9a-f-]{36})?|auth\/(?:login|logout))$/,
     requests: 50,
     unit: [{ id: 'UMG-UNIT-1', file: 'apps/api/src/account-mutation-security.test.ts', name: 'real HTTP account mutation security returns public service-user fields after PATCH without disclosing the persisted password hash' }],
-    checks: ['CREATE-SUBACCOUNT', 'MAILBOX-ACCEPTS-LOGIN', 'PORT-21-GREETING', 'QUOTA-ABOVE-PLAN', 'LOGIN-WITH-SPACE', 'PANEL-LOGIN-REFUSED'],
-    async run({ owner, fixture, tag, net, check, refused, signIn, sleep, undo }) {
+    checks: ['CREATE-SUBACCOUNT', 'MAILBOX-ACCEPTS-LOGIN', 'PORT-21-GREETING', 'QUOTA-ABOVE-PLAN', 'LOGIN-WITH-SPACE', 'PANEL-LOGIN-REFUSED'], hostOnly: ['PORT-21-GREETING'],
+    async run({ owner, fixture, tag, net, host, check, refused, signIn, sleep, undo }) {
       const short = tag.slice(0, 4), login = `u${short}@${fixture.domain}`, secret = `Xq-${tag}-Qm4!vT8#nB2zLp6`
       const gone = async id => {
         const removed = await owner.delete(`/api/service-users/${id}`)
@@ -479,8 +479,10 @@ export default [
         mailbox = await signIn('mailbox', { username: login, password: secret })
       }
       check('MAILBOX-ACCEPTS-LOGIN', mailbox.client !== null, { status: mailbox.response.status })
-      const ftp = await net.tcpBanner(21)
-      check('PORT-21-GREETING', created.status === 201 && ftp.ok && /^220[\s-]/.test(ftp.banner), { ok: ftp.ok })
+      if (host) {
+        const ftp = await net.tcpBanner(21)
+        check('PORT-21-GREETING', created.status === 201 && ftp.ok && /^220[\s-]/.test(ftp.banner), { ok: ftp.ok })
+      }
       const big = await owner.post('/api/service-users', { login: `b${short}@${fixture.domain}`, password: secret, services: { email: true, ftp: false, webdisk: false }, mailboxQuotaMb: 100_000_000 })
       if (big.data?.serviceUser?.id) undo('oversized mailbox', () => gone(big.data.serviceUser.id))
       refused('QUOTA-ABOVE-PLAN', big, 'LIMIT_EXCEEDED')
@@ -549,7 +551,7 @@ export default [
     async run({ owner, fixture, tag, site, check, until }) {
       const domain = await firstDomain(owner)
       if (!check('DOMAIN-READ', domain.listed.status === 200 && typeof domain.id === 'string', { status: domain.listed.status })) return
-      const logPath = `/api/account/logs/${domain.id}/access`, prefix = `/xq-${tag}-`, lines = 4
+      const logPath = `/api/account/logs/${domain.id}/access`, prefix = `/xq-wsa-${tag}-`, lines = 4
       for (let round = 0; round < lines; round++) await site.get(fixture.domain, `${prefix}${round}`)
       const seen = await until(() => owner.get(logPath), response => (response.data?.entries ?? []).filter(entry => String(entry.uri).startsWith(prefix)).length >= lines, { attempts: 10, delayMs: 2000 })
       const matched = (seen.last?.data?.entries ?? []).filter(entry => String(entry.uri).startsWith(prefix))

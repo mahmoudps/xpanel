@@ -617,7 +617,7 @@ export default [
     paths: /^\/api\/(?:server\/settings|domains|accounts\/[a-z][a-z0-9]{0,15}\/files)$/, requests: 35,
     unit: [{ id: 'S15T21-UNIT-1', file: 'packages/render/src/edge/web-directives.test.ts', name: 'web stack directives renders saved Global Configuration, compression, DirectoryIndex order and memory limits' }],
     checks: ['TRAVERSAL-DIRECTORY-INDEX-REFUSED', 'DUPLICATE-DIRECTORY-INDEX-REFUSED', 'DIRECTORY-INDEX-PRIORITY-SWAPPED'],
-    async run({ root, owner, fixture, site, tag, check, refused, undo }) {
+    async run({ root, owner, fixture, site, tag, until, check, refused, undo }) {
       const before = await root.get('/api/server/settings')
       const origSettings = before.data?.settings
       const baseWeb = effectiveWeb(origSettings)
@@ -648,14 +648,17 @@ export default [
       await sendFile({ op: 'mkdir', path: subDir })
       await sendFile({ op: 'put-bytes', path: `${subDir}/index.php`, contentBase64: b64(`<?php echo 'PHP_${tag}';`) })
       await sendFile({ op: 'put-bytes', path: `${subDir}/index.html`, contentBase64: b64(`HTML_${tag}`) })
+      const probeIndex = query => site.get(fixture.domain, `/xq-${tag}/?${query}`, { headers: { authorization: 'Bearer xq-nocache' } }).catch(() => ({ status: 0, text: '' }))
       const phpFirst = await root.put('/api/server/settings', {
         ...origSettings, web: { ...baseWeb, directoryIndex: ['index.php', 'index.html'] },
       })
-      const firstHit = await site.get(fixture.domain, `/xq-${tag}/`).catch(() => ({ status: 0, text: '' }))
+      const firstProbe = await until(() => probeIndex('v=1'), hit => hit.status === 200 && hit.text.includes(`PHP_${tag}`), { attempts: 10, delayMs: 500 })
+      const firstHit = firstProbe.last ?? { status: 0, text: '' }
       const htmlFirst = await root.put('/api/server/settings', {
         ...origSettings, web: { ...baseWeb, directoryIndex: ['index.html', 'index.php'] },
       })
-      const secondHit = await site.get(fixture.domain, `/xq-${tag}/`).catch(() => ({ status: 0, text: '' }))
+      const secondProbe = await until(() => probeIndex('v=2'), hit => hit.status === 200 && hit.text.includes(`HTML_${tag}`), { attempts: 10, delayMs: 500 })
+      const secondHit = secondProbe.last ?? { status: 0, text: '' }
       const restored = await root.put('/api/server/settings', origSettings)
       const trashed = await sendFile({ op: 'trash', path: subDir })
       if (trashed.status === 200) {

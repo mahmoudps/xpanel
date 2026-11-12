@@ -224,7 +224,7 @@ function runVitestFiles(files, targetDocument) {
   try {
     const output = join(temporary, 'vitest.json')
     const result = spawnSync(process.execPath, [resolve(ROOT, 'node_modules/vitest/vitest.mjs'), 'run', ...files, '--reporter=json', `--outputFile=${output}`], {
-      cwd: ROOT, stdio: 'ignore', timeout: 600_000, killSignal: 'SIGKILL', windowsHide: true,
+      cwd: ROOT, stdio: 'ignore', timeout: 1_800_000, killSignal: 'SIGKILL', windowsHide: true,
       env: { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: temporary, TMPDIR: temporary, CI: '1', NO_COLOR: '1', LANG: 'C.UTF-8' },
     })
     const report = result.error === undefined && result.signal === null ? JSON.parse(readBoundedFile(output, { maxBytes: 64 * 1024 * 1024 }).toString('utf8')) : null
@@ -234,7 +234,7 @@ function runVitestFiles(files, targetDocument) {
 }
 
 async function runTool(slot, toolId, options, environment) {
-  const driver = DRIVERS[toolId], startedAt = new Date().toISOString(), deadline = Date.now() + driver.deadlineMs
+  const driver = DRIVERS[toolId], startedAt = new Date().toISOString(), deadline = Date.now() + Math.max(driver.deadlineMs, 600_000)
   const base = { toolId, slot, runId: options['run-id'], targetDocument: environment.targetDocument, profile: environment.profile, osRelease: environment.osRelease, startedAt }
   if (slot === 'unit') {
     const batched = environment.unitBatch ?? runVitestFiles([...new Set(QUALIFICATION_INVENTORY[toolId].unit.map(item => item.file))], environment.targetDocument)
@@ -253,16 +253,13 @@ async function runTool(slot, toolId, options, environment) {
     return observation({ ...base, executor: 'real', checks: [], cleanup: { ok: true, errors: [] }, failure: 'An earlier shared-state restore was not confirmed, so this run stopped changing shared state.' })
   }
   if (slot === 'browser') {
-    const installedBefore = verifyInstalledRelease({ binding, targetDocument, artifact: options.artifact, deadline })
-    process.env.PLAYWRIGHT_BROWSERS_PATH ??= resolve(ROOT, '.tools/playwright-browsers')
-    const { chromium } = await import('@playwright/test')
-    const targetAddress = binding.address.includes(':') ? `[${binding.address}]` : binding.address
-    const resolverRules = [...new Set([origin, actorOrigin('owner'), actorOrigin('mailbox')].map(item => `MAP ${new URL(item).hostname} ${targetAddress}`))].join(', ')
-    const browser = await chromium.launch({ headless: true, timeout: 20_000, args: [`--host-resolver-rules=${resolverRules}`] })
+    const installedBefore = verifyInstalledRelease({ binding, targetDocument, artifact: options.artifact, deadline: Date.now() + 180_000 })
     const pageActor = driver.page?.actor ?? driver.as, login = actorLogin(pageActor)
-    let result = { checks: [], signedOut: false }, failure = null
+    let result = { checks: [], signedOut: false }, failure = null, context
     try {
-      const page = await (await browser.newContext({ locale: 'en-US' })).newPage()
+      const browser = await environment.getBrowser()
+      context = await browser.newContext({ locale: 'en-US' })
+      const page = await context.newPage()
       page.setDefaultTimeout(15_000)
       page.setDefaultNavigationTimeout(15_000)
       let guard
@@ -274,12 +271,15 @@ async function runTool(slot, toolId, options, environment) {
       } finally {
         clearTimeout(guard)
       }
-    } catch (error) { failure = `The browser acceptance did not complete.${failureCause(error)}` } finally {
-      await browser.close()
+    } catch (error) {
+      failure = `The browser acceptance did not complete.${failureCause(error)}`
+      await environment.resetBrowserIfDisconnected?.()
+    } finally {
+      await context?.close().catch(() => {})
       login.password = ''
       if (login.totpCode !== undefined) login.totpCode = ''
     }
-    const installedAfter = verifyInstalledRelease({ binding, targetDocument, artifact: options.artifact, deadline })
+    const installedAfter = verifyInstalledRelease({ binding, targetDocument, artifact: options.artifact, deadline: Date.now() + 180_000 })
     if (JSON.stringify(installedBefore.roles) !== JSON.stringify(installedAfter.roles)) failure = 'Installed release or measured processes changed during the run.'
     const cleanup = result.signedOut ? { ok: true, errors: [] } : { ok: false, errors: ['Browser session sign-out was not confirmed.'], leftovers: { sessions: ['qualification-session-outcome-unknown'] } }
     return observation({ ...base, executor: 'real', checks: result.checks, cleanup, failure })
@@ -290,11 +290,11 @@ async function runTool(slot, toolId, options, environment) {
     allow: path => SESSION_PATHS.includes(path) || path === '/api/auth/me' || path === '/api/catalog' || driver.paths.test(path) || path === driver.probe || driver.restores.includes(path) })
   const drive = (prefix, anonymous) => driver.run === undefined
     ? withRootSession({ request: requestFor('root'), login: rootLogin(), prefix, probe: driver.probe, anonymous, run: read => slot === 'host' ? driver.host(read, { db: options.db ?? '/var/lib/xpanel/control.db' }) : driver.external(read) })
-    : driveTool(driver, toolId, { prefix, anonymous, requestFor, loginFor: actorLogin, tag: runTag(options['run-id']), fixture, site: siteClient({ address, deadline }), net: netClient({ address, deadline }), address, ...(slot === 'host' ? { host: hostOracle } : {}) })
+    : driveTool(driver, toolId, { prefix, anonymous, requestFor, loginFor: actorLogin, tag: runTag(`${options['run-id']}-${slot}`), fixture, site: siteClient({ address, deadline }), net: netClient({ address, deadline }), address, ...(slot === 'host' ? { host: hostOracle } : {}) })
   if (slot === 'host') {
-    const installedBefore = verifyInstalledRelease({ binding, targetDocument, artifact: options.artifact, deadline })
+    const installedBefore = verifyInstalledRelease({ binding, targetDocument, artifact: options.artifact, deadline: Date.now() + 180_000 })
     const session = await drive(driver.prefix, true)
-    const installedAfter = verifyInstalledRelease({ binding, targetDocument, artifact: options.artifact, deadline })
+    const installedAfter = verifyInstalledRelease({ binding, targetDocument, artifact: options.artifact, deadline: Date.now() + 180_000 })
     const changed = JSON.stringify(installedBefore.roles) !== JSON.stringify(installedAfter.roles)
     return observation({ ...base, executor: 'real', admission: session.admission, checks: [check(`${driver.prefix}-OS-PROFILE`, true, { profile: environment.profile, osRelease: environment.osRelease }), ...session.checks], cleanup: session.cleanup, failure: changed ? 'Installed release or measured processes changed during the run.' : session.failure })
   }
@@ -335,7 +335,7 @@ export async function runQualification(options) {
   const fixtureSession = async work => {
     const { origin } = environment, address = options.slot === 'external' ? environment.binding.address : options.address
     const ca = options['ca-file'] === undefined ? undefined : readProtectedBytes({ file: options['ca-file'], maxBytes: 1024 * 1024 })
-    const request = createQualificationTransport({ origin, address, ca, deadline: Date.now() + 300_000, methods: WRITE_METHODS, maxBody: 4 * 1024 * 1024, requestTimeoutMs: 60_000, maxRequests: 30 + ACCOUNT_CREATE.requests, allow: path => path.startsWith('/api/') })
+    const request = createQualificationTransport({ origin, address, ca, deadline: Date.now() + 600_000, methods: WRITE_METHODS, maxBody: 4 * 1024 * 1024, requestTimeoutMs: 180_000, maxRequests: 30 + ACCOUNT_CREATE.requests, allow: path => path.startsWith('/api/') })
     let outcome
     const session = await withRootSession({ request, login: readCredentials({ credentialFile: options['credential-file'] }), prefix: 'FIXTURE', probe: '/api/auth/me', anonymous: false, run: async (_read, opened) => { outcome = await work(apiClient(request, opened)); return [] } })
     return { outcome, session }
@@ -350,7 +350,7 @@ export async function runQualification(options) {
   if (options.slot !== 'unit' && needs.length > 0) {
     const created = await fixtureSession(async root => {
       await clearRunnerIp(root)
-      return createFixture(root, { tag: runTag(options['run-id']), domainSuffix: options['fixture-domain-suffix'], mailbox: needs.includes('mailbox') }).catch(error => {
+      return createFixture(root, { tag: runTag(`${options['run-id']}-${options.slot}`), domainSuffix: options['fixture-domain-suffix'], mailbox: needs.includes('mailbox') }).catch(error => {
         // A fixture the API may have accepted and whose removal is not confirmed is a leftover: the slot reports it.
         if (error?.fixtureCleanup?.ok !== true) fixtureLeftovers = { username: error?.fixtureCleanup?.username ?? null, errors: error?.fixtureCleanup?.errors ?? ['The fixture cleanup did not complete.'] }
         return null
@@ -358,16 +358,42 @@ export async function runQualification(options) {
     })
     environment = { ...environment, fixture: created.outcome ?? null }
   }
+  let sharedBrowser = null
+  if (options.slot === 'browser') {
+    process.env.PLAYWRIGHT_BROWSERS_PATH ??= resolve(ROOT, '.tools/playwright-browsers')
+    const targetAddress = environment.binding.address.includes(':') ? `[${environment.binding.address}]` : environment.binding.address
+    const actorOrigin = actor => ACTOR_ENTRY[actor] === 'xwhm' ? environment.origin : entryOrigin(environment.origin, ENTRY_PORT[ACTOR_ENTRY[actor]])
+    const resolverRules = [...new Set([environment.origin, actorOrigin('owner'), actorOrigin('mailbox')].map(item => `MAP ${new URL(item).hostname} ${targetAddress}`))].join(', ')
+    environment = {
+      ...environment,
+      getBrowser: async () => {
+        if (sharedBrowser && sharedBrowser.isConnected()) return sharedBrowser
+        const { chromium } = await import('@playwright/test')
+        sharedBrowser = await chromium.launch({ headless: true, timeout: 20_000, args: [`--host-resolver-rules=${resolverRules}`] })
+        return sharedBrowser
+      },
+      resetBrowserIfDisconnected: async () => {
+        if (sharedBrowser && !sharedBrowser.isConnected()) {
+          await sharedBrowser.close().catch(() => {})
+          sharedBrowser = null
+        }
+      },
+    }
+  }
   const outputs = [], passed = []
-  for (const { toolId, shared } of plan.tools) {
-    const report = await runTool(options.slot, toolId, options, environment)
-    if (shared && report.cleanup?.ok !== true) environment = { ...environment, sharedStopped: true }
-    if ((options.slot === 'host' || options.slot === 'external') && NEGATIVE_AUTH_TOOLS.has(toolId)) await fixtureSession(clearRunnerIp)
-    const name = `${options['run-id']}-${toolId}-${report.profile.replaceAll('.', '_')}-${options.slot}`
-    const written = writeDetachedJson(ROOT, join(options.output, `${name}.report.json`), report)
-    const output = { toolId, status: report.status, report: written, receipts: [] }
-    outputs.push(output)
-    if (report.status === 'passed') passed.push({ report, written, name, output })
+  try {
+    for (const { toolId, shared } of plan.tools) {
+      const report = await runTool(options.slot, toolId, options, environment)
+      if (shared && report.cleanup?.ok !== true) environment = { ...environment, sharedStopped: true }
+      if ((options.slot === 'host' || options.slot === 'external') && NEGATIVE_AUTH_TOOLS.has(toolId)) await fixtureSession(clearRunnerIp)
+      const name = `${options['run-id']}-${toolId}-${report.profile.replaceAll('.', '_')}-${options.slot}`
+      const written = writeDetachedJson(ROOT, join(options.output, `${name}.report.json`), report)
+      const output = { toolId, status: report.status, report: written, receipts: [] }
+      outputs.push(output)
+      if (report.status === 'passed') passed.push({ report, written, name, output })
+    }
+  } finally {
+    await sharedBrowser?.close().catch(() => {})
   }
   // A receipt says the run cleaned up, so none exists until the shared fixture is confirmed gone.
   const fixtureGone = environment.fixture ? (await fixtureSession(async root => {

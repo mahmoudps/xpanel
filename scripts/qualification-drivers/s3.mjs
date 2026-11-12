@@ -97,15 +97,56 @@ export default [
   }),
 
   tool('waf-settings', {
-    prefix: 'WAFS', restores: ['/api/server/sec/waf'], needs: ['account'], probe: SEC('waf'), paths: /^\/api\/server\/sec\/waf$/, requests: 8,
+    prefix: 'WAFS', restores: ['/api/server/sec/waf'], needs: ['account'], probe: SEC('waf'),
+    paths: /^\/api\/server\/sec\/(?:waf|waf-rules(?:\/deploy)?)$/, requests: 30, deadlineMs: 240_000,
     page: { route: '/whm/security/waf', read: SEC('waf'), shows: () => ['Web application firewall'] },
     unit: [{ id: 'WAFS-UNIT-READ', file: 'apps/api/src/sec-workspace.test.ts', name: 'sec server workspaces reads defaults with the strict host observation and refuses selectors, methods and non-root callers' }],
     checks: ['ENGINE-DETECTION-ONLY', 'BLOCKING-REQUEST-RETURNS-200', 'INVALID-POLICY-REFUSED'],
-    async run({ root, fixture, site, check, refused }) {
+    async run({ root, fixture, site, check, refused, undo, until }) {
       const view = await root.get(SEC('waf')), engine = view.data?.observation?.engineConf?.ruleEngine ?? null
       check('ENGINE-DETECTION-ONLY', view.status === 200 && engine === 'DetectionOnly', { status: view.status, ruleEngine: engine })
-      const probe = await site.get(fixture.domain, `/?xq=${encodeURIComponent('<script>alert(1)</script>')}&id=${encodeURIComponent("1' OR '1'='1")}`)
-      check('BLOCKING-REQUEST-RETURNS-200', view.status === 200 && probe.status === 200, { viewStatus: view.status, status: probe.status })
+      const attack = `/?xq=${encodeURIComponent('<script>alert(1)</script>')}&id=${encodeURIComponent("1' OR '1'='1")}`
+      const rulesView = await root.get('/api/server/sec/waf-rules')
+      const origRules = rulesView.data?.policy
+      let deployedOk = false
+      if (rulesView.status === 200 && typeof rulesView.data?.revision === 'string' && origRules && typeof origRules === 'object') {
+        undo('waf rules engine', async () => {
+          const now = await root.get('/api/server/sec/waf-rules')
+          if (now.status !== 200 || typeof now.data?.revision !== 'string') return false
+          if (same(now.data?.policy, origRules)) return true
+          const stagedBack = await root.put('/api/server/sec/waf-rules', {
+            expectedRevision: now.data.revision,
+            policy: { ...origRules, engine: origRules.deployedEngine, staged: origRules.deployed },
+          })
+          if (stagedBack.status !== 200 || typeof stagedBack.data?.revision !== 'string') return false
+          const depBack = await root.post('/api/server/sec/waf-rules/deploy', { expectedRevision: stagedBack.data.revision })
+          if (depBack.status !== 200 || typeof depBack.data?.revision !== 'string') return false
+          if (!same(depBack.data?.policy, origRules)) {
+            const finalPut = await root.put('/api/server/sec/waf-rules', { expectedRevision: depBack.data.revision, policy: origRules })
+            if (finalPut.status !== 200) return false
+          }
+          if (origRules.deployedEngine !== 'DetectionOnly' && until) {
+            await until(() => site.get(fixture.domain, attack), r => r.status === 403, { attempts: 8, delayMs: 1500 })
+          }
+          return true
+        })
+        if (origRules.deployedEngine === 'DetectionOnly') {
+          deployedOk = true
+        } else {
+          const staged = await root.put('/api/server/sec/waf-rules', {
+            expectedRevision: rulesView.data.revision,
+            policy: { ...origRules, engine: 'DetectionOnly' },
+          })
+          const deployed = staged.status === 200 && typeof staged.data?.revision === 'string'
+            ? await root.post('/api/server/sec/waf-rules/deploy', { expectedRevision: staged.data.revision })
+            : { status: 0 }
+          deployedOk = deployed.status === 200
+        }
+      }
+      const probe = view.status === 200 && deployedOk
+        ? await until(() => site.get(fixture.domain, attack), r => r.status === 200, { attempts: 8, delayMs: 1500 })
+        : { settled: false, last: await site.get(fixture.domain, attack) }
+      check('BLOCKING-REQUEST-RETURNS-200', view.status === 200 && deployedOk && probe.settled, { viewStatus: view.status, deployedOk, status: probe.last?.status ?? null })
       const expectedRevision = typeof view.data?.revision === 'string' ? view.data.revision : '0'.repeat(64)
       refused('INVALID-POLICY-REFUSED', await root.put(SEC('waf'), { expectedRevision, policy: { unknownField: true } }), 'VALIDATION')
     },

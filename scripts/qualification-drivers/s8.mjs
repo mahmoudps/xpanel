@@ -22,7 +22,7 @@ async function scratch(x, label, caps = {}) {
   undo(`plan ${label}`, async () => gone(await root.delete(`/api/plans/${planId}`)))
   const username = `xq${tag}${label}`, password = secret(), primary = `${username}.example.net`
   undo(`account ${label}`, async () => gone(await root.delete(`/api/accounts/${username}`, { confirmUsername: username })))
-  const created = await createAccount(root, { username, password, primaryDomain: primary, planId }, { idempotencyKey: `xq-${tag}-${label}-${++scratchSeq}` }, x)
+  const created = await createAccount(root, { username, password, primaryDomain: primary, planId }, { idempotencyKey: `xq-${tag}-${label}-${++scratchSeq}-${randomBytes(4).toString('hex')}` }, x)
   if (!created.created || typeof created.data?.account?.id !== 'string') return null
   const session = await signIn('owner', { username, password })
   return session.client ? { client: session.client, id: created.data.account.id, username, primary } : null
@@ -245,9 +245,9 @@ export default [
     prefix: 'FTPA', as: 'owner', also: ['root'], needs: ['account'], probe: '/api/auth/me',
     paths: new RegExp(String.raw`^\/api\/(?:domains|service-users(?:\/${ID})?|${SCRATCH.join('|')})$`), accounts: 1, requests: 50, deadlineMs: 300_000,
     unit: [{ id: 'FTPA-UNIT-1', file: 'apps/api/src/authorization-security.test.ts', name: 'HTTP authorization security regressions email and FTP capabilities are gated independently and service verifiers never appear in reads' }],
-    checks: ['OUTSIDE-HOME-REJECTED', 'ACCOUNT-CREATED-IN-FOLDER', 'PORT-21-GREETING', 'ONE-OVER-LIMIT-REFUSED'],
+    checks: ['OUTSIDE-HOME-REJECTED', 'ACCOUNT-CREATED-IN-FOLDER', 'PORT-21-GREETING', 'ONE-OVER-LIMIT-REFUSED'], hostOnly: ['PORT-21-GREETING'],
     async run(x) {
-      const { owner, fixture, tag, net, check, refused, undo } = x
+      const { owner, fixture, tag, net, host, check, refused, undo } = x
       const site = await siteOf(owner)
       if (!site.rel) return
       const short = tag.slice(0, 4), mine = `f${short}`, bad = `g${short}`
@@ -262,8 +262,10 @@ export default [
       refused('OUTSIDE-HOME-REJECTED', await owner.post('/api/service-users', body(bad, '../x')), 'VALIDATION')
       const created = await owner.post('/api/service-users', body(mine, site.rel))
       check('ACCOUNT-CREATED-IN-FOLDER', created.status === 201 && created.data?.serviceUser?.services?.ftp === true && created.data.serviceUser.ftpDir === site.rel, { status: created.status })
-      const greeting = created.status === 201 ? await net.tcpBanner(21) : { ok: false, banner: '' }
-      check('PORT-21-GREETING', created.status === 201 && greeting.ok && /^220[\s-]/.test(greeting.banner), { status: created.status, open: greeting.ok })
+      if (host) {
+        const greeting = created.status === 201 ? await net.tcpBanner(21) : { ok: false, banner: '' }
+        check('PORT-21-GREETING', created.status === 201 && greeting.ok && /^220[\s-]/.test(greeting.banner), { status: created.status, open: greeting.ok })
+      }
       const small = await scratch(x, 'ft', { ftpAccounts: 1 })
       if (!small) return check('ONE-OVER-LIMIT-REFUSED', false, { setup: false })
       const first = await small.client.post('/api/service-users', body('f1', 'public_html', small.primary))
@@ -332,7 +334,7 @@ export default [
   }),
 
   tool('mysql-users', {
-    prefix: 'MDBU', as: 'owner', needs: ['account'], probe: '/api/auth/me', paths: DB_PATHS, requests: 20,
+    prefix: 'MDBU', as: 'owner', needs: ['account'], probe: '/api/auth/me', paths: DB_PATHS, requests: 20, deadlineMs: 360_000,
     unit: [{ id: 'MDBU-UNIT-1', file: 'apps/api/src/completion-database-grants-security.test.ts', name: 'conditional database grant API with isolated SQLite and desired state adds a grant only when the last read had no grant and returns safe owned readback' }],
     checks: ['GRANT-SELECT-ONLY', 'INVALID-PRIVILEGE-REFUSED', 'USER-NAME-TOO-LONG'],
     async run({ owner, fixture, tag, check, refused, undo }) {

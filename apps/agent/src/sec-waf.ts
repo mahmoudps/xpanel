@@ -58,7 +58,7 @@ export async function observeSecWaf(input: { family: string; readNginxMain: () =
 }
 
 export interface SecEdgeConfiguration {
-  edge: { waf: edge.WafGlobalPolicy; modsecurity: edge.ModsecuritySettings | null; clientMaxBodyMb: number | 'unlimited' }
+  edge: { waf: edge.WafGlobalPolicy; modsecurity: edge.ModsecuritySettings | null; clientMaxBodyMb: number | 'unlimited'; apacheRuleEngine?: 'On' | 'Off' | 'DetectionOnly' }
   sites: Record<string, edge.WafSitePolicy>
   flood: system.NftFloodSettings | null
 }
@@ -77,13 +77,19 @@ export async function readSecEdgeConfiguration(root: string, input: { family: st
   const waf = effectiveSecPolicy('waf', await readState(root, SEC_WAF_STATE))
   const flood = effectiveSecPolicy('flood', await readState(root, SEC_FLOOD_STATE))
   const switches = effectiveSecPolicy('waf-sites', await readState(root, SEC_WAF_SITES_STATE)).sites
+  const rules = effectiveSecPolicy('waf-rules', await readState(root, SVC_STATE_PATHS['waf-rules']))
+  const apacheRuleEngine: 'On' | 'Off' | 'DetectionOnly' = !waf.modsecurity
+    ? 'Off'
+    : rules.deployedEngine === 'DetectionOnly'
+      ? 'DetectionOnly'
+      : 'On'
   let modsecurity: edge.ModsecuritySettings | null = null
   if (waf.modsecurity && (input.family === 'debian' || input.family === 'rhel')) {
     const paths = SEC_MODSEC_PATHS[input.family]
     const engineConf = await present(paths.nginxModule, 'file').catch(() => null) === true ? await first(paths.engineConf, present, 'file') : null
     if (engineConf) {
       const crsDir = await first(paths.crsDirs, present, 'directory')
-      modsecurity = { engineConf, crsDir, ...await svcWafInput(effectiveSecPolicy('waf-rules', await readState(root, SVC_STATE_PATHS['waf-rules'])), effectiveSecPolicy('waf-vendors', await readState(root, SVC_STATE_PATHS['waf-vendors'])), crsDir) }
+      modsecurity = { engineConf, crsDir, ...await svcWafInput(rules, effectiveSecPolicy('waf-vendors', await readState(root, SVC_STATE_PATHS['waf-vendors'])), crsDir) }
     }
   }
   const sites: Record<string, edge.WafSitePolicy> = {}
@@ -97,7 +103,7 @@ export async function readSecEdgeConfiguration(root: string, input: { family: st
     }
   }
   return {
-    edge: { waf: { denyIps: waf.denyIps, denyPaths: waf.denyPaths, denyUserAgents: waf.denyUserAgents, denyStatus: waf.deniedResponse }, modsecurity, clientMaxBodyMb: waf.maxBodyMb ?? 'unlimited' },
+    edge: { waf: { denyIps: waf.denyIps, denyPaths: waf.denyPaths, denyUserAgents: waf.denyUserAgents, denyStatus: waf.deniedResponse }, modsecurity, clientMaxBodyMb: waf.maxBodyMb ?? 'unlimited', apacheRuleEngine },
     sites,
     flood: flood.enabled ? { connectionsPerAddress: flood.connectionsPerAddress, newPerSecond: flood.newConnectionsPerSecond, newBurst: flood.newConnectionsBurst, pingPerSecond: flood.pingPerSecond } : null,
   }

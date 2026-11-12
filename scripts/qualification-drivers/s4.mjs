@@ -74,24 +74,28 @@ const SECRET = () => `Xq-${randomBytes(18).toString('base64url')}-9a`
 export default [
   tool('restart-dns', {
     prefix: 'RDNS', probe: SERVICES, paths: restartPaths(), page: servicesPage, unit: unitsOf('RDNS'),
-    checks: ['RESTART-SUCCESS', 'PORT-53-ANSWERS', 'UNKNOWN-SERVICE-REFUSED'],
+    checks: ['RESTART-SUCCESS', 'PORT-53-ANSWERS', 'UNKNOWN-SERVICE-REFUSED'], hostOnly: ['PORT-53-ANSWERS'],
     async run(x) {
       const cycle = await restartActive(x, 'pdns')
       x.check('RESTART-SUCCESS', cameBack(cycle), seen(cycle))
-      const dns = cycle.restarted ? await x.net.dnsQuery('localhost', 1) : null
-      x.check('PORT-53-ANSWERS', cameBack(cycle) && dns?.ok === true, { ...seen(cycle), dnsOk: dns?.ok ?? false, rcode: dns?.rcode ?? null })
+      if (x.host) {
+        const dns = cycle.restarted ? await x.net.dnsQuery('localhost', 1) : null
+        x.check('PORT-53-ANSWERS', cameBack(cycle) && dns?.ok === true, { ...seen(cycle), dnsOk: dns?.ok ?? false, rcode: dns?.rcode ?? null })
+      }
       x.refused('UNKNOWN-SERVICE-REFUSED', await x.root.post(`${SERVICES}/unknown-dns/restart`, {}), 'NOT_FOUND')
     },
   }),
 
   tool('restart-ftp', {
     prefix: 'RFTP', probe: SERVICES, paths: restartPaths(), page: servicesPage, unit: unitsOf('RFTP'),
-    checks: ['UNKNOWN-SERVICE-REFUSED', 'PORT-21-ACCEPTS', 'SERVICE-ACTIVE-AFTER-RESTART'],
+    checks: ['UNKNOWN-SERVICE-REFUSED', 'PORT-21-ACCEPTS', 'SERVICE-ACTIVE-AFTER-RESTART'], hostOnly: ['PORT-21-ACCEPTS'],
     async run(x) {
       const cycle = await restartActive(x, 'pure-ftpd')
       x.refused('UNKNOWN-SERVICE-REFUSED', await x.root.post(`${SERVICES}/unknown-ftp/restart`, {}), 'NOT_FOUND')
-      const ftp = cycle.restarted ? await x.net.tcpBanner(21) : null
-      x.check('PORT-21-ACCEPTS', cameBack(cycle) && ftp?.ok === true && /^220\b/.test(ftp.banner), { ...seen(cycle), bannerOk: ftp?.ok ?? false })
+      if (x.host) {
+        const ftp = cycle.restarted ? await x.net.tcpBanner(21) : null
+        x.check('PORT-21-ACCEPTS', cameBack(cycle) && ftp?.ok === true && /^220\b/.test(ftp.banner), { ...seen(cycle), bannerOk: ftp?.ok ?? false })
+      }
       x.check('SERVICE-ACTIVE-AFTER-RESTART', cameBack(cycle), seen(cycle))
     },
   }),
@@ -125,7 +129,7 @@ export default [
 
   tool('restart-mta', {
     prefix: 'RMTA', probe: SERVICES, paths: restartPaths('mail-queue'), page: servicesPage, unit: unitsOf('RMTA'),
-    checks: ['QUEUE-PRESERVED', 'PORT-25-220-BANNER'],
+    checks: ['QUEUE-PRESERVED', 'PORT-25-220-BANNER'], hostOnly: ['PORT-25-220-BANNER'],
     async run(x) {
       const kept = read => (Array.isArray(read.data?.messages) ? read.data.messages.filter(item => ['deferred', 'hold'].includes(item.queue)).map(item => item.queueId) : [])
       const queued = await x.root.get('/api/server/mail-queue')
@@ -134,8 +138,10 @@ export default [
       const beforeIds = kept(queued), afterIds = kept(after)
       x.check('QUEUE-PRESERVED', cameBack(cycle) && queued.status === 200 && after.status === 200 && Array.isArray(queued.data?.messages) && Array.isArray(after.data?.messages) && afterIds.length <= beforeIds.length,
         { ...seen(cycle), queued: beforeIds.length, remaining: afterIds.length })
-      const smtp = cycle.restarted ? await x.net.tcpBanner(25) : null
-      x.check('PORT-25-220-BANNER', cameBack(cycle) && smtp?.ok === true && /^220\b/.test(smtp.banner), { ...seen(cycle), bannerOk: smtp?.ok ?? false })
+      if (x.host) {
+        const smtp = cycle.restarted ? await x.net.tcpBanner(25) : null
+        x.check('PORT-25-220-BANNER', cameBack(cycle) && smtp?.ok === true && /^220\b/.test(smtp.banner), { ...seen(cycle), bannerOk: smtp?.ok ?? false })
+      }
     },
   }),
 

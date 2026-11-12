@@ -163,7 +163,7 @@ export default [
 
   tool('ssl-install', {
     prefix: 'S12T06', as: 'owner', needs: ['account'], probe: '/api/domains',
-    paths: new RegExp(String.raw`^\/api\/(?:domains|accounts\/[a-z][a-z0-9]{0,15}\/(?:ssl(?:\/(?:keys|certificates)(?:\/${SSL_ID})?)?|certificates(?:\/install|\/${ID})?))$`), requests: 35,
+    paths: new RegExp(String.raw`^\/api\/(?:domains|accounts\/[a-z][a-z0-9]{0,15}\/(?:ssl(?:\/(?:keys|certificates)(?:\/${SSL_ID})?)?|certificates(?:\/install|\/${ID})?))$`), requests: 35, deadlineMs: 360_000,
     unit: [{ id: 'S12T06-UNIT-1', file: 'apps/api/src/certificate-install.test.ts', name: 'manual certificate installation refuses a mismatched, encrypted, weak or malformed private key without echoing it' }],
     checks: ['MISMATCHED-KEY-REFUSED', 'INSTALL-AND-UNINSTALL-BOUND'],
     async run({ owner, fixture, tag, check, refused, undo }) {

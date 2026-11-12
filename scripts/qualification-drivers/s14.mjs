@@ -830,9 +830,18 @@ export default [
         servicesStatus: services.status, smStatus: sm.status, sshState: sshRow?.state ?? null,
       })
       refused('UNKNOWN-DAEMON-NOT-FOUND', await root.post('/api/server/services/unknown-daemon/restart', {}), 'NOT_FOUND')
-      refused('DISABLE-SSH-FORBIDDEN', await root.post('/api/server/service-manager/action', {
-        action: 'disable', unit: sshUnit, expectedRevision: smRev,
-      }), 'FORBIDDEN')
+      let disableRes = { status: 0, data: null }, rev = smRev
+      for (let attempt = 0; attempt < 4; attempt++) {
+        if (attempt > 0) {
+          const fresh = await root.get('/api/server/service-manager')
+          rev = typeof fresh.data?.revision === 'string' ? fresh.data.revision : ZERO_REV
+        }
+        disableRes = await root.post('/api/server/service-manager/action', {
+          action: 'disable', unit: sshUnit, expectedRevision: rev,
+        })
+        if (disableRes.status !== 409) break
+      }
+      refused('DISABLE-SSH-FORBIDDEN', disableRes, 'FORBIDDEN')
       refused('STALE-SERVICE-MANAGER-CONFLICT', await root.post('/api/server/service-manager/action', {
         action: 'restart', unit: sshUnit, expectedRevision: ZERO_REV,
       }), 'CONFLICT')
