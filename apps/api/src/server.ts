@@ -30,7 +30,7 @@ import { handleClusterRoute, pushSectionsToCluster } from './config-cluster.ts'
 import { handleLiveSourceRoute } from './live-transfer.ts'
 import { createNodeLink, NODE_PIN_WATCH_MS, nodePackageVersion } from './node-link.ts'
 import { handleIntegrationsWorkspaceRoute } from './ops-integrations-workspace.ts'
-import { atomicWriteJson as opsAtomicWriteJson } from '@xpanel/state'
+import { atomicWriteJson as opsAtomicWriteJson, readJsonIfExists as opsReadJsonIfExists } from '@xpanel/state'
 import { join as opsJoin } from 'node:path'
 import { handleRepairWorkspaceRoute } from './repair-workspace.ts'
 import { handleConfigurationHealthWorkspaceRoute } from './configuration-health-workspace.ts'
@@ -66,6 +66,7 @@ import { handleAccountTemplatesRoute } from './acct-templates-workspace.ts'
 import { AccountLifecycleCoordinator, isFreshProvisioningHostEffect } from './use-cases/account-lifecycle.ts'
 import { createAuthenticatedProvisioningPort } from './use-cases/account-provisioning-transport.ts'
 import { createProvisioningPreparationAuthority, parseMailAuthOptions, prepareAccountProvisioning, type PreparedAccountState, type ProvisioningAuthorizationReference } from './use-cases/account-provisioning-prepared.ts'
+import { services as renderServices } from '@xpanel/render'
 import type { ProvisioningPreparationStore } from './use-cases/provisioning-preparation.ts'
 import { handleAccountEnhancementsRoute, handleEnhancementAssignmentRoute } from './acct-enhancements-workspace.ts'
 import { handleSoftwareCenterWorkspaceRoute } from './software-center-workspace.ts'
@@ -318,6 +319,7 @@ import {
   assertPasswordHashArgon2id,
   verifyTotpStep,
   passwordHashFromInput,
+  serviceHashSchemeForOs,
   principalRecordToPrincipal,
 } from './auth.ts'
 import type { AuthenticatedCaller } from './auth.ts'
@@ -1266,11 +1268,24 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
     try { body = await readAccountApplyBody(response) }
     catch { return accountMutationFailure(caller, account, action, 'unknown', 'host_reply_unverified') }
     if (body?.status === 'failed') return accountMutationFailure(caller, account, action, 'failed', 'host_apply_failed', 'CONFIG_TEST_FAILED')
-    if (body?.status === 'noop') return accountMutationFailure(caller, account, action, 'not_applied', 'host_apply_not_verified', 'PRECONDITION_FAILED')
     const generation = body?.generation
     const gen = generation !== null && typeof generation === 'object' && !Array.isArray(generation) ? generation as Record<string, unknown> : null
-    if (body?.status !== 'applied' || !gen || !Number.isSafeInteger(gen.id) || Number(gen.id) < 1 || gen.status !== 'active'
-      || typeof gen.checksum !== 'string' || !/^[a-f0-9]{64}$/.test(gen.checksum)
+    const validGen = gen !== null && Number.isSafeInteger(gen.id) && Number(gen.id) >= 1 && gen.status === 'active'
+      && typeof gen.checksum === 'string' && /^[a-f0-9]{64}$/.test(gen.checksum)
+    if (body?.status === 'noop') {
+      if (!validGen || typeof body.stateChecksum !== 'string' || !/^[a-f0-9]{64}$/.test(body.stateChecksum)) {
+        return accountMutationFailure(caller, account, action, 'not_applied', 'host_apply_not_verified', 'PRECONDITION_FAILED')
+      }
+      if (await deps.store.getRevision() !== expectedRevision) {
+        return accountMutationFailure(caller, account, action, 'unknown', 'state_changed_during_apply', 'CONFLICT')
+      }
+      const snapshot = await deps.store.readSnapshot()
+      if (snapshot.checksum !== body.stateChecksum) {
+        return accountMutationFailure(caller, account, action, 'not_applied', 'host_apply_not_verified', 'PRECONDITION_FAILED')
+      }
+      return { status: 'applied', generation: { id: Number(gen.id), status: 'active', checksum: gen.checksum as string }, filesCount: 0, durationMs: 0 }
+    }
+    if (body?.status !== 'applied' || !validGen
       || !Number.isSafeInteger(body.filesCount) || Number(body.filesCount) < 0
       || typeof body.durationMs !== 'number' || !Number.isFinite(body.durationMs) || body.durationMs < 0) {
       return accountMutationFailure(caller, account, action, 'unknown', 'host_reply_unverified')
@@ -1278,7 +1293,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
     if (await deps.store.getRevision() !== expectedRevision) {
       return accountMutationFailure(caller, account, action, 'unknown', 'state_changed_during_apply', 'CONFLICT')
     }
-    return { status: 'applied', generation: { id: Number(gen.id), status: 'active', checksum: gen.checksum }, filesCount: Number(body.filesCount), durationMs: body.durationMs }
+    return { status: 'applied', generation: { id: Number(gen.id), status: 'active', checksum: gen.checksum as string }, filesCount: Number(body.filesCount), durationMs: body.durationMs }
   }
 
   /**
@@ -1619,11 +1634,13 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
       return { selector: body.selector, publicKeyPem: body.publicKeyPem }
     } catch { return null }
   }
+  const serviceHashScheme = serviceHashSchemeForOs(deps.os)
   const extendedRouter = createExtendedApiRouter({
     db: deps.db,
     store: deps.store,
     dav,
     serverSecret,
+    serviceHashScheme,
     ...(deps.agentApp && deps.agentToken ? { maintainDatabase: (caller: AuthenticatedCaller, account: Account, body: { database: string; action: string }) => readNativeWorkspace(caller, `/accounts/${account.username}/databases/maintenance`, body, body.action === 'repair') } : {}),
     ...(deps.agentApp && deps.agentToken ? { readQuotaState: (caller: AuthenticatedCaller, path: string) =>
       readNativeWorkspace(caller, '/host/quota?path=' + encodeURIComponent(path), undefined, false, 'GET'),
@@ -1644,7 +1661,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
       return {
         execution: createTransferExecution({ ...shared, readToken: id => readTransferCredentialToken(deps.store, id) }),
         nodeAuth: nodeLink.transferAuth,
-        cpanel: createCpanelImportPorts({ ...shared, uploadDir: opsJoin(deps.store.rootDir, 'extended', 'transfers', 'cpanel'), maxBytes: 50 * 1024 ** 3, serviceHash: password => passwordHashFromInput({ password }, { service: ['mail'] }) }),
+        cpanel: createCpanelImportPorts({ ...shared, uploadDir: opsJoin(deps.store.rootDir, 'extended', 'transfers', 'cpanel'), maxBytes: 50 * 1024 ** 3, serviceHash: password => passwordHashFromInput({ password }, { service: ['mail'], scheme: serviceHashScheme }) }),
         // background work acts as the root user who started it, re-read from the principal store each time
         callerFor: async (principalId: string): Promise<AuthenticatedCaller | null> => {
           const record = await getPrincipal(deps.db, principalId)
@@ -2073,7 +2090,12 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
     const url = new URL(req.url, 'http://localhost')
     const { pathname } = url
     const method = req.method.toUpperCase()
-    if (req.body !== null && pathname.startsWith('/api/') && req.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() !== 'application/json') {
+    const mediaType = req.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() ?? ''
+    const rawUploadAllowed = method === 'PUT' && (
+      (/^\/api\/server\/panel\/languages\/[A-Za-z0-9-]{1,35}\/catalog$/.test(pathname) && ['text/x-gettext-translation', 'text/x-po', 'text/plain'].includes(mediaType))
+      || (/^\/api\/server\/panel\/branding\/(?:logo|favicon)$/.test(pathname) && ['image/png', 'image/jpeg', 'image/x-icon', 'image/vnd.microsoft.icon'].includes(mediaType))
+    )
+    if (req.body !== null && pathname.startsWith('/api/') && mediaType !== 'application/json' && !rawUploadAllowed) {
       return transportProblem(415, 'UNSUPPORTED_MEDIA_TYPE', 'application/json is required', pathname)
     }
 
@@ -2873,6 +2895,20 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         const defaultMailboxQuotaMb =
           body.defaultMailboxQuotaMb ??
           (typeof resources.diskMb === 'number' ? Math.min(packageValues.mailboxQuotaMb, Math.max(1, resources.diskMb)) : packageValues.mailboxQuotaMb)
+        const finalCaps = body.caps ?? {
+          addonDomains: 10,
+          aliasDomains: 10,
+          subdomains: 20,
+          mailboxes: 20,
+          forwarders: 20,
+          mailingLists: 5,
+          ftpAccounts: 10,
+          databases: 10,
+          phpWorkers: 8,
+        }
+        if (caller.principal.kind === 'reseller' && [...Object.values(resources), ...Object.values(finalCaps)].some((value) => value === 'unlimited')) {
+          assertAcl(caller.principal, await resolveResellerForCaller(caller), 'allow-unlimited-plans')
+        }
         assertPackageValues({ resources, defaultMailboxQuotaMb })
 
         const plan = await deps.store.createPlan({
@@ -2880,17 +2916,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
           ownerId,
           featureListId,
           resources,
-          caps: body.caps ?? {
-            addonDomains: 10,
-            aliasDomains: 10,
-            subdomains: 20,
-            mailboxes: 20,
-            forwarders: 20,
-            mailingLists: 5,
-            ftpAccounts: 10,
-            databases: 10,
-            phpWorkers: 8,
-          },
+          caps: finalCaps,
           dedicatedIp: body.dedicatedIp ?? false,
           shell: body.shell ?? 'jailed',
           defaultMailboxQuotaMb,
@@ -2927,6 +2953,9 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
           const patch = await readJsonBody<PlanPatch>(req)
           if (patch.name !== undefined && patch.name !== existing.name) return fail('VALIDATION', 'a plan name is permanent', { stateChanged: false })
           if (patch.dedicatedIp !== undefined && patch.dedicatedIp !== existing.dedicatedIp) return fail('VALIDATION', 'a plan keeps its dedicated IP option', { stateChanged: false })
+          if (caller.principal.kind === 'reseller' && [...Object.values(patch.resources ?? {}), ...Object.values(patch.caps ?? {})].some((value) => value === 'unlimited')) {
+            assertAcl(caller.principal, await resolveResellerForCaller(caller), 'allow-unlimited-plans')
+          }
           assertPackageValues(patch)
           const plan = await deps.store.updatePlan(planId, {
             ...patch,
@@ -3154,7 +3183,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         const response = await handleMailboxSecurityRoute(req, url, method, { db: deps.db, serverSecret, mfaMode: mfaRuntimePolicy.mode, store: deps.store,
           transport: deps.mailboxTransport ?? createLocalMailboxTransport(mailboxEnvironment),
           requireCaller: request => requireCaller(request), open: (request, toolIds) => authorizeNativeMailboxRequest(request, toolIds),
-          hashPassword: (password, services) => passwordHashFromInput({ password }, { service: servicePasswordKinds(services) }),
+          hashPassword: (password, services) => passwordHashFromInput({ password }, { service: servicePasswordKinds(services), scheme: serviceHashScheme }),
           reconcile: caller => triggerReconcile(caller),
           audit: async (caller, action, mailbox, detail) => {
             const account = await deps.store.getAccount(caller.principal.kind === 'user' ? caller.principal.accountId : '')
@@ -3576,8 +3605,26 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         if (response) return response
       }
       if (pathname === '/api/server/mail-log/delivery' || pathname === '/api/server/mail-log/monitor') {
-        const response = await handleMailLogWorkspaceRoute(req, url, method, { requireCaller, assertRoot,
-          readServerLog: (caller, query) => readNativeWorkspace(caller, '/host/mail/log?' + query) })
+        const response = await handleMailLogWorkspaceRoute(req, url, method, {
+          requireCaller,
+          assertRoot,
+          listResellerDomains: async resellerCaller => {
+            const accounts = await deps.store.listAccounts({ ownerId: resellerCaller.principal.id })
+            const owned = new Set(accounts.map(account => account.id))
+            return (await deps.store.listDomains()).filter(domain => owned.has(domain.accountId)).map(domain => domain.name)
+          },
+          readServerLog: async (caller, query) => {
+            const agentCaller: AuthenticatedCaller = caller.principal.kind === 'reseller'
+              ? await (async () => {
+                  const rootPrincipal = await findPrincipalByUsername(deps.db, 'root')
+                  return rootPrincipal
+                    ? { ...caller, principalRecord: rootPrincipal, principal: { kind: 'root' as const, id: rootPrincipal.id, username: rootPrincipal.username } }
+                    : caller
+                })()
+              : caller
+            return readNativeWorkspace(agentCaller, '/host/mail/log?' + query)
+          },
+        })
         if (response) return response
       }
       if (pathname === '/api/auth/api-tokens' || pathname.startsWith('/api/auth/api-tokens/')) {
@@ -3803,7 +3850,40 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
       }
       if (pathname === '/api/server/trusted-proxies' || pathname.startsWith('/api/server/trusted-proxies/')) {
         const response = await handleTrustedProxiesWorkspaceRoute(req, url, method, { store: deps.store, requireCaller, assertRoot, emitAudit,
-          readSafety: async request => ({ localAddresses: Object.values(networkInterfaces()).flatMap(entries => entries?.map(entry => entry.address) ?? []), managementClient: extractClientIp(request) }),
+          readSafety: async (request, safetyCaller) => {
+            const addresses = new Set<string>(['127.0.0.1', '::1'])
+            const addValidAddress = (raw: string): void => {
+              const clean = raw.split('%')[0]!.trim()
+              if (clean && parseIp(clean)) addresses.add(clean)
+            }
+            try {
+              for (const entries of Object.values(networkInterfaces())) {
+                for (const entry of entries ?? []) if (entry?.address) addValidAddress(entry.address)
+              }
+            } catch { /* systemd RestrictAddressFamilies blocks netlink getifaddrs in xpanel-api.service */ }
+            const rawPool = await opsReadJsonIfExists<unknown>(opsJoin(deps.store.rootDir, 'ip-pool.json')).catch(() => null)
+            const poolEntries = Array.isArray(rawPool)
+              ? rawPool
+              : rawPool && typeof rawPool === 'object' && Array.isArray((rawPool as { ips?: unknown }).ips)
+                ? (rawPool as { ips: unknown[] }).ips
+                : []
+            for (const item of poolEntries) {
+              const addr = item && typeof item === 'object' ? (item as { address?: unknown }).address : undefined
+              if (typeof addr === 'string') addValidAddress(addr)
+            }
+            if (safetyCaller && deps.agentApp && deps.agentToken) {
+              try {
+                const hostReply = await callAgent('/host/addresses', { caller: safetyCaller })
+                if (hostReply.ok) {
+                  const payload = await hostReply.json() as { addresses?: unknown }
+                  if (Array.isArray(payload.addresses)) {
+                    for (const item of payload.addresses) if (typeof item === 'string' && item.length > 0) addValidAddress(item)
+                  }
+                }
+              } catch { /* ipPool and loopback remain populated when the agent cannot report interfaces */ }
+            }
+            return { localAddresses: [...addresses], managementClient: extractClientIp(request) }
+          },
           readHost: (caller, path, body, managementClient) => readNativeWorkspace(caller, path, body, body !== undefined, 'POST', managementClient ?? null),
         })
         if (response) return response
@@ -4581,21 +4661,38 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         const parentId = body.parentId ?? body.parentDomainId ?? null
         const parent = parentId ? existingDomains.find(domain => domain.id === parentId) : undefined
         if (guarded && (body.kind === 'alias' || body.kind === 'subdomain') && (!parent || parent.kind === 'alias')) return fail('VALIDATION', 'an owned non-alias parent is required', { stateChanged: false })
-        const alias = guarded && body.kind === 'alias' ? parent : undefined
-        const newDomainPhp = alias?.php ?? body.php ?? primaryDomain?.php ?? await serverDefaultPhp()
+        const effectiveKind = body.kind ?? 'addon'
+        const alias = effectiveKind === 'alias' ? parent : undefined
+        const newDomainPhp = (alias ? (guarded ? alias.php : body.php ?? alias.php) : body.php) ?? primaryDomain?.php ?? await serverDefaultPhp()
+        const serverSettings = await deps.store.getServerSettings()
         const domainTweaks = await tweakSettingsFile(deps.store).current()
-        assertDomainTweaks({ values: domainTweaks, privileged: caller.principal.kind === 'root', name, accountId: account.id, home: account.home, docRoot: alias ? undefined : body.docRoot,
+        assertDomainTweaks({ values: domainTweaks, privileged: caller.principal.kind === 'root', name, accountId: account.id, home: account.home, docRoot: guarded && alias ? undefined : body.docRoot,
           ...(caller.principal.kind !== 'root' && (domainTweaks['domains.allowRemote'] === false || domainTweaks['domains.allowUnregistered'] === false) ? { resolution: await observeDomainResolution(name, [account.ipv4, ...(await deps.store.readSnapshot()).ipPool?.map(ip => ip.address) ?? []]) } : {}),
-          defaultDocRoot: `${account.home}/domains/${name}/public_html`, hostname: (await deps.store.getServerSettings())?.hostname ?? null, others: await deps.store.listDomains() })
+          defaultDocRoot: `${account.home}/domains/${name}/public_html`, hostname: serverSettings?.hostname ?? null, others: await deps.store.listDomains() })
+        const defaultZone = (effectiveKind === 'addon' || effectiveKind === 'alias') && (serverSettings?.nameservers?.length ?? 0) > 0 && !(await deps.store.getDnsZone(name))
+          ? (() => {
+              const serial = Number(new Date().toISOString().slice(0, 10).replaceAll('-', '') + '01')
+              const records = renderServices.defaultZoneRecords(name, {
+                ipv4: body.ipv4 ?? account.ipv4,
+                ipv6: body.ipv6 ?? account.ipv6 ?? null,
+                nameservers: [...serverSettings!.nameservers],
+                mailHost: `mail.${name}`,
+                adminEmail: account.contactEmail,
+                serial,
+                ...zoneDefaultsFromTweaks(domainTweaks),
+              }).filter(r => r.type !== 'SOA').map(r => ({ id: randomUUID(), zone: name, name: r.name, type: r.type as Exclude<renderServices.ZoneRecordType, 'SOA'>, ttl: r.ttl, content: r.content, priority: r.priority }))
+              return { id: randomUUID(), name, accountId: account.id, serial, records }
+            })()
+          : null
         const result = await mutateDomainWorkspace(req, caller, account, body.expectedRevision, 'domain.created', options => deps.store.createDomain({
           accountId: account.id,
           name,
-          kind: body.kind ?? 'addon',
+          kind: effectiveKind,
           parentId,
-          docRoot: alias?.docRoot ?? body.docRoot ?? `${account.home}/domains/${name}/public_html`,
-          siteType: alias?.siteType ?? body.siteType ?? 'php',
-          upstream: alias?.upstream ?? body.upstream ?? null,
-          redirect: alias?.redirect ?? body.redirect ?? null,
+          docRoot: (alias ? (guarded ? alias.docRoot : body.docRoot ?? alias.docRoot) : body.docRoot) ?? `${account.home}/domains/${name}/public_html`,
+          siteType: (alias ? (guarded ? alias.siteType : body.siteType ?? alias.siteType) : body.siteType) ?? 'php',
+          upstream: (alias ? (guarded ? alias.upstream : body.upstream ?? alias.upstream) : body.upstream) ?? null,
+          redirect: (alias ? (guarded ? alias.redirect : body.redirect ?? alias.redirect) : body.redirect) ?? null,
           php: newDomainPhp,
           wildcard: body.wildcard ?? false,
           certificateId: body.certificateId ?? null,
@@ -4604,7 +4701,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
           pathQuotaMb: body.pathQuotaMb ?? 'unlimited',
           ...(body.ipv4 !== undefined && { ipv4: body.ipv4 }),
           ...(body.ipv6 !== undefined && { ipv6: body.ipv6 }),
-        }, options), Boolean(body.certificateId))
+        }, defaultZone ? { ...options, defaultZone } : options), Boolean(body.certificateId))
         const providerDns = (body as { autoDns?: unknown }).autoDns === true ? await publishSiteRecord({ store: deps.store, fetch: globalThis.fetch }, { domain: name, ipv4: result.value.ipv4 ?? account.ipv4 ?? null, ownDomains: existingDomains.map(domain => domain.name), root: caller.principal.kind === 'root' }) : undefined
         return jsonResponse({ domain: result.value, stateChanged: true, ...result.view, reconcile: result.reconcile, ...(providerDns ? { providerDns } : {}) }, 201)
       }
@@ -4875,7 +4972,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         }
         if (!login) return fail('VALIDATION', 'login (or localPart + domainId) is required')
 
-        const passwordHash = await passwordHashFromInput(body, { service: servicePasswordKinds(body.services) })
+        const passwordHash = await passwordHashFromInput(body, { service: servicePasswordKinds(body.services), scheme: serviceHashScheme })
 
         const serviceUser = await deps.store.createServiceUser({
           accountId: account.id,
@@ -5023,7 +5120,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
           const resolvedPatch: ServiceUserPatch = {
             ...patch,
             ...(patch.password !== undefined || patch.passwordHash !== undefined
-              ? { passwordHash: await passwordHashFromInput(patch, { service: servicePasswordKinds(services) }) }
+              ? { passwordHash: await passwordHashFromInput(patch, { service: servicePasswordKinds(services), scheme: serviceHashScheme }) }
               : {}),
           }
           const serviceUser = await deps.store.updateServiceUser(suId, resolvedPatch)
@@ -5104,12 +5201,29 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
               if (!current && fresh.principal.kind !== 'root') await requireDomainAccount(deps.store, fresh, zoneName, 'dns.zone.save', owner.id)
             } else await assertRoot(fresh, 'dns.zone.save')
           } : undefined
+          const inputRecords = body.records ?? []
+          const hasApexNs = inputRecords.some(record => record.type === 'NS' && (record.name === '@' || record.name === zoneName || record.name === `${zoneName}.`))
+          const defaultNsRecords = !existingZone && zoneAccountId === null && inputRecords.length > 0 && !hasApexNs
+            ? await (async () => {
+                const settings = await deps.store.getServerSettings()
+                const ttl = settings?.defaultTtl ?? 3600
+                return (settings?.nameservers ?? []).map(ns => ({
+                  id: randomUUID(),
+                  zone: zoneName,
+                  name: '@',
+                  type: 'NS' as const,
+                  ttl,
+                  content: ns,
+                  priority: null,
+                }))
+              })()
+            : []
           const zone = await deps.store.saveDnsZone({
             id: body.id ?? existingZone?.id ?? randomUUID(),
             name: zoneName,
             accountId: zoneAccountId,
             serial: body.serial ?? (existingZone ? existingZone.serial + 1 : 2026102201),
-            records: body.records ?? [],
+            records: [...defaultNsRecords, ...inputRecords],
           }, dnsGuard ? { dnsGuard } : undefined)
           const reconcile = await triggerReconcile(caller)
           await emitAudit({

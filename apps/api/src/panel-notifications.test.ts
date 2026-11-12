@@ -182,4 +182,13 @@ describe('notification settings workspace', () => {
     await expect(call('PUT', helpers(null, { emitAudit: vi.fn(async () => { throw new Error('down') }) }).helpers, update())).rejects.toMatchObject(verify)
     await expect(call('POST', helpers(null, { writeSigningKey: vi.fn(async () => undefined) }).helpers, undefined, KEY)).rejects.toMatchObject(verify)
   })
+
+  it('resets saved notification settings under the observed revision and records a labeled update audit', async () => {
+    const { helpers: h, audits } = helpers()
+    const saved = await read(await call('PUT', h, update({ recipients: ['ops@example.com'], events: ['monitoring.alert'] })))
+    await expect(call('POST', h, { expectedRevision: EMPTY }, ROUTE + '/reset')).rejects.toMatchObject({ code: 'CONFLICT' })
+    const cleared = await read(await call('POST', h, { expectedRevision: saved.revision }, ROUTE + '/reset'))
+    expect(cleared).toMatchObject({ state: 'default', settings: null, revision: EMPTY })
+    expect(audits.at(-1)).toMatchObject({ action: 'server.notifications.updated', target: 'panel:notifications', outcome: 'ok', detail: { recipients: 0, events: [], webhook: null, reset: true } })
+  })
 })

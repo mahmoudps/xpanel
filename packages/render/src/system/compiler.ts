@@ -58,6 +58,7 @@ const script = (input: CompilerAccessInput): string => {
           `[ "$(stat -c %G "$f")" = ${COMPILER_GROUP} ] || continue`,
           'chown root:root "$f" && chmod 0755 "$f" || status=1',
         ]),
+        `[ "\${1-}" = --hook ] || [ "$status" != 0 ] || ! getent group ${COMPILER_GROUP} >/dev/null 2>&1 || groupdel ${COMPILER_GROUP} >/dev/null 2>&1 || true`,
       ]
   // A failing dpkg post-invoke hook fails the whole package transaction, so the hook never reports an error.
   return ['#!/bin/sh', ...lines, '[ "${1-}" = --hook ] && exit 0', 'exit "$status"', ''].join('\n')

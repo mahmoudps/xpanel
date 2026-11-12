@@ -222,6 +222,7 @@ if [[ "$OS_FAMILY" == "debian" ]]; then
     lighttpd
     lighttpd-mod-webdav
     python3-radicale
+    git
     gcc
     libc6-dev
     "php${PHP_VERSION}-fpm"
@@ -241,6 +242,7 @@ if [[ "$OS_FAMILY" == "debian" ]]; then
     "php${PHP_VERSION}-zip"
     "php${PHP_VERSION}-readline"
     "php${PHP_VERSION}-sqlite3"
+    php-pear
     awstats
     webalizer
     libgeoip2-perl
@@ -288,6 +290,7 @@ else
     "php${PHP_COMPACT}-php-process"
     "php${PHP_COMPACT}-php-pecl-zip"
     "php${PHP_COMPACT}-php-sodium"
+    "php${PHP_COMPACT}-php-pear"
     postgresql-server
     "$REDIS_PKG"
     openssh-server
@@ -298,6 +301,7 @@ else
     lighttpd
     lighttpd-mod_webdav
     python3-radicale3
+    git
     gcc
     glibc-devel
   )
@@ -639,6 +643,7 @@ service auth {
 }
 
 service lmtp {
+  vsz_limit = 0
   unix_listener /var/spool/postfix/private/dovecot-lmtp {
     mode = 0600
     user = postfix
@@ -740,6 +745,7 @@ install_local_mail() {
     fi
   done
   apply_managed_block /etc/postfix/main.cf render_main_block
+  postconf -c /etc/postfix -e 'inet_interfaces=all'
   apply_managed_block /etc/postfix/master.cf render_master_block
   if systemctl is-active --quiet postfix; then systemctl reload postfix; fi
   if systemctl is-active --quiet dovecot; then systemctl reload dovecot; fi
@@ -828,8 +834,8 @@ selinux_http_port() {
 }
 
 configure_selinux() {
-  local port
-  for port in 2083 2087 2096; do selinux_http_port "$port"; done
+  local port runtime_dir
+  for port in 2078 2080 2083 2087 2096; do selinux_http_port "$port"; done
   setsebool -P httpd_can_network_connect 1 || die "SELinux refused httpd_can_network_connect."
   # Apache, nginx and PHP-FPM write the per-domain logs under /var/log/xpanel; directories created there later
   # inherit the type, so the tree is typed once here.
@@ -838,11 +844,11 @@ configure_selinux() {
   restorecon -R /var/log/xpanel
   bash "$INSTALL_SOURCE_ROOT/scripts/selinux-account-homes.sh" || die "SELinux refused the account home policy."
   # Account provisioning holds a probe request on a socket the agent opens under /run/xpanel-account-probe, and
-  # nginx proxies to it. tmpfiles creates the directory at boot with the httpd_var_run_t type that the agent's
-  # per-account directories and sockets inherit (the rule is spelled /var/run: the policy equates /run with it);
-  # one reviewed rule lets nginx connect to the agent's socket.
-  semanage fcontext -a -t httpd_var_run_t '/var/run/xpanel-account-probe(/.*)?' 2> /dev/null \
-    || semanage fcontext -m -t httpd_var_run_t '/var/run/xpanel-account-probe(/.*)?' || die "SELinux refused the account probe context."
+  # nginx proxies to it alongside Web Disk, CalDAV, PHP-FPM, and customer app sockets.
+  for runtime_dir in xpanel-account-probe xpanel-webdisk xpanel-webdiskd xpanel-webdisk-state xpanel-caldav xpanel-app-proxy xpanel-apps xpanel-fpm; do
+    semanage fcontext -a -t httpd_var_run_t "/var/run/${runtime_dir}(/.*)?" 2> /dev/null \
+      || semanage fcontext -m -t httpd_var_run_t "/var/run/${runtime_dir}(/.*)?" || die "SELinux refused the ${runtime_dir} context."
+  done
   write_config /etc/tmpfiles.d/xpanel-account-probe.conf render_account_probe_tmpfiles 0644
   systemd-tmpfiles --create /etc/tmpfiles.d/xpanel-account-probe.conf || die "The account probe runtime directory could not be created."
   restorecon -R /run/xpanel-account-probe
@@ -871,8 +877,40 @@ render_account_probe_tmpfiles() {
 }
 
 render_account_probe_selinux_module() {
-  printf '%s\n' '; Managed by xPanel: nginx forwards the held account probe request to the agent socket.' \
-    '(allow httpd_t unconfined_service_t (unix_stream_socket (connectto)))'
+  printf '%s\n' \
+    '; Managed by xPanel: nginx forwards held account probe, Web Disk, CalDAV, and app-proxy requests over systemd sockets.' \
+    '(allow httpd_t unconfined_service_t (unix_stream_socket (connectto)))' \
+    '(allow httpd_t systemd_socket_proxyd_t (unix_stream_socket (connectto)))' \
+    '(allow init_t systemd_socket_proxyd_t (process2 (nnp_transition)))' \
+    '(allow systemd_socket_proxyd_t httpd_var_run_t (dir (search getattr)))' \
+    '(allow systemd_socket_proxyd_t httpd_var_run_t (sock_file (write getattr)))' \
+    '(allow systemd_socket_proxyd_t httpd_t (unix_stream_socket (connectto)))' \
+    '(allow systemd_socket_proxyd_t unconfined_service_t (unix_stream_socket (connectto)))' \
+    '(allow systemd_socket_proxyd_t init_t (unix_stream_socket (connectto)))' \
+    '(allow httpd_t tmpfs_t (dir (search getattr)))' \
+    '(allow httpd_t tmpfs_t (file (read open getattr)))' \
+    '(typetransition unconfined_service_t user_home_dir_t dir "domains" httpd_sys_rw_content_t)' \
+    '(typetransition unconfined_t user_home_dir_t dir "domains" httpd_sys_rw_content_t)' \
+    '(optional xpanel_account_redis' \
+    '  (allow init_t redis_t (process2 (nnp_transition)))' \
+    '  (allow redis_t tmpfs_t (dir (search getattr)))' \
+    '  (allow redis_t home_root_t (dir (search getattr)))' \
+    '  (allow redis_t user_home_dir_t (dir (search getattr)))' \
+    '  (allow redis_t user_home_t (dir (getattr search open read write add_name remove_name)))' \
+    '  (allow redis_t user_home_t (file (getattr open read write create unlink rename append lock)))' \
+    '  (allow redis_t user_home_t (sock_file (getattr create setattr write unlink)))' \
+    '  (allow httpd_t redis_t (unix_stream_socket (connectto)))' \
+    '  (allow unconfined_service_t redis_t (unix_stream_socket (connectto))))' \
+    '(optional xpanel_account_memcached' \
+    '  (allow init_t memcached_t (process2 (nnp_transition)))' \
+    '  (allow memcached_t tmpfs_t (dir (search getattr)))' \
+    '  (allow memcached_t home_root_t (dir (search getattr)))' \
+    '  (allow memcached_t user_home_dir_t (dir (search getattr)))' \
+    '  (allow memcached_t user_home_t (dir (getattr search open read write add_name remove_name)))' \
+    '  (allow memcached_t user_home_t (file (getattr open read write create unlink rename append lock)))' \
+    '  (allow memcached_t user_home_t (sock_file (getattr create setattr write unlink)))' \
+    '  (allow httpd_t memcached_t (unix_stream_socket (connectto)))' \
+    '  (allow unconfined_service_t memcached_t (unix_stream_socket (connectto))))'
 }
 
 render_opendkim_selinux_module() {
@@ -1372,6 +1410,18 @@ echo "[2/6] Ensuring every bootable kernel carries the quota format modules..."
 assert_bootable_kernel_quota_format
 echo "[2/6] Applying the web server and service configuration of the OS profile..."
 apply_os_configuration
+if [[ "$WITH_MODSECURITY" -eq 1 ]]; then
+  if [[ "$OS_FAMILY" == "debian" ]]; then
+    if [[ -f /etc/modsecurity/modsecurity.conf-recommended && ! -f /etc/modsecurity/modsecurity.conf ]]; then
+      cp -p /etc/modsecurity/modsecurity.conf-recommended /etc/modsecurity/modsecurity.conf
+    fi
+    if [[ -f /etc/modsecurity/modsecurity.conf ]]; then
+      sed -i 's/^SecRuleEngine .*/SecRuleEngine DetectionOnly/' /etc/modsecurity/modsecurity.conf
+    fi
+  elif [[ -f /etc/httpd/conf.d/mod_security.conf ]]; then
+    sed -i 's/^[[:space:]]*SecRuleEngine .*/    SecRuleEngine DetectionOnly/' /etc/httpd/conf.d/mod_security.conf
+  fi
+fi
 if selinuxenabled 2> /dev/null; then
   echo "[2/6] Setting the SELinux policy xPanel needs while SELinux stays enforcing..."
   configure_selinux

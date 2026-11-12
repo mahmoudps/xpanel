@@ -58,7 +58,7 @@ export const renderBoxTrapper = (os: OsProfile, input: BoxTrapperRenderInput | u
     const paths = boxTrapperPaths(dir, domain, local)
     files.push({ path: paths.rules, content: JSON.stringify(box.rules), mode: 0o640, owner: 'root', group: account.username },
       { path: paths.script, content: renderBoxTrapperScript(paths.rules, box.forward), mode: 0o640, owner: 'root', group: account.username })
-    postActions.push({ kind: 'exec', argv: ['/usr/bin/sievec', paths.script] }, { kind: 'exec', argv: ['/usr/bin/chown', `root:${account.username}`, paths.binary] }, { kind: 'exec', argv: ['/usr/bin/chmod', '0640', paths.binary] })
+    postActions.push({ kind: 'exec', argv: ['/usr/bin/sievec', '-P', 'sieve_extprograms', '-x', '+vnd.dovecot.execute', paths.script] }, { kind: 'exec', argv: ['/usr/bin/chown', `root:${account.username}`, paths.binary] }, { kind: 'exec', argv: ['/usr/bin/chmod', '0640', paths.binary] })
   }
   for (const [domain, group] of [...domains].sort(([x], [y]) => x.localeCompare(y))) preActions.push({ kind: 'ensure-dir', path: `${dir}/${domain}`, mode: 0o750, owner: 'root', group })
   return { files, preActions, postActions, execute: input.mailboxes.length > 0 }

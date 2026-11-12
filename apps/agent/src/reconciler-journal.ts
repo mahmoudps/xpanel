@@ -53,6 +53,8 @@ export interface GenerationManifest {
   testResults: RecordedConfigTestResult[]
   /** Identity of the ordered host actions this generation applies; older manifests omit it. */
   effectsChecksum?: string
+  /** Identities of host prerequisites already applied by this generation; older manifests omit it. */
+  preActionHashes?: string[]
 }
 
 export interface PreviousFileBackup {
@@ -151,12 +153,13 @@ export const runJournaledPreActions = async (
   executor: Pick<AgentExecutor, 'runAction'>,
   save: (record: ReconcileJournalRecord) => Promise<void>,
   trackHostEffects: boolean,
+  requiresRollbackVerification = trackHostEffects,
 ): Promise<void> => {
   if (trackHostEffects) record.preActionPlanSha256 = sha256Text(JSON.stringify(actions))
   else record.preActionsNeedVerification = false
   for (const [index, action] of actions.entries()) {
     if (trackHostEffects) {
-      record.preActionsNeedVerification = true
+      if (requiresRollbackVerification) record.preActionsNeedVerification = true
       record.pendingPreAction = { index, kind: action.kind, sha256: sha256Text(JSON.stringify(action)) }
       await save(record)
     }
@@ -277,6 +280,7 @@ export const buildGenerationManifest = (input: {
   createdAt?: string
   /** Provided by the reconciler; tests that build manifests by hand may omit it. */
   effectsChecksum?: string
+  preActions?: readonly HostAction[]
 }): GenerationManifest => {
   const sortedFiles = [...input.files].sort((a, b) => a.path.localeCompare(b.path))
   const entries: OwnedFileEntry[] = sortedFiles.map((f) => {
@@ -321,6 +325,7 @@ export const buildGenerationManifest = (input: {
     stateChecksum: input.stateChecksum,
     filesChecksum: input.filesChecksum,
     ...(input.effectsChecksum === undefined ? {} : { effectsChecksum: input.effectsChecksum }),
+    ...(input.preActions === undefined ? {} : { preActionHashes: [...new Set(input.preActions.map(action => sha256Text(JSON.stringify(action))))] }),
     createdAt: input.createdAt ?? new Date().toISOString(),
     actor: input.actor,
     files: entries,

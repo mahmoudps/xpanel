@@ -418,7 +418,7 @@ export interface AgentServerDeps {
   applicationArtifacts?: StoredApplicationArtifacts | null
   /** Builds one control snapshot now; absent where the index database cannot be copied. */
   panelSnapshot?: () => Promise<{ file: string; bytes: number }>
-  databaseRemoteAccessNative?: DatabaseRemoteAccessNative
+  databaseRemoteAccessNative?: DatabaseRemoteAccessNative | (() => Promise<DatabaseRemoteAccessNative | null>)
   trustedProxiesProvider?: TrustedProxyNativeProvider
   backupDestinationProvider?: BackupDestinationProbeProvider
   readBackupDestination?: (id: string) => Promise<BackupDestinationTarget | null>
@@ -1729,7 +1729,14 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
 
       const dbMaintenanceResponse = await handleDbMaintenanceRoute(req, url, method, { caller, reauthenticate: () => authenticateCaller(req), assertRoot: assertRootCaller, audit: entry => appendAudit(deps.db, entry), ...(deps.mariadbAdmin ? { mariadb: deps.mariadbAdmin } : {}), ...(deps.executor instanceof LinuxHostExecutor ? { host: deps.executor } : {}) })
       if (dbMaintenanceResponse) return dbMaintenanceResponse
-      const dbAdminToolsResponse = await handleDbAdminToolsRoute(req, url, method, { caller, reauthenticate: () => authenticateCaller(req), assertRoot: assertRootCaller, audit: entry => appendAudit(deps.db, entry), store: deps.store, ...(deps.mariadbAdmin ? { mariadb: deps.mariadbAdmin } : {}), ...(deps.databaseRemoteAccessNative ? { native: deps.databaseRemoteAccessNative } : {}), ...(deps.executor instanceof LinuxHostExecutor ? { host: deps.executor, runAction: (action: HostAction) => deps.executor!.runAction(action) } : {}) })
+      const resolveDatabaseRemoteAccessNative = async (): Promise<DatabaseRemoteAccessNative | undefined> => {
+        const candidate = deps.databaseRemoteAccessNative
+        if (!candidate) return undefined
+        if (typeof candidate === 'function') return (await candidate()) ?? undefined
+        return candidate
+      }
+      const dbAdminNative = url.pathname === '/host/databases/access-hosts/push' ? await resolveDatabaseRemoteAccessNative() : undefined
+      const dbAdminToolsResponse = await handleDbAdminToolsRoute(req, url, method, { caller, reauthenticate: () => authenticateCaller(req), assertRoot: assertRootCaller, audit: entry => appendAudit(deps.db, entry), store: deps.store, ...(deps.mariadbAdmin ? { mariadb: deps.mariadbAdmin } : {}), ...(dbAdminNative ? { native: dbAdminNative } : {}), ...(deps.executor instanceof LinuxHostExecutor ? { host: deps.executor, runAction: (action: HostAction) => deps.executor!.runAction(action) } : {}) })
       if (dbAdminToolsResponse) return dbAdminToolsResponse
       const databaseTuningResponse = await handleDatabaseTuningRoute(req, url, method, {
         caller, reauthenticate: () => authenticateCaller(req), assertRoot: assertRootCaller,
@@ -2151,9 +2158,10 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         host: linuxHost && (deps.os.family === 'debian' || deps.os.family === 'rhel') ? accountPearHost(deps.executor!, deps.os.family) : null,
       })
       if (accountPackagesResponse) return accountPackagesResponse
+      const remoteDatabaseNative = url.pathname.endsWith('/database-remote-access') ? await resolveDatabaseRemoteAccessNative() : undefined
       const remoteDatabaseResponse = await handleDatabaseRemoteAccessRoute(req, url, method, {
         caller, store: deps.store, currentPrincipal: () => getPrincipal(deps.db, caller.principalId),
-        ...(deps.databaseRemoteAccessNative ? { native: deps.databaseRemoteAccessNative } : {}),
+        ...(remoteDatabaseNative ? { native: remoteDatabaseNative } : {}),
         audit: async (account, action, host) => { await appendAudit(deps.db, { actor: caller.actor, principalId: caller.principalId, action: 'database.remote_access.' + action, target: 'account:' + account.username, detail: { host }, outcome: 'ok' }) },
       })
       if (remoteDatabaseResponse) return remoteDatabaseResponse

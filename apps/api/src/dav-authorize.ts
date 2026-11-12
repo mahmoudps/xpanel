@@ -5,7 +5,7 @@ import { checkLockout, findPrincipalByUsername } from '@xpanel/db'
 import type { Db } from '@xpanel/db'
 import { system } from '@xpanel/render'
 import type { StateStore } from '@xpanel/state'
-import { DUMMY_PASSWORD_HASH, verifyPasswordArgon2id } from './auth.ts'
+import { DUMMY_PASSWORD_HASH, verifyPasswordArgon2id, verifyServicePassword } from './auth.ts'
 import { assertAccountPlanFeatures } from './authorization.ts'
 
 /**
@@ -64,7 +64,8 @@ export const createDavAuthorizer = (deps: DavAuthorizeDeps) => {
   // Bound to the stored hash, so a password change or reset ends a cached verification at once.
   const verified = new Map<string, number>()
   const now = deps.now ?? Date.now
-  const verify = deps.verify ?? verifyPasswordArgon2id
+  const verify = deps.verify ?? ((password: string, hash: string) =>
+    hash.startsWith('{SHA512-CRYPT}') ? verifyServicePassword(password, hash) : verifyPasswordArgon2id(password, hash))
   const cacheKey = (service: DavService, account: string, login: string, password: string, hash: string): string =>
     createHmac('sha256', key).update([service, account, login, password, createHash('sha256').update(hash).digest('hex')].join('\0')).digest('hex')
 
@@ -77,7 +78,7 @@ export const createDavAuthorizer = (deps: DavAuthorizeDeps) => {
     const user = login.includes('@') ? await deps.getServiceUserByLogin(login) : null
     if (!user || user.accountId !== account.id || !(service === 'webdisk' ? user.services.webdisk : user.services.email)) return null
     const stored = await deps.getServiceUserHash(user.id)
-    const hash = stored?.startsWith('{ARGON2ID}') ? stored.slice('{ARGON2ID}'.length) : null
+    const hash = stored?.startsWith('{ARGON2ID}') ? stored.slice('{ARGON2ID}'.length) : stored?.startsWith('{SHA512-CRYPT}') ? stored : null
     return { kind: 'user', id: user.id, principal: user.id, login: user.login.toLowerCase(), hash, readOnly: user.webdiskReadOnly === true, dir: user.ftpDir }
   }
 

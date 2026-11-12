@@ -32,7 +32,7 @@ interface UnitStatus { load: string; active: string; cgroup: string; pending: bo
 const refused = (message: string) => new XpanelError('PRECONDITION_FAILED', message)
 const unavailable = (message: string) => new XpanelError('SERVICE_UNAVAILABLE', message)
 const hasCode = (error: unknown, code: string): boolean => !!error && typeof error === 'object' && 'code' in error && error.code === code
-const canonicalPath = (value: string): boolean => typeof value === 'string' && value.startsWith('/') && posix.normalize(value) === value && !/[\u0000-\u0020\u007f%]/.test(value)
+const canonicalPath = (value: string): boolean => typeof value === 'string' && value.startsWith('/') && posix.normalize(value) === value && !/[\u0000-\u0020\u007f%$]/.test(value)
 
 /** Check every ancestor without following symlinks. Only root may change this tree. */
 const secureDirectory = async (path: string, create = false, privateLeaf = false): Promise<void> => {
@@ -423,7 +423,7 @@ export class SystemdAccountFileWorkerPool {
           'TimeoutStopSec=2s', 'SendSIGKILL=yes', 'NoNewPrivileges=yes', 'MemoryMax=64M', 'MemorySwapMax=0', 'TasksMax=1', 'CPUQuota=100%',
           'ConditionPathExists=/etc/systemd/system/' + slice, 'BindsTo=' + slice,
         ]
-        const args = ['--system', '--no-ask-password', '--quiet', '--pipe', '--wait', '--collect', '--service-type=exec', '--expand-environment=no', '--unit=' + input.workerUnit, '--slice=' + slice, ...properties.map((property) => '--property=' + property), '--', input.binaryPath]
+        const args = ['--system', '--no-ask-password', '--quiet', '--pipe', '--wait', '--collect', '--service-type=exec', '--unit=' + input.workerUnit, '--slice=' + slice, ...properties.map((property) => '--property=' + property), '--', input.binaryPath]
         attempted = true
         job.process = captureProcess(SYSTEMD_RUN, args, input)
         captured = await job.process.result

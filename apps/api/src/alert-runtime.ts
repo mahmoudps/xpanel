@@ -1,3 +1,4 @@
+import { rm } from 'node:fs/promises'
 import { hostname } from 'node:os'
 import { join } from 'node:path'
 import { agentCallerHeaders } from '@xpanel/agent'
@@ -26,7 +27,7 @@ type Store = Pick<StateStore, 'rootDir' | 'getServerSettings' | 'getWriterLock'>
 export function alertStateFiles(store: Pick<StateStore, 'rootDir' | 'getWriterLock'>) {
   const path = (name: keyof typeof ALERT_FILES): string => join(store.rootDir, 'extended', ALERT_FILES[name])
   const read = (name: keyof typeof ALERT_FILES) => () => readJsonIfExists<unknown>(path(name))
-  const write = (name: keyof typeof ALERT_FILES, mode?: number) => (value: unknown) => atomicWriteJson(path(name), value, mode)
+  const write = (name: keyof typeof ALERT_FILES, mode?: number) => (value: unknown) => value === null ? rm(path(name), { force: true }) : atomicWriteJson(path(name), value, mode)
   return {
     readRules: read('rules'), writeRules: write('rules'), readState: read('state'), writeState: write('state'), readDelivery: read('delivery'), writeDelivery: write('delivery'),
     readSaved: read('notifications'), writeSaved: write('notifications'), readSigningKey: read('signingKey'), writeSigningKey: write('signingKey', 0o600),

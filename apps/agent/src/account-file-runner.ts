@@ -468,8 +468,8 @@ export class NativeAccountFileRunner implements AccountFileRunner {
       this.onObservation?.(observation)
       return fail(mappedCode, errPayload.message, {
         operation: request.op,
-        // These helpers refuse before their single publishing rename; later failures arrive as SERVICE_UNAVAILABLE.
-        ...(['write-checked', 'move', 'copy', 'compress', 'extract'].includes(request.op) && ['VALIDATION', 'CONFLICT', 'FORBIDDEN', 'NOT_FOUND', 'LIMIT_EXCEEDED', 'PRECONDITION_FAILED'].includes(mappedCode) ? { stateChanged: false } : {}),
+        // These helpers refuse before their single publishing mutation; later failures arrive as SERVICE_UNAVAILABLE.
+        ...(['write', 'put-bytes', 'mkdir', 'chmod', 'trash', 'restore', 'purge-trash', 'write-checked', 'move', 'copy', 'compress', 'extract'].includes(request.op) && ['VALIDATION', 'CONFLICT', 'FORBIDDEN', 'NOT_FOUND', 'LIMIT_EXCEEDED', 'PRECONDITION_FAILED'].includes(mappedCode) ? { stateChanged: false } : {}),
         errno: errPayload.errno,
         errnoName: errPayload.errnoName,
         ...(typeof errPayload.reason === 'string' && /^[a-z][a-z_]{0,63}$/.test(errPayload.reason) ? { reason: errPayload.reason } : {}),

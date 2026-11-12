@@ -118,7 +118,7 @@ export async function handleAddressImport(req: Request, ports: AddressImportPort
         await helpers.store.createServiceUser({
           accountId,
           login: col0,
-          passwordHash: await passwordHashFromInput({ password: col1 }, { service: ['mail'] }),
+          passwordHash: await passwordHashFromInput({ password: col1 }, { service: ['mail'], ...(helpers.serviceHashScheme && { scheme: helpers.serviceHashScheme }) }),
           services: { email: true, ftp: false, webdisk: false },
           mailboxQuotaMb: quotaMb,
           ftpDir: 'public_html',

@@ -155,7 +155,17 @@ export async function handlePanelBrandingRoute(request: Request, url: URL, metho
     return value ?? (raw === null ? DEFAULT_PANEL_BRANDING() : fail('PRECONDITION_FAILED', 'the saved branding requires review before it can be changed', unchanged))
   }
   if (!assetMatch) {
-    if (method !== 'GET' && method !== 'PUT') return new Response(null, { status: 405, headers: { allow: 'GET, PUT' } })
+    if (method !== 'GET' && method !== 'PUT' && method !== 'DELETE') return new Response(null, { status: 405, headers: { allow: 'GET, PUT, DELETE' } })
+    if (method === 'DELETE') {
+      if ([...url.searchParams.keys()].join() !== 'expectedRevision') return fail('VALIDATION', 'the reset takes only ?expectedRevision=', unchanged)
+      const expected = assertExpectedRevision(url.searchParams.get('expectedRevision')), before = await current()
+      const saved = await file.reset(expected, authority)
+      for (const kind of ['logo', 'favicon'] as const) {
+        if (before[kind]) await rm(brandingAssetPath(file, kind, before[kind]), { force: true }).catch(() => undefined)
+      }
+      await audit('panel.branding.updated', { reset: true })
+      return panelJson(viewOf(saved.raw, saved.value))
+    }
     if (url.search) return fail('VALIDATION', 'branding accepts no query selectors', unchanged)
     if (method === 'GET') { const { raw, value } = await file.read(); return panelJson(viewOf(raw, value)) }
     const body = await readPanelConfigBody(request)

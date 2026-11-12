@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { tools } from './data/index.ts'
+import { buildDeliveryCatalog, tools } from './data/index.ts'
 import { navigation } from './data/navigation.ts'
 import { canonicalNavigationRoute, registeredDocumentAliases, canOpenRegisteredRoute, visibleNavigation, visibleRegisteredNavigation } from './navigation.ts'
 import type { VisibilityContext } from './visibility.ts'
@@ -59,9 +59,10 @@ describe('navigation', () => {
   it('keeps role admission separate from qualification and leaves registry and tool status unchanged', () => {
     const context: VisibilityContext = { principal: { kind: 'user', id: 'fixture-owner', username: 'owner', accountId: 'fixture-account' }, disabledFeatures: new Set(['terminal', 'domains']) }
     const before = JSON.stringify({ navigation, tools })
+    const unbound = buildDeliveryCatalog([], null)
     expect(canOpenRegisteredRoute('/advanced/terminal', context)).toBe(true)
     expect(visibleRegisteredNavigation(context).flatMap(surface => surface.sections.flatMap(section => section.pages.map(page => page.route)))).toContain('/resources')
-    expect(visibleNavigation(context, tools).flatMap(surface => surface.sections.flatMap(section => section.pages.map(page => page.route)))).not.toContain('/resources')
+    expect(visibleNavigation(context, unbound).flatMap(surface => surface.sections.flatMap(section => section.pages.map(page => page.route)))).not.toContain('/resources')
     expect(JSON.stringify({ navigation, tools })).toBe(before)
   })
 

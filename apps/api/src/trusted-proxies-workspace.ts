@@ -10,7 +10,7 @@ import type { ExtendedRouteHelpers } from './extended-routes.ts'
 export interface TrustedProxiesWorkspaceHelpers extends Pick<ExtendedRouteHelpers, 'requireCaller' | 'assertRoot' | 'emitAudit'> {
   store: Pick<StateStore, 'rootDir' | 'getWriterLock'>
   /** Trusted socket/session-derived context plus host interface inventory, never body/header selectors. */
-  readSafety: (request: Request) => Promise<{ localAddresses: readonly string[]; managementClient: string | null }>
+  readSafety: (request: Request, caller?: AuthenticatedCaller) => Promise<{ localAddresses: readonly string[]; managementClient: string | null }>
   /** Existing protected agent transport; absent until an agent is connected. The management client is this request's socket-derived address, carried to the protected ingress provider. */
   readHost?: (caller: AuthenticatedCaller, path: string, body?: unknown, managementClient?: string | null) => Promise<unknown>
   now?: () => Date
@@ -62,7 +62,7 @@ export async function handleTrustedProxiesWorkspaceRoute(request: Request, url: 
   await helpers.assertRoot(caller, action)
   const fresh = async (): Promise<AuthenticatedCaller> => { const current = await helpers.requireCaller(request); await helpers.assertRoot(current, action); if (!same(caller, current)) return fail('FORBIDDEN', 'root authorization changed', unchanged); return current }
   if (url.search) return invalid('proxy configuration accepts no query selectors')
-  const client = async (): Promise<string | null> => { try { const value = (await helpers.readSafety(request))?.managementClient ?? null; return parseIp(value) ? value : null } catch { return null } }
+  const client = async (): Promise<string | null> => { try { const value = (await helpers.readSafety(request, caller))?.managementClient ?? null; return parseIp(value) ? value : null } catch { return null } }
   if (url.pathname === ROUTE && method === 'GET') { const view = await viewOf(await readRaw(helpers.store), caller, helpers, await client()); await fresh(); return json(view) }
   if (url.pathname === ROUTE + '/apply' && method === 'POST') {
     const body = await bodyOf(request)
@@ -105,7 +105,7 @@ export async function handleTrustedProxiesWorkspaceRoute(request: Request, url: 
     const raw = await readRaw(helpers.store)
     if (raw !== null && !readTrustedProxyRecord(raw)) return fail('PRECONDITION_FAILED', 'saved proxy policy requires review before changing it', unchanged)
     if (trustedProxyRevision(raw) !== expectedRevision) return fail('CONFLICT', 'saved proxy policy changed; reload before saving', unchanged)
-    const safety = await helpers.readSafety(request)
+    const safety = await helpers.readSafety(request, caller)
     if (!safety || !Array.isArray(safety.localAddresses) || safety.localAddresses.length < 1 || safety.localAddresses.length > 256) return fail('PRECONDITION_FAILED', 'local interface safety inventory is unavailable', unchanged)
     const policy = parseTrustedProxyPolicy(body.policy, safety.localAddresses), client = parseIp(safety.managementClient)
     if (policy.cidrs.length && !client) return fail('PRECONDITION_FAILED', 'the actual management client address could not be verified', unchanged)

@@ -22,7 +22,7 @@ import {
 } from '@xpanel/db'
 import type { Db, DurableJobRecord, MailboxSessionRecord, PrincipalRecord, SessionRecord } from '@xpanel/db'
 import type { StateStore } from '@xpanel/state'
-import { hashPasswordArgon2id, verifyPasswordArgon2id } from '../auth.ts'
+import { hashPasswordArgon2id, verifyPasswordArgon2id, verifyServicePassword } from '../auth.ts'
 import type { AuthenticatedCaller } from '../auth.ts'
 import { assertAccountFeatures } from '../authorization.ts'
 import { sessionTokenHash } from '../entry-points.ts'
@@ -584,7 +584,7 @@ export const establishMailboxSession = async (input: {
   if (account.status !== 'active') {
     // IMAP is closed on a suspended account, so the stored hash decides; only the right password learns the account state.
     const stored = await input.store.getServiceUserHash(serviceUser.id)
-    if (stored?.startsWith('{ARGON2ID}') && await verifyPasswordArgon2id(input.password, stored.slice('{ARGON2ID}'.length))) return fail('FORBIDDEN', 'this mailbox account is suspended', { reason: 'account_suspended' })
+    if (await verifyServicePassword(input.password, stored)) return fail('FORBIDDEN', 'this mailbox account is suspended', { reason: 'account_suspended' })
     return fail('UNAUTHENTICATED', 'invalid username or password')
   }
   await assertMailboxIdentityAvailable(input.db, serviceUser.id, mailbox)

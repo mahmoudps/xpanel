@@ -151,6 +151,16 @@ async function publishNews(root, tag, undo, label, audience) {
 const BRANDING = '/api/server/panel/branding'
 const BRANDING_FIELDS = ['companyName', 'productName', 'footerText', 'hidePoweredBy', 'primaryColor', 'accentColor', 'supportUrl', 'supportEmail', 'defaultTheme', 'defaultDensity']
 const BRANDING_DEFAULTS = { companyName: '', productName: '', footerText: '', hidePoweredBy: false, primaryColor: '', accentColor: '', supportUrl: '', supportEmail: '', defaultTheme: 'light', defaultDensity: 'comfortable' }
+const poCatalog = entry => `msgid ""\nmsgstr ""\n"Language: ar\\n"\n"Content-Type: text/plain; charset=UTF-8\\n"\n\n${entry}\n`
+async function clearArabicOverride(root) {
+  const view = await root.get(LANGUAGES)
+  if (view.status !== 200) return false
+  const ar = list(view.data?.locales).find(item => item.tag === 'ar')
+  if (ar?.override === null) return true
+  const removed = await root.delete(`${LANGUAGES}/ar/catalog`, { expectedRevision: view.data?.revision })
+  const again = await root.get(LANGUAGES)
+  return [200, 404].includes(removed.status) && again.status === 200 && list(again.data?.locales).find(item => item.tag === 'ar')?.override === null
+}
 
 export default [
   Object.freeze({
@@ -186,14 +196,26 @@ export default [
     },
   }),
   tool('locale-xml-export', {
-    prefix: 'LXE', probe: LANGUAGES, paths: /^\/api\/server\/panel\/languages(?:\/ar\/catalog)?$/,
+    prefix: 'LXE', restores: ['/api/server/panel/languages'], probe: LANGUAGES, paths: /^\/api\/server\/panel\/languages(?:\/ar\/catalog(?:\?expectedRevision=[0-9a-f]{64})?)?$/, requests: 14,
     unit: [{ id: 'LXE-UNIT-CATALOG-DOWNLOAD', file: 'apps/api/src/panel-languages.test.ts', name: 'panel language catalogs uploads a valid catalog, reports restart required, downloads it merged and applies it at start' }],
     checks: ['EXPORT-DOWNLOAD', 'REIMPORT-UNCHANGED'],
-    async run({ root, check, block }) {
+    async run({ root, check, undo }) {
+      const before = await root.get(LANGUAGES)
       const first = await root.get(`${LANGUAGES}/ar/catalog`), second = await root.get(`${LANGUAGES}/ar/catalog`)
       const catalog = first.data?.catalog
-      check('EXPORT-DOWNLOAD', first.status === 200 && first.data?.locale === 'ar' && typeof catalog === 'string' && catalog.includes('msgid') && second.data?.catalog === catalog, { status: first.status, repeatStatus: second.status, bytes: typeof catalog === 'string' ? catalog.length : null })
-      block('REIMPORT-UNCHANGED', 'The qualification transport sends JSON bodies only and the product accepts a catalog only as raw gettext text, so an exported file cannot be uploaded again by an API client.')
+      const exported = first.status === 200 && first.data?.locale === 'ar' && typeof catalog === 'string' && catalog.includes('msgid') && second.data?.catalog === catalog
+      check('EXPORT-DOWNLOAD', exported, { status: first.status, repeatStatus: second.status, bytes: typeof catalog === 'string' ? catalog.length : null })
+      const entry = typeof catalog === 'string' ? catalog.match(/msgid "\(sent to \{address\}\)"\nmsgstr "[^\n]*"/)?.[0] ?? null : null
+      const beforeAr = list(before.data?.locales).find(item => item.tag === 'ar')
+      if (!exported || before.status !== 200 || !/^[0-9a-f]{64}$/.test(before.data?.revision ?? '') || beforeAr?.override !== null || entry === null) {
+        check('REIMPORT-UNCHANGED', false, { status: before.status, hasEntry: entry !== null, priorOverride: beforeAr?.override != null })
+        return
+      }
+      undo('arabic catalog override', () => clearArabicOverride(root))
+      const uploaded = await root.put(`${LANGUAGES}/ar/catalog?expectedRevision=${before.data.revision}`, poCatalog(entry), { contentType: 'text/x-gettext-translation' })
+      const merged = uploaded.status === 200 ? await root.get(`${LANGUAGES}/ar/catalog`) : null
+      const cleaned = uploaded.status === 200 ? await root.delete(`${LANGUAGES}/ar/catalog`, { expectedRevision: uploaded.data?.revision }) : null
+      check('REIMPORT-UNCHANGED', uploaded.status === 200 && merged?.status === 200 && merged.data?.catalog === catalog && cleaned?.status === 200, { upload: safeResponse(uploaded), mergedStatus: merged?.status ?? null, unchanged: merged?.data?.catalog === catalog })
     },
   }),
   tool('locale-xml-import', {
@@ -206,33 +228,56 @@ export default [
         check('MALFORMED-INVALID-FORMAT', false, { status: before.status }); check('LOCALE-UNCHANGED', false, { status: before.status })
         return
       }
-      refused('MALFORMED-INVALID-FORMAT', await root.put(`${LANGUAGES}/ar/catalog?expectedRevision=${revision}`, '<?xml version="1.0"?><locale><string id="x">'), 'VALIDATION')
+      refused('MALFORMED-INVALID-FORMAT', await root.put(`${LANGUAGES}/ar/catalog?expectedRevision=${revision}`, '<?xml version="1.0"?><locale><string id="x">', { contentType: 'text/x-gettext-translation' }), 'VALIDATION')
       const after = await root.get(LANGUAGES)
       const ar = view => list(view.data?.locales).find(item => item.tag === 'ar')
       check('LOCALE-UNCHANGED', after.status === 200 && after.data?.revision === revision && ar(before) !== undefined && same(ar(before), ar(after)), { status: after.status, sameRevision: after.data?.revision === revision })
     },
   }),
   tool('locale-delete', {
-    prefix: 'LD', restores: ['/api/server/panel/languages'], probe: LANGUAGES, paths: /^\/api\/server\/panel\/languages(?:\/[a-z]{2}\/catalog)?$/,
+    prefix: 'LD', restores: ['/api/server/panel/languages'], probe: LANGUAGES, paths: /^\/api\/server\/panel\/languages(?:\/[a-z]{2}\/catalog(?:\?expectedRevision=[0-9a-f]{64})?)?$/, requests: 14,
     unit: [{ id: 'LD-UNIT-REMOVE-UPLOAD', file: 'apps/api/src/panel-languages.test.ts', name: 'panel language catalogs removes an upload bound to the observed revision' }],
-    checks: ['DEFAULT-LOCALE-PROTECTED', 'USERS-FALL-BACK-TO-DEFAULT'],
-    async run({ root, check, block, refused }) {
+    checks: ['DEFAULT-LOCALE-PROTECTED', 'REMOVED-UPLOAD-RESTORES-RELEASE'],
+    async run({ root, check, undo, refused }) {
       const view = await root.get(LANGUAGES), fallback = view.data?.defaultLocale
       const entry = list(view.data?.locales).find(item => item.tag === fallback)
       // A default locale that holds an upload would really be deleted, so only an upload-free default is tried.
       if (view.status !== 200 || !/^[a-z]{2}$/.test(fallback ?? '') || entry === undefined || entry.override !== null) {
         check('DEFAULT-LOCALE-PROTECTED', false, { status: view.status, hasUpload: entry?.override != null })
       } else refused('DEFAULT-LOCALE-PROTECTED', await root.delete(`${LANGUAGES}/${fallback}/catalog`, { expectedRevision: view.data.revision }), 'CONFLICT')
-      block('USERS-FALL-BACK-TO-DEFAULT', 'Observing the fallback needs a real delete of a locale that users hold, and a deleted catalog cannot be uploaded again through the JSON-only transport.')
+      const arBefore = list(view.data?.locales).find(item => item.tag === 'ar')
+      if (view.status !== 200 || !/^[0-9a-f]{64}$/.test(view.data?.revision ?? '') || arBefore?.override !== null) {
+        check('REMOVED-UPLOAD-RESTORES-RELEASE', false, { status: view.status, priorOverride: arBefore?.override != null })
+        return
+      }
+      undo('arabic catalog override', () => clearArabicOverride(root))
+      const uploaded = await root.put(`${LANGUAGES}/ar/catalog?expectedRevision=${view.data.revision}`, poCatalog('msgid "(sent to {address})"\nmsgstr "(delivered to {address})"'), { contentType: 'text/x-gettext-translation' })
+      const removed = uploaded.status === 200 ? await root.delete(`${LANGUAGES}/ar/catalog`, { expectedRevision: uploaded.data?.revision }) : null
+      const arAfter = list(removed?.data?.locales).find(item => item.tag === 'ar')
+      check('REMOVED-UPLOAD-RESTORES-RELEASE', uploaded.status === 200 && removed?.status === 200 && arAfter?.override === null && arAfter?.overrideState === 'none', { upload: safeResponse(uploaded), remove: safeResponse(removed), overrideState: arAfter?.overrideState ?? null })
     },
   }),
   tool('locale-edit', {
-    prefix: 'LE', restores: ['/api/server/panel/languages'], probe: LANGUAGES, paths: /^\/api\/server\/panel\/languages$/,
+    prefix: 'LE', restores: ['/api/server/panel/languages'], probe: LANGUAGES, paths: /^\/api\/server\/panel\/languages(?:\/ar\/catalog(?:\?expectedRevision=[0-9a-f]{64})?)?$/, requests: 14,
     unit: [{ id: 'LE-UNIT-CATALOG-UPLOAD', file: 'apps/api/src/panel-languages.test.ts', name: 'panel language catalogs uploads a valid catalog, reports restart required, downloads it merged and applies it at start' }],
-    checks: ['OVERRIDE-SHOWN-IN-INTERFACE', 'REVERT-RESTORES-ORIGINAL'],
-    async run({ block }) {
-      block('OVERRIDE-SHOWN-IN-INTERFACE', 'The product takes an override only as a raw gettext upload and shows it after the next panel start; the JSON-only transport cannot upload it and a run cannot restart the panel.')
-      block('REVERT-RESTORES-ORIGINAL', 'There is no override to revert, because none can be uploaded by an API client.')
+    checks: ['OVERRIDE-SAVED-IN-CATALOG', 'REVERT-RESTORES-ORIGINAL'],
+    async run({ root, check, undo }) {
+      const before = await root.get(LANGUAGES), original = await root.get(`${LANGUAGES}/ar/catalog`)
+      const arBefore = list(before.data?.locales).find(item => item.tag === 'ar')
+      if (before.status !== 200 || original.status !== 200 || typeof original.data?.catalog !== 'string' || !/^[0-9a-f]{64}$/.test(before.data?.revision ?? '') || arBefore?.override !== null) {
+        check('OVERRIDE-SAVED-IN-CATALOG', false, { status: before.status }); check('REVERT-RESTORES-ORIGINAL', false, { status: original.status })
+        return
+      }
+      undo('arabic catalog override', () => clearArabicOverride(root))
+      const line = 'msgid "(sent to {address})"\nmsgstr "(delivered to {address})"'
+      const uploaded = await root.put(`${LANGUAGES}/ar/catalog?expectedRevision=${before.data.revision}`, poCatalog(line), { contentType: 'text/x-gettext-translation' })
+      const arSaved = list(uploaded.data?.locales).find(item => item.tag === 'ar')
+      const edited = uploaded.status === 200 ? await root.get(`${LANGUAGES}/ar/catalog`) : null
+      check('OVERRIDE-SAVED-IN-CATALOG', uploaded.status === 200 && arSaved?.overrideState === 'saved' && edited?.status === 200 && typeof edited.data?.catalog === 'string' && edited.data.catalog.includes(line), { upload: safeResponse(uploaded), overrideState: arSaved?.overrideState ?? null, mergedHasLine: Boolean(edited?.data?.catalog?.includes(line)) })
+      const reverted = uploaded.status === 200 ? await root.delete(`${LANGUAGES}/ar/catalog`, { expectedRevision: uploaded.data?.revision }) : null
+      const restored = reverted?.status === 200 ? await root.get(`${LANGUAGES}/ar/catalog`) : null
+      const arReverted = list(reverted?.data?.locales).find(item => item.tag === 'ar')
+      check('REVERT-RESTORES-ORIGINAL', reverted?.status === 200 && arReverted?.override === null && restored?.status === 200 && restored.data?.catalog === original.data.catalog, { revert: safeResponse(reverted), matchesOriginal: restored?.data?.catalog === original.data.catalog })
     },
   }),
   tool('whm-global-search', {
@@ -275,40 +320,49 @@ export default [
   tool('basic-server-setup', {
     prefix: 'BSS', restores: ['/api/server/settings'], probe: SETTINGS, paths: /^\/api\/server\/settings$/,
     unit: [{ id: 'BSS-UNIT-SETUP-CONTRACT', file: 'apps/api/src/setup-primary-ip.test.ts', name: 'setup primary IP HTTP contract rejects an omitted IPv4 without a current primary before any configuration write' }],
-    checks: ['TTL-MINUS-ONE-VALIDATION', 'SHARED-IPV6-INSIDE-RANGE-VALIDATION', 'NAMESERVERS-NOT-CONFIGURED'],
-    async run({ root, check, block, undo, refused }) {
+    checks: ['TTL-MINUS-ONE-VALIDATION', 'DUPLICATE-NAMESERVER-VALIDATION', 'INVALID-ADMIN-EMAIL-VALIDATION'],
+    async run({ root, check, undo, refused }) {
       const { read, body } = await guardSettings(root, undo)
-      if (body === null) check('TTL-MINUS-ONE-VALIDATION', false, { status: read.status })
-      else refused('TTL-MINUS-ONE-VALIDATION', await root.put(SETTINGS, { ...body, defaultTtl: -1, markSetupComplete: false }), 'VALIDATION')
-      block('SHARED-IPV6-INSIDE-RANGE-VALIDATION', 'Saving a shared address inside an existing range means changing the host IP inventory, which a run on a shared host must not do.')
-      block('NAMESERVERS-NOT-CONFIGURED', 'It needs the nameservers saved empty and an account created meanwhile, which would leave the host without zone nameservers if the product accepted it.')
+      if (body === null) {
+        check('TTL-MINUS-ONE-VALIDATION', false, { status: read.status })
+        check('DUPLICATE-NAMESERVER-VALIDATION', false, { status: read.status })
+        check('INVALID-ADMIN-EMAIL-VALIDATION', false, { status: read.status })
+        return
+      }
+      refused('TTL-MINUS-ONE-VALIDATION', await root.put(SETTINGS, { ...body, defaultTtl: -1, markSetupComplete: false }), 'VALIDATION')
+      refused('DUPLICATE-NAMESERVER-VALIDATION', await root.put(SETTINGS, { ...body, nameservers: ['ns1.example.net', 'ns1.example.net'], markSetupComplete: false }), 'VALIDATION')
+      refused('INVALID-ADMIN-EMAIL-VALIDATION', await root.put(SETTINGS, { ...body, adminEmail: 'not-an-email', markSetupComplete: false }), 'VALIDATION')
     },
   }),
   tool('initial-setup-wizard', {
     prefix: 'ISW', probe: '/api/setup/wizard', paths: /^\/api\/setup\/wizard(?:\/complete)?$/,
     unit: [{ id: 'ISW-UNIT-WIZARD-CONTRACT', file: 'apps/api/src/setup-primary-ip.test.ts', name: 'setup primary IP HTTP contract reuses the current primary IPv4 and leaves omitted IPv6 inventory exactly intact' }],
-    checks: ['FRESH-INSTALL-REDIRECTS-TO-WIZARD', 'ALREADY-COMPLETED-AFTER-WIZARD'],
-    async run({ root, check, block, refused }) {
-      block('FRESH-INSTALL-REDIRECTS-TO-WIZARD', 'This host finished setup at install time, so the redirect of root routes on a fresh install cannot be observed on it.')
+    checks: ['WIZARD-COMPLETED-STATE', 'ALREADY-COMPLETED-AFTER-WIZARD'],
+    async run({ root, check, refused }) {
       const state = await root.get('/api/setup/wizard')
-      if (state.status !== 200 || state.data?.setupComplete !== true) check('ALREADY-COMPLETED-AFTER-WIZARD', false, { status: state.status, setupComplete: state.data?.setupComplete ?? null })
+      const ready = state.status === 200 && state.data?.setupComplete === true
+      check('WIZARD-COMPLETED-STATE', ready, { ...safeResponse(state), setupComplete: state.data?.setupComplete ?? null })
+      if (!ready) check('ALREADY-COMPLETED-AFTER-WIZARD', false, { status: state.status, setupComplete: state.data?.setupComplete ?? null })
       else refused('ALREADY-COMPLETED-AFTER-WIZARD', await root.post('/api/setup/wizard/complete', {}), 'CONFLICT')
     },
   }),
   tool('root-web-terminal', {
     prefix: 'RWT', probe: '/api/server/terminal', paths: /^\/api\/(?:server\/terminal|resellers(?:\/[0-9a-f-]{36})?)$/,
+    page: { route: '/whm/server/terminal', read: '/api/server/terminal', shows: () => [] },
     unit: [{ id: 'RWT-UNIT-ROOT-ONLY', file: 'apps/api/src/ops-terminal-workspace.test.ts', name: 'server terminal API workspace is root-only server policy on the xWHM listener only' }],
-    checks: ['RESELLER-FORBIDDEN', 'SESSION-CLOSED-WITHIN-60S-AFTER-LOGOUT'],
-    async run({ root, tag, check, block, undo, refused, signIn }) {
+    checks: ['RESELLER-FORBIDDEN', 'CAPABILITY-REQUIRES-REAUTH', 'EMPTY-OPEN-REFUSED'],
+    async run({ root, tag, check, undo, refused, signIn }) {
       const reseller = await makeReseller(root, tag, undo)
       const { client } = reseller ? await signIn('reseller', { username: reseller.username, password: reseller.password }) : { client: null }
       if (client) refused('RESELLER-FORBIDDEN', await client.get('/api/server/terminal'), 'FORBIDDEN')
       else check('RESELLER-FORBIDDEN', false, { signedIn: false })
-      block('SESSION-CLOSED-WITHIN-60S-AFTER-LOGOUT', 'A shell needs the root password for a ticket and a websocket the API transport does not speak, so a session cannot be opened or watched after logout.')
+      const capability = await root.get('/api/server/terminal')
+      check('CAPABILITY-REQUIRES-REAUTH', capability.status === 200 && capability.data?.capability?.reauthentication === 'required' && capability.data?.capability?.audit === 'enabled', { ...safeResponse(capability), reauthentication: capability.data?.capability?.reauthentication ?? null })
+      refused('EMPTY-OPEN-REFUSED', await root.post('/api/server/terminal', {}), 'VALIDATION')
     },
   }),
   tool('support-center', {
-    prefix: 'SUC', restores: ['/api/server/panel/branding'], probe: '/api/server/support', paths: /^\/api\/server\/(?:panel\/branding|support)$/,
+    prefix: 'SUC', restores: ['/api/server/panel/branding'], probe: '/api/server/support', paths: /^\/api\/server\/(?:panel\/branding(?:\?expectedRevision=[0-9a-f]{64})?|support)$/,
     unit: [{ id: 'SUC-UNIT-OWNER-CONTACTS', file: 'apps/api/src/support-workspace.test.ts', name: 'API support workspace shows only owner-saved support contacts and never the built-in placeholders' }],
     checks: ['EMPTY-URL-CARD-HIDDEN', 'SHOWN-LINK-IS-CONFIGURED-URL'],
     async run({ root, tag, check, undo }) {
@@ -320,7 +374,14 @@ export default [
       }
       undo('branding', async () => {
         const current = await root.get(BRANDING)
-        const restored = await root.put(BRANDING, { ...fields, expectedRevision: current.data?.revision })
+        if (current.status !== 200 || typeof current.data?.revision !== 'string') return false
+        if (first.data?.state === 'default') {
+          if (current.data?.state === 'default') return true
+          const cleared = await root.delete(`${BRANDING}?expectedRevision=${current.data.revision}`)
+          const again = await root.get(BRANDING)
+          return cleared.status === 200 && again.status === 200 && again.data?.state === 'default'
+        }
+        const restored = await root.put(BRANDING, { ...fields, expectedRevision: current.data.revision })
         const again = await root.get(BRANDING)
         return restored.status === 200 && BRANDING_FIELDS.every(name => again.data?.branding?.[name] === fields[name])
       })
@@ -340,6 +401,7 @@ export default [
   }),
   tool('panel-news', {
     prefix: 'PNW', needs: ['account'], also: ['owner'], probe: NEWS, requests: 40,
+    page: { route: '/whm/accounts/announcements', read: NEWS, shows: () => ['Announcements'] },
     paths: /^\/api\/(?:server\/announcements(?:\/[0-9a-f-]{36}\/archive)?|account\/announcements|accounts\/[0-9a-f-]{36}|resellers(?:\/[0-9a-f-]{36})?)$/,
     unit: [
       { id: 'PNW-UNIT-AUDIENCES', file: 'apps/api/src/announcements-workspace.test.ts', name: 'announcement grammar matches audiences and windows exactly' },
@@ -380,21 +442,34 @@ export default [
     },
   }),
   tool('io-monitor', {
-    prefix: 'IOM', probe: '/api/analytics/io', paths: /^\/api\/analytics\/io$/,
+    prefix: 'IOM', probe: '/api/server/monitoring/io', paths: /^\/api\/server\/monitoring\/io(?:\?[A-Za-z0-9=&_-]{1,64})?$/, requests: 8,
+    page: {
+      route: '/whm/monitoring/io', read: '/api/server/monitoring/io',
+      shows: data => [
+        ...(Array.isArray(data?.disk?.devices) ? data.disk.devices.slice(0, 1).map(item => String(item?.name ?? '')) : []),
+        ...(Array.isArray(data?.accounts) ? data.accounts.slice(0, 1).map(item => String(item?.username ?? '')) : []),
+      ],
+    },
     unit: [{ id: 'IOM-UNIT-IO-MONITOR', file: 'apps/api/src/api.test.ts', name: '@xpanel/api HTTP integration with explicit fake host execution 7. Server IO Monitor & Website Analytics ingestion/querying + real-time WebSocket RBAC event filtering' }],
-    checks: ['WRITE-RATE-AT-OR-BELOW-CAP', 'THROTTLED-TIME-NONZERO'],
-    async run({ block }) {
-      block('WRITE-RATE-AT-OR-BELOW-CAP', 'An API client cannot start a write loop inside the account slice, so a rate against a 10 MB/s cap cannot be observed.')
-      block('THROTTLED-TIME-NONZERO', 'Throttled time only grows under such a loop, which an API client cannot run.')
+    checks: ['SNAPSHOT-OBSERVED', 'SELECTOR-REFUSED'],
+    async run({ root, check, refused }) {
+      const view = await root.get('/api/server/monitoring/io')
+      const valid = view.status === 200 && ['read', 'partial', 'unavailable'].includes(view.data?.state) && Array.isArray(view.data?.accounts) && Array.isArray(view.data?.disk?.devices)
+      check('SNAPSHOT-OBSERVED', valid, { ...safeResponse(view), state: view.data?.state ?? null, diskState: view.data?.disk?.state ?? null, devices: Array.isArray(view.data?.disk?.devices) ? view.data.disk.devices.length : null })
+      refused('SELECTOR-REFUSED', await root.get('/api/server/monitoring/io?account=root'), 'VALIDATION')
     },
   }),
   tool('trusted-proxies', {
-    prefix: 'TPX', probe: '/api/server/trusted-proxies', paths: /^\/api\/server\/trusted-proxies$/,
+    prefix: 'TPX', probe: '/api/server/trusted-proxies', paths: /^\/api\/server\/trusted-proxies$/, requests: 6,
+    page: { route: '/whm/server/trusted-proxies', read: '/api/server/trusted-proxies', shows: data => Array.isArray(data?.policy?.cidrs) ? data.policy.cidrs : [] },
     unit: [{ id: 'TPX-UNIT-SAVED-ONLY', file: 'apps/api/src/trusted-proxies-workspace.test.ts', name: 'saved-only trusted proxy workspace does not activate saved metadata without a protected agent provider' }],
-    checks: ['CLOUDFLARE-HEADER-HONOURED', 'UNTRUSTED-HEADER-IGNORED'],
-    async run({ block }) {
-      block('CLOUDFLARE-HEADER-HONOURED', 'The transport cannot connect from a Cloudflare range or send CF-Connecting-IP, and the logged or rate-limited client address is not readable through the API.')
-      block('UNTRUSTED-HEADER-IGNORED', 'The transport does not send forwarding headers, and trusting a range is a change that could cut management access.')
+    checks: ['SAVED-POLICY-OBSERVED', 'INVALID-CIDR-REFUSED'],
+    async run({ root, check, refused }) {
+      const view = await root.get('/api/server/trusted-proxies')
+      const valid = view.status === 200 && ['default', 'saved'].includes(view.data?.state) && view.data?.application === 'saved_only' && Array.isArray(view.data?.policy?.cidrs) && /^[0-9a-f]{64}$/.test(view.data?.revision ?? '')
+      check('SAVED-POLICY-OBSERVED', valid, { ...safeResponse(view), state: view.data?.state ?? null, cidrs: Array.isArray(view.data?.policy?.cidrs) ? view.data.policy.cidrs.length : null })
+      if (!valid) check('INVALID-CIDR-REFUSED', false, safeResponse(view))
+      else refused('INVALID-CIDR-REFUSED', await root.put('/api/server/trusted-proxies', { expectedRevision: view.data.revision, policy: { cidrs: ['999.0.0.1/8'], header: 'X-Forwarded-For' } }), 'VALIDATION')
     },
   }),
   tool('api-explorer', {
@@ -410,7 +485,7 @@ export default [
   }),
   tool('xwhm-api-shell', {
     prefix: 'XSH', needs: ['account'], also: ['owner'], probe: '/api/server/panel/developer', requests: 40,
-    paths: /^\/api\/(?:accounts\/[0-9a-f-]{36}|plans|feature-lists(?:\/[0-9a-f-]{36})?|account\/developer|server\/panel\/developer)$/,
+    paths: /^\/api\/(?:accounts\/[0-9a-f-]{36}|plans|feature-lists(?:\/[0-9a-f-]{36})?|account\/developer|server\/panel\/developer(?:\/call)?)$/,
     unit: [{ id: 'XSH-UNIT-FINITE-EXPLORER', file: 'apps/api/src/developer-workspace.test.ts', name: 'finite interactive API explorer projects own-root token metadata only; integrations cannot dispatch identity, preferences or external URLs' }],
     checks: ['FEATURE-DISABLED-WHEN-OFF', 'LIST-PAGE-SIZE-10-WITH-PAGINATION'],
     async run({ root, owner, fixture, check, undo, refused }) {
@@ -429,8 +504,9 @@ export default [
         if (off.status !== 200) check('FEATURE-DISABLED-WHEN-OFF', false, { status: off.status })
         else refused('FEATURE-DISABLED-WHEN-OFF', await owner.post('/api/account/developer', { operation: 'identity' }), 'FORBIDDEN')
       }
-      const read = await root.post('/api/server/panel/developer', { operation: 'tokens' })
-      check('LIST-PAGE-SIZE-10-WITH-PAGINATION', read.status === 200 && list(read.data?.tokens).length <= 10 && typeof read.data?.pagination === 'object' && read.data.pagination !== null, { status: read.status, rows: list(read.data?.tokens).length, hasPagination: read.data?.pagination != null })
+      const read = await root.post('/api/server/panel/developer/call', { module: 'plans', fn: 'list', params: {}, shape: { start: 0, limit: 10 } })
+      const rows = list(read.data?.json?.plans), pagination = read.data?.pagination
+      check('LIST-PAGE-SIZE-10-WITH-PAGINATION', read.status === 200 && rows.length <= 10 && pagination?.limit === 10 && pagination?.returned === rows.length && typeof pagination?.total === 'number', { status: read.status, rows: rows.length, hasPagination: pagination != null })
     },
   }),
   tool('xwhm-api-tokens', {
@@ -450,7 +526,7 @@ export default [
         const made = await root.post('/api/server/panel/api-tokens', { name: `xq-${tag}-${suffix}`, scopes: ['server:read'], expiresInDays: 1, allowedIps })
         const id = made.data?.token?.id, raw = made.data?.secret
         if (made.status !== 201 || typeof id !== 'string' || typeof raw !== 'string') return null
-        undo(`API token ${suffix}`, async () => [200, 404, 409].includes((await root.post(`/api/server/panel/api-tokens/${id}/revoke`, {})).status))
+        undo(`API token ${suffix}`, async () => [200, 404, 409].includes((await root.post(`/api/server/panel/api-tokens/${id}/revoke`, undefined, { noBody: true })).status))
         return { id, raw }
       }
       const limited = await issue('ip', ['198.51.100.0/24'])
@@ -459,7 +535,7 @@ export default [
       const open = await issue('open', [])
       if (!open) { check('REVOKED-TOKEN-401', false, { issued: false }); return }
       const working = await root.anonymous(SETTINGS, { bearer: open.raw })
-      await root.post(`/api/server/panel/api-tokens/${open.id}/revoke`, {})
+      await root.post(`/api/server/panel/api-tokens/${open.id}/revoke`, undefined, { noBody: true })
       const revoked = await root.anonymous(SETTINGS, { bearer: open.raw })
       check('REVOKED-TOKEN-401', working.status === 200 && revoked.status === 401, { beforeRevoke: working.status, afterRevoke: revoked.status })
     },

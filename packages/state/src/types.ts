@@ -190,6 +190,7 @@ export interface DomainMutationGuard {
 
 export interface DomainMutationOptions extends MutationOptions {
   domainGuard?: DomainMutationGuard
+  defaultZone?: DnsZoneState | null
 }
 
 export interface DomainWorkspaceRead {

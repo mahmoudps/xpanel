@@ -21,7 +21,7 @@ describe('exact account Git sandbox admission', () => {
   it('uses the profile Git exec directory and refuses a mixed or unknown one', async () => {
     const el = buildAccountGitCommand(account, '.', { op: 'clone', url: 'https://example.com/site.git', path: 'repositories/site' }, 'rhel')
     expect(el).toContain('--setenv=GIT_EXEC_PATH=/usr/libexec/git-core')
-    expect(el).toContain('ExecPaths=/usr/bin/git -/usr/libexec/git-core/git-remote-http -/usr/libexec/git-core/git-remote-https')
+    expect(el).toContain('ExecPaths=/usr/bin/git -/usr/lib -/usr/lib64 -/usr/libexec/git-core/git-remote-http -/usr/libexec/git-core/git-remote-https')
     expect(isAccountGitCommand(el)).toBe(true)
     // The shared executor allowlist admits exactly this argv.
     await new FakeHostExecutor().runCommand(el)

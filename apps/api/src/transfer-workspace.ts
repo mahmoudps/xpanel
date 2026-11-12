@@ -617,7 +617,8 @@ export function createTransferWorkspaceRoutes(helpers: Helpers, ports: TransferW
       return json({ sessions: document.sessions.map(record => enrichProjected(project(record), hostCtx)), cpanelImports: document.cpanelImports.map(projectImport), capabilities })
     }
     if (method === 'POST' && !match) {
-      const body = exact(await requestBody(req), ['auth', 'node', 'live'])
+      const body = exact(await requestBody(req), ['auth', 'node', 'live', 'transfer_threads'])
+      if (body.transfer_threads !== undefined && (typeof body.transfer_threads !== 'number' || !Number.isSafeInteger(body.transfer_threads) || body.transfer_threads < 1 || body.transfer_threads > 100)) return fail('VALIDATION', 'transfer_threads must be an integer between 1 and 100', { stateChanged: false })
       if (body.live !== undefined && typeof body.live !== 'boolean' || body.live === true && body.node === undefined || (body.auth === undefined) === (body.node === undefined)) return fail('VALIDATION', 'a transfer takes a source credential, or a linked server for a live transfer', { stateChanged: false })
       if (body.node !== undefined && !ports.nodeAuth) return fail('PRECONDITION_FAILED', 'linked server transfers require the host agent', { stateChanged: false })
       const auth = body.node !== undefined ? await ports.nodeAuth!(String(body.node)) : parseTransferAuth(body.auth)

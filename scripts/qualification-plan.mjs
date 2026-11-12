@@ -40,16 +40,18 @@ export function qualificationRequirements(toolIds = Object.keys(QUALIFICATION_IN
 export const readinessProbes = toolId => Object.hasOwn(PHASE1_TOOL_PROBES, toolId) ? [...PHASE1_TOOL_PROBES[toolId]] : null
 
 /** Plan for one slot: tools with a driver run, every other requested catalog tool is listed as not run. */
-export function qualificationPlan(slot, requested = 'all') {
+export function qualificationPlan(slot, requested = 'all', profile = undefined) {
   requireValue(Object.hasOwn(RUNNER_SLOTS, slot), 'Use --slot=unit, host, browser or external')
   const inScope = tools.filter(tool => tool.status !== 'out-of-scope').map(tool => tool.id)
   const ids = requested === 'all' ? inScope : requested.split(',')
   requireValue(ids.length > 0 && new Set(ids).size === ids.length && ids.every(id => inScope.includes(id)), 'Requested tools must be unique in-scope catalog tool IDs')
-  const driven = ids.filter(id => Object.hasOwn(QUALIFICATION_INVENTORY, id))
+  const excludedByProfile = profile === undefined ? [] : ids.filter(id => Object.hasOwn(PROFILE_EXCLUSIONS, id) && PROFILE_EXCLUSIONS[id].profiles.includes(profile))
+  const driven = ids.filter(id => Object.hasOwn(QUALIFICATION_INVENTORY, id) && !excludedByProfile.includes(id))
   return {
     slot, receipts: RUNNER_SLOTS[slot],
     // Shared state runs last, so a failed restore can only stop drivers that would have touched it.
     tools: driven.map(toolId => ({ toolId, checks: slotCheckIds(toolId, slot), readiness: readinessProbes(toolId), requires_qualification_admission: DRIVERS[toolId].requires_qualification_admission, shared: DRIVERS[toolId].restores.length > 0 })).sort((left, right) => Number(left.shared) - Number(right.shared)),
-    notRun: ids.filter(id => !driven.includes(id)).map(toolId => ({ toolId, reason: 'no reviewed acceptance driver', readiness: readinessProbes(toolId) })),
+    notRun: ids.filter(id => !driven.includes(id)).map(toolId => ({ toolId, reason: excludedByProfile.includes(toolId) ? PROFILE_EXCLUSIONS[toolId].reason : 'no reviewed acceptance driver', readiness: readinessProbes(toolId) })),
+    ...(profile === undefined ? {} : { excludedByProfile: excludedByProfile.map(toolId => ({ toolId, reason: PROFILE_EXCLUSIONS[toolId].reason })) }),
   }
 }

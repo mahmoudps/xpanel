@@ -6,7 +6,7 @@ import { deepFreeze } from './freeze.ts'
 
 // Remi SCL naming: php<ver>-php-<module>. curl is part of common; zip is a PECL build;
 // php-cgi ships inside the cli package, next to the php binary.
-const PHP_MODULES = ['fpm', 'cli', 'common', 'mysqlnd', 'pdo', 'gd', 'mbstring', 'xml', 'intl', 'bcmath', 'soap', 'opcache', 'process', 'pecl-zip', 'sodium']
+const PHP_MODULES = ['fpm', 'cli', 'common', 'mysqlnd', 'pdo', 'gd', 'mbstring', 'xml', 'intl', 'bcmath', 'soap', 'opcache', 'process', 'pecl-zip', 'sodium', 'pear']
 
 /** CentOS Stream, AlmaLinux and Rocky Linux 9 / 10. */
 export const dnfProfile = (release: OsRelease): XpanelOsProfile => {

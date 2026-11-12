@@ -25,7 +25,7 @@ describe('rollback of units without a reload job', { tags: ['unit'] }, () => {
   it('stops an on-demand service and restarts the xPanel daemons that have no ExecReload', () => {
     expect(rollbackReloadActions('xpanel-caldav-qa1.service')).toEqual([{ kind: 'systemd', verb: 'stop', unit: 'xpanel-caldav-qa1.service' }])
     expect(onDemandService('xpanel-app-alice-blog.service')).toBeNull()
-    for (const unit of ['xpanel-app-alice-blog.service', 'xpanel-ctr-alice-web.service', 'xpanel-redis-alice.service', 'xpanel-memcached-alice.service']) {
+    for (const unit of ['xpanel-app-alice-blog.service', 'xpanel-ctr-alice-web.service', 'xpanel-redis-alice.service', 'xpanel-memcached-alice.service', 'pure-ftpd.service', 'pure-ftpd']) {
       expect(rollbackReloadActions(unit), unit).toEqual([{ kind: 'systemd', verb: 'restart', unit }])
     }
   })
@@ -106,6 +106,41 @@ describe.runIf(process.platform === 'linux')('an account whose provisioning gene
     await reconciler.resolveFailedGeneration(journal!.generationId, 'root', { attestPreActions: true })
     expect((await reconciler.reconcile({ actor: 'root', mailAuth: null })).status).toBe('applied')
     expect(host.fake.units.get('xpanel-caldav-qa4.socket')).toMatchObject({ enabled: true, active: true })
+    expect(await reconciler.journal.readActiveJournal()).toBeNull()
+  })
+})
+
+describe.runIf(process.platform === 'linux')('a config-test failure whose prerequisites belong to the active generation', () => {
+  let state: TestStateStoreHandle
+  let db: TestDbHandle
+  let reconciler: HostReconciler
+  let rejected: unknown
+  beforeAll(async () => {
+    state = await createTestStateStore()
+    db = await createTestDb()
+    const suggested = suggestServerSettings({ cores: 2, memoryMb: 2048 })
+    const baseSettings = { hostname: 'srv1.example.com', nameservers: ['ns1.example.com', 'ns2.example.com'], adminEmail: 'ops@example.com', engine: 'apache' as const, apacheMpm: 'itk' as const, panelPort: 2087, sshPort: 22, nginx: suggested.nginx, apache: suggested.apache, backendPort: 8080, backendTlsPort: 8443 }
+    await state.store.saveServerSettings(baseSettings)
+    await state.store.saveServerIp({ address: '203.0.113.10', version: 4, prefixLength: 24, interfaceName: 'eth0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
+    const host = nativeHost()
+    reconciler = new HostReconciler({ store: state.store, db: db.db, executor: host.executor, os })
+    if ((await reconciler.reconcile({ actor: 'root', mailAuth: null })).status !== 'applied') throw new Error('baseline generation was not applied')
+    await state.store.saveServerSettings({
+      ...baseSettings,
+      web: {
+        timeoutSec: 60, clientMaxBodyMb: 128, tlsProtocols: ['TLSv1.2', 'TLSv1.3'], tlsCiphers: 'HIGH:!aNULL:!MD5',
+        gzip: { enabled: true, level: 5 }, directoryIndex: ['index.php', 'index.html'], rlimitMemMb: null, rlimitCpuSec: null,
+        includes: { apachePreMain: '', apachePreVhost: '', apachePostVhost: '', nginxHttp: 'not_a_directive on;' },
+      },
+    })
+    host.fake.failConfigTest('nginx')
+    rejected = await reconciler.reconcile({ actor: 'root', mailAuth: null })
+  }, 15_000)
+  afterAll(async () => { await state?.close(); await db?.close() })
+
+  it('rolls back cleanly without latching needs_attention', { tags: ['feature'] }, async () => {
+    expect(rejected).toMatchObject({ status: 'failed', failedTest: 'nginx', stateChanged: false })
+    expect(rejected).not.toHaveProperty('verificationRequired')
     expect(await reconciler.journal.readActiveJournal()).toBeNull()
   })
 })

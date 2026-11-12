@@ -203,6 +203,7 @@ export const policyForRequest = (pathname: string, method: string): RoutePolicy 
   if (/^\/api\/server\/panel\/whmcs(?:\/(?:token|module|activity))?$/.test(pathname)) return { resource: 'whmcs', rootOnly: true }
   // Calls between linked servers carry a link token, which reaches nothing else.
   if (/^\/api\/server\/nodes\/peer\//.test(pathname)) return { resource: 'nodes', rootOnly: true }
+  if (pathname === '/api/server/mail-log/delivery') return { resource: 'server', rootOnly: !read, acl: 'list-accounts', scopeAccess: 'read' }
   if (/^\/api\/(?:server|setup)(?:\/|$)/.test(pathname)) return { resource: 'server', rootOnly: true }
   if (/^\/api\/feature-lists(?:\/|$)/.test(pathname)) return { resource: 'feature-lists', acl: 'manage-feature-lists' }
   if (/^\/api\/plans(?:\/|$)/.test(pathname)) return { resource: 'plans', acl: 'manage-plans' }

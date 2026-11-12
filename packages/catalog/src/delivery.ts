@@ -25,6 +25,50 @@ export const PROFILE_EXCLUSIONS: Readonly<Record<string, ProfileExclusion>> = {
   'sudo-group-users': { profiles: ['almalinux-9', 'rocky-9', 'centos-stream-9'], reason: 'Enterprise Linux grants administrator rights through the wheel group; there is no sudo group to manage.' },
 }
 
+/** Truthful availability reasons for catalog tools whose host or multi-node capability is not shipped on single-server hosts. */
+export const UNIMPLEMENTED_TOOL_REASONS: Readonly<Record<string, string>> = {
+  'connect-devices': 'Account-wide device setup is delivered per mailbox under xMail Connect Devices rather than on the account filters page.',
+  'calendars-contacts-sharing': 'Cross-mailbox CalDAV/CardDAV ACL sharing is not enabled in the single-collection Radicale profile.',
+  'reseller-acl-lists': 'Reseller privileges are assigned directly per reseller; named ACL template lists are not enabled.',
+  'disk-quota-setup': 'Filesystem quota mount flags require host boot-loader and fstab provisioning during installation rather than runtime remounting.',
+  'tweak-panel-php': 'xPanel runs natively on Node.js and executes no internal panel PHP runtime.',
+  'nameserver-report': 'Nightly cross-zone nameserver delegation aggregation is not enabled; inspect per-zone NS records in the DNS Zone Manager.',
+  'remote-service-ips': 'External authoritative nameserver and mail gateway IP bypass lists are not enabled for tenant domain creation.',
+  'web-stack-builder': 'Web server MPM and stack topology are pinned by the signed OS installation profile rather than rebuilt dynamically.',
+  'distro-packages': 'Arbitrary OS repository package installation is disabled; manage reviewed components in Software Center.',
+  'webmail-dav-collections': 'Each mailbox provisions its default calendar and address book; custom multi-collection creation is not enabled.',
+  'webmail-dav-sharing': 'Cross-mailbox calendar and address-book sharing is not enabled in the Radicale host profile.',
+  'aapanel-site-reverse-proxy': 'Path-scoped custom reverse-proxy rules are not enabled; site proxy mode is managed on the Domains workspace.',
+  'aapanel-proxy-project': 'Standalone Nginx proxy-only projects without a hosting domain are not enabled.',
+  'aapanel-one-click-deploy': 'Automated PHP application bundle deployment is not enabled on this host.',
+  'aapanel-mysql-service': 'MariaDB daemon port and data-directory relocation are pinned by the host reconciler; inspect server state on Database Servers.',
+  'aapanel-node-management': 'Remote server management over panel API or SSH keys requires a multi-node lab and is unavailable on standalone hosts.',
+  'aapanel-node-file-transfer': 'Direct node-to-node file transfer between linked servers is unavailable on standalone hosts.',
+  'aapanel-openlitespeed-manager': 'Apache httpd with mpm-itk behind Nginx is the active web stack on this host; OpenLiteSpeed is not installed.',
+  'aapanel-server-migrate': 'Automated whole-server OS migration to a remote target host requires a paired destination server and is unavailable.',
+  'traffic-monitor-account': 'Live per-request visitor stream inspection is root-only; per-domain bandwidth totals are shown on Bandwidth.',
+  'spam-quarantine': 'Server-held spam quarantine release and Bayesian retraining are not enabled; spam delivery uses mailbox Junk folders.',
+  'database-tuning': 'MariaDB runtime variables and counters are read-only; automated my.cnf buffer-pool rewriting is not enabled.',
+  'git-deployments': 'Build-pipeline release symlink hooks are not enabled; manage Git repositories on Git Version Control.',
+  'app-installer': 'Automated open-source application installer packages are not configured on this host.',
+  'linked-server-nodes': 'Linking peer xPanel servers requires a paired second host and is unavailable on standalone hosts.',
+  'configuration-cluster': 'Pushing server configuration snapshots across peer servers requires linked cluster nodes and is unavailable on standalone hosts.',
+  'dns-cluster': 'Synchronizing authoritative zones across peer nameservers requires a multi-node DNS cluster and is unavailable on standalone hosts.',
+  'dns-cluster-sync': 'Cross-server DNS zone synchronization requires linked cluster peers and is unavailable on standalone hosts.',
+  'live-transfer': 'Live cutover account migration requires a linked source server and is unavailable on standalone hosts.',
+  'transfer-tool': 'Pulling accounts and packages from a remote server requires a paired source host and is unavailable on standalone hosts.',
+  'transfer-tool-selection': 'Selecting remote accounts and packages for migration requires an active remote transfer source and is unavailable on standalone hosts.',
+  'account-transfer-progress': 'Streaming remote account transfer phases requires a multi-host transfer session and is unavailable on standalone hosts.',
+  'cloudflare-account': 'Managing domain proxy and cache settings through Cloudflare requires external Cloudflare API credentials and is unavailable on standalone hosts.',
+  'db-server-profiles': 'Offloading tenant databases to remote MySQL or MariaDB hosts requires external database nodes and is unavailable on standalone hosts.',
+  'cloudflare-integration': 'Server-wide Cloudflare partner and zone integration requires external Cloudflare API credentials and is unavailable on standalone hosts.',
+  'aapanel-dns-provider-accounts': 'External cloud DNS registrar API credentials require third-party DNS provider accounts and are unavailable on standalone hosts.',
+  'aapanel-provider-domains': 'Importing domains from external cloud DNS registrars requires connected third-party DNS provider accounts and is unavailable on standalone hosts.',
+  'aapanel-provider-dns-records': 'Editing DNS records at external cloud DNS registrars requires connected third-party DNS provider accounts and is unavailable on standalone hosts.',
+  'aapanel-auto-dns-on-site-create': 'Automatic record creation at external cloud DNS registrars on site creation requires connected third-party DNS provider accounts and is unavailable on standalone hosts.',
+  'external-authentication': 'OpenID Connect single sign-on requires an external OIDC identity provider and is unavailable on standalone hosts.',
+}
+
 /** Profiles a tool must be proven on; empty (never verified) when its exclusion is malformed or leaves nothing. */
 export const requiredProfiles = (
   toolId: string, target: VerificationTarget, exclusions: Readonly<Record<string, ProfileExclusion>> = PROFILE_EXCLUSIONS,
@@ -59,7 +103,13 @@ export const assessDelivery = (
     return { status: 'out-of-scope', reason: tool.outOfScopeReason ?? 'Outside the product scope.', evidence: [] }
   }
   if (target === null || !validTarget(target) || tool.id !== spec.id || !spec.acceptance.trim()) {
-    return { status: 'researched', reason: 'No source and release target with supported acceptance evidence.', evidence: [] }
+    return {
+      status: 'researched',
+      reason: Object.hasOwn(UNIMPLEMENTED_TOOL_REASONS, tool.id)
+        ? UNIMPLEMENTED_TOOL_REASONS[tool.id]!
+        : 'No source and release target with supported acceptance evidence.',
+      evidence: [],
+    }
   }
   const profiles = requiredProfiles(tool.id, target, exclusions)
   if (profiles.length === 0) {
@@ -89,7 +139,9 @@ export const assessDelivery = (
     status,
     reason: status === 'verified'
       ? 'Acceptance observed on the target artifact in supported browser, Linux and external environments.'
-      : `Acceptance evidence is incomplete for the tier after ${status}.`,
+      : status === 'researched' && evidence.length === 0 && Object.hasOwn(UNIMPLEMENTED_TOOL_REASONS, tool.id)
+        ? UNIMPLEMENTED_TOOL_REASONS[tool.id]!
+        : `Acceptance evidence is incomplete for the tier after ${status}.`,
     evidence,
   }
 }

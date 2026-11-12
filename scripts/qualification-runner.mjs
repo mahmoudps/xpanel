@@ -12,11 +12,17 @@ import { readProtectedBytes, readProtectedJson, validateInstalledBinding, verify
 import { parseObservedOsRelease } from './evidence/server-information-observer.mjs'
 import { credentials as readCredentials } from './evidence/server-information-runner.mjs'
 import { DRIVER_MODULES, DRIVERS } from './qualification-drivers/index.mjs'
-import { ACCOUNT_CREATE, ACTOR_ENTRY, apiClient, createFixture, entryOrigin, externalDnsCheck, externalTlsCheck, failureCause, pageChecks, runDriver, runTag, siteClient } from './qualification-drivers/kit.mjs'
+import { ACCOUNT_CREATE, ACTOR_ENTRY, apiClient, createFixture, entryOrigin, externalDnsCheck, externalTlsCheck, failureCause, netClient, pageChecks, runDriver, runTag, siteClient } from './qualification-drivers/kit.mjs'
 import { QUALIFICATION_INVENTORY, qualificationPlan, qualificationRequirements, RUNNER_SLOTS, slotCheckIds } from './qualification-plan.mjs'
 
 export const ROOT = resolve(import.meta.dirname, '..')
 const SESSION_PATHS = ['/api/auth/login', '/api/auth/logout']
+const NEGATIVE_AUTH_TOOLS = new Set([
+  'manage-account-suspension', 'terminate-accounts', 'password-modification', 'xwhm-two-factor-auth',
+  'email-account-manage', 'account-preferences', 'password-security', 'manage-team', 'user-manager',
+  'two-factor-auth', 'webmail-signin', 'webmail-two-factor', 'force-password-change',
+  'restart-imap', 'forwarders', 'domain-forwarders', 'autoresponders', 'spam-filters', 'webmail-autoresponder',
+])
 const RUNNER_INPUTS = ['scripts/qualification-runner.mjs', ...DRIVER_MODULES, 'scripts/qualification-plan.mjs', 'packages/catalog/src/delivery.ts']
 const ENTRY_PORT = { xpanel: 2083, xmail: 2096 }
 const WRITE_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
@@ -51,14 +57,15 @@ export function parseRunnerArguments(argv) {
 /** Dry run: validates inputs and lists the plan; it makes no request, signs nobody in and writes nothing. */
 export function dryRun(args, readTarget = path => readJson(path), readOsRelease = () => readFileSync('/etc/os-release', 'utf8')) {
   const targetDocument = validateTargetDocument(readTarget(args.target))
-  const plan = qualificationPlan(args.slot, args.tools)
   let profile = null
   try { profile = profileFromOsRelease(parseObservedOsRelease(readOsRelease())) } catch { /* Not a qualification profile host: reported as null. */ }
+  const plan = qualificationPlan(args.slot, args.tools, profile ?? undefined)
   return {
     status: 'dry_run', proofExecuted: false, slot: args.slot, runId: args['run-id'], profile,
     profileInTarget: profile !== null && targetDocument.target.supportedProfiles.includes(profile),
     target: targetDocument.target, missingOptions: SLOT_OPTIONS[args.slot].filter(name => args[name] === undefined),
     receiptsPerTool: plan.receipts, tools: plan.tools, notRun: plan.notRun.length, notRunTools: plan.notRun.map(item => item.toolId),
+    ...(plan.excludedByProfile === undefined ? {} : { excludedByProfile: plan.excludedByProfile }),
     // Evidence for these would be demoted by host readiness; they need a probe entry before qualification.
     withoutReadiness: [...plan.tools, ...plan.notRun].filter(item => item.readiness === null).map(item => item.toolId),
   }
@@ -107,7 +114,7 @@ export async function withRootSession({ request, login, prefix, probe, anonymous
 }
 
 /** Signs in each actor the driver uses, runs it once inside those sessions, then revokes them; cleanup covers both. */
-export async function driveTool(driver, toolId, { prefix, anonymous, requestFor, loginFor, tag, fixture, site, host }) {
+export async function driveTool(driver, toolId, { prefix, anonymous, requestFor, loginFor, tag, fixture, site, net, address, host }) {
   const actors = [driver.as, ...driver.also]
   let driven = { checks: [], cleanup: { ok: false, errors: [] }, failure: null }, admission = 'none'
   const nest = async (index, clients) => {
@@ -121,7 +128,7 @@ export async function driveTool(driver, toolId, { prefix, anonymous, requestFor,
         const catalog = await client[driver.as].get('/api/catalog')
         const open = Array.isArray(catalog.data?.tools) ? catalog.data.tools.find(item => item?.id === driver.gate) : undefined
         admission = open?.delivery?.admission === 'qualification' ? 'qualification' : 'none'
-        driven = await runDriver(driver, { clients: client, prefix, tag, fixture, site, host, requestFor, admitted: open !== undefined })
+        driven = await runDriver(driver, { clients: client, prefix, tag, fixture, site, net, address, host, requestFor, admitted: open !== undefined })
         return driven.checks
       },
     })
@@ -210,24 +217,28 @@ function installed(options, targetDocument) {
   return { binding, origin }
 }
 
+function runVitestFiles(files, targetDocument) {
+  const before = identifySource(ROOT)
+  requireValue(before.sourceFingerprint === targetDocument.target.sourceFingerprint && before.commit === targetDocument.source.commit, 'This checkout is not the target source')
+  const temporary = mkdtempSync(join(tmpdir(), 'xpanel-qualification-unit-'))
+  try {
+    const output = join(temporary, 'vitest.json')
+    const result = spawnSync(process.execPath, [resolve(ROOT, 'node_modules/vitest/vitest.mjs'), 'run', ...files, '--reporter=json', `--outputFile=${output}`], {
+      cwd: ROOT, stdio: 'ignore', timeout: 600_000, killSignal: 'SIGKILL', windowsHide: true,
+      env: { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: temporary, TMPDIR: temporary, CI: '1', NO_COLOR: '1', LANG: 'C.UTF-8' },
+    })
+    const report = result.error === undefined && result.signal === null ? JSON.parse(readBoundedFile(output, { maxBytes: 64 * 1024 * 1024 }).toString('utf8')) : null
+    const unchanged = identifySource(ROOT).sourceFingerprint === before.sourceFingerprint
+    return { report, failure: unchanged ? null : 'Source changed during the unit run.' }
+  } finally { rmSync(temporary, { recursive: true, force: true }) }
+}
+
 async function runTool(slot, toolId, options, environment) {
   const driver = DRIVERS[toolId], startedAt = new Date().toISOString(), deadline = Date.now() + driver.deadlineMs
   const base = { toolId, slot, runId: options['run-id'], targetDocument: environment.targetDocument, profile: environment.profile, osRelease: environment.osRelease, startedAt }
   if (slot === 'unit') {
-    const before = identifySource(ROOT)
-    requireValue(before.sourceFingerprint === environment.targetDocument.target.sourceFingerprint && before.commit === environment.targetDocument.source.commit, 'This checkout is not the target source')
-    const temporary = mkdtempSync(join(tmpdir(), 'xpanel-qualification-unit-'))
-    try {
-      const output = join(temporary, 'vitest.json')
-      const files = [...new Set(QUALIFICATION_INVENTORY[toolId].unit.map(item => item.file))]
-      const result = spawnSync(process.execPath, [resolve(ROOT, 'node_modules/vitest/vitest.mjs'), 'run', ...files, '--reporter=json', `--outputFile=${output}`], {
-        cwd: ROOT, stdio: 'ignore', timeout: 300_000, killSignal: 'SIGKILL', windowsHide: true,
-        env: { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: temporary, TMPDIR: temporary, CI: '1', NO_COLOR: '1', LANG: 'C.UTF-8' },
-      })
-      const report = result.error === undefined && result.signal === null ? JSON.parse(readBoundedFile(output, { maxBytes: 16 * 1024 * 1024 }).toString('utf8')) : null
-      const unchanged = identifySource(ROOT).sourceFingerprint === before.sourceFingerprint
-      return observation({ ...base, executor: 'fake', checks: unitChecks(toolId, report, ROOT), cleanup: { ok: true, errors: [] }, failure: unchanged ? null : 'Source changed during the unit run.' })
-    } finally { rmSync(temporary, { recursive: true, force: true }) }
+    const batched = environment.unitBatch ?? runVitestFiles([...new Set(QUALIFICATION_INVENTORY[toolId].unit.map(item => item.file))], environment.targetDocument)
+    return observation({ ...base, executor: 'fake', checks: unitChecks(toolId, batched.report, ROOT), cleanup: { ok: true, errors: [] }, failure: batched.failure })
   }
   const { binding, origin, targetDocument, fixture } = environment
   const rootLogin = () => readCredentials({ credentialFile: options['credential-file'] })
@@ -245,13 +256,24 @@ async function runTool(slot, toolId, options, environment) {
     const installedBefore = verifyInstalledRelease({ binding, targetDocument, artifact: options.artifact, deadline })
     process.env.PLAYWRIGHT_BROWSERS_PATH ??= resolve(ROOT, '.tools/playwright-browsers')
     const { chromium } = await import('@playwright/test')
-    const browser = await chromium.launch({ headless: true, timeout: 20_000, args: [`--host-resolver-rules=MAP ${new URL(origin).hostname} ${binding.address.includes(':') ? `[${binding.address}]` : binding.address}`] })
+    const targetAddress = binding.address.includes(':') ? `[${binding.address}]` : binding.address
+    const resolverRules = [...new Set([origin, actorOrigin('owner'), actorOrigin('mailbox')].map(item => `MAP ${new URL(item).hostname} ${targetAddress}`))].join(', ')
+    const browser = await chromium.launch({ headless: true, timeout: 20_000, args: [`--host-resolver-rules=${resolverRules}`] })
     const pageActor = driver.page?.actor ?? driver.as, login = actorLogin(pageActor)
     let result = { checks: [], signedOut: false }, failure = null
     try {
       const page = await (await browser.newContext({ locale: 'en-US' })).newPage()
       page.setDefaultTimeout(15_000)
-      result = driver.browser ? await driver.browser({ page, origin, credentials: login }) : await pageChecks(driver, { page, origin: actorOrigin(pageActor), credentials: login })
+      page.setDefaultNavigationTimeout(15_000)
+      let guard
+      try {
+        result = await Promise.race([
+          driver.browser ? driver.browser({ page, origin, credentials: login }) : pageChecks(driver, { page, origin: actorOrigin(pageActor), credentials: login }),
+          new Promise((_, reject) => { guard = setTimeout(() => reject(Object.assign(new Error('Browser check timed out after 45000ms'), { name: 'TimeoutError' })), 45_000); guard.unref() }),
+        ])
+      } finally {
+        clearTimeout(guard)
+      }
     } catch (error) { failure = `The browser acceptance did not complete.${failureCause(error)}` } finally {
       await browser.close()
       login.password = ''
@@ -264,11 +286,11 @@ async function runTool(slot, toolId, options, environment) {
   }
   const address = slot === 'external' ? binding.address : options.address
   const transports = {}
-  const requestFor = actor => transports[actor] ??= createQualificationTransport({ origin: actorOrigin(actor), address, ca, deadline, methods: WRITE_METHODS, maxBody: 256 * 1024, acceptText: true, maxRequests: transportBudget(driver),
+  const requestFor = actor => transports[actor] ??= createQualificationTransport({ origin: actorOrigin(actor), address, ca, deadline, methods: WRITE_METHODS, maxBody: 4 * 1024 * 1024, acceptText: true, requestTimeoutMs: 180_000, maxRequests: transportBudget(driver),
     allow: path => SESSION_PATHS.includes(path) || path === '/api/auth/me' || path === '/api/catalog' || driver.paths.test(path) || path === driver.probe || driver.restores.includes(path) })
   const drive = (prefix, anonymous) => driver.run === undefined
     ? withRootSession({ request: requestFor('root'), login: rootLogin(), prefix, probe: driver.probe, anonymous, run: read => slot === 'host' ? driver.host(read, { db: options.db ?? '/var/lib/xpanel/control.db' }) : driver.external(read) })
-    : driveTool(driver, toolId, { prefix, anonymous, requestFor, loginFor: actorLogin, tag: runTag(options['run-id']), fixture, site: siteClient({ address, deadline }), ...(slot === 'host' ? { host: hostOracle } : {}) })
+    : driveTool(driver, toolId, { prefix, anonymous, requestFor, loginFor: actorLogin, tag: runTag(options['run-id']), fixture, site: siteClient({ address, deadline }), net: netClient({ address, deadline }), address, ...(slot === 'host' ? { host: hostOracle } : {}) })
   if (slot === 'host') {
     const installedBefore = verifyInstalledRelease({ binding, targetDocument, artifact: options.artifact, deadline })
     const session = await drive(driver.prefix, true)
@@ -276,7 +298,7 @@ async function runTool(slot, toolId, options, environment) {
     const changed = JSON.stringify(installedBefore.roles) !== JSON.stringify(installedAfter.roles)
     return observation({ ...base, executor: 'real', admission: session.admission, checks: [check(`${driver.prefix}-OS-PROFILE`, true, { profile: environment.profile, osRelease: environment.osRelease }), ...session.checks], cleanup: session.cleanup, failure: changed ? 'Installed release or measured processes changed during the run.' : session.failure })
   }
-  const url = new URL(origin), prefix = `${driver.prefix}-EXTERNAL`
+  const url = new URL(actorOrigin(driver.as)), prefix = `${driver.prefix}-EXTERNAL`
   const network = [await externalDnsCheck(`${prefix}-DNS`, url.hostname, binding.address), await externalTlsCheck(`${prefix}-TLS`, { hostname: url.hostname, port: Number(url.port || 443), address: binding.address })]
   const session = await drive(prefix, false)
   return observation({ ...base, executor: 'real', admission: session.admission, observer: environment.observer, hostReport: environment.hostReport, checks: [...network, ...session.checks], cleanup: session.cleanup, failure: session.failure })
@@ -299,35 +321,48 @@ export async function runQualification(options) {
   validateTargetDocument(targetDocument)
   requireValue(process.version === `v${targetDocument.source.node}`, 'Qualification requires the pinned Node runtime')
   verifyRunnerInputs(targetDocument)
-  const plan = qualificationPlan(options.slot, options.tools)
   let environment = { targetDocument }
   if (options.slot === 'unit') environment = { ...environment, ...hostIdentity(undefined, targetDocument) }
   else {
     const { binding, origin } = installed(options, targetDocument)
     environment = { ...environment, binding, origin, ...(options.slot === 'external' ? externalEnvironment(options, binding, targetDocument) : hostIdentity(binding, targetDocument)) }
   }
+  const plan = qualificationPlan(options.slot, options.tools, environment.profile)
+  if (options.slot === 'unit' && plan.tools.length > 0) {
+    const unitFiles = [...new Set(plan.tools.flatMap(({ toolId }) => QUALIFICATION_INVENTORY[toolId].unit.map(item => item.file)))]
+    environment = { ...environment, unitBatch: runVitestFiles(unitFiles, targetDocument) }
+  }
   const fixtureSession = async work => {
     const { origin } = environment, address = options.slot === 'external' ? environment.binding.address : options.address
     const ca = options['ca-file'] === undefined ? undefined : readProtectedBytes({ file: options['ca-file'], maxBytes: 1024 * 1024 })
-    const request = createQualificationTransport({ origin, address, ca, deadline: Date.now() + 300_000, methods: WRITE_METHODS, maxBody: 256 * 1024, maxRequests: 30 + ACCOUNT_CREATE.requests, allow: path => path.startsWith('/api/') })
+    const request = createQualificationTransport({ origin, address, ca, deadline: Date.now() + 300_000, methods: WRITE_METHODS, maxBody: 4 * 1024 * 1024, requestTimeoutMs: 60_000, maxRequests: 30 + ACCOUNT_CREATE.requests, allow: path => path.startsWith('/api/') })
     let outcome
     const session = await withRootSession({ request, login: readCredentials({ credentialFile: options['credential-file'] }), prefix: 'FIXTURE', probe: '/api/auth/me', anonymous: false, run: async (_read, opened) => { outcome = await work(apiClient(request, opened)); return [] } })
     return { outcome, session }
   }
+  const clearRunnerIp = async root => {
+    const policy = await root.get('/api/server/sec/sign-in')
+    const clientIp = policy.data?.client?.address
+    if (typeof clientIp === 'string' && clientIp.length > 0) await root.post('/api/server/sec/sign-in/unlock', { ip: clientIp })
+  }
   const needs = plan.tools.flatMap(({ toolId }) => DRIVERS[toolId].needs)
   let fixtureLeftovers = null
   if (options.slot !== 'unit' && needs.length > 0) {
-    const created = await fixtureSession(root => createFixture(root, { tag: runTag(options['run-id']), domainSuffix: options['fixture-domain-suffix'], mailbox: needs.includes('mailbox') }).catch(error => {
-      // A fixture the API may have accepted and whose removal is not confirmed is a leftover: the slot reports it.
-      if (error?.fixtureCleanup?.ok !== true) fixtureLeftovers = { username: error?.fixtureCleanup?.username ?? null, errors: error?.fixtureCleanup?.errors ?? ['The fixture cleanup did not complete.'] }
-      return null
-    }))
+    const created = await fixtureSession(async root => {
+      await clearRunnerIp(root)
+      return createFixture(root, { tag: runTag(options['run-id']), domainSuffix: options['fixture-domain-suffix'], mailbox: needs.includes('mailbox') }).catch(error => {
+        // A fixture the API may have accepted and whose removal is not confirmed is a leftover: the slot reports it.
+        if (error?.fixtureCleanup?.ok !== true) fixtureLeftovers = { username: error?.fixtureCleanup?.username ?? null, errors: error?.fixtureCleanup?.errors ?? ['The fixture cleanup did not complete.'] }
+        return null
+      })
+    })
     environment = { ...environment, fixture: created.outcome ?? null }
   }
   const outputs = [], passed = []
   for (const { toolId, shared } of plan.tools) {
     const report = await runTool(options.slot, toolId, options, environment)
     if (shared && report.cleanup?.ok !== true) environment = { ...environment, sharedStopped: true }
+    if ((options.slot === 'host' || options.slot === 'external') && NEGATIVE_AUTH_TOOLS.has(toolId)) await fixtureSession(clearRunnerIp)
     const name = `${options['run-id']}-${toolId}-${report.profile.replaceAll('.', '_')}-${options.slot}`
     const written = writeDetachedJson(ROOT, join(options.output, `${name}.report.json`), report)
     const output = { toolId, status: report.status, report: written, receipts: [] }
@@ -335,7 +370,10 @@ export async function runQualification(options) {
     if (report.status === 'passed') passed.push({ report, written, name, output })
   }
   // A receipt says the run cleaned up, so none exists until the shared fixture is confirmed gone.
-  const fixtureGone = environment.fixture ? (await fixtureSession(root => environment.fixture.destroy())).outcome : null
+  const fixtureGone = environment.fixture ? (await fixtureSession(async root => {
+    await clearRunnerIp(root)
+    return environment.fixture.destroy(root)
+  })).outcome : null
   const leftovers = fixtureLeftovers ?? (environment.fixture && fixtureGone?.ok !== true ? { username: environment.fixture.username, errors: fixtureGone?.errors ?? ['The fixture cleanup did not complete.'] } : null)
   if (leftovers === null) for (const { report, written, name, output } of passed) {
     const pathFor = slot => `${name}-${slot.stage}-${slot.environment}.report.json`

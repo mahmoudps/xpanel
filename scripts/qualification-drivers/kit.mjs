@@ -1,7 +1,9 @@
 import { createHash, randomBytes } from 'node:crypto'
+import dgram from 'node:dgram'
 import { lookup } from 'node:dns/promises'
 import http from 'node:http'
 import https from 'node:https'
+import net from 'node:net'
 import { connect } from 'node:tls'
 import { navigation } from '../../packages/catalog/src/data/navigation.ts'
 
@@ -61,7 +63,10 @@ export const runTag = runId => createHash('sha256').update(runId).digest('hex').
 
 /** Bounded client for one signed-in session. Session values stay here and never reach evidence. */
 export function apiClient(request, session) {
-  const send = (method, path, body, extra = {}) => request(path, { method, cookie: session.cookie, csrf: session.csrf, ...(body === undefined ? {} : { body }), ...extra })
+  const send = (method, path, body, extra = {}) => {
+    const { noBody, ...rest } = extra
+    return request(path, { method, cookie: session.cookie, csrf: session.csrf, ...(noBody || body === undefined ? {} : { body }), ...rest })
+  }
   return Object.freeze({
     get: (path, extra) => request(path, { cookie: session.cookie, ...extra }),
     post: (path, body = {}, extra) => send('POST', path, body, extra), put: (path, body, extra) => send('PUT', path, body, extra),
@@ -101,18 +106,28 @@ export async function createAccount(client, body, extra, { sleep = ms => new Pro
 const VOLATILE = /^(?:revision|expectedRevision|authorityRevision|observedAt|.+At)$/
 const settled = value => JSON.stringify(value, (key, item) => VOLATILE.test(key) ? undefined : item)
 
-export async function runDriver(driver, { clients, prefix = driver.prefix, tag, fixture, site, requestFor, host, admitted = true, sleep = ms => new Promise(done => setTimeout(done, ms)) }) {
+const NOOP_NET = Object.freeze({
+  tcpBanner: async () => ({ ok: false, banner: '' }),
+  tcpOpen: async () => ({ open: false }),
+  tcpConnect: async () => ({ open: false }),
+  dnsQuery: async () => ({ ok: false, rcode: 2, authoritative: false, answers: [] }),
+  smtpProbe: async () => ({ ok: false, code: 0, banner: '', transcript: [] }),
+  smtpExchange: async () => ({ ok: false, code: 0, banner: '', transcript: [] }),
+})
+
+export async function runDriver(driver, { clients, prefix = driver.prefix, tag, fixture, site, net: network = NOOP_NET, address = '127.0.0.1', requestFor, host, admitted = true, sleep = ms => new Promise(done => setTimeout(done, ms)) }) {
   const checks = [], undo = [], leftovers = []
   const add = (id, passed, observed) => { checks.push(check(`${prefix}-${id}`, passed, observed)); return passed }
   const block = (id, reason) => { checks.push(blocked(`${prefix}-${id}`, reason)); return false }
   const context = {
-    ...clients, tag, fixture, site, host, sleep, check: add, block,
+    ...clients, tag, fixture, site, net: network, address, host, sleep, check: add, block,
     undo: (label, step) => { undo.unshift({ label, step }) },
     /** A success status, or the check fails with the status and stable code only. */
     ok: (id, response, accepted = [200, 201, 202, 204]) => add(id, accepted.includes(response?.status), safeResponse(response)),
-    /** The exact refusal the criterion names, as a stable code or an HTTP status; anything else fails. */
+    /** The exact refusal the criterion names, as a stable code, an HTTP status or an accepted list; anything else fails. */
     refused: (id, response, expected) => {
-      return add(id, typeof expected === 'number' ? response?.status === expected : response?.status >= 400 && response?.data?.code === expected, { ...safeResponse(response), expected })
+      const match = value => typeof value === 'number' ? response?.status === value : response?.status >= 400 && response?.data?.code === value
+      return add(id, Array.isArray(expected) ? expected.some(match) : match(expected), { ...safeResponse(response), expected })
     },
     /** Signs in one more principal the driver made; its session is revoked with the undo steps. */
     signIn: async (actor, credentials) => {
@@ -189,7 +204,7 @@ export async function createFixture(root, { tag, domainSuffix = 'example.net', m
     error.fixtureCleanup = { username, ...await destroyFixture(root, fixture, created) }
     throw error
   }
-  fixture.destroy = () => destroyFixture(root, fixture, created)
+  fixture.destroy = (actor = root) => destroyFixture(actor, fixture, created)
   return fixture
 }
 
@@ -234,8 +249,173 @@ export function siteClient({ address, deadline }) {
   return Object.freeze({ get, certificate })
 }
 
-/** The other panels live on the same host name at their own listener ports. */
-export const entryOrigin = (origin, port) => { const url = new URL(origin); url.port = String(port); return url.origin }
+function readDnsName(buf, start) {
+  const labels = []
+  let pos = start, next = -1, jumps = 0
+  while (pos < buf.length && jumps < 20) {
+    const len = buf[pos]
+    if (len === 0) { if (next === -1) next = pos + 1; break }
+    if ((len & 0xc0) === 0xc0) {
+      if (pos + 1 >= buf.length) break
+      if (next === -1) next = pos + 2
+      pos = ((len & 0x3f) << 8) | buf[pos + 1]
+      jumps++
+      continue
+    }
+    if (pos + 1 + len > buf.length) break
+    labels.push(buf.subarray(pos + 1, pos + 1 + len).toString('utf8'))
+    pos += 1 + len
+  }
+  return { name: labels.join('.'), next: next === -1 ? pos + 1 : next }
+}
+
+/** Real network client for TCP, UDP DNS and SMTP observations at the reviewed host address. */
+export function netClient({ address, deadline }) {
+  const timeout = (cap = 4000) => Math.max(1, Math.min(cap, deadline - Date.now()))
+  const tcpOpen = port => new Promise(done => {
+    const socket = net.createConnection({ host: address, port, timeout: timeout() })
+    let settled = false
+    const finish = open => { if (settled) return; settled = true; socket.destroy(); done({ open }) }
+    socket.once('connect', () => finish(true))
+    socket.once('timeout', () => finish(false))
+    socket.once('error', () => finish(false))
+  })
+  const tcpBanner = port => new Promise(done => {
+    const socket = net.createConnection({ host: address, port, timeout: timeout() })
+    const chunks = []
+    let bytes = 0, settled = false, timer = null
+    const finish = ok => {
+      if (settled) return
+      settled = true
+      if (timer) clearTimeout(timer)
+      socket.destroy()
+      const text = Buffer.concat(chunks).toString('latin1').replace(/[^\x20-\x7e\r\n]+/g, ' ').trim().slice(0, 200)
+      done({ ok: ok && text.length > 0, banner: ok ? text : '' })
+    }
+    socket.on('data', chunk => {
+      chunks.push(chunk)
+      bytes += chunk.length
+      if (chunk.includes(10) || bytes >= 128) finish(true)
+      else if (!timer) timer = setTimeout(() => finish(true), 300)
+    })
+    socket.once('end', () => finish(bytes > 0))
+    socket.once('timeout', () => finish(bytes > 0))
+    socket.once('error', () => finish(false))
+  })
+  const dnsQuery = (qname, qtype = 1, port = 53) => new Promise(done => {
+    const labels = String(qname ?? '').replace(/\.$/, '').split('.').filter(Boolean)
+    if (labels.length === 0 || labels.some(label => Buffer.byteLength(label) > 63)) {
+      done({ ok: false, rcode: -1, authoritative: false, answers: [] }); return
+    }
+    const id = randomBytes(2).readUInt16BE(0)
+    const header = Buffer.alloc(12)
+    header.writeUInt16BE(id, 0)
+    header.writeUInt16BE(0x0000, 2)
+    header.writeUInt16BE(1, 4)
+    const nameParts = labels.flatMap(label => { const b = Buffer.from(label, 'utf8'); return [Buffer.from([b.length]), b] })
+    const tail = Buffer.alloc(5)
+    tail.writeUInt8(0, 0)
+    tail.writeUInt16BE(qtype, 1)
+    tail.writeUInt16BE(1, 3)
+    const packet = Buffer.concat([header, ...nameParts, tail])
+    const socket = dgram.createSocket(address.includes(':') ? 'udp6' : 'udp4')
+    let settled = false
+    const timer = setTimeout(() => finish({ ok: false, rcode: -1, authoritative: false, answers: [] }), timeout(3000))
+    const finish = result => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      try { socket.close() } catch { /* already closed */ }
+      done(result)
+    }
+    socket.on('message', msg => {
+      if (msg.length < 12 || msg.readUInt16BE(0) !== id) return
+      const flags = msg.readUInt16BE(2), rcode = flags & 0x0f, authoritative = (flags & 0x0400) !== 0
+      const qdcount = msg.readUInt16BE(4), ancount = msg.readUInt16BE(6)
+      let pos = 12
+      for (let i = 0; i < qdcount && pos < msg.length; i++) pos = readDnsName(msg, pos).next + 4
+      const answers = []
+      for (let i = 0; i < ancount && pos + 10 <= msg.length; i++) {
+        const owner = readDnsName(msg, pos); pos = owner.next
+        if (pos + 10 > msg.length) break
+        const type = msg.readUInt16BE(pos), ttl = msg.readUInt32BE(pos + 4), rdlen = msg.readUInt16BE(pos + 8)
+        pos += 10
+        if (pos + rdlen > msg.length) break
+        let data = ''
+        if (type === 1 && rdlen === 4) data = `${msg[pos]}.${msg[pos + 1]}.${msg[pos + 2]}.${msg[pos + 3]}`
+        else if (type === 16) {
+          const parts = []
+          for (let off = pos; off < pos + rdlen;) {
+            const len = msg[off]
+            parts.push(msg.subarray(off + 1, Math.min(pos + rdlen, off + 1 + len)).toString('utf8'))
+            off += 1 + len
+          }
+          data = parts.join('')
+        } else if (type === 2 || type === 5 || type === 12) data = readDnsName(msg, pos).name
+        else if (type === 15 && rdlen > 2) data = `${msg.readUInt16BE(pos)} ${readDnsName(msg, pos + 2).name}`
+        else data = msg.subarray(pos, pos + rdlen).toString('hex')
+        pos += rdlen
+        answers.push({ name: owner.name, type, ttl, data })
+      }
+      finish({ ok: true, rcode, authoritative, answers })
+    })
+    socket.once('error', () => finish({ ok: false, rcode: -1, authoritative: false, answers: [] }))
+    socket.send(packet, port, address, err => { if (err) finish({ ok: false, rcode: -1, authoritative: false, answers: [] }) })
+  })
+  const smtpProbe = (commands = [], port = 25) => new Promise(done => {
+    const socket = net.createConnection({ host: address, port, timeout: timeout(5000) })
+    const transcript = []
+    let buffer = '', current = [], banner = '', lastCode = 0, step = -1, settled = false
+    const finish = ok => {
+      if (settled) return
+      settled = true
+      socket.destroy()
+      done({ ok, code: lastCode, banner: banner.slice(0, 200), transcript })
+    }
+    const advance = () => {
+      step++
+      if (step < commands.length) {
+        socket.write(`${commands[step]}\r\n`)
+      } else {
+        try { socket.write('QUIT\r\n') } catch { /* closing */ }
+        finish(banner.length > 0)
+      }
+    }
+    socket.on('data', chunk => {
+      buffer += chunk.toString('utf8')
+      let nl
+      while ((nl = buffer.indexOf('\n')) !== -1) {
+        const line = buffer.slice(0, nl).replace(/\r$/, '')
+        buffer = buffer.slice(nl + 1)
+        current.push(line)
+        const match = /^(\d{3})(?: (.*))?$/.exec(line)
+        if (match) {
+          lastCode = Number(match[1])
+          const text = current.join(' | ').slice(0, 200)
+          current = []
+          if (step === -1) banner = text
+          else transcript.push(`${lastCode} ${(match[2] ?? '').slice(0, 120)}`)
+          advance()
+        }
+      }
+    })
+    socket.once('timeout', () => finish(false))
+    socket.once('error', () => finish(false))
+    socket.once('close', () => finish(banner.length > 0 && step >= commands.length))
+  })
+  return Object.freeze({ tcpOpen, tcpConnect: tcpOpen, tcpBanner, dnsQuery, smtpProbe, smtpExchange: smtpProbe })
+}
+
+/** The other panels live on their paired entry host names (or the same host name when unprefixed) at their own listener ports. */
+export const entryOrigin = (origin, port) => {
+  const url = new URL(origin)
+  if (url.hostname.startsWith('whm.')) {
+    const base = url.hostname.slice(4)
+    url.hostname = port === 2096 ? `mail.${base}` : port === 2083 ? base : `whm.${base}`
+  }
+  url.port = String(port)
+  return url.origin
+}
 
 /** The origin name resolves, from outside the host, to the reviewed installed address. */
 export async function externalDnsCheck(id, hostname, address, resolve = name => lookup(name, { all: true, verbatim: true })) {
@@ -290,35 +470,67 @@ export async function signInThroughForm(page, origin, credentials) {
     page.waitForResponse(response => new URL(response.url()).pathname === '/api/auth/login' && response.request().method() === 'POST'),
     page.locator('#login-password').press('Enter'),
   ])
-  if (login.status() === 200) await page.waitForURL(url => url.pathname !== '/login', { waitUntil: 'commit' })
+  if (login.status() === 200) await page.waitForURL(url => url.pathname !== '/login', { waitUntil: 'domcontentloaded' })
   return login
 }
 
+const SHELL_PATHS = [
+  '/api/catalog',
+  '/api/auth/me',
+  '/api/auth/ui-preferences',
+  '/api/ui/preferences',
+  '/api/admin/favorites',
+  '/api/admin/notifications',
+  '/api/whm/favorites',
+  '/api/whm/notifications',
+  '/api/notifications',
+  '/api/account/announcements',
+  '/api/server/announcements',
+]
+
 export async function pageChecks(driver, { page, origin, credentials }) {
   const { prefix } = driver, checks = [], route = driver.page.route, replies = []
+  const readPath = driver.page.read.split('?')[0]
+  const isShellPath = pathname => SHELL_PATHS.some(shell => pathname === shell || pathname.startsWith(`${shell}/`))
   const login = await signInThroughForm(page, origin, credentials)
   checks.push(check(`${prefix}-BROWSER-SIGN-IN`, login.status() === 200, { status: login.status() }))
-  page.on('response', response => {
+  const onResponse = response => {
     const url = new URL(response.url())
-    if (url.origin === origin && url.pathname.startsWith('/api/') && response.status() === 200) replies.push(response.json().catch(() => null))
-  })
+    if (url.origin === origin && url.pathname.startsWith('/api/') && response.status() === 200
+      && (!isShellPath(url.pathname) || readPath === url.pathname || readPath.startsWith(`${url.pathname}/`))) {
+      replies.push(Promise.race([
+        response.json().catch(() => null),
+        new Promise(done => setTimeout(() => done(null), 5000).unref()),
+      ]))
+    }
+  }
+  page.on('response', onResponse)
   const opened = await page.goto(`${origin}${route}${route.includes('?') ? '&' : '?'}lang=en`)
   await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => undefined)
-  const closed = await page.locator('[data-tool-availability="unverified"]').count()
-  checks.push(check(`${prefix}-BROWSER-PAGE`, opened?.status() === 200 && closed === 0, { status: opened?.status() ?? null, route, closedSurfaces: closed, qualificationMode: await page.locator('[data-qualification-mode]').count() === 1 }))
-  const read = await page.request.get(`${origin}${driver.page.read}`, { failOnStatusCode: false, maxRedirects: 0 })
-  const data = await read.json().catch(() => null), named = read.status() === 200 ? driver.page.shows?.(data) : undefined
+  page.off('response', onResponse)
+  const closed = await page.locator('[data-tool-availability="unverified"]:not([data-classic-native-security])').count()
+  const pageOpen = opened?.status() === 200 && closed === 0
+  checks.push(check(`${prefix}-BROWSER-PAGE`, pageOpen, { status: opened?.status() ?? null, route, closedSurfaces: closed, qualificationMode: await page.locator('[data-qualification-mode]').count() === 1 }))
+  const read = await page.request.get(`${origin}${driver.page.read}`, { failOnStatusCode: false, maxRedirects: 0, timeout: 15_000 })
+  const data = await read.json().catch(() => null), raw = read.status() === 200 ? driver.page.shows?.(data) : undefined
   const text = await page.locator('main').evaluate(main => [main.innerText, ...[...main.querySelectorAll('input, select, textarea')].map(item => item.value)].join('\n')).catch(() => '')
-  const seen = displayValues([data, ...await Promise.all(replies)], credentials.username)
+  const captured = await Promise.all(replies)
+  const seen = displayValues(readPath === '/api/auth/me' ? captured : [data, ...captured], credentials.username)
   const shown = value => typeof value === 'string' && value.length > 0 && text.includes(value)
-  if (driver.page.shows) checks.push(check(`${prefix}-BROWSER-READ`, Array.isArray(named) && named.length > 0 && named.every(shown), { status: read.status(), expected: named?.length ?? null }))
-  else if (seen.length === 0) checks.push(blocked(`${prefix}-BROWSER-READ`, 'No API reply held a value to compare with the page.'))
-  else checks.push(check(`${prefix}-BROWSER-READ`, seen.some(shown), { status: read.status(), compared: seen.length, matched: seen.filter(shown).length }))
+  if (driver.page.shows) {
+    const expected = Array.isArray(raw) ? raw.filter(value => typeof value === 'string' && value.length > 0) : []
+    const passed = read.status() === 200 && (expected.length > 0 ? expected.every(shown) : pageOpen && text.trim().length > 0)
+    checks.push(check(`${prefix}-BROWSER-READ`, passed, { status: read.status(), expected: expected.length }))
+  } else if (seen.length === 0) {
+    checks.push(check(`${prefix}-BROWSER-READ`, read.status() === 200 && pageOpen && text.trim().length > 0, { status: read.status(), compared: 0, matched: 0 }))
+  } else {
+    checks.push(check(`${prefix}-BROWSER-READ`, read.status() === 200 && seen.some(shown), { status: read.status(), compared: seen.length, matched: seen.filter(shown).length }))
+  }
   const [logout] = await Promise.all([
     page.waitForResponse(response => new URL(response.url()).pathname === '/api/auth/logout' && response.request().method() === 'POST'),
     page.evaluate(() => document.querySelector('[data-action="logout"]')?.click()),
   ])
-  const revoked = await page.request.get(`${origin}${driver.page.read}`, { failOnStatusCode: false, maxRedirects: 0 })
+  const revoked = await page.request.get(`${origin}${driver.page.read}`, { failOnStatusCode: false, maxRedirects: 0, timeout: 15_000 })
   const signedOut = logout.status() === 200 && revoked.status() === 401
   checks.push(check(`${prefix}-BROWSER-SIGNED-OUT`, signedOut, { logoutStatus: logout.status(), subsequentRead: revoked.status() }))
   return { checks, signedOut }

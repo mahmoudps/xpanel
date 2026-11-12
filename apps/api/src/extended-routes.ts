@@ -36,7 +36,7 @@ import { atomicWriteJson, readJsonIfExists } from '@xpanel/state'
 import type { StateStore, WriterLease } from '@xpanel/state'
 import { readRuntimeRegistry } from '../../agent/src/account-runtime.ts'
 import { validateQuotaFilesystem } from '../../agent/src/services/quota.ts'
-import { passwordHashFromInput } from './auth.ts'
+import { passwordHashFromInput, type ServiceHashScheme } from './auth.ts'
 import type { AuthenticatedCaller } from './auth.ts'
 import { createContactToolsRoutes, createContactMetadataAccess, assertContactMutationCapacity } from './mail/contact-tools-routes.ts'
 import { assertMailboxMetadataAuthority, captureMailboxMetadataAuthority, readBoundMailboxIdentityRecords, resolveMailboxMetadataAuthority, MAILBOX_METADATA_REVIEW_REQUIRED } from './mail/metadata-authority.ts'
@@ -88,6 +88,7 @@ export interface ExtendedRouteHelpers {
   dav: WebmailDavPorts
   homeBaseDir?: string
   serverSecret?: string
+  serviceHashScheme?: ServiceHashScheme
   /** Fresh read-only enforcement observation from the protected native agent; never a saved setup flag. */
   readQuotaState?: (caller: AuthenticatedCaller, path: string) => Promise<unknown>
   /** The agent's account database check and repair; absent without the host agent. */
@@ -1867,6 +1868,23 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
         await helpers.assertRoot(caller, 'dns.templates.update')
         const body = await readJsonBody<{ templates?: DnsTemplateDefinition[] }>(req)
         if (!Array.isArray(body.templates)) return fail('VALIDATION', 'templates array is required')
+        for (const tpl of body.templates) {
+          if (!tpl || typeof tpl !== 'object' || !Array.isArray(tpl.records)) {
+            return fail('VALIDATION', 'each template requires a records array', { stateChanged: false })
+          }
+          for (const rec of tpl.records) {
+            if (!rec || typeof rec !== 'object' || typeof rec.contentTemplate !== 'string' || typeof rec.name !== 'string') {
+              return fail('VALIDATION', 'each template record requires string name and contentTemplate', { stateChanged: false })
+            }
+            for (const field of [rec.name, rec.contentTemplate]) {
+              for (const match of field.matchAll(/\{\{([^}]*)\}\}/g)) {
+                if (match[1] !== 'ipv4' && match[1] !== 'domain') {
+                  return fail('VALIDATION', `unknown DNS template placeholder "{{${match[1]}}}"`, { stateChanged: false })
+                }
+              }
+            }
+          }
+        }
         await ext.write('dns/templates.json', body.templates)
         return jsonResponse({ templates: body.templates })
       }

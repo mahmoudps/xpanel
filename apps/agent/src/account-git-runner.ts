@@ -25,7 +25,7 @@ export function buildAccountGitCommand(account: Pick<Account, 'username' | 'uid'
   const prefix = skeleton.slice(0, delimiter).map(value => value === 'User=' + account.username ? 'User=' + account.uid : value === 'Group=' + account.username ? 'Group=' + account.gid : value)
   return [...prefix, '--property', 'RuntimeMaxSec=' + GIT_LIMITS.timeoutSeconds + 's', '--property', 'TimeoutStopSec=5s',
     '--property', 'MemoryMax=512M', '--property', 'TasksMax=32', '--property', 'NoExecPaths=/',
-    '--property', 'ExecPaths=/usr/bin/git -' + core + '/git-remote-http -' + core + '/git-remote-https',
+    '--property', 'ExecPaths=/usr/bin/git -/usr/lib -/usr/lib64 -' + core + '/git-remote-http -' + core + '/git-remote-https',
     '--property', 'InaccessiblePaths=-' + account.home + '/.ssh -' + account.home + '/.netrc -' + account.home + '/.git-credentials',
     '--property', 'UnsetEnvironment=' + unset, '--', ...(operation.op.startsWith('view-') ? buildGitViewCommand(operation as GitViewOperation) : buildGitCommand(operation as GitOperation))]
 }

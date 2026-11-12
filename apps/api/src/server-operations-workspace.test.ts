@@ -132,6 +132,31 @@ describe('WHM server operations', () => {
     expect((await state.store.getDnsZone('example.net'))!.records).toContainEqual(expect.objectContaining({ name: 'srv', type: 'A', content: '192.0.2.11' }))
   })
 
+  it('resets an previously unsaved panel TLS policy cleanly when the config test refuses it', async () => {
+    const api = createApiApp({
+      db: db.db,
+      store: state.store,
+      serverSecret: SERVER_SECRET,
+      allowedOrigins: [ORIGIN],
+      agentToken: 'a'.repeat(64),
+      agentApp: { subscribe: () => () => {}, fetch: async () => new Response(JSON.stringify({ status: 'failed', failedTest: 'nginx', stateChanged: false }), { status: 200, headers: { 'content-type': 'application/json' } }) } as never,
+    })
+    const login = await api.fetch(new Request(ORIGIN + '/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json', origin: ORIGIN }, body: JSON.stringify({ username: 'root', password: PASSWORD }) }))
+    const { csrfToken } = await login.json() as { csrfToken: string }
+    const cookie = login.headers.get('set-cookie')!.split(';')[0]!
+    const call = async (method: string, path: string, body?: unknown): Promise<{ status: number; body: Reply }> => {
+      const response = await api.fetch(new Request(ORIGIN + path, { method, headers: { cookie, origin: ORIGIN, 'x-csrf-token': csrfToken, ...(body === undefined ? {} : { 'content-type': 'application/json' }) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) }))
+      return { status: response.status, body: await response.json() as Reply }
+    }
+    const initial = await call('GET', '/api/server/panel-tls')
+    expect(initial.body.saved).toBe(false)
+    const refused = await call('PUT', '/api/server/panel-tls', { protocols: ['TLSv1.2', 'TLSv1.3'], ciphers: 'NOT_A_REAL_OPENSSL_CIPHER_NAME', expectedRevision: initial.body.revision })
+    expect(refused.status).toBeGreaterThanOrEqual(400)
+    expect(refused.body.code).toBe('CONFIG_TEST_FAILED')
+    const after = await call('GET', '/api/server/panel-tls')
+    expect(after).toMatchObject({ status: 200, body: { saved: false, revision: initial.body.revision } })
+  })
+
   it('refuses the DNS cleanup without a host agent and these routes for a query', async () => {
     const call = await session()
     expect(JSON.stringify((await call('GET', '/api/server/dns-ops/cleanup')).body)).toContain('host_agent_unavailable')

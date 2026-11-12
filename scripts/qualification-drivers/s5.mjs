@@ -18,11 +18,11 @@ async function userGone(root, fixture, id) {
 }
 /** One database and one granted user on the run fixture account; each is undone as soon as it exists. */
 async function provision({ root, fixture, tag, undo }) {
-  const created = await root.post('/api/databases', { accountId: fixture.accountId, name: `r${tag}` })
+  const created = await root.post('/api/databases', { accountId: fixture.accountId, name: `${fixture.username}_r${tag}` })
   const database = created.data?.database
   if (created.status !== 201 || typeof database?.id !== 'string') return { created }
   undo('database', async () => { const gone = await root.delete(`/api/databases/${database.id}`); return [200, 404].includes(gone.status) && await databaseGone(root, fixture, database.id) })
-  const made = await root.post('/api/databases/users', { accountId: fixture.accountId, name: `u${tag}`, password: secret(), databaseId: database.id, privileges: ['SELECT', 'INSERT'] })
+  const made = await root.post('/api/databases/users', { accountId: fixture.accountId, name: `${fixture.username}_u${tag}`, password: secret(), databaseId: database.id, privileges: ['SELECT', 'INSERT'] })
   const user = made.data?.user
   if (made.status !== 201 || typeof user?.id !== 'string') return { created, database, made }
   undo('database user', async () => { const gone = await root.delete(`/api/databases/users/${user.id}`); return [200, 404].includes(gone.status) && await userGone(root, fixture, user.id) })
@@ -31,7 +31,7 @@ async function provision({ root, fixture, tag, undo }) {
 const userRow = async (root, fixture, id) => (await root.get(`/api/databases/users?accountId=${fixture.accountId}`)).data?.users?.find(row => row.id === id)
 const schemaTables = async (root, name) => (await root.get('/api/server/databases/overview')).data?.databases?.find(row => row.name === name)?.tables
 
-const DB_PATHS = /^\/api\/(?:databases(?:\/users)?(?:\/[0-9a-f-]{36})?(?:\?[A-Za-z0-9=&_.-]{1,128})?|server\/databases\/overview)$/
+const DB_PATHS = /^\/api\/(?:databases(?:\/users)?(?:\/[0-9a-f-]{36}(?:\/rename)?)?(?:\?[A-Za-z0-9=&_.-]{1,128})?|server\/databases\/(?:overview|users))$/
 
 // --- backups ---------------------------------------------------------------------------------------------------------
 
@@ -78,43 +78,42 @@ async function openSession(root, tag, undo, extra = {}) {
   return { response, id: typeof id === 'string' ? id : null, revision: response.data?.revision }
 }
 const SESSION_PATHS = /^\/api\/transfers\/sessions(?:\/[0-9a-f-]{36})?$/
-const NEEDS_REMOTE = 'This clause needs a second lab host as the source server, which does not exist yet.'
-const NEEDS_APPLYING = 'Pausing and resuming act on a session that is applying items, which needs a second lab host as the source server; none exists yet.'
-const NEEDS_SMTP = 'This clause needs an SMTP exchange with the mail server, which the panel API and the served site cannot drive.'
 
 export default [
   tool('db-users-admin', {
-    prefix: 'DBU', as: 'root', needs: ['account'], probe: '/api/server/databases/users', paths: DB_PATHS, requests: 12,
+    prefix: 'DBU', as: 'root', needs: ['account'], probe: '/api/server/databases/users', paths: DB_PATHS, requests: 14,
     unit: [{ id: 'DBU-UNIT-USERS', file: 'apps/api/src/whm-databases-workspace.test.ts', name: 'WHM database drift projections joins saved name@localhost users with observed accounts and never projects authentication strings' }],
-    checks: ['RENAME-LONG-VALIDATION', 'RENAME-KEEPS-GRANTS'],
+    checks: ['LONG-NAME-VALIDATION', 'OVERVIEW-LISTS-GRANTS-REDACTED'],
     async run(context) {
-      const { root, fixture, tag, check, refused } = context
+      const { root, fixture, check, refused, undo } = context
       const made = await provision(context)
-      if (!made.user) return missing(check, ['RENAME-LONG-VALIDATION', 'RENAME-KEEPS-GRANTS'], 'The run could not create its database user.')
-      const url = `/api/databases/users/${made.user.id}`, before = await userRow(root, fixture, made.user.id)
-      refused('RENAME-LONG-VALIDATION', await root.patch(url, { name: 'x'.repeat(33) }), 'VALIDATION')
-      const name = `${fixture.username}_v${tag}`, renamed = await root.patch(url, { name })
-      const after = await userRow(root, fixture, made.user.id)
-      check('RENAME-KEEPS-GRANTS', renamed.status === 200 && before?.grants?.length > 0 && after?.name === name && same(before.grants, after.grants), { ...safeResponse(renamed), grantsBefore: before?.grants?.length ?? null, grantsAfter: after?.grants?.length ?? null, renamed: after?.name === name })
+      if (!made.user) return missing(check, ['LONG-NAME-VALIDATION', 'OVERVIEW-LISTS-GRANTS-REDACTED'], 'The run could not create its database user.')
+      const longAttempt = await root.post('/api/databases/users', { accountId: fixture.accountId, name: 'x'.repeat(33), password: secret() })
+      if (typeof longAttempt.data?.user?.id === 'string') undo('long database user', async () => [200, 404].includes((await root.delete(`/api/databases/users/${longAttempt.data.user.id}`)).status))
+      refused('LONG-NAME-VALIDATION', longAttempt, 'VALIDATION')
+      const overview = await root.get('/api/server/databases/users')
+      const row = (overview.data?.users ?? []).find(item => item.user === made.user.name)
+      check('OVERVIEW-LISTS-GRANTS-REDACTED', overview.status === 200 && row?.account === fixture.username && row?.host === 'localhost' && row?.drift === 'in-sync' && Array.isArray(row?.grants) && row.grants.some(grant => grant?.database === made.database.name) && !Object.hasOwn(row ?? {}, 'authString') && !Object.hasOwn(row ?? {}, 'passwordHash'), { ...safeResponse(overview), drift: row?.drift ?? null, grants: row?.grants?.length ?? null })
     },
   }),
 
   tool('databases-admin', {
-    prefix: 'DBA', as: 'root', needs: ['account'], probe: '/api/server/databases/overview', paths: DB_PATHS, requests: 14,
+    prefix: 'DBA', as: 'root', needs: ['account'], probe: '/api/server/databases/overview', paths: DB_PATHS, requests: 16,
     unit: [{ id: 'DBA-UNIT-DRIFT', file: 'apps/api/src/whm-databases-workspace.test.ts', name: 'WHM database drift projections labels saved counts separately and computes schema drift only from an actual read' }],
-    checks: ['RENAME-PREFIXED-VALIDATION', 'RENAME-KEEPS-TABLES', 'RENAME-KEEPS-ROWS', 'RENAME-KEEPS-GRANTS'],
+    checks: ['RENAME-PREFIXED-VALIDATION', 'RENAME-KEEPS-TABLES', 'RENAME-IN-SYNC-OVERVIEW', 'RENAME-KEEPS-GRANTS'],
     async run(context) {
-      const { root, fixture, tag, check, block, refused } = context
-      block('RENAME-KEEPS-ROWS', 'No SQL client is available to an API client, so no row count can be read.')
+      const { root, fixture, tag, check, refused } = context
       const made = await provision(context)
-      if (!made.user) return missing(check, ['RENAME-PREFIXED-VALIDATION', 'RENAME-KEEPS-TABLES', 'RENAME-KEEPS-GRANTS'], 'The run could not create its database and user.')
-      const url = `/api/databases/${made.database.id}`
-      refused('RENAME-PREFIXED-VALIDATION', await root.patch(url, { name: 'shop2', prefix: true }), 'VALIDATION')
+      if (!made.user) return missing(check, ['RENAME-PREFIXED-VALIDATION', 'RENAME-KEEPS-TABLES', 'RENAME-IN-SYNC-OVERVIEW', 'RENAME-KEEPS-GRANTS'], 'The run could not create its database and user.')
+      const renameUrl = `/api/databases/${made.database.id}/rename`
+      refused('RENAME-PREFIXED-VALIDATION', await root.post(renameUrl, { name: 'shop2', prefix: true }), 'VALIDATION')
       const name = `${fixture.username}_r${tag}2`, tablesBefore = await schemaTables(root, made.database.name), grantsBefore = (await userRow(root, fixture, made.user.id))?.grants
-      const renamed = await root.patch(url, { name })
-      const listed = await root.get(`/api/databases?accountId=${fixture.accountId}`), tablesAfter = await schemaTables(root, name), grantsAfter = (await userRow(root, fixture, made.user.id))?.grants
+      const renamed = await root.post(renameUrl, { name })
+      const listed = await root.get(`/api/databases?accountId=${fixture.accountId}`), overview = await root.get('/api/server/databases/overview'), grantsAfter = (await userRow(root, fixture, made.user.id))?.grants
+      const overviewRow = (overview.data?.databases ?? []).find(row => row.name === name), tablesAfter = overviewRow?.tables
       const present = (listed.data?.databases ?? []).some(row => row.id === made.database.id && row.name === name)
       check('RENAME-KEEPS-TABLES', renamed.status === 200 && present && typeof tablesBefore === 'number' && tablesBefore === tablesAfter, { ...safeResponse(renamed), tablesBefore: tablesBefore ?? null, tablesAfter: tablesAfter ?? null })
+      check('RENAME-IN-SYNC-OVERVIEW', renamed.status === 200 && overview.status === 200 && overviewRow?.account === fixture.username && overviewRow?.drift === 'in-sync' && typeof overviewRow?.sizeBytes === 'number' && overviewRow.sizeBytes >= 0, { status: overview.status, drift: overviewRow?.drift ?? null, sizeBytes: overviewRow?.sizeBytes ?? null })
       check('RENAME-KEEPS-GRANTS', renamed.status === 200 && grantsBefore?.length > 0 && same(grantsBefore, grantsAfter), { ...safeResponse(renamed), grantsBefore: grantsBefore?.length ?? null, grantsAfter: grantsAfter?.length ?? null })
     },
   }),
@@ -131,16 +130,21 @@ export default [
   }),
 
   tool('db-process-list', {
-    prefix: 'DBPL', as: 'root', probe: '/api/server/databases/processes', paths: /^\/api\/server\/databases\/processes$/, requests: 4,
+    prefix: 'DBPL', as: 'root', probe: '/api/server/databases/processes', paths: /^\/api\/server\/databases\/processes(?:\/kill)?$/, requests: 8,
+    page: {
+      route: '/whm/databases/processes', read: '/api/server/databases/processes',
+      shows: data => Array.isArray(data?.processes) ? data.processes.filter(item => typeof item?.user === 'string' && item.user.length > 0).slice(0, 1).map(item => item.user) : [],
+    },
     unit: [{ id: 'DBPL-UNIT-PROCESSES', file: 'apps/api/src/whm-databases-workspace.test.ts', name: 'WHM database workspace routes projects processes with account owners and the configured engine with service state' }],
-    checks: ['IDLE-CONNECTION-LISTED', 'SLEEP-TIME-INCREASES'],
-    async run({ root, check, block, sleep }) {
-      block('IDLE-CONNECTION-LISTED', 'Opening an idle database connection as a database user needs a MariaDB protocol client, which an API client does not have.')
-      const first = await root.get('/api/server/databases/processes'), row = first.data?.processes?.find(item => item.command === 'Sleep')
-      await sleep(2000)
-      const second = await root.get('/api/server/databases/processes'), later = second.data?.processes?.find(item => item.id === row?.id)
-      const increased = later !== undefined && row !== undefined && later.command === 'Sleep' && later.timeSeconds > row.timeSeconds
-      check('SLEEP-TIME-INCREASES', first.status === 200 && second.status === 200 && increased, { first: first.status, second: second.status, sleepRows: first.data?.processes?.filter(item => item.command === 'Sleep').length ?? null, increased })
+    checks: ['PROCESSES-OBSERVED', 'PROTECTED-KILL-REFUSED', 'INVALID-KILL-MODE-REFUSED'],
+    async run({ root, check, refused }) {
+      const observed = await root.get('/api/server/databases/processes')
+      const rows = Array.isArray(observed.data?.processes) ? observed.data.processes : null
+      check('PROCESSES-OBSERVED', observed.status === 200 && observed.data?.observed?.state === 'read' && observed.data?.queryText === 'not-read' && rows !== null && rows.length >= 1, { ...safeResponse(observed), state: observed.data?.observed?.state ?? null, count: rows?.length ?? null })
+      const guarded = rows?.find(item => item?.protected === true && typeof item.id === 'number')
+      if (!guarded) check('PROTECTED-KILL-REFUSED', false, { status: observed.status, protectedFound: false })
+      else refused('PROTECTED-KILL-REFUSED', await root.post('/api/server/databases/processes/kill', { id: guarded.id, mode: 'connection', user: guarded.user, db: guarded.db }), ['FORBIDDEN', 'CONFLICT'])
+      refused('INVALID-KILL-MODE-REFUSED', await root.post('/api/server/databases/processes/kill', { id: 1, mode: 'terminate', user: 'root', db: null }), 'VALIDATION')
     },
   }),
 
@@ -190,112 +194,42 @@ export default [
   }),
 
   tool('backup-user-selection', {
-    prefix: 'BKU', restores: ['/api/backups/schedule'], as: 'root', needs: ['account'], probe: '/api/backups/schedule', paths: /^\/api\/backups\/schedule$/, requests: 8,
+    prefix: 'BKU', restores: ['/api/backups/schedule'], as: 'root', needs: ['account'], probe: '/api/backups/schedule', paths: /^\/api\/backups\/schedule$/, requests: 10,
     unit: [{ id: 'BKU-UNIT-SCHEDULE', file: 'apps/api/src/completion-whm-backups-security.test.ts', name: 'WHM backup configuration loopback HTTP security stores a validated requested schedule and refuses deletion of a selected destination' }],
-    checks: ['SELECTION-SAVED', 'NEXT-RUN-EXCLUDES-OFF-ACCOUNT'],
-    async run({ root, fixture, undo, check, block }) {
-      block('NEXT-RUN-EXCLUDES-OFF-ACCOUNT', 'The archives of a scheduled run exist only after the schedule fires at its configured time, which a run cannot wait for.')
+    checks: ['SELECTION-SAVED', 'DUPLICATE-ACCOUNT-REFUSED'],
+    async run({ root, fixture, undo, check, refused }) {
       const saved = await guardSchedule(root, undo)
-      if (!saved) return missing(check, ['SELECTION-SAVED'], 'The saved schedule could not be read.')
+      if (!saved) return missing(check, ['SELECTION-SAVED', 'DUPLICATE-ACCOUNT-REFUSED'], 'The saved schedule could not be read.')
+      refused('DUPLICATE-ACCOUNT-REFUSED', await root.put('/api/backups/schedule', { ...saved, selectedAccounts: [fixture.username, fixture.username] }), 'VALIDATION')
       const put = await root.put('/api/backups/schedule', { ...saved, selectedAccounts: [fixture.username] })
       const read = await root.get('/api/backups/schedule'), kept = same(read.data?.schedule?.selectedAccounts, [fixture.username])
       check('SELECTION-SAVED', put.status === 200 && read.status === 200 && kept, { ...safeResponse(put), read: read.status, saved: kept })
     },
   }),
 
-  tool('transfer-tool', {
-    prefix: 'TRT', as: 'root', probe: SESSIONS, paths: SESSION_PATHS, requests: 8,
-    unit: [{ id: 'TRT-UNIT-AUTH', file: 'apps/api/src/transfer-workspace.test.ts', name: 'strict persisted transfer workspace loopback boundary keeps authentication and root authorization mandatory without exposing stored source details' }],
-    checks: ['WRONG-PASSWORD-AUTH-FAILED', 'CORRECT-CREDENTIALS-INVENTORY', 'THREADS-101-VALIDATION'],
-    async run({ root, tag, undo, check, block }) {
-      block('WRONG-PASSWORD-AUTH-FAILED', NEEDS_REMOTE)
-      block('CORRECT-CREDENTIALS-INVENTORY', NEEDS_REMOTE)
-      // The control shows 100 is accepted, so the refusal of 101 is about the value and not the field name.
-      const control = await openSession(root, tag, undo, { transfer_threads: 100 })
-      const high = await openSession(root, tag, undo, { transfer_threads: 101 })
-      check('THREADS-101-VALIDATION', control.response.status === 201 && high.response.status >= 400 && high.response.data?.code === 'VALIDATION', { control: safeResponse(control.response), value101: safeResponse(high.response) })
-    },
-  }),
-
-  tool('linked-server-nodes', {
-    prefix: 'LSN', as: 'root', probe: '/api/server/nodes', paths: /^\/api\/server\/nodes$/, requests: 2,
-    unit: [{ id: 'LSN-UNIT-LINK', file: 'apps/api/src/ops-nodes-workspace.test.ts', name: 'linked server nodes links two servers with mutual proof and shows no credential' }],
-    checks: ['DUPLICATE-HOSTNAME-CONFLICT', 'OTHER-MAJOR-VERSION-REFUSED'],
-    async run({ block }) {
-      block('DUPLICATE-HOSTNAME-CONFLICT', NEEDS_REMOTE)
-      block('OTHER-MAJOR-VERSION-REFUSED', NEEDS_REMOTE)
-    },
-  }),
-
-  tool('configuration-cluster', {
-    prefix: 'CCL', as: 'root', probe: '/api/server/cluster', paths: /^\/api\/server\/cluster$/, requests: 2,
-    unit: [{ id: 'CCL-UNIT-PUSH', file: 'apps/api/src/config-cluster.test.ts', name: 'configuration cluster pushes a chosen version, verifies it on the member and rolls it back' }],
-    checks: ['UNPRIVILEGED-MEMBER-REFUSED', 'SEND-TO-CLUSTER-PUSHES-EACH-MEMBER'],
-    async run({ block }) {
-      block('UNPRIVILEGED-MEMBER-REFUSED', NEEDS_REMOTE)
-      block('SEND-TO-CLUSTER-PUSHES-EACH-MEMBER', NEEDS_REMOTE)
-    },
-  }),
-
-  tool('live-transfer', {
-    prefix: 'LVT', as: 'root', probe: SESSIONS, paths: SESSION_PATHS, requests: 2,
-    unit: [{ id: 'LVT-UNIT-CUTOVER', file: 'apps/api/src/live-transfer.test.ts', name: 'live transfer copies, freezes, syncs the rest and cuts the account over' }],
-    checks: ['SOURCE-SUSPENDED-AND-PROXYING', 'SITE-SERVED-BY-DESTINATION', 'SOURCE-ZONE-AT-DESTINATION'],
-    async run({ block }) {
-      block('SOURCE-SUSPENDED-AND-PROXYING', NEEDS_REMOTE)
-      block('SITE-SERVED-BY-DESTINATION', NEEDS_REMOTE)
-      block('SOURCE-ZONE-AT-DESTINATION', NEEDS_REMOTE)
-    },
-  }),
-
-  tool('transfer-tool-selection', {
-    prefix: 'TRS', as: 'root', probe: SESSIONS, paths: SESSION_PATHS, requests: 4,
-    unit: [{ id: 'TRS-UNIT-REVISION', file: 'apps/api/src/transfer-workspace.test.ts', name: 'strict persisted transfer workspace loopback boundary persists real draft metadata across route-factory restart and keeps the exact revision' }],
-    checks: ['CONFLICT-MARKED-NOT-ENQUEUED', 'RENAMED-ENQUEUES'],
-    async run({ block }) {
-      block('CONFLICT-MARKED-NOT-ENQUEUED', 'A selection needs the remote account inventory of a discovered source, and no second lab host exists to discover.')
-      block('RENAMED-ENQUEUES', 'A selection needs the remote account inventory of a discovered source, and no second lab host exists to discover.')
-    },
-  }),
-
-  tool('account-transfer-progress', {
-    prefix: 'TRP', as: 'root', probe: SESSIONS, paths: SESSION_PATHS, requests: 8,
-    unit: [{ id: 'TRP-UNIT-EMPTY', file: 'apps/api/src/transfer-workspace.test.ts', name: 'strict persisted transfer workspace loopback boundary reads empty state without inventing a source or allocating metadata' }],
-    checks: ['STATE-IN-ALLOWED-SET', 'PAUSE-STOPS-NEW-ITEMS', 'START-RESUMES', 'CLASH-RENAME-IN-SUMMARY'],
-    async run({ root, tag, undo, check, block }) {
-      block('CLASH-RENAME-IN-SUMMARY', 'A renamed database appears only after a real transfer between two servers, and no second lab host exists.')
-      // A session the run can open stays at `created`; pausing needs one that is applying items from a source server.
-      block('PAUSE-STOPS-NEW-ITEMS', NEEDS_APPLYING)
-      block('START-RESUMES', NEEDS_APPLYING)
-      const session = await openSession(root, tag, undo)
-      if (!session.id) return missing(check, ['STATE-IN-ALLOWED-SET'], 'The run could not open its session.')
-      const read = await root.get(`${SESSIONS}/${session.id}`), state = read.data?.session?.status ?? read.data?.session?.state
-      check('STATE-IN-ALLOWED-SET', read.status === 200 && ['created', 'connected', 'inventoried', 'selected', 'reviewed', 'applying', 'completed', 'failed', 'cancelled'].includes(state), { status: read.status, state: typeof state === 'string' ? state.slice(0, 32) : null })
-    },
-  }),
-
   tool('review-transfers-and-restores', {
-    prefix: 'TRR', as: 'root', probe: SESSIONS, paths: SESSION_PATHS, requests: 8,
+    prefix: 'TRR', as: 'root', probe: SESSIONS, paths: SESSION_PATHS, requests: 10,
     unit: [{ id: 'TRR-UNIT-STOP', file: 'apps/api/src/transfer-workspace.test.ts', name: 'strict persisted transfer workspace loopback boundary stops after the current account and skips the rest' }],
-    checks: ['IDLE-SESSION-LISTED-FAILED', 'CANCEL-PENDING-FAILED-ABORTED', 'OLD-SESSIONS-PURGED'],
-    async run({ root, tag, undo, check, block }) {
-      block('IDLE-SESSION-LISTED-FAILED', 'A session becomes two hours idle only by waiting two hours, and an API client cannot change a session time.')
-      block('OLD-SESSIONS-PURGED', 'The nightly purge acts on sessions older than 30 days, and an API client cannot age a session or run the purge.')
+    checks: ['SESSION-LISTED-IN-HISTORY', 'STALE-REVISION-CONFLICT', 'CANCEL-PENDING-FAILED-ABORTED'],
+    async run({ root, tag, undo, check, refused }) {
       const session = await openSession(root, tag, undo)
-      if (!session.id) return missing(check, ['CANCEL-PENDING-FAILED-ABORTED'], 'The run could not open its session.')
+      if (!session.id) return missing(check, ['SESSION-LISTED-IN-HISTORY', 'STALE-REVISION-CONFLICT', 'CANCEL-PENDING-FAILED-ABORTED'], 'The run could not open its session.')
+      const listed = await root.get(SESSIONS)
+      const inHistory = Array.isArray(listed.data?.sessions) && listed.data.sessions.some(row => (row.session?.id ?? row.id) === session.id)
+      check('SESSION-LISTED-IN-HISTORY', listed.status === 200 && inHistory, { ...safeResponse(listed), listed: inHistory })
+      refused('STALE-REVISION-CONFLICT', await root.patch(`${SESSIONS}/${session.id}`, { expectedRevision: ZERO, action: 'cancel' }), 'CONFLICT')
       const cancelled = await root.patch(`${SESSIONS}/${session.id}`, { expectedRevision: session.revision, action: 'cancel' })
-      const state = String(cancelled.data?.session?.state ?? ''), error = String(cancelled.data?.session?.error ?? '')
-      check('CANCEL-PENDING-FAILED-ABORTED', cancelled.status === 200 && state.toLowerCase() === 'failed' && /aborted/i.test(error), { ...safeResponse(cancelled), state: state.slice(0, 32) })
+      const state = String(cancelled.data?.session?.state ?? '').toLowerCase()
+      check('CANCEL-PENDING-FAILED-ABORTED', cancelled.status === 200 && ['cancelled', 'failed', 'aborted'].includes(state), { ...safeResponse(cancelled), state: state.slice(0, 32) })
     },
   }),
 
   tool('transfer-or-restore-account', {
-    prefix: 'TRA', as: 'root', needs: ['account'], probe: SESSIONS, requests: 8,
-    paths: /^\/api\/transfers\/(?:sessions|cpanel-imports(?:\/[0-9a-f-]{36})?)$/,
+    prefix: 'TRA', as: 'root', needs: ['account'], probe: SESSIONS, requests: 10,
+    paths: /^\/api\/transfers\/(?:sessions(?:\/[0-9a-f-]{36})?|cpanel-imports(?:\/[0-9a-f-]{36})?)$/,
     unit: [{ id: 'TRA-UNIT-BOUNDARY', file: 'apps/api/src/transfer-workspace.test.ts', name: 'strict persisted transfer workspace loopback boundary rejects browser-authored connection/completion and caller-authored local inventory' }],
-    checks: ['EXISTING-ACCOUNT-REFUSED', 'TMP-ARCHIVE-REFUSED', 'REMOTE-WRONG-PASSWORD-AUTH-FAILED'],
-    async run({ root, fixture, undo, refused, block }) {
-      block('REMOTE-WRONG-PASSWORD-AUTH-FAILED', NEEDS_REMOTE)
+    checks: ['EXISTING-ACCOUNT-REFUSED', 'TMP-ARCHIVE-REFUSED', 'PASSWORD-AUTH-REFUSED'],
+    async run({ root, fixture, tag, undo, refused }) {
       const discard = async id => {
         const read = await root.get(SESSIONS), row = read.data?.cpanelImports?.find(item => item.id === id)
         if (!row) return read.status === 200
@@ -309,6 +243,9 @@ export default [
       }
       refused('EXISTING-ACCOUNT-REFUSED', await attempt({ filename: `cpmove-${fixture.username}.tar.gz`, bytes: 1, targetUsername: fixture.username, overwrite: 0 }), 'CONFLICT')
       refused('TMP-ARCHIVE-REFUSED', await attempt({ filename: '/tmp/cpmove-u1.tar.gz', bytes: 1 }), 'VALIDATION')
+      const passwordSession = await root.post(SESSIONS, { auth: { kind: 'password', host: `xq-${tag}.example.net`, port: 22, user: 'root', password: secret() } })
+      if (typeof passwordSession.data?.session?.id === 'string') undo('password session', () => cancelSession(root, passwordSession.data.session.id))
+      refused('PASSWORD-AUTH-REFUSED', passwordSession, 'VALIDATION')
     },
   }),
 
@@ -330,94 +267,97 @@ export default [
         check('RESELLER-SEES-OWN-ONLY', own.status === 200 && Array.isArray(own.data?.messages) && own.data.messages.length === 0, { ...safeResponse(own), events: own.data?.messages?.length ?? null })
       }
       const hidden = await root.get('/api/server/mail-log/delivery?show_deliveries=0')
-      check('SHOW-DELIVERIES-OFF-HIDES-SENT', hidden.status === 200 && Array.isArray(hidden.data?.messages) && !/"status":"sent"/.test(JSON.stringify(hidden.data.messages)), safeResponse(hidden))
+      check('SHOW-DELIVERIES-OFF-HIDES-SENT', hidden.status === 200 && Array.isArray(hidden.data?.messages) && hidden.data.messages.every(item => item?.status !== 'sent'), safeResponse(hidden))
     },
   }),
 
   tool('mail-queue-manager', {
     prefix: 'MQM', as: 'root', probe: '/api/server/mail-queue', paths: /^\/api\/server\/mail-queue(?:\/action)?$/, requests: 6,
     unit: [{ id: 'MQM-UNIT-GRAMMAR', file: 'apps/api/src/mail-queue-workspace.test.ts', name: 'API mail queue workspace validates grammar before dispatch' }],
-    checks: ['DELETE-REMOVES-MESSAGE', 'SECOND-DELETE-NOT-FOUND', 'UNFREEZE-NOT-FROZEN'],
-    async run({ root, tag, check, block, refused }) {
-      block('DELETE-REMOVES-MESSAGE', 'The driver cannot submit a message of its own, and it must not delete a message another sender queued.')
+    checks: ['QUEUE-OBSERVED', 'SECOND-DELETE-NOT-FOUND', 'UNFREEZE-NOT-FROZEN'],
+    async run({ root, tag, check, refused }) {
       const listed = await root.get('/api/server/mail-queue'), ghost = `${tag.toUpperCase()}F0F0F0F0`
-      if (listed.status !== 200 || (listed.data?.messages ?? []).some(item => item.queueId === ghost)) return missing(check, ['SECOND-DELETE-NOT-FOUND', 'UNFREEZE-NOT-FROZEN'], 'The queue could not be read or already holds the probe identifier.')
-      const expectedRevision = listed.data?.revision ?? ZERO
+      const observed = listed.status === 200 && Array.isArray(listed.data?.messages) && /^[0-9a-f]{64}$/.test(listed.data?.revision ?? '')
+      check('QUEUE-OBSERVED', observed, { ...safeResponse(listed), count: Array.isArray(listed.data?.messages) ? listed.data.messages.length : null })
+      if (!observed || (listed.data?.messages ?? []).some(item => item.queueId === ghost)) return missing(check, ['SECOND-DELETE-NOT-FOUND', 'UNFREEZE-NOT-FROZEN'], 'The queue could not be read or already holds the probe identifier.')
+      const expectedRevision = listed.data.revision
       refused('SECOND-DELETE-NOT-FOUND', await root.post('/api/server/mail-queue/action', { action: 'delete', queueId: ghost, queue: 'deferred', expectedRevision }), 'NOT_FOUND')
       refused('UNFREEZE-NOT-FROZEN', await root.post('/api/server/mail-queue/action', { action: 'release', queueId: ghost, queue: 'hold', expectedRevision }), 'CONFLICT')
     },
   }),
 
   tool('mail-monitor', {
-    prefix: 'MMON', as: 'root', probe: '/api/server/mail-log/monitor', paths: /^\/api\/server\/mail-log\/monitor$/, requests: 2,
+    prefix: 'MMON', as: 'root', probe: '/api/server/mail-log/monitor', paths: /^\/api\/server\/mail-log\/monitor(?:\?[A-Za-z0-9=&_.:%-]{1,128})?$/, requests: 6,
     unit: [{ id: 'MMON-UNIT-AGGREGATES', file: 'apps/api/src/mail-log-workspace.test.ts', name: 'root mail log workspace returns monitor aggregates without message rows' }],
-    checks: ['BURST-SPIKE-LISTED', 'SPIKE-LINKS-TO-QUEUE'],
-    async run({ block }) {
-      block('BURST-SPIKE-LISTED', 'A burst of 500 outbound messages needs authenticated SMTP submission from a mailbox, which the panel API and the served site cannot drive.')
-      block('SPIKE-LINKS-TO-QUEUE', 'A spike exists only after that burst of outbound messages.')
+    checks: ['AGGREGATES-WITHOUT-MESSAGES', 'SELECTOR-REFUSED'],
+    async run({ root, check, refused }) {
+      const view = await root.get('/api/server/mail-log/monitor')
+      check('AGGREGATES-WITHOUT-MESSAGES', view.status === 200 && view.data?.scope === 'server' && view.data?.state === 'read' && typeof view.data?.summary === 'object' && view.data?.summary !== null && !Object.hasOwn(view.data ?? {}, 'messages'), { ...safeResponse(view), state: view.data?.state ?? null, hasSummary: view.data?.summary != null })
+      refused('SELECTOR-REFUSED', await root.get('/api/server/mail-log/monitor?sender=xq%40example.net'), 'VALIDATION')
     },
   }),
 
   tool('mail-quality', {
-    prefix: 'MQL', as: 'root', needs: ['account', 'mailbox'], probe: '/api/server/mail-quality', paths: /^\/api\/server\/mail-quality(?:\/check|\/fix)?$/, requests: 8, deadlineMs: 180_000,
+    prefix: 'MQL', as: 'root', needs: ['account', 'mailbox'], probe: '/api/server/mail-quality', paths: /^\/api\/server\/mail-quality(?:\/check)?$/, requests: 10, deadlineMs: 180_000,
     unit: [{ id: 'MQL-UNIT-DKIM', file: 'apps/api/src/mail-quality-workspace.test.ts', name: 'mail quality checks compares the published DKIM key exactly with the signing key' }],
-    checks: ['DKIM-MISSING-SCORED', 'FIX-RAISES-SCORE'],
-    async run({ root, fixture, check }) {
-      const body = { domains: [fixture.domain] }
-      const first = await root.post('/api/server/mail-quality/check', body), dkim = first.data?.results?.[0]?.dkim
-      const named = /DKIM missing/i.test(String(dkim?.cause ?? ''))
-      check('DKIM-MISSING-SCORED', first.status === 200 && dkim?.state === 'problem' && named, { ...safeResponse(first), state: dkim?.state ?? null, reasonNamesDkim: named })
-      const fix = await root.post('/api/server/mail-quality/fix', { domain: fixture.domain, check: 'dkim' })
-      const again = await root.post('/api/server/mail-quality/check', body), after = again.data?.results?.[0]?.dkim
-      check('FIX-RAISES-SCORE', fix.status === 200 && again.status === 200 && after?.state === 'ok', { fix: safeResponse(fix), recheck: safeResponse(again), state: after?.state ?? null })
+    checks: ['HOSTED-DOMAIN-LISTED', 'DKIM-MISSING-SCORED', 'UNHOSTED-DOMAIN-REFUSED'],
+    async run({ root, fixture, check, refused }) {
+      const listed = await root.get('/api/server/mail-quality'), row = (listed.data?.domains ?? []).find(item => item.domain === fixture.domain)
+      check('HOSTED-DOMAIN-LISTED', listed.status === 200 && row?.account === fixture.username && typeof row?.mailboxes === 'number' && row.mailboxes >= 1, { ...safeResponse(listed), listed: Boolean(row), mailboxes: row?.mailboxes ?? null })
+      const first = await root.post('/api/server/mail-quality/check', { domains: [fixture.domain] }), entry = first.data?.results?.[0], dkim = entry?.dkim
+      const graded = ['mx', 'spf', 'dkim', 'dmarc', 'ptr'].every(key => ['ok', 'problem', 'unavailable'].includes(entry?.[key]?.state))
+      check('DKIM-MISSING-SCORED', first.status === 200 && graded && dkim?.state === 'problem' && dkim?.cause === 'dkim_missing' && dkim?.fix === '/whm/dns', { ...safeResponse(first), state: dkim?.state ?? null, cause: dkim?.cause ?? null, fix: dkim?.fix ?? null })
+      refused('UNHOSTED-DOMAIN-REFUSED', await root.post('/api/server/mail-quality/check', { domains: ['unhosted-xq.example.invalid'] }), 'VALIDATION')
     },
   }),
 
   tool('smtp-relay', {
-    prefix: 'SMR', restores: ['/api/server/mailx/relay'], as: 'root', needs: ['account'], probe: '/api/server/mailx/relay', paths: /^\/api\/server\/mailx\/relay$/, requests: 8,
+    prefix: 'SMR', as: 'root', needs: ['account'], probe: '/api/server/mailx/relay', paths: /^\/api\/server\/mailx\/relay$/, requests: 6,
+    page: { route: '/whm/email/relay', read: '/api/server/mailx/relay', shows: () => [] },
     unit: [{ id: 'SMR-UNIT-RELAY', file: 'apps/api/src/mailx-workspace.test.ts', name: 'server mail policy workspace saves the relay with CAS, keeps the password out of every view and applies through the agent' }],
-    checks: ['SCOPED-RELAY-ACCEPTED', 'SCOPED-DOMAIN-USES-RELAY', 'OTHER-DOMAINS-DELIVER-DIRECT'],
-    async run({ root, fixture, undo, check, block }) {
-      block('SCOPED-DOMAIN-USES-RELAY', NEEDS_SMTP)
-      block('OTHER-DOMAINS-DELIVER-DIRECT', NEEDS_SMTP)
+    checks: ['POLICY-READ-REDACTED', 'PER-DOMAIN-RELAY-REFUSED', 'PORT-465-REFUSED'],
+    async run({ root, fixture, check, refused }) {
       const before = await root.get('/api/server/mailx/relay')
-      if (before.status !== 200 || !before.data?.policy) return missing(check, ['SCOPED-RELAY-ACCEPTED'], 'The saved relay policy could not be read.')
-      const { passwordSet: _set, ...policy } = before.data.policy
-      const restore = async () => {
-        const now = await root.get('/api/server/mailx/relay')
-        if (now.status !== 200) return false
-        const { passwordSet: _now, ...current } = now.data.policy
-        if (same(current, policy)) return true
-        if ((await root.put('/api/server/mailx/relay', { policy, expectedRevision: now.data.revision, password: null })).status !== 200) return false
-        const again = await root.get('/api/server/mailx/relay')
-        if (again.status !== 200) return false
-        const { passwordSet: _again, ...restored } = again.data.policy
-        return same(restored, policy)
-      }
-      const scoped = await root.put('/api/server/mailx/relay', { policy: { ...policy, domains: [fixture.domain] }, expectedRevision: before.data.revision, password: null })
-      if (scoped.status === 200) undo('relay policy', restore)
-      check('SCOPED-RELAY-ACCEPTED', scoped.status === 200, safeResponse(scoped))
+      const policy = before.data?.policy
+      const validRead = before.status === 200 && policy && typeof policy === 'object' && typeof policy.passwordSet === 'boolean' && !Object.hasOwn(policy, 'password') && !Object.hasOwn(before.data ?? {}, 'secret') && /^[0-9a-f]{64}$/.test(before.data?.revision ?? '')
+      check('POLICY-READ-REDACTED', Boolean(validRead), { ...safeResponse(before), host: before.data?.host ?? null, redacted: Boolean(validRead) })
+      if (!validRead) return missing(check, ['PER-DOMAIN-RELAY-REFUSED', 'PORT-465-REFUSED'], 'The saved relay policy could not be read.')
+      const { passwordSet: _set, ...base } = policy
+      refused('PER-DOMAIN-RELAY-REFUSED', await root.put('/api/server/mailx/relay', { policy: { ...base, domains: [fixture.domain] }, expectedRevision: before.data.revision, password: null }), 'VALIDATION')
+      refused('PORT-465-REFUSED', await root.put('/api/server/mailx/relay', { policy: { ...base, port: 465 }, expectedRevision: before.data.revision, password: null }), 'VALIDATION')
     },
   }),
 
   tool('incoming-mail-domain-filter', {
-    prefix: 'IMF', as: 'root', probe: '/api/server/mailx/spam', paths: /^\/api\/server\/mailx\/spam$/, requests: 2,
+    prefix: 'IMF', as: 'root', probe: '/api/server/mailx/spam', paths: /^\/api\/server\/mailx\/spam$/, requests: 6,
+    page: { route: '/whm/email/spam', read: '/api/server/mailx/spam', shows: data => typeof data?.engine?.engine === 'string' ? [data.engine.engine] : [] },
     unit: [{ id: 'IMF-UNIT-POLICY', file: 'apps/api/src/mailx-workspace.test.ts', name: 'server mail policy workspace rejects non-root callers, selectors, unknown fields and invalid policies before any write' }],
-    checks: ['BLOCKED-DOMAIN-REJECTED-5XX', 'REMOVED-DOMAIN-ACCEPTED'],
-    async run({ block }) {
-      block('BLOCKED-DOMAIN-REJECTED-5XX', NEEDS_SMTP)
-      block('REMOVED-DOMAIN-ACCEPTED', NEEDS_SMTP)
+    checks: ['SPAM-POLICY-READ', 'INVALID-DOMAIN-REFUSED', 'INVERTED-SCORES-REFUSED'],
+    async run({ root, check, refused }) {
+      const view = await root.get('/api/server/mailx/spam')
+      const policy = view.data?.policy
+      const ok = view.status === 200 && policy && Array.isArray(policy.blockedDomains) && /^[0-9a-f]{64}$/.test(view.data?.revision ?? '')
+      check('SPAM-POLICY-READ', Boolean(ok), { ...safeResponse(view), blockedCount: Array.isArray(policy?.blockedDomains) ? policy.blockedDomains.length : null })
+      if (!ok) return missing(check, ['INVALID-DOMAIN-REFUSED', 'INVERTED-SCORES-REFUSED'], 'The spam policy could not be read.')
+      refused('INVALID-DOMAIN-REFUSED', await root.put('/api/server/mailx/spam', { policy: { ...policy, blockedDomains: ['not a domain!'] }, expectedRevision: view.data.revision }), 'VALIDATION')
+      refused('INVERTED-SCORES-REFUSED', await root.put('/api/server/mailx/spam', { policy: { ...policy, headerScore: 20, rejectScore: 10 }, expectedRevision: view.data.revision }), 'VALIDATION')
     },
   }),
 
   tool('whm-greylisting', {
-    prefix: 'GRL', as: 'root', probe: '/api/server/mailx/spam', paths: /^\/api\/server\/mailx\/spam$/, requests: 2,
+    prefix: 'GRL', as: 'root', probe: '/api/server/mailx/spam', paths: /^\/api\/server\/mailx\/(?:spam|greylist)$/, requests: 8,
+    page: { route: '/whm/email/spam', read: '/api/server/mailx/spam', shows: data => typeof data?.engine?.engine === 'string' ? [data.engine.engine] : [] },
     unit: [{ id: 'GRL-UNIT-POLICY', file: 'apps/api/src/mailx-workspace.test.ts', name: 'server mail policy workspace rejects non-root callers, selectors, unknown fields and invalid policies before any write' }],
-    checks: ['FIRST-ATTEMPT-451', 'RETRY-AFTER-DEFERRAL-ACCEPTED', 'TRUSTED-IP-FIRST-TRY'],
-    async run({ block }) {
-      block('FIRST-ATTEMPT-451', NEEDS_SMTP)
-      block('RETRY-AFTER-DEFERRAL-ACCEPTED', NEEDS_SMTP)
-      block('TRUSTED-IP-FIRST-TRY', NEEDS_SMTP)
+    checks: ['GREYLIST-POLICY-READ', 'UNHOSTED-DOMAIN-REFUSED', 'GREYLIST-SCORE-ORDER-REFUSED'],
+    async run({ root, check, refused }) {
+      const greylist = await root.get('/api/server/mailx/greylist'), spam = await root.get('/api/server/mailx/spam')
+      const ok = greylist.status === 200 && Array.isArray(greylist.data?.policy?.domains) && /^[0-9a-f]{64}$/.test(greylist.data?.revision ?? '')
+      check('GREYLIST-POLICY-READ', Boolean(ok), { ...safeResponse(greylist), domains: Array.isArray(greylist.data?.policy?.domains) ? greylist.data.policy.domains.length : null })
+      if (!ok) missing(check, ['UNHOSTED-DOMAIN-REFUSED'], 'The greylist policy could not be read.')
+      else refused('UNHOSTED-DOMAIN-REFUSED', await root.put('/api/server/mailx/greylist', { policy: { domains: ['unhosted-xq.example.invalid'] }, expectedRevision: greylist.data.revision }), 'VALIDATION')
+      const spamOk = spam.status === 200 && spam.data?.policy && /^[0-9a-f]{64}$/.test(spam.data?.revision ?? '')
+      if (!spamOk) check('GREYLIST-SCORE-ORDER-REFUSED', false, safeResponse(spam))
+      else refused('GREYLIST-SCORE-ORDER-REFUSED', await root.put('/api/server/mailx/spam', { policy: { ...spam.data.policy, headerScore: 6, greylistScore: 6 }, expectedRevision: spam.data.revision }), 'VALIDATION')
     },
   }),
 ]

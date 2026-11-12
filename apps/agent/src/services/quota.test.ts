@@ -67,6 +67,14 @@ describe('observed user quota enforcement', () => {
       return host.run(argv)
     }, action)).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE', detail: { stateChanged: true, unknownOutcome: true } })
   })
+  it('treats clearing a zero limit for an absent user as idempotent while still refusing nonzero limits', async () => {
+    const host = fixture()
+    const missing: QuotaCommandRunner = async argv => argv[0] === '/usr/sbin/setquota'
+      ? { ok: false, code: 1, stdout: '', stderr: 'setquota: user alice does not exist.\n' }
+      : host.run(argv)
+    await expect(applyObservedUserQuota(missing, { ...action, blockSoftKb: 0, blockHardKb: 0 })).resolves.toBeUndefined()
+    await expect(applyObservedUserQuota(missing, action)).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' })
+  })
   it('does not modify an ancestor mount or unsupported filesystem', async () => {
     const host = fixture()
     const result = await observeUserQuota(async argv => argv[4] === 'TARGET' ? ok('/') : host.run(argv), '/home')

@@ -1,4 +1,4 @@
-import { constants } from 'node:fs'
+import { constants, createReadStream, createWriteStream, readFileSync } from 'node:fs'
 import { chmod, chown, lstat, mkdir, open, readdir, rename, unlink } from 'node:fs/promises'
 import { join, posix } from 'node:path'
 import { pipeline } from 'node:stream/promises'
@@ -363,11 +363,23 @@ const assertHeldUser = (username: string): string => /^[a-z][a-z0-9]{0,15}$/.tes
 const heldName = (name: string): string => parseArchiveName(name) ? name : fail('VALIDATION', 'invalid log archive name', { stateChanged: false })
 const isProtected = (info: Awaited<ReturnType<typeof lstat>> | null): boolean => !!info && info.isDirectory() && !info.isSymbolicLink() && info.uid === 0 && (Number(info.mode) & 0o022) === 0
 
-/** Every ancestor is a root-owned real directory, and none below /var/log/xpanel is writable by another user (as account-logs.ts reads the edge logs). */
+const resolveXpanelSystemUid = (): number | null => {
+  try {
+    for (const line of readFileSync('/etc/passwd', 'utf8').split('\n')) {
+      const [user, , uidText] = line.split(':')
+      if (user === 'xpanel') { const uid = Number(uidText); return Number.isInteger(uid) && uid >= 0 ? uid : null }
+    }
+  } catch { /* fall through */ }
+  return null
+}
+
+/** Every ancestor is a root-owned real directory (or /var/log/xpanel owned by the xpanel system account), and none below /var/log/xpanel is writable by another user. */
 async function rootAncestors(path: string): Promise<boolean> {
+  const xpanelUid = resolveXpanelSystemUid()
   for (let current = posix.dirname(path); current !== '/'; current = posix.dirname(current)) {
     const info = await lstat(current).catch(() => null)
-    if (!info?.isDirectory() || info.isSymbolicLink() || info.uid !== 0 || current.startsWith('/var/log/xpanel') && (Number(info.mode) & 0o022) !== 0) return false
+    const ownerOk = info?.uid === 0 || (current === '/var/log/xpanel' && xpanelUid !== null && info?.uid === xpanelUid)
+    if (!info?.isDirectory() || info.isSymbolicLink() || !ownerOk || current.startsWith('/var/log/xpanel') && (Number(info.mode) & 0o022) !== 0) return false
   }
   return true
 }
@@ -386,13 +398,14 @@ async function protectedDir(path: string, mode: number, gid: number): Promise<st
 async function writeFrom(source: string, target: string, mode: number, gid: number, gzip: boolean): Promise<number> {
   const part = target + '.part'
   const from = await open(source, constants.O_RDONLY | constants.O_NOFOLLOW)
-  const to = await open(part, constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW, mode)
+  let to: Awaited<ReturnType<typeof open>> | undefined
   try {
+    to = await open(part, constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW, mode)
     await to.chown(0, gid)
-    const read = from.createReadStream({ autoClose: false }), write = to.createWriteStream({ autoClose: false })
+    const read = createReadStream('', { fd: from.fd, autoClose: false }), write = createWriteStream('', { fd: to.fd, autoClose: false })
     await (gzip ? pipeline(read, createGzip({ level: 6 }), write) : pipeline(read, write))
     await to.sync()
-  } finally { await Promise.all([from.close(), to.close()]) }
+  } finally { await Promise.all([from.close(), to?.close()]) }
   await rename(part, target)
   return (await lstat(target)).size
 }

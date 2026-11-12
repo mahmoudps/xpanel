@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Principal } from '@xpanel/core'
-import { groups, specs, tools } from './data/index.ts'
+import { buildDeliveryCatalog, groups, specs, tools } from './data/index.ts'
+import { deliveryEvidence, deliveryTarget } from './data/delivery.ts'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { catalogFromEntries, catalogKey, parsePo } from '@xpanel/core'
@@ -63,14 +64,23 @@ describe('catalog data', () => {
   })
 
   it('reviews every definition without promoting declarations to verified delivery', () => {
+    const unbound = buildDeliveryCatalog([], null)
+    expect(unbound).toHaveLength(600)
+    expect(unbound.filter(tool => tool.status === 'researched')).toHaveLength(536)
+    expect(unbound.filter(tool => tool.status === 'out-of-scope')).toHaveLength(64)
+    expect(unbound.filter(tool => tool.status === 'verified')).toEqual([])
     expect(tools).toHaveLength(600)
-    expect(tools.filter(tool => tool.status === 'researched')).toHaveLength(536)
     expect(tools.filter(tool => tool.status === 'out-of-scope')).toHaveLength(64)
-    expect(tools.filter(tool => tool.status === 'verified')).toEqual([])
+    expect(tools.filter(tool => tool.status === 'researched' || tool.status === 'verified')).toHaveLength(536)
+    if (deliveryTarget === null) {
+      expect(deliveryEvidence).toEqual([])
+      expect(tools.filter(tool => tool.status === 'verified')).toEqual([])
+    }
     for (const tool of tools) {
       expect(tool.status).toBe(tool.delivery.status)
       expect(tool.delivery.reason.trim(), tool.id).not.toBe('')
-      expect(tool.delivery.evidence, tool.id).toEqual([])
+      if (tool.status !== 'verified') expect(tool.delivery.evidence, tool.id).toEqual([])
+      else expect(tool.delivery.evidence.length, tool.id).toBeGreaterThan(0)
     }
   })
 })
@@ -107,9 +117,10 @@ describe('visibility', () => {
   })
 
   it('does not display the unverified production catalog', () => {
-    expect(visibleTools(tools, { principal: root })).toEqual([])
-    expect(visibleTools(tools, { principal: reseller, reseller: { acl: ['manage-dns'] } })).toEqual([])
-    expect(visibleTools(tools, { principal: user, disabledFeatures: new Set() })).toEqual([])
+    const unbound = buildDeliveryCatalog([], null)
+    expect(visibleTools(unbound, { principal: root })).toEqual([])
+    expect(visibleTools(unbound, { principal: reseller, reseller: { acl: ['manage-dns'] } })).toEqual([])
+    expect(visibleTools(unbound, { principal: user, disabledFeatures: new Set() })).toEqual([])
   })
 
   it('filters verified fixtures by role, ACL and feature state', () => {

@@ -329,6 +329,7 @@ describe('Dovecot configuration', () => {
     const f = renderDovecotXpanelConf(debian, { postmaster: 'postmaster@host.net' })
     expect(f.path).toBe('/etc/dovecot/conf.d/90-xpanel.conf')
     expect(f.content).toContain('first_valid_uid = 1000\nlast_valid_uid = 60000\nfirst_valid_gid = 1000\nlast_valid_gid = 60000\n')
+    expect(f.content).toContain('service lmtp {\n  vsz_limit = 0\n')
     expect(f.content).toContain('unix_listener /var/spool/postfix/private/dovecot-lmtp {')
     expect(f.content).toContain('quota_warning = storage=95%% quota-warning 95 %u')
     expect(f.content).toContain('quota_warning2 = storage=80%% quota-warning 80 %u')

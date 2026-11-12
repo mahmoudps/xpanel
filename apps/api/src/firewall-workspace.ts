@@ -242,7 +242,7 @@ export const FIREWALL_CONFIRM_WINDOW_MS = 120_000
 const IMPORT_MAX_BYTES = 1024 * 1024
 const RULE_ID = '[A-Za-z0-9][A-Za-z0-9_-]{0,63}'
 const ruleRoute = new RegExp(`^/api/firewall/rules/(${RULE_ID})(/move)?$`)
-const listRoute = /^\/api\/firewall\/prefix-lists\/([a-z][a-z0-9_]{0,23})$/
+const listRoute = /^\/api\/firewall\/prefix-lists\/([^/]+)$/
 const REVISION = /^[0-9a-f]{64}$/
 
 export interface FirewallWorkspaceStore {
@@ -587,7 +587,8 @@ export async function handleFirewallWorkspaceRoute(req: Request, url: URL, metho
 
   if (list) {
     // upload or replace a list (one IPv4 or IPv6 range per line); an upload with an action also adds its rule at the top
-    const name = list[1]!
+    let name = ''
+    try { name = decodeURIComponent(list[1]!) } catch { return fail('VALIDATION', 'list name must match [a-z][a-z0-9_]{0,23}', { stateChanged: false }) }
     if (!PREFIX_LIST_NAME_RE.test(name)) return fail('VALIDATION', 'list name must match [a-z][a-z0-9_]{0,23}', { stateChanged: false })
     const others = state.prefixLists.filter(item => item.name !== name)
     if (method === 'DELETE') {

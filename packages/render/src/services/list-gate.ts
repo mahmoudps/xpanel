@@ -80,7 +80,7 @@ export const renderListGate = (os: OsProfile, input: ListGateRenderInput | undef
     domains.set(gateParts(list.gate).domain, account.username)
     files.push({ path: paths.rules, content: JSON.stringify(list.rules), mode: 0o640, owner: 'root', group: account.username },
       { path: paths.script, content: renderListGateScript(paths.rules), mode: 0o640, owner: 'root', group: account.username })
-    postActions.push({ kind: 'exec', argv: ['/usr/bin/sievec', paths.script] }, { kind: 'exec', argv: ['/usr/bin/chown', `root:${account.username}`, paths.binary] }, { kind: 'exec', argv: ['/usr/bin/chmod', '0640', paths.binary] })
+    postActions.push({ kind: 'exec', argv: ['/usr/bin/sievec', '-P', 'sieve_extprograms', '-x', '+vnd.dovecot.execute', paths.script] }, { kind: 'exec', argv: ['/usr/bin/chown', `root:${account.username}`, paths.binary] }, { kind: 'exec', argv: ['/usr/bin/chmod', '0640', paths.binary] })
   }
   for (const [domain, group] of [...domains].sort(([x], [y]) => x.localeCompare(y))) preActions.push({ kind: 'ensure-dir', path: `${dir}/${domain}`, mode: 0o750, owner: 'root', group })
   return { files, preActions, postActions, execute: input.lists.length > 0 }

@@ -4,6 +4,7 @@ import type { Account, ServiceUser } from '@xpanel/core'
 import { system } from '@xpanel/render'
 import { createDavAuthorizer, parseBasicCredentials } from './dav-authorize.ts'
 import type { DavAuthorizeDeps } from './dav-authorize.ts'
+import { passwordHashFromInput, serviceHashSchemeForOs, verifyServicePassword } from './auth.ts'
 
 const ACCOUNT_ID = '11111111-1111-4111-8111-111111111111'
 const account = { id: ACCOUNT_ID, username: 'alice', uid: 20014, status: 'active' } as Account
@@ -109,5 +110,17 @@ describe('DAV edge verification', { tags: ['unit'] }, () => {
     expect((await ask('caldav', 'info@alice.test', 'box-secret')).status).toBe(204)
     expect(verify).toHaveBeenCalledTimes(3)
     expect((await ask('caldav', 'info@alice.test', 'other')).status).toBe(401)
+  })
+
+  it('chooses sha512-crypt service hashes on RHEL-family hosts and argon2id elsewhere', async () => {
+    expect(serviceHashSchemeForOs({ family: 'rhel' })).toBe('SHA512-CRYPT')
+    expect(serviceHashSchemeForOs({ family: 'debian' })).toBe('ARGON2ID')
+    expect(serviceHashSchemeForOs(null)).toBe('ARGON2ID')
+    const rhelHash = await passwordHashFromInput(
+      { password: 'Rhel-Mail-Secret-9!' },
+      { service: ['mail'], scheme: serviceHashSchemeForOs({ family: 'rhel' }) },
+    )
+    expect(rhelHash.startsWith('{SHA512-CRYPT}$6$')).toBe(true)
+    expect(await verifyServicePassword('Rhel-Mail-Secret-9!', rhelHash)).toBe(true)
   })
 })
