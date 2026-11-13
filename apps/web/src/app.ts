@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { canOpenRegisteredRoute, canonicalNavigationRoute, visibleNavigation, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
+import { canOpenRegisteredRoute, canonicalNavigationRoute, navigation, visibleNavigation, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
 import { canSeeAccount, normalizeMailboxMetadataAddress, type Account, type MfaRuntimeMode, type Plan } from '@xpanel/core'
 import { accountSecurityRoute, panelLabel, roleLabel } from './chrome.ts'
 import { HANDOFF_CLIENT_BINDING } from './panel-handoff-client.ts'
@@ -40,6 +40,7 @@ import {
 
 import { builtInUiTheme, findUiThemeAsset, registerUiThemePackage, registeredUiThemeIds, resolveUiTheme, unregisterUiThemePackage } from './themes/registry.ts'
 import { cloneUiThemePackage, parseUiThemePackage, uiThemePackageTheme, type UiThemePackage } from './themes/packages.ts'
+import { readonlyThemeOverlay } from './theme-messages.ts'
 import type { PersonalHomeFacts } from './account-notices.ts'
 export { builtInUiTheme, findUiThemeAsset, registeredUiThemeIds, resolveUiTheme, unregisterUiThemePackage as removeUiThemePackage }
 export { THEME_PACKAGE_LIMITS, type UiThemePackage } from './themes/packages.ts'
@@ -167,6 +168,7 @@ export const unavailableView = (
   theme: ThemeMode,
   density: TableDensity,
   activeRoute: string,
+  precomputedNavigation?: ReturnType<typeof visibleNavigation>,
 ): UnavailableProps => {
   const surface = state.surface === 'xwhm' || state.surface === 'xmail' ? state.surface : 'xpanel'
   const principal = state.visibility?.principal
@@ -210,7 +212,7 @@ export const unavailableView = (
     admitted,
     securityPage,
     ...(authPersonal ? { authPersonal } : {}),
-    qualifiedRoutes: new Set((state.visibility ? visibleNavigation(state.visibility, state.catalog) : [])
+    qualifiedRoutes: new Set((precomputedNavigation ?? (state.visibility ? visibleNavigation(state.visibility, state.catalog) : []))
       .filter(item => item.surface === surface).flatMap(item => item.sections.flatMap(section => section.pages.map(page => page.route)))),
     ...(state.catalog ? { catalog: state.catalog } : {}),
     ...(state.visibility ? { visibility: state.visibility } : {}),
@@ -262,7 +264,8 @@ export function renderWebApp(state: WebAppRenderState): string {
   const securityPrincipal = state.visibility?.principal.kind
   const routeMatches = (pages: ReturnType<typeof visibleNavigation>): boolean =>
     pages.some(item => item.surface === state.surface && item.sections.some(section => section.pages.some(page => page.route === canonicalNavigationRoute(activeRoute))))
-  let routeReady = routeMatches(visibleNavigation(state.visibility, state.catalog))
+  const navPages = state.visibility ? visibleNavigation(state.visibility, state.catalog) : []
+  let routeReady = routeMatches(navPages)
   // These persisted personal settings do not depend on host-native capability qualification.
   if (state.surface === 'xwhm' && activeRoute === '/whm/preferences' && (securityPrincipal === 'root' || securityPrincipal === 'reseller')) routeReady = true
   const sessionPrincipal = state.visibility?.principal
@@ -282,7 +285,7 @@ export function renderWebApp(state: WebAppRenderState): string {
   const bodyCategory: 'status' | 'login' | 'workspace' = statusError ? 'status' : state.surface === 'login' ? 'login' : 'workspace'
   const statusSurface = state.error?.surface ?? (state.surface === 'xwhm' || state.surface === 'xmail' ? state.surface : 'xpanel')
   const pageHeading = workspacePageHeading(state.surface, locale, activeRoute)
-  const unavailableDescriptor = unavailableView(state, locale, theme, density, activeRoute)
+  const unavailableDescriptor = unavailableView(state, locale, theme, density, activeRoute, navPages)
   const themePackages = unavailableDescriptor.themePackages
   const pageTitle = state.title ?? (state.error && isStatusCode(state.error.status)
     ? `${statusPageCopy(state.error.status, locale).title} — ${brandingProductName(state.branding, panelLabel(statusSurface))}`
@@ -406,10 +409,6 @@ export function renderWebApp(state: WebAppRenderState): string {
 
   const realtime = state.surface !== 'login' && !state.error
   const handoffControls = hasVerifiedSurface && (state.surface === 'xwhm' || state.surface === 'xpanel') && surfaceBodyHtml.includes('data-handoff=')
-  const paletteEntries = hasVerifiedSurface ? commandPaletteEntries(state.surface, locale, state.visibility, state.catalog,
-    state.surface === 'xwhm' ? { accounts: state.whm?.accounts ?? [], domains: state.whm?.domains ?? [] }
-      : state.surface === 'xpanel' ? { accounts: state.panel?.account ? [state.panel.account] : [], domains: state.panel?.domains ?? [] }
-        : undefined) : []
   const clientScriptsHtml = `  ${pageScriptTag(LOGIN_PAGE_SCRIPT, 'xpanel-login-client')}
   ${state.surface === 'login' ? pageScriptTag(TEAM_PASSWORD_PAGE_SCRIPT, 'xpanel-team-password-client') : ''}
   ${handoffControls ? pageScriptTag(HANDOFF_PAGE_SCRIPT, 'xpanel-handoff-client') : ''}
@@ -425,7 +424,7 @@ export function renderWebApp(state: WebAppRenderState): string {
     handoffControls,
     surfaceHtml: surfaceBodyHtml,
     reconcileHtml: reconcileBannerHtml,
-    paletteHtml: hasVerifiedSurface ? contextualizeDocumentLinks(uiTheme.slots.commandPalette({ surface: state.surface, locale, entries: paletteEntries }), context) : '',
+    paletteHtml: hasVerifiedSurface ? renderCachedCommandPalette(uiTheme, state, locale, context) : '',
     activityHtml: hasVerifiedSurface && state.liveState?.reconcile !== undefined ? uiTheme.slots.activityDrawer({ locale, live: fullLiveState }) : '',
     clientScriptsHtml,
   })
@@ -441,9 +440,63 @@ export function renderWebApp(state: WebAppRenderState): string {
     faviconHref,
     ...(state.branding ? { branding: state.branding } : {}),
     ...(state.branding?.faviconUrl ? {} : { faviconContentType: 'image/svg+xml' }),
-    headHtml: renderClientI18nScript(locale, scriptMessageKeys(bodyHtml), uiTheme.messages?.forClient(locale)),
+    headHtml: renderClientI18nScript(locale, scriptMessageKeys(bodyHtml), readonlyThemeOverlay(uiTheme.messages, locale)),
     bodyHtml,
   })
+}
+
+const DEFAULT_CATALOG_SENTINEL: object = {}
+const PALETTE_HTML_CACHE = new WeakMap<object, Map<string, { uiTheme: unknown; translatorRef: unknown; html: string }>>()
+
+function renderCachedCommandPalette(
+  uiTheme: ReturnType<typeof resolveUiTheme>,
+  state: WebAppRenderState,
+  locale: Locale,
+  context: { locale: Locale; theme: ThemeMode; density: TableDensity; activeRoute: string; accountId?: string },
+): string {
+  const records = state.surface === 'xwhm'
+    ? { accounts: state.whm?.accounts ?? [], domains: state.whm?.domains ?? [] }
+    : state.surface === 'xpanel'
+      ? { accounts: state.panel?.account ? [state.panel.account] : [], domains: state.panel?.domains ?? [] }
+      : undefined
+  const accounts = records?.accounts ?? []
+  const domains = records?.domains ?? []
+  const vis = state.visibility
+  if (!vis || accounts.length > 4 || domains.length > 4) {
+    const entries = commandPaletteEntries(state.surface, locale, vis, state.catalog, records)
+    return contextualizeDocumentLinks(uiTheme.slots.commandPalette({ surface: state.surface, locale, entries }), context)
+  }
+  const p = vis.principal
+  const pKey = p.kind === 'root' ? 'root'
+    : p.kind === 'reseller' ? `reseller:${p.id}:${vis.reseller?.acl.join(',') ?? ''}`
+      : `user:${p.id}:${p.accountId}`
+  const dfKey = vis.disabledFeatures === undefined ? 'u' : vis.disabledFeatures.size === 0 ? '' : [...vis.disabledFeatures].sort().join(',')
+  const atKey = vis.allowedToolIds === undefined ? 'u' : vis.allowedToolIds.size === 0 ? '' : [...vis.allowedToolIds].sort().join(',')
+  const recKey = `${accounts.map(a => `${a.id}\x1f${a.ownerId ?? ''}\x1f${a.username}\x1f${a.primaryDomain}`).join('\x1e')}\x1d${domains.map(d => `${d.id}\x1f${d.accountId}\x1f${d.name}`).join('\x1e')}`
+  let kwKey = ''
+  const navSurface = navigation.find(s => s.surface === state.surface)
+  if (navSurface) {
+    for (const sec of navSurface.sections) {
+      for (const pg of sec.pages) {
+        if (pg.keywords.length > 0) kwKey += `${pg.keywords.length}:${pg.keywords[pg.keywords.length - 1]}\x1f`
+      }
+    }
+  }
+  const cacheKey = `${state.catalog?.length ?? -1}\0${state.surface}\0${locale}\0${context.theme}\0${context.density}\0${context.accountId ?? ''}\0${pKey}\0${dfKey}\0${atKey}\0${recKey}\0${kwKey}`
+  const catalogHolder: object = state.catalog ?? DEFAULT_CATALOG_SENTINEL
+  let byKey = PALETTE_HTML_CACHE.get(catalogHolder)
+  if (!byKey) {
+    byKey = new Map()
+    PALETTE_HTML_CACHE.set(catalogHolder, byKey)
+  }
+  const translatorRef = translator(locale)
+  const hit = byKey.get(cacheKey)
+  if (hit && hit.uiTheme === uiTheme && hit.translatorRef === translatorRef) return hit.html
+  const entries = commandPaletteEntries(state.surface, locale, vis, state.catalog, records)
+  const html = contextualizeDocumentLinks(uiTheme.slots.commandPalette({ surface: state.surface, locale, entries }), context)
+  if (byKey.size >= 128) byKey.clear()
+  byKey.set(cacheKey, { uiTheme, translatorRef, html })
+  return html
 }
 
 const FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><rect width="40" height="40" rx="10" fill="#1D5BD6"/><text x="20" y="27" text-anchor="middle" fill="#FFFFFF" font-family="monospace" font-weight="700" font-size="22">x</text></svg>`

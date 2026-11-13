@@ -1,8 +1,12 @@
 import { randomUUID } from 'node:crypto'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { existsSync } from 'node:fs'
+import { cp, mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { fail } from '@xpanel/core'
 import * as db from '@xpanel/db'
-import { createTestStateStore } from '@xpanel/state'
+import { createStateStore, type TestStateStoreHandle } from '@xpanel/state'
 import { createAgentApp } from '../../agent/src/server.ts'
 import type { AgentServerDeps } from '../../agent/src/server.ts'
 import { FakeHostExecutor } from '../../agent/src/executor.ts'
@@ -29,17 +33,52 @@ afterEach(async () => {
   if (failures.length) throw new AggregateError(failures.map(result => result.reason), 'Mounted workflow cleanup failed')
 })
 
+const MOUNTED_TMP = existsSync('/dev/shm') ? '/dev/shm' : tmpdir()
+let mountedTplDir: string
+let mountedSeed: {
+  features: Awaited<ReturnType<TestStateStoreHandle['store']['createFeatureList']>>
+  account: Awaited<ReturnType<TestStateStoreHandle['store']['createAccount']>>
+}
+
+beforeAll(async () => {
+  const tplDb = await db.createTestDb()
+  mountedTplDir = await mkdtemp(join(MOUNTED_TMP, 'xpanel-mounted-tpl-'))
+  const tplStore = createStateStore(mountedTplDir)
+  try {
+    const features = await tplStore.createFeatureList({ name: 'Mounted workflows', ownerId: null, disabled: [] })
+    const plan = await tplStore.createPlan({ name: 'Mounted workflows', ownerId: null, featureListId: features.id,
+      resources: { diskMb: 1000, bandwidthMbMonth: 10000, ioReadBps: 1048576, ioWriteBps: 1048576, ioReadIops: 100, ioWriteIops: 100, memoryMb: 128, maxProcesses: 16, cpuPercent: 100 },
+      caps: { addonDomains: 4, aliasDomains: 4, subdomains: 4, mailboxes: 4, forwarders: 4, mailingLists: 4, ftpAccounts: 4, databases: 4, phpWorkers: 4 }, dedicatedIp: false, shell: 'none', defaultMailboxQuotaMb: 100 })
+    await tplStore.saveServerIp({ address: '192.0.2.64', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
+    const account = await tplStore.createAccount({ username: 'mountowner', passwordHash: HASH, primaryDomain: 'mount.example.test', planId: plan.id, ownerId: null,
+      contactEmail: 'owner@mount.example.test', ipv4: '192.0.2.64', shell: 'none',
+      php: { version: '8.3', handler: 'fpm', fpm: { mode: 'ondemand', maxChildren: 2, startServers: 1, minSpareServers: 1, maxSpareServers: 1, maxRequests: 50, processIdleTimeoutSec: 10 }, ini: {} } })
+    const warmRoot = await db.createRootPrincipal(tplDb.db, { username: 'root', passwordHash: HASH, forcePasswordChange: false })
+    const warmRaw = randomUUID() + randomUUID(), warmOrigin = 'https://whm.example.test:2087'
+    await db.createSession(tplDb.db, { principalId: warmRoot.id, tokenHash: sessionTokenHash(warmRaw, 'xwhm'), expiresAt: new Date(Date.now() + 3600000).toISOString(), mfaVerified: true })
+    const warmApp = createApiApp({ db: tplDb.db, store: tplStore, serverSecret: TEST_SERVER_SECRET, entryPoint: 'xwhm', publicOrigin: warmOrigin, allowedOrigins: [warmOrigin], secureCookies: true, requireSecureCookies: true,
+      webRenderer: await createDefaultWebRenderer({ db: tplDb.db, store: tplStore, serverSecret: TEST_SERVER_SECRET, entryPoint: 'xwhm' }) })
+    for (const p of ['/whm/preferences?lang=en', '/whm/preferences?lang=ar', '/whm/accounts']) {
+      await warmApp.fetch(new Request(warmOrigin + p, { headers: { origin: warmOrigin, cookie: sessionCookieName('xwhm', true) + '=' + warmRaw } }), { tls: true, remoteAddress: '198.51.100.9' })
+    }
+    mountedSeed = { features, account }
+  } finally {
+    await tplDb.close()
+  }
+})
+
+afterAll(async () => {
+  if (mountedTplDir) await rm(mountedTplDir, { recursive: true, force: true })
+})
+
 async function fixture() {
-  const database = await db.createTestDb(); cleanup.push(() => database.close())
-  const state = await createTestStateStore(); cleanup.push(() => state.close())
-  const features = await state.store.createFeatureList({ name: 'Mounted workflows', ownerId: null, disabled: [] })
-  const plan = await state.store.createPlan({ name: 'Mounted workflows', ownerId: null, featureListId: features.id,
-    resources: { diskMb: 1000, bandwidthMbMonth: 10000, ioReadBps: 1048576, ioWriteBps: 1048576, ioReadIops: 100, ioWriteIops: 100, memoryMb: 128, maxProcesses: 16, cpuPercent: 100 },
-    caps: { addonDomains: 4, aliasDomains: 4, subdomains: 4, mailboxes: 4, forwarders: 4, mailingLists: 4, ftpAccounts: 4, databases: 4, phpWorkers: 4 }, dedicatedIp: false, shell: 'none', defaultMailboxQuotaMb: 100 })
-  await state.store.saveServerIp({ address: '192.0.2.64', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
-  const account = await state.store.createAccount({ username: 'mountowner', passwordHash: HASH, primaryDomain: 'mount.example.test', planId: plan.id, ownerId: null,
-    contactEmail: 'owner@mount.example.test', ipv4: '192.0.2.64', shell: 'none',
-    php: { version: '8.3', handler: 'fpm', fpm: { mode: 'ondemand', maxChildren: 2, startServers: 1, minSpareServers: 1, maxSpareServers: 1, maxRequests: 50, processIdleTimeoutSec: 10 }, ini: {} } })
+  const database = await db.createTestDb()
+  cleanup.push(() => database.close())
+  const rootDir = await mkdtemp(join(MOUNTED_TMP, 'xpanel-mounted-'))
+  await cp(mountedTplDir, rootDir, { recursive: true, force: true })
+  const state: TestStateStoreHandle = { store: createStateStore(rootDir), rootDir, close: () => rm(rootDir, { recursive: true, force: true }) }
+  cleanup.push(() => state.close())
+  const { features, account } = mountedSeed
   const root = await db.createRootPrincipal(database.db, { username: 'root', passwordHash: HASH, forcePasswordChange: false })
   const owner = await db.createUserPrincipal(database.db, { username: account.username, accountId: account.id, passwordHash: HASH })
   const executor = new FakeHostExecutor(), nativeRun = vi.spyOn(executor, 'runCommand')

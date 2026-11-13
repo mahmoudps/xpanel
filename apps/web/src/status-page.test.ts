@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { qualifyHostTools, tools } from '@xpanel/catalog'
+import { qualifyHostTools, unqualifiedTools as tools } from '@xpanel/catalog'
 import type { Principal } from '@xpanel/core'
 import { renderWebApp, serveWebUi } from './app.ts'
 import { formatDisplayName, publicContactEmail } from './display-name.ts'

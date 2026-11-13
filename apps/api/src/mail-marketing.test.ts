@@ -40,7 +40,7 @@ describe('imports and tokens', { tags: ['unit'] }, () => {
   })
 })
 
-describe('campaigns, lists and flows', { tags: ['unit'] }, () => {
+describe('campaigns, lists and flows', { tags: ['feature'] }, () => {
   let root = ''
   beforeEach(async () => { root = await mkdtemp(join(tmpdir(), 'xp-marketing-')) })
   afterEach(async () => { await rm(root, { recursive: true, force: true }) })

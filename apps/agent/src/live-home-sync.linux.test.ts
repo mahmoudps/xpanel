@@ -99,9 +99,9 @@ describe('final sync of a live transfer', () => {
     const since = (await stat(join(t.homes.source, 'logs', 'access.log'))).mtime
     since.setMinutes(since.getMinutes() - 5)
     const before = await t.settled(await t.controller.start({ kind: 'home-changes', username: 'alice', since: since.toISOString() }))
-    expect(before.result).toEqual({ changed: false })
+    expect(before.result).toEqual({ files: 0, mail: [] })
     await writeFile(join(t.homes.source, 'public_html', 'upload.jpg'), 'x')
     const after = await t.settled(await t.controller.start({ kind: 'home-changes', username: 'alice', since: since.toISOString() }))
-    expect(after.result).toEqual({ changed: true })
+    expect(after.result).toEqual({ files: 1, mail: [] })
   }, 30_000)
 })

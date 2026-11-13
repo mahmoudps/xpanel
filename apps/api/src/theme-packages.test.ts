@@ -27,7 +27,7 @@ function harness(caller = ROOT) {
 beforeEach(async () => { root = await mkdtemp(join(tmpdir(), 'xp-themes-')) })
 afterEach(async () => { for (const id of registeredUiThemeIds()) if (!['classic', 'v2'].includes(id)) removeUiThemePackage(id); await rm(root, { recursive: true, force: true }) })
 
-describe('theme manager', { tags: ['unit'] }, () => {
+describe('theme manager', { tags: ['feature'] }, () => {
   it('previews an installed theme for root on one document and saves nothing', async () => {
     await harness().send('POST', undefined, pkg)
     const state = (kind: string) => ({ visibility: { principal: { kind } }, uiTheme: 'classic' })

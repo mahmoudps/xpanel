@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { tools, type CatalogTool } from '@xpanel/catalog'
+import { unqualifiedTools as tools, type CatalogTool } from '@xpanel/catalog'
 import { defaultPlan, type Account, type Domain } from '@xpanel/core'
 import { ACCOUNT_HTACCESS_CLIENT_BINDING, type HtaccessClientView } from './account-htaccess-client.ts'
 import { renderApprovedXpanelWorkspace } from './board-port/approved-xpanel-workspaces.ts'

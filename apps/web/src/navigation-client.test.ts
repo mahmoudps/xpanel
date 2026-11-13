@@ -1,7 +1,7 @@
 /// <reference lib="dom" />
 // @vitest-environment node
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { builtinEnvironments, type EnvironmentReturn } from 'vitest/runtime'
 import { BROWSER_REALTIME_SCRIPT } from './ws-client.ts'
 import { tools, visibleNavigation, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
@@ -58,9 +58,11 @@ function viewport(width: number): void {
   window.dispatchEvent(new Event('resize'))
 }
 
+const runRealtimeScript = new Function('window', 'document', BROWSER_REALTIME_SCRIPT) as (win: Window, doc: Document) => void
+
 function bootClient(realtime = 'false'): void {
   document.documentElement.dataset.realtimeEnabled = realtime
-  new Function('window', 'document', BROWSER_REALTIME_SCRIPT)(window, document)
+  runRealtimeScript(window, document)
 }
 
 function press(key: string, options: KeyboardEventInit = {}): KeyboardEvent {
@@ -103,6 +105,11 @@ function searchCommands(query: string): void {
 function selectedCommand(): HTMLElement | null {
   return document.querySelector('[data-cmdk-item][aria-selected="true"]')
 }
+
+beforeAll(async () => {
+  const warm = await builtinEnvironments.jsdom.setup(globalThis, { jsdom: { url: 'https://panel.example.test/panel', runScripts: 'outside-only' } })
+  await warm.teardown(globalThis)
+})
 
 beforeEach(async () => {
   testDom = await builtinEnvironments.jsdom.setup(globalThis, { jsdom: { url: 'https://panel.example.test/panel?lang=ar&theme=light&accountId=account-test', runScripts: 'outside-only' } })
@@ -732,9 +739,15 @@ describe('document navigation and scrolling', () => {
   })
 
   it('starts real-time transport only when the document enables it', () => {
-    bootClient('true')
-    expect(socket).toHaveBeenCalledOnce()
-    expect(socket).toHaveBeenCalledWith('wss://panel.example.test/api/ws')
+    vi.useFakeTimers()
+    try {
+      bootClient('true')
+      expect(socket).toHaveBeenCalledOnce()
+      expect(socket).toHaveBeenCalledWith('wss://panel.example.test/api/ws')
+    } finally {
+      vi.clearAllTimers()
+      vi.useRealTimers()
+    }
   })
 })
 

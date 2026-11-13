@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import assert from 'node:assert/strict'
 import { describe, it } from 'vitest'
-import { qualifyHostTools, tools } from '@xpanel/catalog'
+import { qualifyHostTools, unqualifiedTools as tools } from '@xpanel/catalog'
 import type { FirewallRule } from '@xpanel/core'
 import { APPROVED_WHM_OPERATIONS_TABS_CLIENT, renderApprovedWhmOperationsSupplement, renderApprovedWhmServicesContent } from './approved-whm-operations-components.ts'
 

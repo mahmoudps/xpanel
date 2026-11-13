@@ -8,7 +8,16 @@ import { createV2Stylesheet } from './stylesheet.ts'
 
 const css = v2Stylesheet.body
 const foundationAssets = [v2Stylesheet, ...v2SharedStylesheets]
-const compressedBytes = (assets: readonly { readonly body: string }[]): number => assets.reduce((sum, asset) => sum + gzipSync(asset.body).byteLength, 0)
+const gzipLengthCache = new Map<string, number>()
+const gzipBytes = (body: string): number => {
+  let len = gzipLengthCache.get(body)
+  if (len === undefined) {
+    len = gzipSync(body).byteLength
+    gzipLengthCache.set(body, len)
+  }
+  return len
+}
+const compressedBytes = (assets: readonly { readonly body: string }[]): number => assets.reduce((sum, asset) => sum + gzipBytes(asset.body), 0)
 /** Splits a selector list at its top-level commas only, never inside :is(), :not(), :has(), :where() or [attributes]. */
 const topLevelSelectors = (list: string): string[] => {
   const parts: string[] = []

@@ -30,13 +30,14 @@ const previewResponse = () => {
   const bytes = new TextEncoder().encode(JSON.stringify({ scope: 'desired-state', hostBinding: 'unverified', defaultSharedIpv4: { poolId: planId, address: '192.0.2.10' }, dedicated: { entitled: false, count: 0, unallocated: [] } }))
   return { ok: true, body: { getReader: () => ({ read: async () => sent ? { done: true } : (sent = true, { done: false, value: bytes }), cancel: async () => {}, releaseLock: () => {} }) } }
 }
+const runRealtimeScript = new Function('window', 'document', BROWSER_REALTIME_SCRIPT) as (w: Window, d: Document) => void
 const boot = (send: Request, withChoices = true, actor: string | null = 'root:operator', runtime: Window = window, shape = (markup: string) => markup) => {
   const choice = withChoices ? '<input type="radio" name="ownerId" value="" checked><input type="radio" name="ownerId" value="' + ownerId + '"><input type="radio" name="shell" value="jailed" checked><input type="radio" name="shell" value="none">' : ''
   const actorAttribute = actor === null ? '' : ' data-account-create-actor="' + actor + '"'
   document.body.innerHTML = shape('<section data-accounts-workspace><form data-create-account-form' + actorAttribute + '><input name="username" value="alpha"><input name="primaryDomain" value="alpha.example.test"><input id="new-acc-password" type="password" name="password" autocomplete="new-password" value="synthetic-initial-password"><input name="contactEmail" value=""><input name="ipv6" value=""><select name="planId"><option value="' + planId + '">Standard</option></select><select name="ipAssignment"><option value="shared">Shared</option></select>' + choice + '<button type="button" data-account-ip-refresh>Refresh</button><button type="button" data-account-generate-password data-password-target="new-acc-password">Generate</button><button type="button" data-account-toggle-password data-password-target="new-acc-password" aria-pressed="false">Reveal password</button><p data-account-ip-status></p><p><bdi data-account-ip-address></bdi></p><p data-account-create-status tabindex="-1"></p><button type="submit">Create</button><button type="reset">Discard</button></form><section data-approved-account-create-status><p data-account-creation-observation></p><button type="button" disabled data-account-create-another data-create-route="/whm/accounts/new?lang=en&amp;theme=dark&amp;density=comfortable">Create another</button></section></section>')
   ;(window as Window & { xpanelSessionRequest?: Request }).xpanelSessionRequest = send
   const fetch = vi.fn().mockImplementation(async () => previewResponse()); vi.stubGlobal('fetch', fetch)
-  new Function('window', 'document', BROWSER_REALTIME_SCRIPT)(runtime, document)
+  runRealtimeScript(runtime, document)
   return fetch
 }
 const submit = () => get<HTMLFormElement>('form').dispatchEvent(new Event('submit', { cancelable: true }))

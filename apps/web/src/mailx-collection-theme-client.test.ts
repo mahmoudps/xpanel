@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { builtinEnvironments, type EnvironmentReturn } from 'vitest/runtime'
 import type { Account } from '@xpanel/core'
 import { translator } from './i18n.ts'
@@ -11,8 +11,9 @@ import { MAILX_ARCHIVE_CLIENT_BINDING } from './mailx-archive-client.ts'
 import { MAILX_COLLECTIONS_CLIENT_BINDING } from './mailx-collections-client.ts'
 
 let dom: EnvironmentReturn | undefined
-beforeEach(async () => { dom = await builtinEnvironments.jsdom.setup(globalThis, { jsdom: { url: 'https://panel.example.test', runScripts: 'outside-only' } }) })
-afterEach(async () => { document.body.replaceChildren(); delete (window as Window & { xpT?: unknown }).xpT; delete (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest; await dom?.teardown(globalThis); dom = undefined })
+beforeAll(async () => { dom = await builtinEnvironments.jsdom.setup(globalThis, { jsdom: { url: 'https://panel.example.test', runScripts: 'outside-only' } }) })
+afterAll(async () => { await dom?.teardown(globalThis); dom = undefined })
+afterEach(() => { document.body.replaceChildren(); delete (window as Window & { xpT?: unknown }).xpT; delete (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest })
 const tick = async () => { for (let n = 0; n < 6; n++) await new Promise(resolve => setTimeout(resolve, 0)) }
 const account: Account = { id: 'account-a', username: 'alice', uid: 20001, gid: 20001, home: '/home/alice', primaryDomain: 'shop.example', planId: 'plan-a', ownerId: null, status: 'active', suspendReason: null, contactEmail: 'alice@example.test', ipv4: '192.0.2.10', shell: 'jailed', createdAt: '2026-10-29T00:00:00Z' }
 const revision = 'a'.repeat(64), calendarId = 'b'.repeat(32), bookId = 'c'.repeat(32)

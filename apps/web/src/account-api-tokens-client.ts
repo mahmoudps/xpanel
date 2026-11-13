@@ -58,12 +58,26 @@ export function bindAccountApiTokens(askDialog?: (options: Record<string, unknow
       if (nodes.length !== 1 || !nodes[0]) throw new Error('account_token_control_unavailable')
       return nodes[0]
     }
-    const note = (node: HTMLElement, state: string, text: string): void => { node.hidden = false; node.dataset.state = state; node.textContent = text; node.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
+    let contractIntact = true, domDirty = true
+    const observedFragments = new WeakSet<DocumentFragment>()
+    const observeOpts = { subtree: true, childList: true, attributes: true, characterData: true } as const
+    const domObserver = new MutationObserver(() => {
+      if (!root.isConnected) { domObserver.disconnect(); return }
+      domDirty = true
+    })
+    domObserver.observe(document, observeOpts)
+    const syncClean = <T>(fn: () => T): T => {
+      const wasDirty = domDirty || domObserver.takeRecords().length > 0
+      try { return fn() } finally {
+        if (!wasDirty) { domObserver.takeRecords(); domDirty = false }
+        else domDirty = true
+      }
+    }
+    const note = (node: HTMLElement, state: string, text: string): void => syncClean(() => { node.hidden = false; node.dataset.state = state; node.textContent = text; node.setAttribute('role', state === 'failed' ? 'alert' : 'status') })
     const disable = (): void => { for (const node of owned('input,select,textarea,button')) if (node instanceof HTMLInputElement || node instanceof HTMLSelectElement || node instanceof HTMLTextAreaElement || node instanceof HTMLButtonElement) node.disabled = true }
-    let contractIntact = true
     const request = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
     const failClosed = (): void => {
-      contractIntact = false; disable()
+      contractIntact = false; domObserver.disconnect(); disable()
       const secret = owned('[data-account-tokens-secret]')[0]; if (secret) secret.textContent = ''
       const reveal = owned('[data-account-tokens-reveal]')[0]; if (reveal) reveal.hidden = true
       const status = owned('[data-account-tokens-status]')[0]; if (status) note(status, 'unavailable', t('API token management is unavailable here. Nothing was read or changed.'))
@@ -74,8 +88,8 @@ export function bindAccountApiTokens(askDialog?: (options: Record<string, unknow
         'reveal-text': ['P'], secret: ['CODE'], copy: ['BUTTON'], done: ['BUTTON'], 'copy-status': ['P'], 'mutation-status': ['P'] }
       const controls: Record<string, HTMLElement> = {}
       for (const [name, tags] of Object.entries(shape)) { const node = one(name); if (!tags.includes(node.tagName)) throw new Error('account_token_control_type'); controls[name] = node }
-      const status = one('status'), rows = one('rows'), refresh = one('refresh'), empty = one('empty'), loading = one('loading'), form = one('create'), name = one('name'), expiry = one('expiry'), ips = one('allowed-ips'), readOnly = one('read-only')
-      const submit = one('submit'), clear = one('clear'), selectAll = one('select-all'), bulk = one('bulk-revoke'), reveal = one('reveal'), revealText = one('reveal-text'), secretView = one('secret'), copy = one('copy'), done = one('done'), copyStatus = one('copy-status'), mutationStatus = one('mutation-status')
+      const status = controls['status']!, rows = controls['rows']!, refresh = controls['refresh']!, empty = controls['empty']!, loading = controls['loading']!, form = controls['create']!, name = controls['name']!, expiry = controls['expiry']!, ips = controls['allowed-ips']!, readOnly = controls['read-only']!
+      const submit = controls['submit']!, clear = controls['clear']!, selectAll = controls['select-all']!, bulk = controls['bulk-revoke']!, reveal = controls['reveal']!, revealText = controls['reveal-text']!, secretView = controls['secret']!, copy = controls['copy']!, done = controls['done']!, copyStatus = controls['copy-status']!, mutationStatus = controls['mutation-status']!
       if (!(form instanceof HTMLFormElement) || !(rows instanceof HTMLTableSectionElement) || !(name instanceof HTMLInputElement) || name.type !== 'text'
         || !(expiry instanceof HTMLSelectElement) || !(ips instanceof HTMLInputElement) || ips.type !== 'text'
         || !(readOnly instanceof HTMLInputElement) || readOnly.type !== 'checkbox' || !(selectAll instanceof HTMLInputElement) || selectAll.type !== 'checkbox'
@@ -85,45 +99,61 @@ export function bindAccountApiTokens(askDialog?: (options: Record<string, unknow
       for (const node of scopeNodes) { if (!(node instanceof HTMLInputElement) || node.type !== 'checkbox' || !/^(?:files|databases|dns|mail|backups|cron):(?:read|write)$/.test(node.value)) throw new Error('account_token_scope_control'); scopeBoxes.push(node) }
       if (scopeBoxes.length !== 12 || new Set(scopeBoxes.map(node => node.value)).size !== 12 || [...expiry.options].map(option => option.value).join() !== '30,90,180,365') throw new Error('account_token_scope_set')
       const originalScopes = scopeBoxes.map(node => node.value)
-      let tokens: AccountApiTokenView[] = [], hasSnapshot = false, listBusy = false, writing = false
+      let tokens: AccountApiTokenView[] = [], hasSnapshot = false, listBusy = false, writing = false, deniedRoot = false, deniedForm = false
       const selected = new Set<string>()
       const selectionControls = new Map<string, HTMLInputElement>()
       const mutationControls: { node: HTMLButtonElement; id: string; revoke: boolean }[] = []
-      const hideSecret = (): void => { secretView.textContent = ''; revealText.textContent = ''; copyStatus.textContent = ''; copyStatus.hidden = true; reveal.hidden = true }
+      const hideSecret = (): void => syncClean(() => { secretView.textContent = ''; revealText.textContent = ''; copyStatus.textContent = ''; copyStatus.hidden = true; reveal.hidden = true })
       hideSecret()
       const current = (): boolean => {
-        if (!contractIntact || !root.isConnected || root.dataset.authPersonalState !== 'ready' || root.dataset.tokensCanRead !== 'true' || root.closest(denied) || typeof request !== 'function'
-          || (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest !== request) { hideSecret(); return false }
+        if (!contractIntact || !root.isConnected || root.dataset.authPersonalState !== 'ready' || root.dataset.tokensCanRead !== 'true' || typeof request !== 'function'
+          || (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest !== request) { if (!root.isConnected) domObserver.disconnect(); hideSecret(); return false }
+        if (domObserver.takeRecords().length > 0) domDirty = true
+        if (!domDirty) {
+          if (scopeBoxes.some((node, index) => node.value !== originalScopes[index])) { failClosed(); hideSecret(); return false }
+          if (deniedRoot) { hideSecret(); return false }
+          return true
+        }
+        deniedRoot = Boolean(root.closest(denied))
+        deniedForm = Boolean(form.closest(denied))
+        if (deniedRoot) { hideSecret(); return false }
         try {
           assertAccountApiTokenTemplates(root)
+          for (const tpl of root.querySelectorAll('template')) if (!observedFragments.has(tpl.content)) { domObserver.observe(tpl.content, observeOpts); observedFragments.add(tpl.content) }
           for (const [key, original] of Object.entries(controls)) { const tags = shape[key]; if (!tags || one(key) !== original || !tags.includes(original.tagName)) throw new Error('account_token_control_replaced') }
           const now = owned('[data-account-tokens-scope]')
           if (now.length !== scopeBoxes.length || now.some((node, index) => node !== scopeBoxes[index] || !(node instanceof HTMLInputElement) || node.value !== originalScopes[index])) throw new Error('account_token_scope_changed')
+          domObserver.takeRecords()
+          domDirty = false
           return true
         } catch { failClosed(); hideSecret(); return false }
       }
-      const canManage = (): boolean => { const allowed = current() && root.dataset.tokensCanManage === 'true' && !form.closest(denied); if (!allowed) hideSecret(); return allowed }
+      const canManage = (): boolean => { const allowed = current() && root.dataset.tokensCanManage === 'true' && !deniedForm; if (!allowed) hideSecret(); return allowed }
       const sync = (): void => {
-        const read = current(), manage = read && canManage() && hasSnapshot && !listBusy && !writing
-        for (const node of [refresh, submit, clear, bulk, copy, done]) if (node instanceof HTMLButtonElement) node.disabled = !manage
-        if (refresh instanceof HTMLButtonElement) refresh.disabled = !read || listBusy || writing
-        for (const node of [name, expiry, ips, readOnly]) node.disabled = !manage
-        for (const node of scopeBoxes) node.disabled = !manage || (readOnly.checked && node.value.endsWith(':write'))
-        selectAll.disabled = !manage || !tokens.some(token => token.state !== 'revoked')
-        const selectable = tokens.filter(token => token.state !== 'revoked').slice(0, 50)
-        selectAll.checked = selectable.length > 0 && selectable.every(token => selected.has(token.id))
-        selectAll.indeterminate = selected.size > 0 && !selectAll.checked
-        for (const [id, node] of selectionControls) node.disabled = !manage || tokens.find(token => token.id === id)?.state === 'revoked'
-        for (const control of mutationControls) control.node.disabled = !manage || (control.revoke && tokens.find(token => token.id === control.id)?.state === 'revoked')
-        if (bulk instanceof HTMLButtonElement) bulk.disabled = !manage || !selected.size
-        if (copy instanceof HTMLButtonElement) copy.disabled = !manage || !secretView.textContent || Boolean(reveal.hidden)
-        if (done instanceof HTMLButtonElement) done.disabled = !manage || Boolean(reveal.hidden)
+        const read = current(), allowed = read && root.dataset.tokensCanManage === 'true' && !deniedForm
+        if (read && !allowed) hideSecret()
+        const manage = allowed && hasSnapshot && !listBusy && !writing
+        syncClean(() => {
+          for (const node of [refresh, submit, clear, bulk, copy, done]) if (node instanceof HTMLButtonElement) node.disabled = !manage
+          if (refresh instanceof HTMLButtonElement) refresh.disabled = !read || listBusy || writing
+          for (const node of [name, expiry, ips, readOnly]) node.disabled = !manage
+          for (const node of scopeBoxes) node.disabled = !manage || (readOnly.checked && node.value.endsWith(':write'))
+          selectAll.disabled = !manage || !tokens.some(token => token.state !== 'revoked')
+          const selectable = tokens.filter(token => token.state !== 'revoked').slice(0, 50)
+          selectAll.checked = selectable.length > 0 && selectable.every(token => selected.has(token.id))
+          selectAll.indeterminate = selected.size > 0 && !selectAll.checked
+          for (const [id, node] of selectionControls) node.disabled = !manage || tokens.find(token => token.id === id)?.state === 'revoked'
+          for (const control of mutationControls) control.node.disabled = !manage || (control.revoke && tokens.find(token => token.id === control.id)?.state === 'revoked')
+          if (bulk instanceof HTMLButtonElement) bulk.disabled = !manage || !selected.size
+          if (copy instanceof HTMLButtonElement) copy.disabled = !manage || !secretView.textContent || Boolean(reveal.hidden)
+          if (done instanceof HTMLButtonElement) done.disabled = !manage || Boolean(reveal.hidden)
+        })
       }
       const ensure = (manage: boolean): void => { if (!(manage ? canManage() : current())) { hideSecret(); throw new Error('account_token_authority_unavailable') } }
       const checkedRequest = async (method: string, path: string, body?: unknown): Promise<unknown> => { ensure(method !== 'GET'); const result = await request?.(method, path, body); ensure(method !== 'GET'); return result }
       const technical = (text: string): HTMLElement => { const node = document.createElement('bdi'); node.dir = 'ltr'; node.textContent = text; return node }
       const paint = (): void => {
-        ensure(false); rows.replaceChildren(); selectionControls.clear(); mutationControls.length = 0
+        ensure(false); syncClean(() => rows.replaceChildren()); selectionControls.clear(); mutationControls.length = 0
         const rendered = document.createDocumentFragment()
         for (const token of tokens) {
           const row = accountApiTokenNode(root, 'account-token-row', 'tr')
@@ -161,21 +191,25 @@ export function bindAccountApiTokens(askDialog?: (options: Record<string, unknow
           clientTemplateSlot(row, 'actions', 'td').replaceChildren(actions); rendered.append(row)
         }
         if (!tokens.length) { const row = accountApiTokenNode(root, 'account-token-empty', 'tr'); clientTemplateSlot(row, 'content', 'td').textContent = t('No API tokens yet'); rendered.append(row) }
-        ensure(false); rows.append(rendered)
-        empty.hidden = tokens.length !== 0
-        const counts = owned('[data-account-tokens-count]'); if (counts.length === 1 && counts[0]) counts[0].textContent = String(tokens.length)
+        ensure(false)
+        const counts = owned('[data-account-tokens-count]')
+        syncClean(() => {
+          rows.append(rendered)
+          empty.hidden = tokens.length !== 0
+          if (counts.length === 1 && counts[0]) counts[0].textContent = String(tokens.length)
+        })
         sync()
       }
       const load = async (): Promise<boolean> => {
         if (listBusy || !current()) return false
-        hideSecret(); listBusy = true; loading.hidden = false; root.setAttribute('aria-busy', 'true'); sync(); note(status, 'reading', t('Reading your API tokens…'))
+        hideSecret(); listBusy = true; syncClean(() => { loading.hidden = false; root.setAttribute('aria-busy', 'true') }); sync(); note(status, 'reading', t('Reading your API tokens…'))
         try {
           const fresh = readAccountApiTokenList(await checkedRequest('GET', BASE))
           tokens = fresh; hasSnapshot = true
           for (const id of selected) if (!tokens.some(token => token.id === id && token.state !== 'revoked')) selected.delete(id)
           paint(); note(status, 'read', tokens.length ? t('Tokens read.') : t('Tokens read. You have no API tokens.')); return true
         } catch { note(status, 'failed', writing ? t('The change may be saved. Refresh and verify the token list before trying again.') : t('Your tokens could not be read or verified. Any rows shown are from the last successful read; nothing was changed.')); return false }
-        finally { listBusy = false; loading.hidden = true; root.setAttribute('aria-busy', 'false'); sync() }
+        finally { listBusy = false; syncClean(() => { loading.hidden = true; root.setAttribute('aria-busy', 'false') }); sync() }
       }
       const mayHaveChanged = (error: unknown, sent: boolean): boolean => {
         const changed = object(error) && object(error.details) ? error.details.stateChanged : undefined

@@ -22,6 +22,15 @@ const MAX_CATALOG_BYTES = 4 * 1024 * 1024
 const NON_ASCII_DIGIT = /(?![0-9])\p{Nd}/u
 const asciiDigits = (text: string): string => text.replace(/[\u0660-\u0669\u06F0-\u06F9]/g, digit => String(digit.charCodeAt(0) & 0xf))
 const validId = (themeId: string): boolean => /^[a-z][a-z0-9-]*$/.test(themeId)
+const IMMUTABLE_THEME_CATALOGS = new WeakSet<Catalog>()
+const READONLY_OVERLAYS = new WeakMap<ThemeMessages, (locale: Locale) => ThemeCatalogOverlay>()
+
+export function isImmutableThemeCatalog(catalog: Catalog): boolean {
+  return IMMUTABLE_THEME_CATALOGS.has(catalog)
+}
+export function readonlyThemeOverlay(bundle: ThemeMessages | undefined, locale: Locale): ThemeCatalogOverlay | undefined {
+  return bundle ? (READONLY_OVERLAYS.get(bundle)?.(locale) ?? bundle.forClient(locale)) : undefined
+}
 
 function checkedPo(themeId: string, locale: Locale, text: string): PoCatalog {
   if (!validId(themeId)) throw new Error('theme_message_id')
@@ -54,12 +63,17 @@ export function createThemeMessages(themeId: string, sourcePo: string, translati
     const parsed = tag === SOURCE_LOCALE || text === undefined ? undefined : checkedPo(themeId, tag, text)
     for (const entry of parsed?.entries ?? [])
       if (!known.has(catalogKey(entry.id, entry.context))) throw new Error('theme_message_unknown')
-    catalogs.set(tag, parsed ? catalogFromEntries(parsed.entries) : new Map())
+    const map = parsed ? catalogFromEntries(parsed.entries) : new Map()
+    IMMUTABLE_THEME_CATALOGS.add(map)
+    catalogs.set(tag, map)
   }
+  const emptyCatalog: Catalog = new Map()
+  IMMUTABLE_THEME_CATALOGS.add(emptyCatalog)
   const prefix = 'theme:' + themeId + SEPARATOR
   const wrapped = new Map<Locale, Translate>()
+  const readonlyByLocale = new Map<Locale, ThemeCatalogOverlay>()
   // A copied locale reads the theme strings of the locale it was copied from.
-  const catalogOf = (tag: Locale): Catalog => catalogs.get(tag) ?? catalogs.get(localeInfo(tag).base as Locale) ?? new Map()
+  const catalogOf = (tag: Locale): Catalog => catalogs.get(tag) ?? catalogs.get(localeInfo(tag).base as Locale) ?? emptyCatalog
   const wrap = (tag: Locale): Translate => {
     const own = createTranslator(tag, catalogOf(tag))
     const translate = (message: string, values?: MessageValues): string => {
@@ -72,7 +86,7 @@ export function createThemeMessages(themeId: string, sourcePo: string, translati
     wrapped.set(tag, bound)
     return bound
   }
-  return Object.freeze({
+  const instance: ThemeMessages = Object.freeze({
     themeId,
     translator(locale: Locale): Translate {
       if (!isLocale(locale)) throw new Error('theme_message_locale')
@@ -83,6 +97,16 @@ export function createThemeMessages(themeId: string, sourcePo: string, translati
       return Object.freeze({ themeId, locale, messages: new Map(catalogOf(locale)) })
     },
   })
+  READONLY_OVERLAYS.set(instance, (locale: Locale): ThemeCatalogOverlay => {
+    if (!isLocale(locale)) throw new Error('theme_message_locale')
+    let cached = readonlyByLocale.get(locale)
+    if (!cached) {
+      cached = Object.freeze({ themeId, locale, messages: catalogOf(locale) })
+      readonlyByLocale.set(locale, cached)
+    }
+    return cached
+  })
+  return instance
 }
 
 /** Installed package paths are supplied by trusted theme modules, never by a request preference. */
@@ -100,5 +124,16 @@ export function loadThemeMessages(themeId: string, directory: URL): ThemeMessage
 
 /** Resolve the trusted installing module through Node's URL implementation before the existing file/scope guards. */
 export function loadThemeMessagesFromModule(themeId: string, moduleUrl: string): ThemeMessages {
-  return loadThemeMessages(themeId, new FileURL('./locales/', moduleUrl))
+  if (!validId(themeId)) throw new Error('theme_message_id')
+  const directory = new FileURL('./locales/', moduleUrl)
+  if (directory.protocol !== 'file:') throw new Error('theme_message_directory')
+  let loaded: ThemeMessages | undefined
+  const bundle = (): ThemeMessages => (loaded ??= loadThemeMessages(themeId, directory))
+  const lazyInstance: ThemeMessages = Object.freeze({
+    themeId,
+    translator: (locale: Locale): Translate => bundle().translator(locale),
+    forClient: (locale: Locale): ThemeCatalogOverlay => bundle().forClient(locale),
+  })
+  READONLY_OVERLAYS.set(lazyInstance, (locale: Locale): ThemeCatalogOverlay => readonlyThemeOverlay(bundle(), locale)!)
+  return lazyInstance
 }

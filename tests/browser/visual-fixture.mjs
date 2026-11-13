@@ -1,5 +1,5 @@
 import { createServer } from 'node:http'
-import { tools } from '../../packages/catalog/src/index.ts'
+import { unqualifiedTools } from '../../packages/catalog/src/index.ts'
 import { defaultPlan } from '../../packages/core/src/index.ts'
 import { resolveWebDocumentRoute, serveWebUi } from '../../apps/web/src/index.ts'
 
@@ -38,14 +38,14 @@ const websiteAnalytics = {
   topReferrers: [{ key: 'https://example.test/', requests: 180, bytes: 1024 ** 2, errors5xx: 0 }],
   topClientIps: [{ key: '192.0.2.100', requests: 60, bytes: 512 * 1024, errors5xx: 0 }],
 }
-const catalog = tools.map(tool => tool.status === 'out-of-scope' ? tool : ({
+const catalog = unqualifiedTools.map(tool => tool.status === 'out-of-scope' ? tool : ({
   ...tool, status: 'verified', delivery: { status: 'verified', reason: 'Synthetic visual fixture only; no production qualification.', evidence: [] },
 }))
 
 const stateFor = (route, qualifiedCatalog) => ({
   surface: route.surface, activeRoute: route.activeRoute, realtimeEnabled: false,
   security: { totpEnabled: true },
-  title: 'Synthetic visual fixture — xPanel', accountId: account.id, catalog: qualifiedCatalog ? catalog : tools,
+  title: 'Synthetic visual fixture — xPanel', accountId: account.id, catalog: qualifiedCatalog ? catalog : unqualifiedTools,
   visibility: { principal: route.surface === 'xwhm' ? root : owner, disabledFeatures: new Set() },
   whm: {
     principal: root, hostname: 'synthetic-host.example.test', version: '0.1.0-fixture', availableVersion: '0.1.0-fixture',

@@ -1,19 +1,38 @@
 /// <reference lib="dom" />
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Script } from 'node:vm'
 import { APPROVED_HOST_SERVICES_CLIENT } from './approved-host-services-client.ts'
 import { renderWhmServiceClientTemplates } from './board-port/whm-service-client-templates.ts'
 import { renderV2WhmServiceClientTemplates } from './themes/v2/pages/xwhm/host/service-client-templates.ts'
 type Request = (method: string, path: string, body?: unknown) => Promise<unknown>
 const service = { id: 'apache', label: 'Apache', unit: 'apache2.service', state: 'active' }
-const tick = async () => { await new Promise(resolve => setTimeout(resolve, 0)); await new Promise(resolve => setTimeout(resolve, 0)) }
+const tick = async () => { for (let i = 0; i < 8; i++) await Promise.resolve() }
 const button = () => document.querySelector<HTMLButtonElement>('button[data-service-id]')!
 const status = () => document.querySelector<HTMLElement>('[data-host-service-status]')!
-const boot = (send: Request, confirm = vi.fn().mockResolvedValue(true), attributes = '', templates = renderWhmServiceClientTemplates('host')) => {
-  document.body.innerHTML = '<section data-host-services ' + attributes + '><table><tbody data-host-service-rows></tbody></table><p data-host-service-status></p>' + templates + '</section>'
+const defaultHostTemplates = renderWhmServiceClientTemplates('host')
+const v2HostTemplates = renderV2WhmServiceClientTemplates('host')
+const runApprovedHostServices = new Function('confirm', '(' + APPROVED_HOST_SERVICES_CLIENT + ')(confirm);') as (confirm: unknown) => void
+const bodyTemplateCache = new Map<string, HTMLTemplateElement>()
+const getCachedBodyTemplate = (html: string): HTMLTemplateElement => {
+  let tpl = bodyTemplateCache.get(html)
+  if (!tpl) {
+    tpl = document.createElement('template')
+    tpl.innerHTML = html
+    bodyTemplateCache.set(html, tpl)
+  }
+  return tpl
+}
+beforeAll(() => {
+  getCachedBodyTemplate('<section data-host-services ><table><tbody data-host-service-rows></tbody></table><p data-host-service-status></p>' + defaultHostTemplates + '</section>')
+  getCachedBodyTemplate('<section data-host-services ><table><tbody data-host-service-rows></tbody></table><p data-host-service-status></p>' + v2HostTemplates + '</section>')
+})
+const boot = (send: Request, confirm = vi.fn().mockResolvedValue(true), attributes = '', templates = defaultHostTemplates) => {
+  const html = '<section data-host-services ' + attributes + '><table><tbody data-host-service-rows></tbody></table><p data-host-service-status></p>' + templates + '</section>'
+  const tpl = getCachedBodyTemplate(html)
+  document.body.replaceChildren(tpl.content.cloneNode(true))
   ;(window as Window & { xpanelSessionRequest?: Request }).xpanelSessionRequest = send
-  new Function('confirm', '(' + APPROVED_HOST_SERVICES_CLIENT + ')(confirm);')(confirm)
+  runApprovedHostServices(confirm)
   return confirm
 }
 beforeEach(() => { document.documentElement.lang = 'en' })

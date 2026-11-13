@@ -180,7 +180,7 @@ describe('engine output', { tags: ['unit'] }, () => {
   })
 })
 
-describe('signed app catalog', { tags: ['unit'] }, () => {
+describe('signed app catalog', { tags: ['feature'] }, () => {
   const { publicKey, privateKey } = generateKeyPairSync('ed25519'), keys = [{ keyId: 'release', publicKeyPem: publicKey.export({ type: 'spki', format: 'pem' }).toString() }]
   const app = { id: 'kuma', name: 'Kuma', description: 'Monitor', version: '2', port: 3001, secrets: [], yaml: 'services:\n  app:\n    image: docker.io/louislam/uptime-kuma:${VERSION}\n' }
   const envelope = (sequence: number, days = 30, signer = privateKey) => {
@@ -264,7 +264,7 @@ describe('container terminal', { tags: ['unit'] }, () => {
   })
 })
 
-describe('container routes', { tags: ['unit'] }, () => {
+describe('container routes', { tags: ['feature'] }, () => {
   it('searches only trusted registries and lists only trusted names', async () => {
     const h = harness({}, { 'search --limit 25 --format json docker.io/nginx': JSON.stringify([{ Name: 'docker.io/library/nginx', Description: 'Official  build', Stars: 20000, Official: '[OK]' }]) })
     const view = await (await call(h.ctx, 'search?account=alice&registry=docker.io&term=nginx')).json() as { results: unknown[] }

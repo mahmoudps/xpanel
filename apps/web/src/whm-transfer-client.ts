@@ -69,7 +69,45 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
     const wholeServer = root.dataset.transferScope === 'server'
     const inventoryLayout = root.dataset.transferInventoryLayout, comparison = inventoryLayout === 'comparison'
     const selectAll = root.querySelector<HTMLInputElement>('[data-transfer-select-all]')
-    let templateIntact = true
+    let templateIntact = true, domDirty = true, templatesDirty = true
+    const observedFragments = new WeakSet<DocumentFragment>()
+    const observeOpts = { subtree: true, childList: true, attributes: true, characterData: true } as const
+    const inspectRecords = (list: readonly MutationRecord[]): void => {
+      if (!list.length) return
+      domDirty = true
+      for (const r of list) {
+        if (r.type === 'attributes') {
+          const el = r.target as Element
+          if (el.tagName === 'TEMPLATE' || r.attributeName === 'data-xp-template' || r.attributeName === 'data-transfer-workspace') templatesDirty = true
+        } else if (r.type === 'childList') {
+          for (const listNodes of [r.addedNodes, r.removedNodes]) for (let i = 0; i < listNodes.length; i++) {
+            const n = listNodes[i]!
+            if (n.nodeType === 1 && ((n as Element).tagName === 'TEMPLATE' || (n as Element).getElementsByTagName('template').length > 0)) { templatesDirty = true; break }
+          }
+        }
+      }
+    }
+    const tplObserver = new MutationObserver(() => {
+      if (!root.isConnected) { tplObserver.disconnect(); return }
+      templatesDirty = true; domDirty = true
+    })
+    const domObserver = new MutationObserver(list => {
+      if (!root.isConnected) { domObserver.disconnect(); tplObserver.disconnect(); return }
+      inspectRecords(list)
+    })
+    domObserver.observe(document, observeOpts)
+    const syncClean = <T>(fn: () => T): T => {
+      inspectRecords(domObserver.takeRecords())
+      if (tplObserver.takeRecords().length > 0) { templatesDirty = true; domDirty = true }
+      const wasDomDirty = domDirty, wasTplDirty = templatesDirty
+      try { return fn() } finally {
+        domObserver.takeRecords()
+        if (tplObserver.takeRecords().length > 0) { templatesDirty = true; domDirty = true }
+        else { domDirty = wasDomDirty; templatesDirty = wasTplDirty }
+      }
+    }
+    const unsafeTags = new Set(['SCRIPT', 'STYLE', 'TEMPLATE', 'IFRAME', 'OBJECT', 'EMBED', 'FORM', 'TEXTAREA', 'SELECT', 'A', 'IMG', 'AUDIO', 'VIDEO', 'SOURCE', 'LINK', 'META', 'BASE'])
+    const unsafeAttrs = new Set(['id', 'style', 'name', 'form', 'api-url', 'data-api-url', 'data-action', 'href', 'src', 'srcset', 'formaction', 'contenteditable', 'data-whm-detail-route'])
     let inventoryRows: Array<{ row: HTMLElement; select: HTMLInputElement; resolve: HTMLButtonElement; conflicts: string[] }> = []
     // Reads run in a read-only frame too; every change needs the manage flag outside one.
     const readable = (): boolean => templateIntact && access.readable(), admitted = (): boolean => readable() && access.writable()
@@ -78,7 +116,7 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
       const names = (container: HTMLElement): string[] => [...container.querySelectorAll<HTMLInputElement>('input:checked')].map(input => input.value).sort()
       return JSON.stringify(names(accounts)) !== JSON.stringify(Array.isArray(selection.accounts) ? [...selection.accounts].sort() : []) || JSON.stringify(names(plans)) !== JSON.stringify(Array.isArray(selection.plans) ? [...selection.plans].sort() : [])
     }
-    const announce = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', ['failed', 'uncertain', 'stale'].includes(state) ? 'alert' : 'status') }
+    const announce = (state: string, message: string): void => syncClean(() => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', ['failed', 'uncertain', 'stale'].includes(state) ? 'alert' : 'status') })
     type RecordSpec = { tag: string; slots: Record<string, keyof HTMLElementTagNameMap>; actions?: Record<string, 'input' | 'button'>; columns?: number }
     const recordRows: Record<string, readonly string[]> = {
       'transfer-inventory': comparison ? ['username', 'domain', 'uid', 'plan', 'disk', 'databases', 'mailboxes', 'conflict', 'resolution'] : ['selected', 'username', 'domain', 'plan', 'disk', 'databases', 'mailboxes', 'conflict', 'resolution'],
@@ -104,7 +142,10 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
     const disableNative = (): void => { root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(control => { control.disabled = true }) }
     // A write step checks the manage flag too; losing it closes the workspace like a broken template.
     const verifyTemplates = (write = false): boolean => {
-      if (!(write ? admitted() : readable())) { disableNative(); if (!['uncertain', 'stale'].includes(status.dataset.state ?? '')) announce('unavailable', t('Unavailable')); return false }
+      if (!(write ? admitted() : readable())) { if (!root.isConnected) { domObserver.disconnect(); tplObserver.disconnect() } disableNative(); if (!['uncertain', 'stale'].includes(status.dataset.state ?? '')) announce('unavailable', t('Unavailable')); return false }
+      inspectRecords(domObserver.takeRecords())
+      if (tplObserver.takeRecords().length > 0) { templatesDirty = true; domDirty = true }
+      if (!domDirty) return true
       try {
         if (inventoryLayout !== undefined && inventoryLayout !== 'comparison' || root.dataset.transferInventoryLayout !== inventoryLayout) throw new Error('invalid_transfer_layout')
         if (pageRoot.hasAttribute('data-whm-detail-route') && !['/whm/transfers', '/whm/transfers/server'].includes(pageRoot.dataset.whmDetailRoute ?? '')) throw new Error('invalid_transfer_owner')
@@ -130,65 +171,86 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
             if (row.tagName !== 'TR' || cells.some(cell => cell.tagName !== 'TD') || !(cells.length === 8 || cells.length === 1 && (cells[0] as HTMLTableCellElement).colSpan === 8)) throw new Error('invalid_transfer_columns')
           }
         } else if (accounts.tagName !== 'DIV' || selectAll) throw new Error('invalid_transfer_selection')
-        for (const [name, spec] of Object.entries(records)) {
-          const template = clientTemplate(root, name)
-          if (template.closest('[data-transfer-workspace]') !== root) throw new Error('foreign_transfer_template')
-          const node = cloneViewRecord(root, name, spec.tag, Object.fromEntries(Object.keys(spec.slots).map(key => [key, ''])))
-          for (const [slot, tag] of Object.entries(spec.slots)) clientTemplateSlot(node, slot, tag)
-          if (node.querySelector('script,style,template,iframe,object,embed,form,textarea,select,a,img,audio,video,source,link,meta,base,[data-transfer-workspace]')) throw new Error('unsafe_transfer_template')
-          for (const part of [node, ...node.querySelectorAll<HTMLElement>('*')]) if ([...part.attributes].some(attr => /^on/i.test(attr.name) || attr.name.startsWith('data-transfer-') || ['id', 'style', 'name', 'form', 'api-url', 'data-api-url', 'data-action', 'href', 'src', 'srcset', 'formaction', 'contenteditable', 'data-whm-detail-route'].includes(attr.name))) throw new Error('unsafe_transfer_template')
-          const actions = spec.actions ?? {}, present = node.querySelectorAll('[data-xp-action]')
-          if (present.length !== Object.keys(actions).length || node.querySelectorAll('input,button').length !== Object.keys(actions).length) throw new Error('invalid_transfer_actions')
-          for (const [action, tag] of Object.entries(actions)) {
-            const control = viewAction<HTMLInputElement | HTMLButtonElement>(node, action, tag)
-            if (!control.disabled || control.type !== (tag === 'input' ? 'checkbox' : 'button')) throw new Error('invalid_transfer_action')
+        if (templatesDirty) {
+          for (const [name, spec] of Object.entries(records)) {
+            const template = clientTemplate(root, name)
+            if (template.closest('[data-transfer-workspace]') !== root) throw new Error('foreign_transfer_template')
+            if (!observedFragments.has(template.content)) { tplObserver.observe(template.content, observeOpts); observedFragments.add(template.content) }
+            const node = cloneViewRecord(root, name, spec.tag, Object.fromEntries(Object.keys(spec.slots).map(key => [key, ''])))
+            for (const [slot, tag] of Object.entries(spec.slots)) clientTemplateSlot(node, slot, tag)
+            let actionCount = 0, controlCount = 0
+            for (const stack: Element[] = [node]; stack.length;) {
+              const part = stack.pop()!, partTag = part.tagName
+              if (part !== node) {
+                if (unsafeTags.has(partTag) || part.hasAttribute('data-transfer-workspace')) throw new Error('unsafe_transfer_template')
+                if (part.hasAttribute('data-xp-action')) actionCount++
+                if (partTag === 'INPUT' || partTag === 'BUTTON') controlCount++
+              }
+              for (let i = 0; i < part.attributes.length; i++) {
+                const attrName = part.attributes[i]!.name
+                if (/^on/i.test(attrName) || attrName.startsWith('data-transfer-') || unsafeAttrs.has(attrName)) throw new Error('unsafe_transfer_template')
+              }
+              for (let child = part.firstElementChild; child; child = child.nextElementSibling) stack.push(child)
+            }
+            const actions = spec.actions ?? {}, expectedActions = Object.keys(actions).length
+            if (actionCount !== expectedActions || controlCount !== expectedActions) throw new Error('invalid_transfer_actions')
+            for (const [action, tag] of Object.entries(actions)) {
+              const control = viewAction<HTMLInputElement | HTMLButtonElement>(node, action, tag)
+              if (!control.disabled || control.type !== (tag === 'input' ? 'checkbox' : 'button')) throw new Error('invalid_transfer_action')
+            }
+            if (spec.tag === 'tr') {
+              const empty = name.endsWith('-empty')
+              if (node.children.length !== (empty ? 1 : spec.columns) || [...node.children].some(cell => cell.tagName !== 'TD') || empty && (node.firstElementChild as HTMLTableCellElement).colSpan !== spec.columns) throw new Error('invalid_transfer_columns')
+            }
+            if (spec.tag === 'div') {
+              const table = node.querySelector('table'), fields = recordRows[name.replace(/-table$/, '')]!
+              if (node.querySelectorAll('table').length !== 1 || table?.tHead?.rows.length !== 1 || table.tHead.rows[0]?.cells.length !== fields.length) throw new Error('invalid_transfer_columns')
+            }
           }
-          if (spec.tag === 'tr') {
-            const empty = name.endsWith('-empty')
-            if (node.children.length !== (empty ? 1 : spec.columns) || [...node.children].some(cell => cell.tagName !== 'TD') || empty && (node.firstElementChild as HTMLTableCellElement).colSpan !== spec.columns) throw new Error('invalid_transfer_columns')
-          }
-          if (spec.tag === 'div') {
-            const table = node.querySelector('table'), fields = recordRows[name.replace(/-table$/, '')]!
-            if (node.querySelectorAll('table').length !== 1 || table?.tHead?.rows.length !== 1 || table.tHead.rows[0]?.cells.length !== fields.length) throw new Error('invalid_transfer_columns')
-          }
+          tplObserver.takeRecords()
+          templatesDirty = false
         }
+        domObserver.takeRecords()
+        domDirty = false
         return true
-      } catch { templateIntact = false; disableNative(); if (!['uncertain', 'stale'].includes(status.dataset.state ?? '')) announce('unavailable', t('Unavailable')); return false }
+      } catch { templateIntact = false; domObserver.disconnect(); tplObserver.disconnect(); disableNative(); if (!['uncertain', 'stale'].includes(status.dataset.state ?? '')) announce('unavailable', t('Unavailable')); return false }
     }
     const controls = (): void => {
       if (!verifyTemplates()) return
-      const locked = busy || reviewRequired || !loaded || !admitted(), state = String(selected?.session.state ?? '')
-      root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(control => { control.disabled = locked })
-      button('refresh').disabled = busy || !readable()
-      sessionSelect.disabled = busy || !loaded || !readable()
-      credential.disabled = locked || !credential.options.length
-      nodeSelect.disabled = locked || !capabilities.live
-      liveBox.disabled = locked || !nodeSelect.value
-      button('create').disabled = locked || !credential.options.length && !nodeSelect.value
-      revertAccount.disabled = locked || !revertAccount.options.length
-      button('revert').disabled = locked || !revertAccount.value
-      button('discover').disabled = locked || !capabilities.discover || state !== 'created'
-      button('select').disabled = locked || !['inventoried', 'selected', 'reviewed'].includes(state)
-      button('resolve').disabled = locked || selectionChanged() || !['selected', 'reviewed'].includes(state) || !conflict.options.length
-      button('review').disabled = locked || selectionChanged() || state !== 'selected'
-      button('run').disabled = locked || selectionChanged() || !capabilities.execute || state !== 'reviewed' || !selected?.digest
-      button('stop').disabled = busy || !loaded || !admitted() || state !== 'applying' || selected?.stopRequested === true
-      button('cancel').disabled = locked || !['created', 'connected', 'inventoried', 'selected', 'reviewed'].includes(state)
-      const chosen = imports.find(item => item.id === importSelect.value)
-      button('inspect').disabled = locked || !capabilities.cpanelImport
-      button('fetch').disabled = locked || !capabilities.cpanelImport
-      button('ssh-key').disabled = locked || !capabilities.cpanelImport
-      importSelect.disabled = busy || !imports.length || !readable()
-      importPlan.disabled = locked || chosen?.state !== 'review'
-      button('import-run').disabled = locked || chosen?.state !== 'review' || !importPlan.value || (Array.isArray(chosen?.conflicts) && chosen.conflicts.length > 0)
-      button('import-discard').disabled = locked || !chosen || ['uploading', 'fetching', 'inspecting', 'importing'].includes(String(chosen.state))
-      field('transfer-resolution-target').disabled = locked || !['rename', 'map-plan'].includes(resolution.value)
-      if (wholeServer) [accounts, plans].forEach(container => container.querySelectorAll<HTMLInputElement>('input').forEach(input => { input.disabled = true }))
-      if (comparison) {
-        for (const item of inventoryRows) { item.select.disabled = locked || wholeServer; item.resolve.disabled = locked || selectionChanged() || !['selected', 'reviewed'].includes(state) || !item.conflicts.length }
-        if (selectAll) { selectAll.disabled = locked || wholeServer || !inventoryRows.length; const chosen = inventoryRows.filter(item => item.select.checked).length; selectAll.checked = inventoryRows.length > 0 && chosen === inventoryRows.length; selectAll.indeterminate = chosen > 0 && chosen < inventoryRows.length }
-      }
-      root.setAttribute('aria-busy', String(busy))
+      syncClean(() => {
+        const locked = busy || reviewRequired || !loaded || !admitted(), state = String(selected?.session.state ?? '')
+        root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(control => { control.disabled = locked })
+        button('refresh').disabled = busy || !readable()
+        sessionSelect.disabled = busy || !loaded || !readable()
+        credential.disabled = locked || !credential.options.length
+        nodeSelect.disabled = locked || !capabilities.live
+        liveBox.disabled = locked || !nodeSelect.value
+        button('create').disabled = locked || !credential.options.length && !nodeSelect.value
+        revertAccount.disabled = locked || !revertAccount.options.length
+        button('revert').disabled = locked || !revertAccount.value
+        button('discover').disabled = locked || !capabilities.discover || state !== 'created'
+        button('select').disabled = locked || !['inventoried', 'selected', 'reviewed'].includes(state)
+        button('resolve').disabled = locked || selectionChanged() || !['selected', 'reviewed'].includes(state) || !conflict.options.length
+        button('review').disabled = locked || selectionChanged() || state !== 'selected'
+        button('run').disabled = locked || selectionChanged() || !capabilities.execute || state !== 'reviewed' || !selected?.digest
+        button('stop').disabled = busy || !loaded || !admitted() || state !== 'applying' || selected?.stopRequested === true
+        button('cancel').disabled = locked || !['created', 'connected', 'inventoried', 'selected', 'reviewed'].includes(state)
+        const chosen = imports.find(item => item.id === importSelect.value)
+        button('inspect').disabled = locked || !capabilities.cpanelImport
+        button('fetch').disabled = locked || !capabilities.cpanelImport
+        button('ssh-key').disabled = locked || !capabilities.cpanelImport
+        importSelect.disabled = busy || !imports.length || !readable()
+        importPlan.disabled = locked || chosen?.state !== 'review'
+        button('import-run').disabled = locked || chosen?.state !== 'review' || !importPlan.value || (Array.isArray(chosen?.conflicts) && chosen.conflicts.length > 0)
+        button('import-discard').disabled = locked || !chosen || ['uploading', 'fetching', 'inspecting', 'importing'].includes(String(chosen.state))
+        field('transfer-resolution-target').disabled = locked || !['rename', 'map-plan'].includes(resolution.value)
+        if (wholeServer) [accounts, plans].forEach(container => container.querySelectorAll<HTMLInputElement>('input').forEach(input => { input.disabled = true }))
+        if (comparison) {
+          for (const item of inventoryRows) { item.select.disabled = locked || wholeServer; item.resolve.disabled = locked || selectionChanged() || !['selected', 'reviewed'].includes(state) || !item.conflicts.length }
+          if (selectAll) { selectAll.disabled = locked || wholeServer || !inventoryRows.length; const chosen = inventoryRows.filter(item => item.select.checked).length; selectAll.checked = inventoryRows.length > 0 && chosen === inventoryRows.length; selectAll.indeterminate = chosen > 0 && chosen < inventoryRows.length }
+        }
+        root.setAttribute('aria-busy', String(busy))
+      })
     }
     const request = async (method: string, path: string, body?: unknown): Promise<unknown> => {
       if (!verifyTemplates(method !== 'GET')) throw { stateChanged: false }

@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { builtinEnvironments, type EnvironmentReturn } from 'vitest/runtime'
 import { ACCOUNT_BACKUP_CLIENT_BINDING, readAccountBackups, readAccountBackupPreview } from './account-backup-client.ts'
 import { renderAccountBackupWorkspace } from './board-port/account-backup-workspace.ts'
@@ -7,8 +7,17 @@ import { renderV2AccountBackupPage } from './themes/v2/pages/xpanel/operations/b
 import { isLocale, translator } from './i18n.ts'
 
 let testDom: EnvironmentReturn | undefined
-beforeEach(async () => {
+const bindAccountBackupClient = new Function('return ' + ACCOUNT_BACKUP_CLIENT_BINDING)() as (ask: () => Promise<boolean>) => void
+beforeAll(async () => {
   testDom = await builtinEnvironments.jsdom.setup(globalThis, { jsdom: { url: 'https://panel.example.test/backups', runScripts: 'outside-only' } })
+})
+afterAll(async () => {
+  await testDom?.teardown(globalThis)
+  testDom = undefined
+})
+beforeEach(() => {
+  document.documentElement.lang = 'en'
+  document.documentElement.dir = 'ltr'
   vi.stubGlobal('xpT', (message: string, values?: Readonly<Record<string, string | number>>) => {
     const lang = document.documentElement.lang
     return translator(isLocale(lang) ? lang : undefined)(message, values)
@@ -43,20 +52,14 @@ function mount(options: { manage?: boolean; transport?: boolean; archives?: {fil
   document.body.innerHTML = options.html ?? renderAccountBackupWorkspace({ lang: 'en', accountId, username, canManage: options.manage !== false })
   options.beforeBind?.(document.querySelector<HTMLElement>('[data-account-backup]')!)
   const dialog = vi.fn(async () => options.dialog !== false)
-  const bind = new Function('return ' + ACCOUNT_BACKUP_CLIENT_BINDING)() as (ask: typeof dialog) => void
-  bind(dialog)
+  bindAccountBackupClient(dialog)
   return { request, dialog }
 }
-afterEach(async () => {
-  try {
-    document.body.textContent = ''
-    delete (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest
-    vi.restoreAllMocks()
-    vi.unstubAllGlobals()
-  } finally {
-    await testDom?.teardown(globalThis)
-    testDom = undefined
-  }
+afterEach(() => {
+  document.body.textContent = ''
+  delete (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest
+  vi.restoreAllMocks()
+  vi.unstubAllGlobals()
 })
 
 describe('account backup reply identity and review validation', () => {

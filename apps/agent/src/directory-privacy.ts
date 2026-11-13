@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'node:crypto'
+import { createHash, hash, randomBytes } from 'node:crypto'
 import { posix } from 'node:path'
 import { fail, isXpanelError, servedDocRoot } from '@xpanel/core'
 import type { Account, Domain, ServerSettings } from '@xpanel/core'
@@ -20,6 +20,7 @@ const unchanged = { stateChanged: false }
 
 // SHA-512-crypt (Drepper, "Unix crypt using SHA-256 and SHA-512"); Apache verifies it through crypt(3).
 const CRYPT64 = './0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
+const ROUND_SCHEDULE = Uint8Array.from({ length: 42 }, (_, r) => (r & 1) | ((r % 3 ? 1 : 0) << 1) | ((r % 7 ? 1 : 0) << 2))
 const repeated = (digest: Buffer, length: number): Buffer => { const out = Buffer.alloc(length); for (let at = 0; at < length; at += 64) digest.copy(out, at, 0, Math.min(64, length - at)); return out }
 export function sha512Crypt(password: string, salt: string = [...randomBytes(16)].map(byte => CRYPT64[byte & 63]).join(''), rounds = 5000): string {
   if (!/^[./0-9A-Za-z]{1,16}$/.test(salt) || !Number.isSafeInteger(rounds) || rounds < 1000 || rounds > 999_999_999) return fail('VALIDATION', 'invalid SHA-512-crypt parameters')
@@ -28,16 +29,27 @@ export function sha512Crypt(password: string, salt: string = [...randomBytes(16)
   const first = createHash('sha512').update(key).update(saltBytes).update(repeated(alternate, key.length))
   for (let length = key.length; length > 0; length >>= 1) first.update(length & 1 ? alternate : key)
   const a = first.digest()
-  const dp = createHash('sha512'); for (let index = 0; index < key.length; index++) dp.update(key)
-  const p = repeated(dp.digest(), key.length)
-  const ds = createHash('sha512'); for (let index = 0; index < 16 + a[0]!; index++) ds.update(saltBytes)
-  const s = repeated(ds.digest(), saltBytes.length)
-  let c = a
+  const dpDigest = key.length === 0 ? hash('sha512', key, 'buffer') : hash('sha512', Buffer.alloc(key.length * key.length, key), 'buffer')
+  const p = repeated(dpDigest, key.length)
+  const dsCount = 16 + a[0]!
+  const dsDigest = hash('sha512', Buffer.alloc(saltBytes.length * dsCount, saltBytes), 'buffer')
+  const s = repeated(dsDigest, saltBytes.length)
+  const templates = Array.from({ length: 8 }, (_, idx) => {
+    const odd = idx & 1, parts: Buffer[] = []
+    if (odd) parts.push(p)
+    if (idx & 2) parts.push(s)
+    if (idx & 4) parts.push(p)
+    if (!odd) parts.push(p)
+    const fixed = Buffer.concat(parts), buf = Buffer.allocUnsafe(fixed.length + 64), cOffset = odd ? fixed.length : 0
+    fixed.copy(buf, odd ? 0 : 64)
+    return { buf, cOffset }
+  })
+  let c = a, slot = 0
   for (let round = 0; round < rounds; round++) {
-    const hash = createHash('sha512').update(round & 1 ? p : c)
-    if (round % 3) hash.update(s)
-    if (round % 7) hash.update(p)
-    c = hash.update(round & 1 ? c : p).digest()
+    const tpl = templates[ROUND_SCHEDULE[slot]!]!
+    c.copy(tpl.buf, tpl.cOffset)
+    c = hash('sha512', tpl.buf, 'buffer')
+    if (++slot === 42) slot = 0
   }
   let encoded = ''
   const emit = (value: number, chars: number): void => { for (let n = 0; n < chars; n++) { encoded += CRYPT64[value & 63]; value >>= 6 } }

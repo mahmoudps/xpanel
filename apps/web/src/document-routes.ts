@@ -48,12 +48,29 @@ export function contextualizeNavigationHref(href: string, context: NavigationCon
   return `${url.pathname}${url.search}${url.hash}`
 }
 
+const PLAIN_ROUTE_HREF = /^\/(?:[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*)?$/
+const escapeHrefAttr = (value: string): string =>
+  value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
 /** Applies URL context to our generated, quoted anchor attributes; it never selects or hides HTML content. */
 export function contextualizeDocumentLinks(html: string, context: NavigationContext): string {
+  const baseParams = new URLSearchParams({ lang: context.locale, theme: context.theme })
+  if (context.density) baseParams.set('density', context.density)
+  const escapedBaseQuery = escapeHrefAttr(`?${baseParams.toString()}`)
+  let escapedAccountQuery = escapedBaseQuery
+  if (context.accountId) {
+    const accParams = new URLSearchParams(baseParams)
+    accParams.set('accountId', context.accountId)
+    escapedAccountQuery = escapeHrefAttr(`?${accParams.toString()}`)
+  }
   return html.replace(/(<a\b[^>]*\bhref=")([^"]*)(")/g, (_match, start: string, raw: string, end: string) => {
+    if (PLAIN_ROUTE_HREF.test(raw)) {
+      if (!resolveWebDocumentRoute(raw)) return _match
+      return `${start}${raw}${raw === '/login' ? escapedBaseQuery : escapedAccountQuery}${end}`
+    }
     const href = raw.replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>')
     const target = contextualizeNavigationHref(href, context)
-    const escaped = target.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    const escaped = escapeHrefAttr(target)
     return `${start}${escaped}${end}`
   })
 }

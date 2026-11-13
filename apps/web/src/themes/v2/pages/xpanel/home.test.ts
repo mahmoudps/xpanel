@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { defaultPlan, type Account, type Domain, type WebsiteAnalyticsSnapshot } from '@xpanel/core'
-import { tools } from '@xpanel/catalog'
+import { unqualifiedTools as tools } from '@xpanel/catalog'
 import { v2Messages } from '../../messages.ts'
 import { parseMarkup, type MarkupNode } from '../../../markup.ts'
 import { PANEL_HOME_TOOL_GROUPS, V2_PANEL_HOME_CSS, panelHomeMeters, renderV2PanelHome, selectedPanelPlan, type PanelPageProps } from './home.ts'

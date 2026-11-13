@@ -1,6 +1,6 @@
 /// <reference lib="dom" />
 import { createRequire } from 'node:module'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 import { msgctxt, msgid } from '@xpanel/core'
 import { tools, type VisibilityContext } from '@xpanel/catalog'
 import { translator } from './i18n.ts'
@@ -19,21 +19,39 @@ import { v2Messages } from './themes/v2/messages.ts'
 type TestDom = { window: Window & typeof globalThis }
 const harnessRequire = createRequire(createRequire(import.meta.url).resolve('vitest'))
 const { JSDOM } = harnessRequire('jsdom') as { JSDOM: new (html: string, options: { url: string; runScripts: 'outside-only' }) => TestDom }
-const doms: TestDom[] = []
+const sharedDom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'https://mail.example.test/mail/inbox', runScripts: 'outside-only' })
+const enTranslator = translator('en')
+const bootCache = new Map<string, (confirm: unknown, rtl?: boolean) => void>()
+const htmlTemplateCache = new Map<string, HTMLTemplateElement>()
+Object.assign(sharedDom.window, { msgid, msgctxt, xpT: enTranslator })
 const mailbox = 'owner@example.test', validity = 800
 const tick = async () => { await new Promise(resolve => setTimeout(resolve, 0)); await new Promise(resolve => setTimeout(resolve, 0)) }
 const input = { locale: 'en' as const, mailbox, route: '/mail/search', canRead: true, canManage: true, searchAvailable: true, attachmentsAvailable: true }
 const visibility: VisibilityContext = { principal: { kind: 'user', id: 'mail-owner', username: 'owner', accountId: 'account-mail' }, disabledFeatures: new Set() }
 const catalog = tools.map(tool => ({ ...tool, status: 'verified' as const, delivery: { ...tool.delivery, status: 'verified' as const } }))
 function mount(html: string, binding: string, send: (method: string, path: string, body?: unknown) => Promise<unknown>, prepare?: (document: Document) => void) {
-  const dom = new JSDOM(html, { url: 'https://mail.example.test/mail/inbox', runScripts: 'outside-only' }); doms.push(dom)
-  Object.assign(dom.window, { msgid, msgctxt, xpT: translator('en'), xpanelSessionRequest: send })
-  prepare?.(dom.window.document)
-  const boot = dom.window.Function('return ' + binding)() as (confirm: unknown, rtl?: boolean) => void
+  let tpl = htmlTemplateCache.get(html)
+  if (!tpl) {
+    tpl = sharedDom.window.document.createElement('template')
+    tpl.innerHTML = html
+    htmlTemplateCache.set(html, tpl)
+  }
+  sharedDom.window.document.body.replaceChildren(tpl.content.cloneNode(true))
+  Object.assign(sharedDom.window, { msgid, msgctxt, xpT: enTranslator, xpanelSessionRequest: send })
+  prepare?.(sharedDom.window.document)
+  let boot = bootCache.get(binding)
+  if (!boot) {
+    boot = sharedDom.window.Function('return ' + binding)() as (confirm: unknown, rtl?: boolean) => void
+    bootCache.set(binding, boot)
+  }
   boot(async () => true, false)
-  return { document: dom.window.document, window: dom.window, boot }
+  return { document: sharedDom.window.document, window: sharedDom.window, boot }
 }
-afterEach(() => { for (const dom of doms.splice(0)) dom.window.close() })
+afterEach(() => {
+  sharedDom.window.document.body.replaceChildren()
+  delete (sharedDom.window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest
+})
+afterAll(() => { sharedDom.window.close() })
 
 describe.each(['classic', 'v2'] as const)('%s mailbox dynamic templates', theme => {
   const attachmentHtml = () => theme === 'classic'

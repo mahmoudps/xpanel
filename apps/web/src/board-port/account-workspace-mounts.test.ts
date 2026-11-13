@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { tools } from '@xpanel/catalog'
+import { unqualifiedTools as tools } from '@xpanel/catalog'
 import type { Account, Domain } from '@xpanel/core'
 import { renderBoardCanvas } from '../board-canvas.ts'
 import { ACCOUNT_BACKUP_CLIENT_BINDING } from '../account-backup-client.ts'

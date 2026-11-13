@@ -2,7 +2,7 @@
 // @vitest-environment jsdom
 // @vitest-environment-options {"url":"https://panel.example.test/home?lang=en"}
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { tools, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
+import { unqualifiedTools as tools, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
 import { commandPaletteEntries, renderCommandPaletteModal } from './command-palette.ts'
 import { COMMAND_PALETTE_CLIENT_FUNCTIONS } from './command-palette-client.ts'
 

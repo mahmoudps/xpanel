@@ -15,6 +15,8 @@ export function accountApiTokenClientTemplates(classes: { buttonClass: string; b
 
 /** Every required prototype is workspace-owned, single-rooted and has exactly its typed slots. */
 export function assertAccountApiTokenTemplates(root: HTMLElement): void {
+  const unsafeTags = new Set(['SCRIPT', 'IFRAME', 'OBJECT', 'EMBED', 'FORM', 'A', 'SELECT', 'TEXTAREA'])
+  const unsafeAttrs = new Set(['data-api-url', 'src', 'href'])
   const contracts = [
     ['account-token-row', 'tr', { select: 'input', name: 'bdi', state: 'span', scopes: 'td', addresses: 'td', created: 'td', expires: 'td', used: 'td', actions: 'td' }],
     ['account-token-actions', 'div', { content: 'div' }],
@@ -32,17 +34,26 @@ export function assertAccountApiTokenTemplates(root: HTMLElement): void {
     const present = [...(clone.hasAttribute('data-xp-slot') ? [clone] : []), ...clone.querySelectorAll<HTMLElement>('[data-xp-slot]')]
     if (present.length !== Object.keys(slots).length || present.some(node => !Object.hasOwn(slots, node.getAttribute('data-xp-slot') ?? ''))) throw new Error('account_token_template_slots_unavailable')
     for (const [slot, type] of Object.entries(slots)) clientTemplateSlot(clone, slot, type)
-    for (const node of [clone, ...clone.querySelectorAll('*')]) {
-      if (node.matches('script,iframe,object,embed,form,a,select,textarea') || [...node.attributes].some(attr => /^on/i.test(attr.name) || ['data-api-url', 'src', 'href'].includes(attr.name))) throw new Error('account_token_template_unsafe')
+    let inputCount = 0, buttonCount = 0
+    for (const stack: Element[] = [clone]; stack.length;) {
+      const node = stack.pop()!, nodeTag = node.tagName
+      if (unsafeTags.has(nodeTag)) throw new Error('account_token_template_unsafe')
+      if (nodeTag === 'INPUT') inputCount++
+      else if (nodeTag === 'BUTTON') buttonCount++
+      for (let i = 0; i < node.attributes.length; i++) {
+        const attrName = node.attributes[i]!.name
+        if (/^on/i.test(attrName) || unsafeAttrs.has(attrName)) throw new Error('account_token_template_unsafe')
+      }
+      for (let child = node.firstElementChild; child; child = child.nextElementSibling) stack.push(child)
     }
     if (name === 'account-token-row') {
       const select = clientTemplateSlot(clone, 'select', 'input')
       if (!(select instanceof HTMLInputElement) || select.type !== 'checkbox' || !select.disabled || clone.children.length !== 7
         || [...clone.children].some(cell => cell.tagName !== 'TD') || clientTemplateSlot(clone, 'name', 'bdi').getAttribute('dir') !== 'ltr'
-        || clone.querySelectorAll('input').length !== 1 || clone.querySelectorAll('button').length) throw new Error('account_token_row_unavailable')
+        || inputCount !== 1 || buttonCount > 0) throw new Error('account_token_row_unavailable')
     } else if (name === 'account-token-rename' || name === 'account-token-revoke') {
-      if (!(clone instanceof HTMLButtonElement) || clone.type !== 'button' || !clone.disabled || clone.getAttribute('data-xp-action') !== name.slice('account-token-'.length)) throw new Error('account_token_action_unavailable')
-    } else if (clone.querySelector('input,button')) throw new Error('account_token_template_unexpected_control')
+      if (!(clone instanceof HTMLButtonElement) || clone.type !== 'button' || !clone.disabled || clone.getAttribute('data-xp-action') !== name.slice('account-token-'.length) || inputCount > 0 || buttonCount !== 1) throw new Error('account_token_action_unavailable')
+    } else if (inputCount > 0 || buttonCount > 0) throw new Error('account_token_template_unexpected_control')
     if (name === 'account-token-empty' && (clone.children.length !== 1 || clientTemplateSlot(clone, 'content', 'td').getAttribute('colspan') !== '7')) throw new Error('account_token_empty_unavailable')
   }
 }

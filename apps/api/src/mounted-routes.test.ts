@@ -1,10 +1,12 @@
 import { randomUUID } from 'node:crypto'
-import { readFile } from 'node:fs/promises'
-import { join } from 'node:path'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { existsSync } from 'node:fs'
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { dirname, join, relative, sep } from 'node:path'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import * as db from '@xpanel/db'
 import { profileFor } from '@xpanel/os'
-import { atomicWriteJson, createTestStateStore } from '@xpanel/state'
+import { atomicWriteJson, createStateStore, createTestStateStore, type TestStateStoreHandle } from '@xpanel/state'
 import { createAgentApp } from '../../agent/src/server.ts'
 import type { AgentServerDeps } from '../../agent/src/server.ts'
 import { FakeHostExecutor } from '../../agent/src/executor.ts'
@@ -21,11 +23,51 @@ import type { MailboxTransport } from './mail/inbox.ts'
 // Real listeners' admission, persisted identities, StateStore and API -> agent routing.
 // These tests never activate Linux/native providers or execute their commands.
 const HASH = '$argon2id$v=19$m=65536,t=3,p=4$MIIRqgvgQbgj220jfp0MPA$YfwJSVjtjSU0zzV/P3S9nnQ/USre2wvJMjfCIjrTQbg'
+const STATE_PARENT = existsSync('/dev/shm') ? '/dev/shm' : tmpdir()
 const cleanup: Array<() => Promise<unknown>> = []
 const subscriptionOnlyReconciler = (): AgentServerDeps['reconciler'] => {
   const boundary: Pick<AgentServerDeps['reconciler'], 'subscribe'> = { subscribe: () => () => {} }
   return boundary as unknown as AgentServerDeps['reconciler']
 }
+interface CachedStateFile { relPath: string; bytes: Buffer }
+const buildMountedTemplate = async () => {
+  const database = await db.createTestDb()
+  const state = await createTestStateStore()
+  try {
+    const features = await state.store.createFeatureList({ name: 'Mounted-route fixture', ownerId: null, disabled: [] })
+    const plan = await state.store.createPlan({ name: 'Mounted-route fixture', ownerId: null, featureListId: features.id,
+      resources: { diskMb: 1000, bandwidthMbMonth: 10000, ioReadBps: 1048576, ioWriteBps: 1048576, ioReadIops: 100, ioWriteIops: 100, memoryMb: 128, maxProcesses: 16, cpuPercent: 100 },
+      caps: { addonDomains: 4, aliasDomains: 4, subdomains: 4, mailboxes: 4, forwarders: 4, mailingLists: 4, ftpAccounts: 4, databases: 4, phpWorkers: 4 }, dedicatedIp: false, shell: 'none', defaultMailboxQuotaMb: 100 })
+    await state.store.saveServerIp({ address: '192.0.2.64', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
+    const makeAccount = (username: string) => state.store.createAccount({ username, passwordHash: HASH, primaryDomain: username + '.example.test', planId: plan.id, ownerId: null,
+      contactEmail: 'owner@' + username + '.example.test', ipv4: '192.0.2.64', shell: 'none',
+      php: { version: '8.3', handler: 'fpm', fpm: { mode: 'ondemand', maxChildren: 2, startServers: 1, minSpareServers: 1, maxSpareServers: 1, maxRequests: 50, processIdleTimeoutSec: 10 }, ini: {} } })
+    const account = await makeAccount('mountowner'), other = await makeAccount('mountother')
+    const root = await db.createRootPrincipal(database.db, { username: 'root', passwordHash: HASH, forcePasswordChange: false })
+    const owner = await db.createUserPrincipal(database.db, { username: account.username, accountId: account.id, passwordHash: HASH })
+    const neighbor = await db.createUserPrincipal(database.db, { username: other.username, accountId: other.id, passwordHash: HASH })
+    const lock = state.store.getWriterLock()
+    const stateFiles: CachedStateFile[] = []
+    const dirSet = new Set<string>()
+    const walk = async (dir: string): Promise<void> => {
+      for (const entry of await readdir(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name)
+        if (full === lock.mutexFilePath || full.startsWith(lock.mutexFilePath + '-') || full === lock.lockDirPath || full.startsWith(lock.lockDirPath + sep)) continue
+        const rel = relative(state.rootDir, full)
+        if (entry.isDirectory()) { dirSet.add(rel); await walk(full) }
+        else { const d = dirname(rel); if (d !== '.') dirSet.add(d); stateFiles.push({ relPath: rel, bytes: await readFile(full) }) }
+      }
+    }
+    await walk(state.rootDir)
+    return { sqlite: database.sqlite.serialize(), stateFiles, relDirs: [...dirSet], account, other, root, owner, neighbor, features, plan }
+  } finally {
+    await state.close()
+    await database.close()
+  }
+}
+let mountedTemplatePromise: ReturnType<typeof buildMountedTemplate> | null = null
+const getMountedTemplate = () => (mountedTemplatePromise ??= buildMountedTemplate())
+beforeAll(async () => { await getMountedTemplate() })
 afterEach(async () => {
   vi.restoreAllMocks()
   const results = await Promise.allSettled(cleanup.splice(0).reverse().map(close => close()))
@@ -33,20 +75,14 @@ afterEach(async () => {
   if (failures.length) throw new AggregateError(failures.map(result => result.reason), 'Mounted-route fixture cleanup failed')
 })
 async function fixture(options: { agent?: Partial<AgentServerDeps>; api?: Partial<ApiServerDeps> } = {}) {
-  const database = await db.createTestDb(); cleanup.push(() => database.close())
-  const state = await createTestStateStore(); cleanup.push(() => state.close())
-  const features = await state.store.createFeatureList({ name: 'Mounted-route fixture', ownerId: null, disabled: [] })
-  const plan = await state.store.createPlan({ name: 'Mounted-route fixture', ownerId: null, featureListId: features.id,
-    resources: { diskMb: 1000, bandwidthMbMonth: 10000, ioReadBps: 1048576, ioWriteBps: 1048576, ioReadIops: 100, ioWriteIops: 100, memoryMb: 128, maxProcesses: 16, cpuPercent: 100 },
-    caps: { addonDomains: 4, aliasDomains: 4, subdomains: 4, mailboxes: 4, forwarders: 4, mailingLists: 4, ftpAccounts: 4, databases: 4, phpWorkers: 4 }, dedicatedIp: false, shell: 'none', defaultMailboxQuotaMb: 100 })
-  await state.store.saveServerIp({ address: '192.0.2.64', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
-  const makeAccount = (username: string) => state.store.createAccount({ username, passwordHash: HASH, primaryDomain: username + '.example.test', planId: plan.id, ownerId: null,
-    contactEmail: 'owner@' + username + '.example.test', ipv4: '192.0.2.64', shell: 'none',
-    php: { version: '8.3', handler: 'fpm', fpm: { mode: 'ondemand', maxChildren: 2, startServers: 1, minSpareServers: 1, maxSpareServers: 1, maxRequests: 50, processIdleTimeoutSec: 10 }, ini: {} } })
-  const account = await makeAccount('mountowner'), other = await makeAccount('mountother')
-  const root = await db.createRootPrincipal(database.db, { username: 'root', passwordHash: HASH, forcePasswordChange: false })
-  const owner = await db.createUserPrincipal(database.db, { username: account.username, accountId: account.id, passwordHash: HASH })
-  const neighbor = await db.createUserPrincipal(database.db, { username: other.username, accountId: other.id, passwordHash: HASH })
+  const tpl = await getMountedTemplate()
+  const database = db.createDb(':memory:'); database.sqlite.deserialize(tpl.sqlite); cleanup.push(() => database.close())
+  const rootDir = await mkdtemp(join(STATE_PARENT, 'xpanel-mount-'))
+  for (const relDir of tpl.relDirs) await mkdir(join(rootDir, relDir), { recursive: true, mode: 0o750 })
+  await Promise.all(tpl.stateFiles.map(file => writeFile(join(rootDir, file.relPath), file.bytes, { mode: 0o640 })))
+  const state: TestStateStoreHandle = { store: createStateStore(rootDir), rootDir, close: () => rm(rootDir, { recursive: true, force: true }) }
+  cleanup.push(() => state.close())
+  const { account, other, root, owner, neighbor, features, plan } = tpl
   const executor = new FakeHostExecutor(), nativeRun = vi.spyOn(executor, 'runCommand'), nativeRead = vi.spyOn(executor, 'readFile')
   const agent = createAgentApp({ db: database.db, store: state.store, executor, os: profileFor('ID=ubuntu\nVERSION_ID="24.04"\n'), agentToken: TEST_AGENT_TOKEN,
     reconciler: subscriptionOnlyReconciler(), ...options.agent })

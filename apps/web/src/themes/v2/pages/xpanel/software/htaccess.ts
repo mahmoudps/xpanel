@@ -1,4 +1,4 @@
-import { isToolAuthorized, tools as defaultCatalog } from '@xpanel/catalog'
+import { isToolAuthorized, unqualifiedTools as defaultCatalog } from '@xpanel/catalog'
 import { htaccessClientTemplates } from '../advanced/directive-client-templates.ts'
 import type { PanelSurfaceProps } from '../../../../contract.ts'
 import { card } from '../../../components/index.ts'

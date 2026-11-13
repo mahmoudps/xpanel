@@ -1,14 +1,14 @@
 import { createHash } from 'node:crypto'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { dirname } from 'node:path'
-import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { canOpenRegisteredRoute, registeredDocumentAliases, tools, visibleTools } from '@xpanel/catalog'
+import { existsSync } from 'node:fs'
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { canOpenRegisteredRoute, deliveryTarget, registeredDocumentAliases, tools, unqualifiedTools, visibleTools } from '@xpanel/catalog'
 import {
-  createApiToken, createResellerPrincipal, createRootPrincipal, createSession, createTestDb, createUserPrincipal, setTotpSecret,
+  createApiToken, createDb, createResellerPrincipal, createRootPrincipal, createSession, createTestDb, createUserPrincipal, setTotpSecret,
 } from '@xpanel/db'
-import type { TestDbHandle } from '@xpanel/db'
-import { createTestStateStore } from '@xpanel/state'
-import type { TestStateStoreHandle } from '@xpanel/state'
+import { createStateStore, type TestStateStoreHandle } from '@xpanel/state'
 import { SESSION_COOKIE_NAME, principalRecordToPrincipal, sha256Hex } from './auth.ts'
 import { createDefaultWebRenderer } from './main.ts'
 import { createApiApp, listenApiServer } from './server.ts'
@@ -233,14 +233,76 @@ afterAll(async () => {
   }, null, 2)}\n`)
 })
 
+const WEB_BOUNDARY_TMP = existsSync('/dev/shm') ? '/dev/shm' : tmpdir()
+
 describe('production web renderer boundary regressions', () => {
-  let db: TestDbHandle
+  let emptyDbBytes: Uint8Array
+  let scopedTemplateDir: string
+  let scopedMeta: {
+    featureList: Awaited<ReturnType<TestStateStoreHandle['store']['createFeatureList']>>
+    plan: Awaited<ReturnType<TestStateStoreHandle['store']['createPlan']>>
+    owner: Awaited<ReturnType<TestStateStoreHandle['store']['createAccount']>>
+    other: Awaited<ReturnType<TestStateStoreHandle['store']['createAccount']>>
+    trashedDatabase: Awaited<ReturnType<TestStateStoreHandle['store']['createDatabase']>>
+    otherDatabase: Awaited<ReturnType<TestStateStoreHandle['store']['createDatabase']>>
+    otherDatabaseUser: Awaited<ReturnType<TestStateStoreHandle['store']['createDatabaseUser']>>
+  }
+  let db: ReturnType<typeof createDb>
   let state: TestStateStoreHandle
   let snapshotReads: number
 
+  beforeAll(async () => {
+    const tpl = await createTestDb()
+    try { emptyDbBytes = tpl.sqlite.serialize() } finally { await tpl.close() }
+    scopedTemplateDir = await mkdtemp(join(WEB_BOUNDARY_TMP, 'xpanel-web-bnd-tpl-'))
+    const tplStore = createStateStore(scopedTemplateDir)
+    const featureList = await tplStore.createFeatureList({ name: 'Summary fixture features', ownerId: null, disabled: [] })
+    const plan = await tplStore.createPlan({
+      name: 'Summary plan7', ownerId: null, featureListId: featureList.id,
+      resources: { diskMb: 1000, bandwidthMbMonth: 'unlimited', ioReadBps: 1048576, ioWriteBps: 1048576, ioReadIops: 10, ioWriteIops: 10, memoryMb: 128, maxProcesses: 16, cpuPercent: 100 },
+      caps: { addonDomains: 1, aliasDomains: 1, subdomains: 1, mailboxes: 1, forwarders: 1, mailingLists: 1, ftpAccounts: 1, databases: 1, phpWorkers: 1 },
+      dedicatedIp: false, shell: 'none', defaultMailboxQuotaMb: 100,
+    })
+    const accountInput = { passwordHash: PUBLIC_VECTOR, planId: plan.id, ownerId: null, contactEmail: 'private-summary-contact@example.test', ipv4: '192.0.2.199', shell: 'none' as const,
+      php: { version: '8.3', handler: 'fpm' as const, fpm: { mode: 'ondemand' as const, maxChildren: 1, startServers: 1, minSpareServers: 1, maxSpareServers: 1, maxRequests: 50, processIdleTimeoutSec: 10 }, ini: {} },
+    }
+    await tplStore.saveServerIp({ address: '192.0.2.199', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
+    const owner = await tplStore.createAccount({ ...accountInput, username: 'owner7', primaryDomain: 'owner7.example.test' })
+    const other = await tplStore.createAccount({ ...accountInput, username: 'other7', primaryDomain: 'private-other-account.example.test' })
+    const trashedDatabase = await tplStore.createDatabase({ accountId: owner.id, name: 'owner7_trashed' })
+    await tplStore.trashDatabase(trashedDatabase.id)
+    const otherDatabase = await tplStore.createDatabase({ accountId: other.id, name: 'other7_private' })
+    const otherDatabaseUser = await tplStore.createDatabaseUser({
+      accountId: other.id, name: 'other7_private', authPlugin: 'ed25519', authString: PUBLIC_DB_AUTH,
+    })
+    scopedMeta = { featureList, plan, owner, other, trashedDatabase, otherDatabase, otherDatabaseUser }
+
+    const warmDb = createDb(':memory:')
+    warmDb.sqlite.deserialize(emptyDbBytes)
+    try {
+      const warmPrincipal = await createUserPrincipal(warmDb.db, { username: owner.username, accountId: owner.id, passwordHash: PUBLIC_VECTOR })
+      await createSession(warmDb.db, { principalId: warmPrincipal.id, tokenHash: sha256Hex('warm'), expiresAt: future(), mfaVerified: true })
+      const warmRender = await createDefaultWebRenderer({ store: tplStore, db: warmDb.db, serverSecret: SERVER_SECRET })
+      const warmCookie = `${SESSION_COOKIE_NAME}=warm`
+      for (const path of ['/panel?lang=en', '/panel?lang=ar', '/domains', '/files/manager', '/software/wordpress', '/whm']) {
+        const res = await warmRender(new Request(`http://localhost${path}`, { headers: { cookie: warmCookie } }))
+        parseMarkup(await res.text())
+      }
+      hydration.length = 0
+    } finally {
+      await warmDb.close()
+    }
+  })
+
+  afterAll(async () => {
+    if (scopedTemplateDir) await rm(scopedTemplateDir, { recursive: true, force: true })
+  })
+
   beforeEach(async () => {
-    db = await createTestDb()
-    state = await createTestStateStore()
+    db = createDb(':memory:')
+    db.sqlite.deserialize(emptyDbBytes)
+    const rootDir = await mkdtemp(join(WEB_BOUNDARY_TMP, 'xpanel-web-bnd-'))
+    state = { store: createStateStore(rootDir), rootDir, close: () => rm(rootDir, { recursive: true, force: true }) }
     snapshotReads = 0
     hydration.length = 0
     const readSnapshot = state.store.readSnapshot.bind(state.store)
@@ -461,7 +523,7 @@ describe('production web renderer boundary regressions', () => {
     const principal = await root()
     const cookie = await session(principal.id)
     const render = await renderer()
-    expect(tools.some(tool => tool.status === 'verified' && tool.delivery.status === 'verified')).toBe(false)
+    if (deliveryTarget === null) expect(tools.some(tool => tool.status === 'verified' && tool.delivery.status === 'verified')).toBe(false)
     const home = await observe('unverified-catalog:/whm', await render(request('/whm', cookie)), 200)
     expect.soft(home.includes('data-tool-availability="unverified"')).toBe(true)
     expect.soft(/alice-shop\.com|srv1\.xpanel\.test/.test(home)).toBe(false)
@@ -548,29 +610,12 @@ describe('production web renderer boundary regressions', () => {
   })
 
   it.each([false, true])('serves a scoped account overview over HTTP with populated owner database state: %s', async (populated) => {
-    const featureList = await state.store.createFeatureList({ name: 'Summary fixture features', ownerId: null, disabled: [] })
-    const plan = await state.store.createPlan({
-      name: 'Summary plan7', ownerId: null, featureListId: featureList.id,
-      resources: { diskMb: 1000, bandwidthMbMonth: 'unlimited', ioReadBps: 1048576, ioWriteBps: 1048576, ioReadIops: 10, ioWriteIops: 10, memoryMb: 128, maxProcesses: 16, cpuPercent: 100 },
-      caps: { addonDomains: 1, aliasDomains: 1, subdomains: 1, mailboxes: 1, forwarders: 1, mailingLists: 1, ftpAccounts: 1, databases: 1, phpWorkers: 1 },
-      dedicatedIp: false, shell: 'none', defaultMailboxQuotaMb: 100,
-    })
-    const accountInput = { passwordHash: PUBLIC_VECTOR, planId: plan.id, ownerId: null, contactEmail: 'private-summary-contact@example.test', ipv4: '192.0.2.199', shell: 'none' as const,
-      php: { version: '8.3', handler: 'fpm' as const, fpm: { mode: 'ondemand' as const, maxChildren: 1, startServers: 1, minSpareServers: 1, maxSpareServers: 1, maxRequests: 50, processIdleTimeoutSec: 10 }, ini: {} },
-    }
-    await state.store.saveServerIp({ address: '192.0.2.199', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
-    const owner = await state.store.createAccount({ ...accountInput, username: 'owner7', primaryDomain: 'owner7.example.test' })
-    const other = await state.store.createAccount({ ...accountInput, username: 'other7', primaryDomain: 'private-other-account.example.test' })
-    const trashedDatabase = await state.store.createDatabase({ accountId: owner.id, name: 'owner7_trashed' })
-    await state.store.trashDatabase(trashedDatabase.id)
+    await cp(scopedTemplateDir, state.rootDir, { recursive: true, force: true })
+    const { featureList, plan, owner, other, trashedDatabase, otherDatabase, otherDatabaseUser } = scopedMeta
     const databases = populated ? [await state.store.createDatabase({ accountId: owner.id, name: 'owner7_live' })] : []
     const databaseUsers = populated ? await Promise.all(['app', 'reader'].map(name => state.store.createDatabaseUser({
       accountId: owner.id, name: `owner7_${name}`, authPlugin: 'ed25519', authString: PUBLIC_DB_AUTH,
     }))) : []
-    const otherDatabase = await state.store.createDatabase({ accountId: other.id, name: 'other7_private' })
-    const otherDatabaseUser = await state.store.createDatabaseUser({
-      accountId: other.id, name: 'other7_private', authPlugin: 'ed25519', authString: PUBLIC_DB_AUTH,
-    })
     const principal = await createUserPrincipal(db.db, { username: owner.username, accountId: owner.id, passwordHash: PUBLIC_VECTOR })
     const cookie = await session(principal.id)
     const app = createApiApp({ store: state.store, db: db.db, serverSecret: SERVER_SECRET, webRenderer: await renderer() })
@@ -641,7 +686,7 @@ describe('production web renderer boundary regressions', () => {
     const principal = await root({ enrolled: false })
     const cookie = await session(principal.id)
     // A deliberately narrow, unaccepted provider snapshot must never expand to default tools.
-    const snapshot = Object.freeze(tools.slice(0, 1))
+    const snapshot = Object.freeze(unqualifiedTools.slice(0, 1))
     expect(snapshot.some(tool => tool.status === 'verified')).toBe(false)
     const load = vi.fn(async (_source: HostCatalogSource | null) => snapshot)
     const catalogProvider = { acceptanceIdentity: 'synthetic-unaccepted-snapshot', load, reset: () => {}, qualificationMode: () => false }

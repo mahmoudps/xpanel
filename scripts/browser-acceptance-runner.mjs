@@ -165,7 +165,9 @@ export async function main(args = process.argv.slice(2)) {
   }
   if (!runId) throw new Error('An explicit run ID is required')
   if (options.aggregate) {
-    const summary = aggregateReceipts(await readReceipts(options.aggregate), { runId, identity: sourceIdentity() })
+    const found = await readReceipts(options.aggregate)
+    if (found.length !== SHARD_COUNT) throw new Error('Exactly three partition receipts are required')
+    const summary = aggregateReceipts(found, { runId, identity: sourceIdentity() })
     process.stdout.write(JSON.stringify(summary, null, 2) + '\n')
     if (process.env.GITHUB_STEP_SUMMARY) {
       const { appendFile } = await import('node:fs/promises')

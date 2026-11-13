@@ -1,9 +1,12 @@
-import { mkdir, writeFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createRootPrincipal, createTestDb, createUserPrincipal, linkExternalIdentity, listSessionsForPrincipal, listVerifiedIps, replaceSecurityQuestions, setTotpSecret } from '@xpanel/db'
-import type { TestDbHandle } from '@xpanel/db'
-import { createTestStateStore } from '@xpanel/state'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { MIN_ARGON2_MEMORY_KIB } from '@xpanel/core'
+import { createDb, createRootPrincipal, createTestDb, createUserPrincipal, linkExternalIdentity, listSessionsForPrincipal, listVerifiedIps, replaceSecurityQuestions, setTotpSecret } from '@xpanel/db'
+import type { DbHandle } from '@xpanel/db'
+import { createStateStore } from '@xpanel/state'
 import type { TestStateStoreHandle } from '@xpanel/state'
 import { computeTotpCode, hashPasswordArgon2id, sealTotpSecret, sha256Hex } from './auth.ts'
 import { EXTERNAL_AUTH_STATE } from './external-auth.ts'
@@ -14,10 +17,29 @@ import type { ApiApp } from './server.ts'
 
 // The security-question step and the external sign-in entry of the real login path.
 const PASSWORD = 'Root-Password-2026'
-let db: TestDbHandle, state: TestStateStoreHandle, app: ApiApp, rootId = ''
+const FAST_HASH = { memoryKiB: MIN_ARGON2_MEMORY_KIB, timeCost: 1, parallelism: 1 }
+const STATE_PARENT = existsSync('/dev/shm') ? '/dev/shm' : tmpdir()
+let db: DbHandle, state: TestStateStoreHandle, app: ApiApp, rootId = ''
+let rootPasswordHash = '', rexAnswerHash = '', ammanAnswerHash = ''
+let sqliteTemplate: Uint8Array
+beforeAll(async () => {
+  ;[rootPasswordHash, rexAnswerHash, ammanAnswerHash] = await Promise.all([
+    hashPasswordArgon2id(PASSWORD, FAST_HASH),
+    hashPasswordArgon2id('rex', FAST_HASH),
+    hashPasswordArgon2id('amman', FAST_HASH),
+  ])
+  const seedDb = await createTestDb()
+  try {
+    rootId = (await createRootPrincipal(seedDb.db, { username: 'root', passwordHash: rootPasswordHash, forcePasswordChange: false })).id
+    sqliteTemplate = seedDb.sqlite.serialize()
+  } finally {
+    await seedDb.close()
+  }
+})
 beforeEach(async () => {
-  db = await createTestDb(); state = await createTestStateStore()
-  rootId = (await createRootPrincipal(db.db, { username: 'root', passwordHash: await hashPasswordArgon2id(PASSWORD, { timeCost: 1, parallelism: 1 }), forcePasswordChange: false })).id
+  db = createDb(':memory:'); db.sqlite.deserialize(sqliteTemplate)
+  const rootDir = await mkdtemp(join(STATE_PARENT, 'xpanel-id-signin-'))
+  state = { store: createStateStore(rootDir), rootDir, close: () => rm(rootDir, { recursive: true, force: true }) }
   app = createApiApp({ db: db.db, store: state.store, serverSecret: 'identity-http-synthetic-server-secret' })
 })
 afterEach(async () => { await db.close(); await state.close() })
@@ -26,8 +48,8 @@ const problem = async (response: Response) => { const body = await response.json
 
 describe('identity sign-in over HTTP', () => {
   it('asks the security questions after the password from an unverified address, then remembers the address', async () => {
-    await replaceSecurityQuestions(db.db, rootId, [{ question: 'First pet name?', answerHash: await hashPasswordArgon2id('rex', { timeCost: 1, parallelism: 1 }) },
-      { question: 'City of birth?', answerHash: await hashPasswordArgon2id('amman', { timeCost: 1, parallelism: 1 }) }])
+    await replaceSecurityQuestions(db.db, rootId, [{ question: 'First pet name?', answerHash: rexAnswerHash },
+      { question: 'City of birth?', answerHash: ammanAnswerHash }])
     expect((await login({ username: 'root', password: PASSWORD })).status).toBe(200)
     await mkdir(join(state.rootDir, 'extended/panel'), { recursive: true })
     await writeFile(join(state.rootDir, SECURITY_QUESTIONS_POLICY), JSON.stringify({ version: 1, verifiedIpSignIn: true, updatedAt: '2026-11-07T00:00:00.000Z' }))
@@ -48,7 +70,7 @@ describe('identity sign-in over HTTP', () => {
     const features = await state.store.createFeatureList({ name: 'Synthetic features', ownerId: null, disabled: [] })
     const plan = await state.store.createPlan({ name: 'Synthetic plan', ownerId: null, featureListId: features.id, resources: { diskMb: 1000, bandwidthMbMonth: 10000, ioReadBps: 1048576, ioWriteBps: 1048576, ioReadIops: 100, ioWriteIops: 100, memoryMb: 128, maxProcesses: 16, cpuPercent: 100 }, caps: { addonDomains: 1, aliasDomains: 1, subdomains: 1, mailboxes: 1, forwarders: 1, mailingLists: 1, ftpAccounts: 1, databases: 1, phpWorkers: 1 }, dedicatedIp: false, shell: 'none', defaultMailboxQuotaMb: 100 })
     await state.store.saveServerIp({ address: '192.0.2.10', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
-    const passwordHash = await hashPasswordArgon2id(PASSWORD, { timeCost: 1, parallelism: 1 })
+    const passwordHash = rootPasswordHash
     const account = await state.store.createAccount({ username: 'owner', passwordHash, primaryDomain: 'owner.example.test', planId: plan.id, ownerId: null, contactEmail: 'owner@example.test', ipv4: '192.0.2.10', shell: 'none', php: { version: '8.3', handler: 'fpm', fpm: { mode: 'ondemand', maxChildren: 1, startServers: 1, minSpareServers: 1, maxSpareServers: 1, maxRequests: 50, processIdleTimeoutSec: 10 }, ini: {} } })
     await createUserPrincipal(db.db, { username: 'owner', accountId: account.id, passwordHash })
     const cookie = (await login({ username: 'owner', password: PASSWORD })).headers.get('set-cookie')!.split(';')[0]!

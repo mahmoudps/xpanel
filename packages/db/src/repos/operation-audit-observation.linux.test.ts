@@ -313,7 +313,7 @@ describe('exact issued lifecycle append recovery algorithm; native admission is 
     // This is a gate algorithm seam, not native journal/old-binary acceptance.
     issuedRepairFixture.afterGate = async () => {
       interleavings++
-      const lease = await new WriterLock(directory).acquire()
+      const lease = await WriterLock.forRootOwnedDirectory(directory).acquire()
       await lease.recordIntent({ op: 'fixtureIssuedOwner', createdRelPaths: [], backups: [] })
       await lease.release() // retains its uncommitted marker but releases the OS mutex
       ownerBefore = await readFile(join(directory, '.lock', 'owner.json'))

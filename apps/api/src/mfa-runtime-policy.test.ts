@@ -1,7 +1,11 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { existsSync } from 'node:fs'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { createResellerPrincipal, createRootPrincipal, createTestDb, createUserPrincipal, getPrincipal, listSessionsForPrincipal, setPasswordHash, setTotpSecret } from '@xpanel/db'
 import type { TestDbHandle } from '@xpanel/db'
-import { createTestStateStore } from '@xpanel/state'
+import { createStateStore } from '@xpanel/state'
 import type { TestStateStoreHandle } from '@xpanel/state'
 import { authenticateRequest, hashPasswordArgon2id, sealTotpSecret, sha256Hex } from './auth.ts'
 import { createApiApp, listenApiServer } from './server.ts'
@@ -13,13 +17,43 @@ const SERVER_SECRET = 'development-policy-synthetic-server-secret-at-least-32-by
 const PASSWORD = 'SyntheticDevelopmentPassword!'
 const SECRET = 'JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP'
 const ORIGIN = 'http://localhost'
+const MFA_TMP = existsSync('/dev/shm') ? '/dev/shm' : tmpdir()
 let passwordHash: string
-beforeAll(async () => { passwordHash = await hashPasswordArgon2id(PASSWORD) })
+beforeAll(async () => {
+  passwordHash = await hashPasswordArgon2id(PASSWORD)
+  const warmDb = await createTestDb()
+  const warmDir = await mkdtemp(join(MFA_TMP, 'xpanel-mfa-warm-'))
+  const warmStore = createStateStore(warmDir)
+  try {
+    const root = await createRootPrincipal(warmDb.db, { username: 'root', passwordHash, forcePasswordChange: false })
+    const features = await warmStore.createFeatureList({ name: 'Warm features', ownerId: null, disabled: [] })
+    const plan = await warmStore.createPlan({ name: 'Warm plan', ownerId: null, featureListId: features.id, resources: { diskMb: 1000, bandwidthMbMonth: 10000, ioReadBps: 1048576, ioWriteBps: 1048576, ioReadIops: 100, ioWriteIops: 100, memoryMb: 128, maxProcesses: 16, cpuPercent: 100 }, caps: { addonDomains: 1, aliasDomains: 1, subdomains: 1, mailboxes: 1, forwarders: 1, mailingLists: 1, ftpAccounts: 1, databases: 1, phpWorkers: 1 }, dedicatedIp: false, shell: 'none', defaultMailboxQuotaMb: 100 })
+    await warmStore.saveServerIp({ address: '192.0.2.10', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
+    const account = await warmStore.createAccount({ username: 'owner', passwordHash, primaryDomain: 'owner.example.test', planId: plan.id, ownerId: null, contactEmail: 'owner@example.test', ipv4: '192.0.2.10', shell: 'none', php: { version: '8.3', handler: 'fpm', fpm: { mode: 'ondemand', maxChildren: 1, startServers: 1, minSpareServers: 1, maxSpareServers: 1, maxRequests: 50, processIdleTimeoutSec: 10 }, ini: {} } })
+    await createUserPrincipal(warmDb.db, { username: 'owner', accountId: account.id, passwordHash })
+    const warmApi = createApiApp({ db: warmDb.db, store: warmStore, serverSecret: SERVER_SECRET, allowedOrigins: [ORIGIN] })
+    const warmRenderer = await createDefaultWebRenderer({ db: warmDb.db, store: warmStore, serverSecret: SERVER_SECRET })
+    for (const [u, p] of [['root', '/whm/security/sign-in'], ['owner', '/security/account']] as const) {
+      const r = await warmApi.fetch(new Request(ORIGIN + '/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: u, password: PASSWORD }) }))
+      const c = r.headers.get('set-cookie')!.split(';')[0]!
+      await warmRenderer(new Request(ORIGIN + p, { headers: { cookie: c } }))
+      void root
+    }
+  } finally {
+    await warmDb.close()
+    await rm(warmDir, { recursive: true, force: true })
+  }
+})
 
 describe('trusted development MFA runtime policy', () => {
   let db: TestDbHandle
   let state: TestStateStoreHandle
-  beforeEach(async () => { db = await createTestDb(); state = await createTestStateStore(); await writeSignInLockout(state.store.rootDir, 2) })
+  beforeEach(async () => {
+    db = await createTestDb()
+    const rootDir = await mkdtemp(join(MFA_TMP, 'xpanel-mfa-'))
+    state = { store: createStateStore(rootDir), rootDir, close: () => rm(rootDir, { recursive: true, force: true }) }
+    await writeSignInLockout(state.store.rootDir, 2)
+  })
   afterEach(async () => { vi.unstubAllEnvs(); await state.close(); await db.close() })
 
   const app = () => createApiApp({ db: db.db, store: state.store, serverSecret: SERVER_SECRET, allowedOrigins: [ORIGIN] })

@@ -79,6 +79,58 @@ const SEARCH_LABELS: Readonly<Record<V2Surface, string>> = {
   xmail: msgctxt('shell', 'Find a page'),
 }
 
+interface CachedSidebarEntry {
+  readonly closedSections: readonly string[]
+  readonly closedJoined: string
+  readonly byCurrent: Map<string, string>
+}
+const SIDEBAR_SECTIONS_CACHE = new Map<string, CachedSidebarEntry>()
+const CHEV_RIGHT_HTML = icon('chevRight', 16).replace('class="v2-icon', 'class="v2-icon v2-nav__chev')
+
+function sidebarSectionsHtml(locale: Translate['locale'], surface: V2Surface, sectionsList: NonNullable<ReturnType<typeof visibleNavigation>[number]>['sections'], current: string): string {
+  if (sectionsList.length === 0) return ''
+  let sig = `${locale}\x1f${surface}`
+  for (const s of sectionsList) {
+    sig += `\x1e${s.id}\x1d${s.name}\x1d${s.icon}`
+    for (const p of s.pages) sig += `\x1c${p.id}\x1b${p.route}\x1b${p.name}`
+  }
+  let entry = SIDEBAR_SECTIONS_CACHE.get(sig)
+  if (!entry) {
+    const closedSections = sectionsList.map(section => {
+      const name = catalogText(locale, `nav.section.${surface}.${section.id}.name`, section.name)
+      const pages = section.pages.map(page => {
+        const label = catalogText(locale, `nav.page.${surface}.${page.id}.name`, page.name)
+        return `<li><a href="${escapeHtml(page.route)}" data-nav-route="${escapeHtml(page.route)}">${escapeHtml(label)}</a></li>`
+      }).join('')
+      return `<li data-nav-section="${escapeHtml(section.id)}"><details><summary>${icon(catalogIcon(section.icon))}<span>${escapeHtml(name)}</span>${CHEV_RIGHT_HTML}</summary><ul aria-label="${escapeHtml(name)}">${pages}</ul></details></li>`
+    })
+    entry = { closedSections, closedJoined: closedSections.join(''), byCurrent: new Map() }
+    if (SIDEBAR_SECTIONS_CACHE.size >= 64) SIDEBAR_SECTIONS_CACHE.clear()
+    SIDEBAR_SECTIONS_CACHE.set(sig, entry)
+  }
+  const hit = entry.byCurrent.get(current)
+  if (hit !== undefined) return hit
+  let anyOpen = false
+  for (const s of sectionsList) {
+    if (s.pages.some(p => p.route === current)) { anyOpen = true; break }
+  }
+  const rendered = !anyOpen
+    ? entry.closedJoined
+    : sectionsList.map((section, idx) => {
+        if (!section.pages.some(page => page.route === current)) return entry.closedSections[idx]!
+        const name = catalogText(locale, `nav.section.${surface}.${section.id}.name`, section.name)
+        const pages = section.pages.map(page => {
+          const here = page.route === current
+          const label = catalogText(locale, `nav.page.${surface}.${page.id}.name`, page.name)
+          return `<li><a href="${escapeHtml(page.route)}" data-nav-route="${escapeHtml(page.route)}"${here ? ' aria-current="page"' : ''}>${escapeHtml(label)}</a></li>`
+        }).join('')
+        return `<li data-nav-section="${escapeHtml(section.id)}"><details open><summary>${icon(catalogIcon(section.icon))}<span>${escapeHtml(name)}</span>${CHEV_RIGHT_HTML}</summary><ul aria-label="${escapeHtml(name)}">${pages}</ul></details></li>`
+      }).join('')
+  if (entry.byCurrent.size >= 256) entry.byCurrent.clear()
+  entry.byCurrent.set(current, rendered)
+  return rendered
+}
+
 function sidebarNavigation(t: Translate, props: V2ShellProps): string {
   const locale = t.locale
   const current = canonicalNavigationRoute(props.activeRoute)
@@ -87,16 +139,7 @@ function sidebarNavigation(t: Translate, props: V2ShellProps): string {
     ? visibleRegisteredNavigation(props.visibility)
     : visibleNavigation(props.visibility, props.catalog)
   const nav = navigation.find(item => item.surface === props.surface)
-  const sections = (nav?.sections ?? []).map(section => {
-    const name = catalogText(locale, `nav.section.${props.surface}.${section.id}.name`, section.name)
-    const open = section.pages.some(page => page.route === current)
-    const pages = section.pages.map(page => {
-      const here = page.route === current
-      const label = catalogText(locale, `nav.page.${props.surface}.${page.id}.name`, page.name)
-      return `<li><a href="${escapeHtml(page.route)}" data-nav-route="${escapeHtml(page.route)}"${here ? ' aria-current="page"' : ''}>${escapeHtml(label)}</a></li>`
-    }).join('')
-    return `<li data-nav-section="${escapeHtml(section.id)}"><details${open ? ' open' : ''}><summary>${icon(catalogIcon(section.icon))}<span>${escapeHtml(name)}</span>${icon('chevRight', 16).replace('class="v2-icon', 'class="v2-icon v2-nav__chev')}</summary><ul aria-label="${escapeHtml(name)}">${pages}</ul></details></li>`
-  }).join('')
+  const sections = sidebarSectionsHtml(locale, props.surface, nav?.sections ?? [], current)
   const empty = sections ? '' : `<p class="v2-nav__empty" data-navigation-empty="true">${escapeHtml(t('These tools are not available on this server yet.'))}</p>`
   const favorites = props.surface === 'xwhm' ? `<div class="v2-nav" data-whm-favorites-nav hidden><h2 class="v2-nav__label">${escapeHtml(t('Favorites'))}</h2><ul></ul></div>` : ''
   return `${favorites}<nav class="v2-nav" aria-label="${escapeHtml(t('Hosting tools'))}">${empty}<ul>${sections}</ul></nav>`

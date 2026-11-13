@@ -38,7 +38,7 @@ const refusal = (reason: string) => ({ code: 'VALIDATION', detail: { reason, sta
 beforeEach(async () => { root = await mkdtemp(join(tmpdir(), 'xp-plugins-')); disabled = [] })
 afterEach(async () => { await rm(root, { recursive: true, force: true }) })
 
-describe('plugin packages', { tags: ['unit'] }, () => {
+describe('plugin packages', { tags: ['feature'] }, () => {
   it('generates a download, installs it, lists it without icons, downloads and deletes it', async () => {
     const h = harness()
     expect(await h.plugins(await h.send('GET'))).toEqual([])

@@ -1,7 +1,12 @@
+import { existsSync } from 'node:fs'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { createRootPrincipal, createTestDb } from '@xpanel/db'
-import type { TestDbHandle } from '@xpanel/db'
-import { createTestStateStore } from '@xpanel/state'
+import { MIN_ARGON2_MEMORY_KIB } from '@xpanel/core'
+import { createDb, createRootPrincipal, createTestDb } from '@xpanel/db'
+import type { DbHandle } from '@xpanel/db'
+import { createStateStore } from '@xpanel/state'
 import type { TestStateStoreHandle } from '@xpanel/state'
 import { hashPasswordArgon2id, passwordHashFromInput } from './auth.ts'
 import { usePasswordStrengthPolicy, defaultPasswordStrength } from './password-policy.ts'
@@ -12,8 +17,19 @@ import { writeSignInPolicy } from './testing/sign-in-policy-fixture.ts'
 const SERVER_SECRET = 'sign-in-policy-synthetic-server-secret-at-least-32-bytes'
 const ORIGIN = 'https://panel.example.test'
 const PASSWORD = 'SyntheticRootPassword!2026'
+const STATE_PARENT = existsSync('/dev/shm') ? '/dev/shm' : tmpdir()
 let passwordHash: string
-beforeAll(async () => { passwordHash = await hashPasswordArgon2id(PASSWORD) })
+let sqliteTemplate: Uint8Array
+beforeAll(async () => {
+  passwordHash = await hashPasswordArgon2id(PASSWORD, { memoryKiB: MIN_ARGON2_MEMORY_KIB, timeCost: 1, parallelism: 1 })
+  const seedDb = await createTestDb()
+  try {
+    await createRootPrincipal(seedDb.db, { username: 'root', passwordHash, forcePasswordChange: false })
+    sqliteTemplate = seedDb.sqlite.serialize()
+  } finally {
+    await seedDb.close()
+  }
+})
 
 describe('sign-in policy rules', { tags: ['unit'] }, () => {
   it('canonicalizes ranges, rounds strength up to a multiple of 5 and refuses out-of-range values', () => {
@@ -41,9 +57,14 @@ describe('sign-in policy rules', { tags: ['unit'] }, () => {
 })
 
 describe('sign-in policy routes and effects', () => {
-  let db: TestDbHandle
+  let db: DbHandle
   let state: TestStateStoreHandle
-  beforeEach(async () => { db = await createTestDb(); state = await createTestStateStore(); await createRootPrincipal(db.db, { username: 'root', passwordHash, forcePasswordChange: false }) })
+  beforeEach(async () => {
+    db = createDb(':memory:')
+    db.sqlite.deserialize(sqliteTemplate)
+    const rootDir = await mkdtemp(join(STATE_PARENT, 'xpanel-signin-'))
+    state = { store: createStateStore(rootDir), rootDir, close: () => rm(rootDir, { recursive: true, force: true }) }
+  })
   afterEach(async () => { usePasswordStrengthPolicy(defaultPasswordStrength()); await state.close(); await db.close() })
 
   const app = () => createApiApp({ db: db.db, store: state.store, serverSecret: SERVER_SECRET, allowedOrigins: [ORIGIN] })

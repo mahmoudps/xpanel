@@ -44,12 +44,20 @@ const freeze = <T>(value: T): T => {
   return value
 }
 
+const frozenDefaultTools = freeze(structuredClone(tools))
+
 /** Acceptance is captured once; host reports can only narrow this immutable snapshot. */
-export const createQualifiedCatalogProvider = (acceptance?: TrustedAcceptanceOptions, readMode: () => boolean = readQualificationMode): QualifiedCatalogProvider => {
+export const createQualifiedCatalogProvider = (
+  acceptance?: TrustedAcceptanceOptions,
+  readMode: () => boolean = readQualificationMode,
+  baseCatalog: readonly CatalogTool[] = frozenDefaultTools,
+): QualifiedCatalogProvider => {
   // Invalid configured evidence throws before any listener is opened. No accepted fallback exists.
   const verified = acceptance ? loadTrustedEvidenceBundle(acceptance) : undefined
   // Without operator acceptance the shipped catalog applies: its delivery evidence is the reviewed release publication.
-  const base = freeze(structuredClone(verified ? buildDeliveryCatalog(verified.evidence, verified.target) : tools))
+  const base = verified
+    ? freeze(structuredClone(buildDeliveryCatalog(verified.evidence, verified.target)))
+    : Object.isFrozen(baseCatalog) ? baseCatalog : freeze(structuredClone(baseCatalog))
   const acceptanceIdentity = createHash('sha256').update(JSON.stringify(acceptance ? {
     digest: acceptance.expectedSha256, target: acceptance.expectedTarget, requirements: acceptance.expectedRequirements,
   } : { accepted: false })).digest('hex')

@@ -1,6 +1,6 @@
 import { catalogText, translator, type Locale } from '../i18n.ts'
 import { formatAsciiBytes, formatDisplayDateTime } from '../display-format.ts'
-import { canOpenRegisteredRoute, canonicalNavigationRoute, isToolAuthorized, tools as defaultCatalog, visibleNavigation, visibleRegisteredNavigation, visibleTools } from '@xpanel/catalog'
+import { canOpenRegisteredRoute, canonicalNavigationRoute, isToolAuthorized, unqualifiedTools as defaultCatalog, visibleNavigation, visibleRegisteredNavigation, visibleTools } from '@xpanel/catalog'
 import type { SurfaceAuthority } from './theme-surface.ts'
 import type { MailMessageItem, MailSurfaceProps } from '../surfaces/xmail.ts'
 

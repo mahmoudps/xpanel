@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { HOST_PROBES } from '../../../packages/catalog/src/host-qualification.ts'
-import { specs } from '../../../packages/catalog/src/data/index.ts'
-import type { CapabilityEvidence } from '@xpanel/catalog'
+import { specs, unqualifiedTools } from '../../../packages/catalog/src/data/index.ts'
+import { deliveryTarget, type CapabilityEvidence } from '@xpanel/catalog'
 import { loadTrustedEvidenceBundle } from '../../../scripts/evidence/runtime.mjs'
 import { createQualifiedCatalogProvider, type HostCatalogSource, type TrustedAcceptanceOptions } from './host-catalog.ts'
 
@@ -36,8 +36,10 @@ afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks() })
 
 describe('trusted acceptance catalog provider', () => {
   it('never manufactures acceptance from healthy host probes or missing configuration', async () => {
-    const provider = createQualifiedCatalogProvider()
+    const provider = createQualifiedCatalogProvider(undefined, () => false, unqualifiedTools)
     expect(status(await provider.load(source()))).toBe('researched')
+    if (deliveryTarget === null) expect(status(await createQualifiedCatalogProvider().load(source()))).toBe('researched')
+    else expect(status(await createQualifiedCatalogProvider().load(source()))).toBe('verified')
     expect(loader).not.toHaveBeenCalled()
   })
   it('never honours the qualification switch on a host with operator acceptance', async () => {
@@ -97,10 +99,10 @@ describe('trusted acceptance catalog provider', () => {
     expect(agent.fetch).toHaveBeenCalledTimes(2)
   })
   it('marks control-plane live from the authenticated agent answer, so qualification mode opens ready tools', async () => {
-    const provider = createQualifiedCatalogProvider(undefined, () => true)
+    const provider = createQualifiedCatalogProvider(undefined, () => true, unqualifiedTools)
     const listAccounts = (await provider.load(source())).find(tool => tool.id === 'list-accounts')!
     expect(listAccounts.delivery.admission).toBe('qualification')
-    const offline = createQualifiedCatalogProvider(undefined, () => true)
+    const offline = createQualifiedCatalogProvider(undefined, () => true, unqualifiedTools)
     const closed = await offline.load({ token: 'test-agent', fetch: async () => new Response('', { status: 503 }) })
     expect(closed.some(tool => tool.delivery.admission)).toBe(false)
   })

@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict'
 import { afterEach, beforeEach, describe, it } from 'vitest'
 import type { AgentApp } from '@xpanel/agent'
-import { qualifyHostTools, tools, type HostQualificationReport } from '@xpanel/catalog'
+import { deliveryTarget, qualifyHostTools, tools, unqualifiedTools, type HostQualificationReport } from '@xpanel/catalog'
 import { createRootPrincipal, createTestDb } from '@xpanel/db'
 import type { TestDbHandle } from '@xpanel/db'
 import { createTestStateStore } from '@xpanel/state'
 import type { TestStateStoreHandle } from '@xpanel/state'
 import { hashPasswordArgon2id, parseCookies } from './auth.ts'
-import { resetQualifiedCatalogCache } from './host-catalog.ts'
+import { createQualifiedCatalogProvider, resetQualifiedCatalogCache } from './host-catalog.ts'
 import { createApiApp } from './server.ts'
 import type { ApiApp } from './server.ts'
 import { TEST_SERVER_SECRET } from './testing.ts'
@@ -71,7 +71,7 @@ describe('GET /api/catalog', () => {
   }
 
   it('returns the same host-qualified catalog the sidebar uses', async () => {
-    assert.equal(tools.some(tool => tool.status === 'verified'), false)
+    if (deliveryTarget === null) assert.equal(tools.some(tool => tool.status === 'verified'), false)
     const body = await catalog(open(healthAgent({
       executor: 'linux',
       probes: {
@@ -96,8 +96,13 @@ describe('GET /api/catalog', () => {
   })
 
   it('healthy reports alone never establish default acceptance', async () => {
-    const body = await catalog(open(healthAgent({ executor: 'linux', probes: { 'control-plane': 'passed', 'linux-account': 'passed' } })))
-    assert.deepEqual(body.tools, [])
+    const agent = healthAgent({ executor: 'linux', probes: { 'control-plane': 'passed', 'linux-account': 'passed' } })
+    const unaccepted = createApiApp({
+      catalogProvider: createQualifiedCatalogProvider(undefined, () => false, unqualifiedTools),
+      db: db.db, store: state.store, serverSecret: TEST_SERVER_SECRET, agentApp: agent, agentToken: 'b'.repeat(64),
+    })
+    assert.deepEqual((await catalog(unaccepted)).tools, [])
+    if (deliveryTarget === null) assert.deepEqual((await catalog(open(agent))).tools, [])
   })
 
   it('stays unqualified for a fake executor and for a disconnected agent', async () => {

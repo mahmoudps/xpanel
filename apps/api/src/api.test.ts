@@ -206,7 +206,7 @@ describe('@xpanel/api HTTP integration with explicit fake host execution', () =>
     return login
   }
 
-  it('1. Root login, TOTP 2FA setup & verification, failed login lockout, CSRF protection, and CLI reset-password / disable-2fa', async () => {
+  it('1. Root login, TOTP 2FA setup & verification, failed login lockout, CSRF protection, and CLI reset-password / disable-2fa', { tags: ['slow', 'journey'] }, async () => {
     // Initial root login succeeds
     const { res: loginRes, body: loginBody, client: rootClient } = await loginAs('root', 'RootPassword!2026')
     assert.equal(loginRes.status, 200)

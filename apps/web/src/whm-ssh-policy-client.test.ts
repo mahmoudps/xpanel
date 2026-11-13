@@ -3,12 +3,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { WHM_SSH_POLICY_CLIENT_BINDING } from './whm-ssh-policy-client.ts'
 
 type Call = { method: string; path: string; body: unknown }
+const runSshPolicyBinding = new Function('return ' + WHM_SSH_POLICY_CLIENT_BINDING)() as (ask: (options: Record<string, unknown>) => Promise<unknown>) => void
 const flush = async (): Promise<void> => { for (let i = 0; i < 20; i++) await new Promise(resolve => setTimeout(resolve, 0)) }
 const bind = (reply: (call: Call) => unknown, ask: (options: Record<string, unknown>) => Promise<unknown> = async () => true): Call[] => {
   const calls: Call[] = []
   ;(window as unknown as { xpanelSessionRequest: unknown }).xpanelSessionRequest = async (method: string, path: string, body?: unknown) => { const call = { method, path, body }; calls.push(call); return reply(call) }
   ;(globalThis as unknown as { xpT: unknown }).xpT = (message: string) => message
-  ;(0, eval)(WHM_SSH_POLICY_CLIENT_BINDING)(ask)
+  runSshPolicyBinding(ask)
   return calls
 }
 const sshView = (patch: Record<string, unknown> = {}) => ({ settings: { port: 22, passwordAuth: false, pubkeyAuth: true, rootLogin: 'prohibit-password', loginAlarm: false, previousPort: null, revision: 'r1', ...patch }, alarmChannels: ['email'],
@@ -18,7 +19,7 @@ const q = <T extends HTMLElement>(selector: string): T => document.querySelector
 
 beforeEach(() => { document.body.innerHTML = '' })
 
-describe('SSH policy client', { tags: ['unit'] }, () => {
+describe('SSH policy client', { tags: ['feature'] }, () => {
   it('paints the host read and marks a capped count', async () => {
     document.body.innerHTML = sshPage()
     bind(() => sshView())
@@ -81,7 +82,7 @@ describe('SSH policy client', { tags: ['unit'] }, () => {
   })
 })
 
-describe('firewall policy client', { tags: ['unit'] }, () => {
+describe('firewall policy client', { tags: ['feature'] }, () => {
   const page = '<div data-whm-firewall-policy data-whm-firewall-can-manage="true"><input type="checkbox" data-whm-firewall-enabled disabled><p data-whm-firewall-policy-status></p></div><input type="checkbox" data-whm-firewall-ping disabled>'
   const view = { revision: 'a'.repeat(64), enabled: true, blockPing: false }
 
@@ -110,7 +111,7 @@ describe('firewall policy client', { tags: ['unit'] }, () => {
   })
 })
 
-describe('isolation policy client', { tags: ['unit'] }, () => {
+describe('isolation policy client', { tags: ['feature'] }, () => {
   const page = '<section data-whm-security-tools-workspace><select data-whm-security-tools-account><option value=""></option><option value="alice" selected></option></select><div data-whm-isolation-policy data-whm-isolation-can-manage="true"><input type="checkbox" data-whm-isolation-switch="privateTmp" disabled><input type="checkbox" data-whm-isolation-switch="hiddenHomes" disabled><input type="checkbox" data-whm-isolation-switch="systemView" disabled><textarea data-whm-isolation-exceptions disabled></textarea><button data-whm-isolation-save disabled></button><button data-whm-isolation-verify disabled></button><p data-whm-isolation-status></p><table><tbody data-whm-isolation-proof></tbody></table></div></section>'
   const view = { policy: { privateTmp: true, hiddenHomes: false, systemView: false, exceptions: [{ username: 'alice', reason: 'legacy deploy' }] }, revision: 'r1' }
 

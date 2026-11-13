@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { translator } from './i18n.ts'
 import { builtinEnvironments, type EnvironmentReturn } from 'vitest/runtime'
 import { ACCOUNT_HTACCESS_CLIENT_BINDING, type HtaccessClientView } from './account-htaccess-client.ts'
@@ -9,11 +9,14 @@ import * as classic from './board-port/account-directive-client-templates.ts'
 import * as v2 from './themes/v2/pages/xpanel/advanced/directive-client-templates.ts'
 
 let environment: EnvironmentReturn
-beforeEach(async () => {
+const runHtaccessBinding = new Function('return ' + ACCOUNT_HTACCESS_CLIENT_BINDING)() as (confirm: unknown) => void
+const runWebDirectivesBinding = new Function('return ' + ACCOUNT_WEB_DIRECTIVES_CLIENT_BINDING)() as (confirm: unknown) => void
+beforeAll(async () => {
   environment = await builtinEnvironments.jsdom.setup(globalThis, { jsdom: { url: 'https://panel.example.test', runScripts: 'outside-only' } })
-  vi.stubGlobal('xpT', translator('en'))
 })
-afterEach(async () => { await environment.teardown(globalThis); vi.restoreAllMocks(); vi.unstubAllGlobals() })
+afterAll(async () => { await environment.teardown(globalThis) })
+beforeEach(() => { vi.stubGlobal('xpT', translator('en')) })
+afterEach(() => { document.body.replaceChildren(); delete (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest; vi.restoreAllMocks(); vi.unstubAllGlobals() })
 const accountId = '11111111-1111-4111-8111-111111111111', domainId = '22222222-2222-4222-8222-222222222222'
 const input = { locale: 'en' as const, accountId, domains: [{ id: domainId, accountId, name: 'example.test' }], canManage: true }
 const saved: HtaccessClientView = { context: { accountId, domainId, domainName: 'example.test', path: 'public_html/.htaccess', engine: 'apache', phpHandler: 'fpm' }, document: { exists: true, content: 'php_value memory_limit 128M', sizeBytes: 27, mtime: '2026-10-26T12:00:00.000Z', revision: 'a'.repeat(64) }, versions: [{ id: '44444444-4444-4444-8444-444444444444', at: '2026-10-26T12:00:00.000Z', actor: '<literal reviewer>', sizeBytes: 27, revision: 'a'.repeat(64), state: 'kept', current: true, canRestore: false }], capabilities: { canValidate: true, canSave: true, canRestore: false, canMigrate: false, reason: null }, application: { status: 'read', nativeQualified: false, syntaxChecked: false, httpStatus: null }, policy: { valid: true, issues: [], phpLines: [] }, reviewRequired: false }
@@ -35,8 +38,7 @@ for (const [theme, factory] of [['classic', classic], ['v2', v2]] as const) desc
     if (denied) root.dataset.readonly = 'true'
     const request = vi.fn(async () => structuredClone(kind === 'htaccess' ? saved : directives))
     Object.assign(window, { xpanelSessionRequest: request })
-    const binding = kind === 'htaccess' ? ACCOUNT_HTACCESS_CLIENT_BINDING : ACCOUNT_WEB_DIRECTIVES_CLIENT_BINDING
-    ;(new Function('return ' + binding)() as (confirm: unknown) => void)(async () => false)
+    ;(kind === 'htaccess' ? runHtaccessBinding : runWebDirectivesBinding)(async () => false)
     return { root, request }
   }
   it('fills actual PHP/history rows without exposing kept version identifiers or interpreting content as HTML', async () => {

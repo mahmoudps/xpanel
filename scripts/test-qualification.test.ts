@@ -92,7 +92,7 @@ const caseNames = (text: string): string[] => {
   return names
 }
 
-describe('reviewed qualification inventory', { tags: ['unit'] }, () => {
+describe('reviewed qualification inventory', { tags: ['feature'] }, () => {
   it('reads a case name only under its own describe', () => {
     const text = "describe('reader', () => {\n  it('reads', () => {})\n})\ndescribe('workspace', { tags: ['unit'] }, () => {\n  it('sends the owner\\'s list', () => {})\n})\n"
     expect(caseNames(text)).toEqual(['reader reads', "workspace sends the owner's list"])
@@ -127,7 +127,7 @@ describe('reviewed qualification inventory', { tags: ['unit'] }, () => {
   })
 })
 
-describe('native qualification runner', { tags: ['unit'] }, () => {
+describe('native qualification runner', { tags: ['feature'] }, () => {
   it('dry runs every driver on all four slots and sends nothing', () => {
     const document = targetDocument(), driven = Object.keys(QUALIFICATION_INVENTORY)
     const ubuntuDriven = driven.filter(id => !PROFILE_EXCLUSIONS[id]?.profiles.includes('ubuntu-22.04'))
@@ -312,12 +312,18 @@ describe('delivery publication', { tags: ['feature'] }, () => {
   })
 })
 
-describe('shipped delivery publication', { tags: ['unit'] }, () => {
+describe('shipped delivery publication', { tags: ['feature'] }, () => {
   it('is exactly the rendered module and every published tool is verified by the catalog', () => {
     expect(renderDeliveryModule(deliveryEvidence, deliveryTarget)).toBe(readFileSync(resolve(ROOT, DELIVERY_PATH), 'utf8'))
-    for (const toolId of new Set(deliveryEvidence.map(row => row.toolId))) {
+    const byTool = new Map<string, (typeof deliveryEvidence)[number][]>()
+    for (const row of deliveryEvidence) {
+      const bucket = byTool.get(row.toolId)
+      if (bucket !== undefined) bucket.push(row)
+      else byTool.set(row.toolId, [row])
+    }
+    for (const [toolId, rows] of byTool) {
       const tool = tools.find(item => item.id === toolId)!
-      expect(assessDelivery({ ...tool, status: 'researched' }, specs.find(spec => spec.id === toolId)!, deliveryEvidence, deliveryTarget).status).toBe('verified')
+      expect(assessDelivery({ ...tool, status: 'researched' }, specs.find(spec => spec.id === toolId)!, rows, deliveryTarget).status).toBe('verified')
     }
   })
 

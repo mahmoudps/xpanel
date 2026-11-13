@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { builtinEnvironments, type EnvironmentReturn } from 'vitest/runtime'
 import { translator } from './i18n.ts'
 import { classicOpsClientTemplates } from './themes/classic/ops-client-templates.ts'
@@ -12,8 +12,9 @@ import { OPS_NODES_CLIENT_BINDING } from './ops-nodes-client.ts'
 import { OPS_INTEGRATIONS_CLIENT_BINDING } from './ops-integrations-client.ts'
 
 let dom: EnvironmentReturn | undefined
-beforeEach(async () => { dom = await builtinEnvironments.jsdom.setup(globalThis, { jsdom: { url: 'https://whm.example.test', runScripts: 'outside-only' } }) })
-afterEach(async () => { document.body.replaceChildren(); delete (window as Window & { xpT?: unknown }).xpT; delete (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest; await dom?.teardown(globalThis); dom = undefined })
+beforeAll(async () => { dom = await builtinEnvironments.jsdom.setup(globalThis, { jsdom: { url: 'https://whm.example.test', runScripts: 'outside-only' } }) })
+afterAll(async () => { await dom?.teardown(globalThis); dom = undefined })
+afterEach(() => { document.body.replaceChildren(); delete (window as Window & { xpT?: unknown }).xpT; delete (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest })
 const tick = async () => { for (let n = 0; n < 4; n++) await new Promise(resolve => setTimeout(resolve, 0)) }
 const revision = 'a'.repeat(64)
 const fixtures = {

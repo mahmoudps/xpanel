@@ -63,7 +63,7 @@ it('picks one fixed hour per host, always in the future', { tags: ['unit'] }, ()
   expect(nextAutoSslRun(new Date(first), 'server.test')).toBe(new Date(Date.parse(first) + 86_400_000).toISOString())
 })
 
-describe('AutoSSL ticks', { tags: ['unit'] }, () => {
+describe('AutoSSL ticks', { tags: ['feature'] }, () => {
   let root = ''
   beforeEach(async () => { root = await mkdtemp(join(tmpdir(), 'xp-autossl-')) })
   afterEach(async () => { await rm(root, { recursive: true, force: true }) })

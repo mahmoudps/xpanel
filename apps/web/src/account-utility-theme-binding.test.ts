@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { builtinEnvironments, type EnvironmentReturn } from 'vitest/runtime'
 import type { Account, Domain } from '@xpanel/core'
 import { translator } from './i18n.ts'
@@ -33,13 +33,17 @@ const noClassicPaint = (root: Element, theme: string) => {
   expect(root.querySelector('[style]')).toBeNull()
 }
 let testDom: EnvironmentReturn | undefined
-beforeEach(async () => {
+beforeAll(async () => {
   testDom = await builtinEnvironments.jsdom.setup(globalThis, { jsdom: { url: 'https://panel.example.test/', runScripts: 'outside-only' } })
+})
+afterAll(async () => {
+  await testDom?.teardown(globalThis); testDom = undefined
+})
+beforeEach(() => {
   document.documentElement.lang = 'en'; document.documentElement.dir = 'ltr'; vi.stubGlobal('xpT', translator('en'))
 })
-afterEach(async () => {
-  try { document.body.replaceChildren(); delete (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest; vi.unstubAllGlobals(); vi.restoreAllMocks() }
-  finally { await testDom?.teardown(globalThis); testDom = undefined }
+afterEach(() => {
+  document.body.replaceChildren(); delete (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest; vi.unstubAllGlobals(); vi.restoreAllMocks()
 })
 
 describe('account utility theme-owned dynamic markup', () => {

@@ -43,7 +43,7 @@ const scenario = async (paths: SourceBuildPaths, installed: () => { ok: boolean;
   return { builds, events, audits, errors, advance: (ms: number) => { at += ms } }
 }
 
-describe('source build state', { tags: ['unit'] }, () => {
+describe('source build state', { tags: ['feature'] }, () => {
   it('compares each build with its package and leaves out what the host never built', async () => {
     const paths = await hostWith({ 'mpm-itk': '2.4.62', 'fts-xapian': '2.3.16' })
     const view = await observeSourceBuilds(async () => packages('2.4.63', '2.3.16'), paths)
@@ -79,7 +79,7 @@ describe('source build state', { tags: ['unit'] }, () => {
   })
 })
 
-describe('source rebuild after a package update', { tags: ['unit'] }, () => {
+describe('source rebuild after a package update', { tags: ['feature'] }, () => {
   it('takes the stale Dovecot plugin out of the configuration before it builds, and puts search back after', async () => {
     const paths = await hostWith({ 'fts-xapian': '2.3.16' })
     await writeFile(paths.plugin, 'old abi')
@@ -166,7 +166,7 @@ describe('source rebuild after a package update', { tags: ['unit'] }, () => {
   })
 })
 
-describe('source build hook', { tags: ['unit'] }, () => {
+describe('source build hook', { tags: ['feature'] }, () => {
   it('renders only for a host whose plugin runs it, as an executor target', async () => {
     const state = await createTestStateStore()
     try {

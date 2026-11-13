@@ -23,7 +23,6 @@ const boot = (request: (method: string, path: string, body?: unknown) => Promise
   (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest = request
   new Function('return ' + WHM_ACCOUNT_BULK_CLIENT_BINDING)()(ask)
 }
-beforeEach(() => { document.body.innerHTML = renderWhmSurface(props) })
 
 describe('bulk account result reader', { tags: ['unit'] }, () => {
   it('accepts exactly the submitted accounts in order and refuses anything else', () => {
@@ -40,6 +39,7 @@ describe('bulk account result reader', { tags: ['unit'] }, () => {
 })
 
 describe('bulk account bar', { tags: ['feature'] }, () => {
+  beforeEach(() => { document.body.innerHTML = renderWhmSurface(props) })
   it('enables the server-permitted actions and submits the selected accounts once with a typed reason', async () => {
     const calls: { method: string; path: string; body: Record<string, unknown> }[] = []
     boot(async (method, path, body) => {

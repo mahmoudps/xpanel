@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { builtinEnvironments, type EnvironmentReturn } from 'vitest/runtime'
 import { translator } from './i18n.ts'
 import { ACCOUNT_NETWORK_TOOLS_CLIENT_BINDING } from './account-network-tools-client.ts'
@@ -11,8 +11,9 @@ import { renderV2NetworkToolsPage } from './themes/v2/pages/xpanel/advanced/tool
 import { renderV2PanelSiteHealth } from './themes/v2/pages/xpanel/observations/health.ts'
 
 let dom: EnvironmentReturn | undefined
-beforeEach(async () => { dom = await builtinEnvironments.jsdom.setup(globalThis, { jsdom: { url: 'https://panel.example.test', runScripts: 'outside-only' } }) })
-afterEach(async () => { document.body.replaceChildren(); delete (window as Window & { xpT?: unknown }).xpT; delete (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest; await dom?.teardown(globalThis); dom = undefined })
+beforeAll(async () => { dom = await builtinEnvironments.jsdom.setup(globalThis, { jsdom: { url: 'https://panel.example.test', runScripts: 'outside-only' } }) })
+afterAll(async () => { await dom?.teardown(globalThis); dom = undefined })
+afterEach(() => { document.body.replaceChildren(); delete (window as Window & { xpT?: unknown }).xpT; delete (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest })
 const accountId = '11111111-1111-4111-8111-111111111111'
 const domainId = '22222222-2222-4222-8222-222222222222'
 const observedAt = '2026-10-29T12:00:00.000Z'

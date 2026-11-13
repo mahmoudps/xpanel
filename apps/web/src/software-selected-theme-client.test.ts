@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { builtinEnvironments, type EnvironmentReturn } from 'vitest/runtime'
 import { translator } from './i18n.ts'
 import { renderSwContainersWorkspace, renderSwContainerEngineWorkspace } from './board-port/sw-containers-workspace.ts'
@@ -9,21 +9,25 @@ import { SW_CONTAINERS_CLIENT_BINDING } from './sw-containers-client.ts'
 import { WHM_UPDATES_CLIENT_BINDING } from './whm-updates-client.ts'
 
 let testDom: EnvironmentReturn | undefined
-beforeEach(async () => {
+beforeAll(async () => {
   testDom = await builtinEnvironments.jsdom.setup(globalThis, { jsdom: { url: 'https://whm.example.test/whm/software/containers', runScripts: 'outside-only' } })
+})
+afterAll(async () => {
+  await testDom?.teardown(globalThis); testDom = undefined
 })
 const settle = async () => { for (let i = 0; i < 4; i++) await new Promise(resolve => setTimeout(resolve, 0)) }
 const mount = (html: string) => {
   document.documentElement.lang = 'en'
+  document.documentElement.dir = 'ltr'
   document.body.innerHTML = html
   vi.stubGlobal('xpT', translator('en')); return document
 }
-afterEach(async () => {
-  try {
-    document.body.replaceChildren()
-    delete (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest
-    vi.restoreAllMocks(); vi.unstubAllGlobals()
-  } finally { await testDom?.teardown(globalThis); testDom = undefined }
+afterEach(() => {
+  document.body.replaceChildren()
+  document.documentElement.lang = 'en'
+  document.documentElement.dir = 'ltr'
+  delete (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest
+  vi.restoreAllMocks(); vi.unstubAllGlobals()
 })
 const render = (theme: 'classic' | 'v2', route: string) => theme === 'v2' ? renderV2WhmSoftwarePage({ activeRoute: route, dataAuthority: { canRead: true, canManage: true } })! : route.endsWith('/engine') ? renderSwContainerEngineWorkspace({ locale: 'en', canRead: true, canManage: false }) : route.endsWith('/updates') ? renderWhmUpdatesWorkspace({ locale: 'en', canRead: true, canApply: true }) : renderSwContainersWorkspace({ locale: 'en', canRead: true, canManage: true })
 const boot = (binding: string, send: (method: string, path: string, body?: unknown) => Promise<unknown>, ask = vi.fn(async () => true)) => { Object.assign(window, { xpanelSessionRequest: send }); new Function('return ' + binding)()(ask); return ask }

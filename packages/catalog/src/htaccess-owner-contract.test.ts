@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Principal } from '@xpanel/core'
-import { specs, tools } from './data/index.ts'
+import { deliveryTarget } from './data/delivery.ts'
+import { specs, tools, unqualifiedTools } from './data/index.ts'
 import { visibleNavigation } from './navigation.ts'
 import { HOST_PROBES, PHASE1_TOOL_PROBES, qualifyHostTools } from './host-qualification.ts'
 import { isToolAuthorized, isVisible } from './visibility.ts'
@@ -8,7 +9,7 @@ import type { CatalogTool } from './types.ts'
 
 const owner: Principal = { kind: 'user', id: 'owner-id', username: 'alice', accountId: 'account-id' }
 const ownerContext = { principal: owner, disabledFeatures: new Set<string>() }
-const definition = (id: string): CatalogTool => { const found = tools.find(tool => tool.id === id); if (!found) throw new Error('Missing real catalog entry ' + id); return found }
+const definition = (id: string): CatalogTool => { const found = unqualifiedTools.find(tool => tool.id === id); if (!found) throw new Error('Missing real catalog entry ' + id); return found }
 const bounded = () => definition('domain-htaccess')
 const legacy = () => definition('aapanel-url-rewrite')
 // Synthetic qualification exercises policy only; no delivery evidence is manufactured.
@@ -21,7 +22,10 @@ describe('bounded account rewrite contract', () => {
     expect(legacy()).toMatchObject({ surface: 'aapanel', rootOnly: true, status: 'researched', delivery: { status: 'researched', evidence: [] } })
     expect(specs.filter(spec => spec.id === 'domain-htaccess')).toHaveLength(1)
     expect(specs.find(spec => spec.id === 'domain-htaccess')!.source).toBe('xpanel:native')
-    expect(tools.filter(tool => tool.status === 'verified')).toEqual([])
+    if (deliveryTarget === null) {
+      expect(tools.filter(tool => tool.status === 'verified')).toEqual([])
+      expect(tools.find(tool => tool.id === 'aapanel-url-rewrite')?.status).toBe('researched')
+    }
     expect(isToolAuthorized(bounded(), ownerContext)).toBe(true)
     expect(isVisible(bounded(), ownerContext)).toBe(false)
     expect(routes([bounded(), legacy()])).not.toContain('/software/htaccess')

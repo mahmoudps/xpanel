@@ -1,12 +1,15 @@
 import { randomUUID } from 'node:crypto'
 import { request as httpRequest } from 'node:http'
-import { mkdir, readFile, writeFile, rm } from 'node:fs/promises'
-import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { existsSync } from 'node:fs'
+import { mkdir, mkdtemp, readdir, readFile, writeFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { dirname, join, relative, sep } from 'node:path'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as catalog from '@xpanel/catalog'
+import type { Account, FeatureList, Plan, Reseller } from '@xpanel/core'
 import type { CatalogTool } from '@xpanel/catalog'
-import { createTestDb, createRootPrincipal, createUserPrincipal, createResellerPrincipal, createSession, revokeSession, setTotpSecret } from '@xpanel/db'
-import { createTestStateStore } from '@xpanel/state'
+import { createTestDb, createRootPrincipal, createUserPrincipal, createResellerPrincipal, createSession, revokeSession, setTotpSecret, type PrincipalRecord } from '@xpanel/db'
+import { createStateStore, type TestStateStoreHandle } from '@xpanel/state'
 import { createDefaultWebRenderer } from './main.ts'
 import { establishMailboxSession, mailboxPrincipalUsername, type MailboxTransport } from './mail/inbox.ts'
 import { createApiApp, INGRESS_SECRET_HEADER, listenApiServer } from './server.ts'
@@ -33,29 +36,76 @@ const origins = { xpanel: 'https://panel.example.test:2083', xwhm: 'https://whm.
 const cleanup: (() => Promise<unknown>)[] = []
 afterEach(async () => { vi.restoreAllMocks(); for (const close of cleanup.splice(0).reverse()) await close() })
 
+const STATE_PARENT = existsSync('/dev/shm') ? '/dev/shm' : tmpdir()
+interface SeedSnapshot {
+  dbBytes: Uint8Array
+  relDirs: string[]
+  files: { relPath: string; bytes: Buffer }[]
+  feature: FeatureList
+  plan: Plan
+  account: Account
+  other: Account
+  owner: PrincipalRecord
+  inboxLogin: string
+  mailbox: PrincipalRecord
+  root: PrincipalRecord
+  reseller: Reseller
+  resellerPrincipal: PrincipalRecord
+}
+let seedSnapshot: SeedSnapshot
+
+beforeAll(async () => {
+  const database = await createTestDb()
+  const rootDir = await mkdtemp(join(STATE_PARENT, 'xpanel-scoped-seed-'))
+  const store = createStateStore(rootDir)
+  try {
+    const feature = await store.createFeatureList({ name: 'Scoped features', ownerId: null, disabled: [] })
+    const plan = await store.createPlan({ name: 'Scoped plan', ownerId: null, featureListId: feature.id,
+      resources: { diskMb: 1000, bandwidthMbMonth: 'unlimited', ioReadBps: 1048576, ioWriteBps: 1048576, ioReadIops: 10, ioWriteIops: 10, memoryMb: 128, maxProcesses: 16, cpuPercent: 100 },
+      caps: { addonDomains: 1, aliasDomains: 1, subdomains: 1, mailboxes: 1, forwarders: 1, mailingLists: 1, ftpAccounts: 1, databases: 1, phpWorkers: 1 }, dedicatedIp: false, shell: 'none', defaultMailboxQuotaMb: 100,
+    })
+    const input = { passwordHash: HASH, planId: plan.id, ownerId: null, contactEmail: 'private-scoped-contact@example.test', ipv4: '192.0.2.10', shell: 'none' as const,
+      php: { version: '8.3', handler: 'fpm' as const, fpm: { mode: 'ondemand' as const, maxChildren: 1, startServers: 1, minSpareServers: 1, maxSpareServers: 1, maxRequests: 50, processIdleTimeoutSec: 10 }, ini: {} },
+    }
+    await store.saveServerIp({ address: '192.0.2.10', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
+    const account = await store.createAccount({ ...input, username: 'owner7', primaryDomain: 'owner7.example.test' })
+    const other = await store.createAccount({ ...input, username: 'other7', primaryDomain: 'private-other-scoped.example.test' })
+    const owner = await createUserPrincipal(database.db, { username: account.username, accountId: account.id, passwordHash: HASH })
+    const inbox = await store.createServiceUser({ accountId: account.id, login: 'inbox@owner7.example.test', services: { email: true, ftp: false, webdisk: false }, mailboxQuotaMb: 100, ftpDir: 'public_html', passwordHash: HASH })
+    const mailbox = await createUserPrincipal(database.db, { username: mailboxPrincipalUsername(inbox.login), accountId: account.id, passwordHash: HASH })
+    const root = await createRootPrincipal(database.db, { username: 'root', passwordHash: HASH, forcePasswordChange: false })
+    await setTotpSecret(database.db, root.id, new Uint8Array(32))
+    const reseller = await store.createReseller({ username: 'reseller7', passwordHash: HASH, acl: ['list-accounts'], maxAccounts: 10, totalDiskMb: 10000, totalBandwidthMb: 'unlimited', oversell: { disk: false, bandwidth: false }, nameservers: [], delegatedIps: [] })
+    const resellerPrincipal = await createResellerPrincipal(database.db, { id: reseller.id, username: reseller.username, passwordHash: HASH })
+    const lock = store.getWriterLock()
+    const files: { relPath: string; bytes: Buffer }[] = []
+    const walk = async (dir: string): Promise<void> => {
+      for (const entry of await readdir(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name)
+        if (full === lock.mutexFilePath || full.startsWith(lock.mutexFilePath + '-') || full === lock.lockDirPath || full.startsWith(lock.lockDirPath + sep)) continue
+        if (entry.isDirectory()) await walk(full)
+        else files.push({ relPath: relative(rootDir, full), bytes: await readFile(full) })
+      }
+    }
+    await walk(rootDir)
+    const relDirs = [...new Set(files.map(file => dirname(file.relPath)).filter(dir => dir !== '.'))]
+    seedSnapshot = { dbBytes: database.sqlite.serialize(), relDirs, files, feature, plan, account, other, owner, inboxLogin: inbox.login, mailbox, root, reseller, resellerPrincipal }
+  } finally {
+    await database.close()
+    await rm(rootDir, { recursive: true, force: true })
+  }
+})
+
 const fixture = async () => {
   const database = await createTestDb()
-  const state = await createTestStateStore()
+  database.sqlite.deserialize(seedSnapshot.dbBytes)
+  database.sqlite.exec('PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;')
+  const rootDir = await mkdtemp(join(STATE_PARENT, 'xpanel-scoped-'))
+  for (const relDir of seedSnapshot.relDirs) await mkdir(join(rootDir, relDir), { recursive: true, mode: 0o750 })
+  await Promise.all(seedSnapshot.files.map(file => writeFile(join(rootDir, file.relPath), file.bytes, { mode: 0o640 })))
+  const state: TestStateStoreHandle = { store: createStateStore(rootDir), rootDir, close: () => rm(rootDir, { recursive: true, force: true }) }
   cleanup.push(() => database.close(), () => state.close())
-  const feature = await state.store.createFeatureList({ name: 'Scoped features', ownerId: null, disabled: [] })
-  const plan = await state.store.createPlan({ name: 'Scoped plan', ownerId: null, featureListId: feature.id,
-    resources: { diskMb: 1000, bandwidthMbMonth: 'unlimited', ioReadBps: 1048576, ioWriteBps: 1048576, ioReadIops: 10, ioWriteIops: 10, memoryMb: 128, maxProcesses: 16, cpuPercent: 100 },
-    caps: { addonDomains: 1, aliasDomains: 1, subdomains: 1, mailboxes: 1, forwarders: 1, mailingLists: 1, ftpAccounts: 1, databases: 1, phpWorkers: 1 }, dedicatedIp: false, shell: 'none', defaultMailboxQuotaMb: 100,
-  })
-  const input = { passwordHash: HASH, planId: plan.id, ownerId: null, contactEmail: 'private-scoped-contact@example.test', ipv4: '192.0.2.10', shell: 'none' as const,
-    php: { version: '8.3', handler: 'fpm' as const, fpm: { mode: 'ondemand' as const, maxChildren: 1, startServers: 1, minSpareServers: 1, maxSpareServers: 1, maxRequests: 50, processIdleTimeoutSec: 10 }, ini: {} },
-  }
-  await state.store.saveServerIp({ address: '192.0.2.10', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
-  const account = await state.store.createAccount({ ...input, username: 'owner7', primaryDomain: 'owner7.example.test' })
-  const other = await state.store.createAccount({ ...input, username: 'other7', primaryDomain: 'private-other-scoped.example.test' })
-  const owner = await createUserPrincipal(database.db, { username: account.username, accountId: account.id, passwordHash: HASH })
-  // xMail admits only a mailbox identity, so its document session belongs to the account's mailbox principal.
-  const inbox = await state.store.createServiceUser({ accountId: account.id, login: 'inbox@owner7.example.test', services: { email: true, ftp: false, webdisk: false }, mailboxQuotaMb: 100, ftpDir: 'public_html', passwordHash: HASH })
-  const mailbox = await createUserPrincipal(database.db, { username: mailboxPrincipalUsername(inbox.login), accountId: account.id, passwordHash: HASH })
-  const root = await createRootPrincipal(database.db, { username: 'root', passwordHash: HASH, forcePasswordChange: false })
-  await setTotpSecret(database.db, root.id, new Uint8Array(32))
-  const reseller = await state.store.createReseller({ username: 'reseller7', passwordHash: HASH, acl: ['list-accounts'], maxAccounts: 10, totalDiskMb: 10000, totalBandwidthMb: 'unlimited', oversell: { disk: false, bandwidth: false }, nameservers: [], delegatedIps: [] })
-  const resellerPrincipal = await createResellerPrincipal(database.db, { id: reseller.id, username: reseller.username, passwordHash: HASH })
+  const { feature, plan, account, other, owner, inboxLogin, mailbox, root, reseller, resellerPrincipal } = seedSnapshot
   const sessions = new Map<EntryPoint, { cookie: string; id: string }>()
   const servers = new Map<EntryPoint, Awaited<ReturnType<typeof listenApiServer>>>()
   const session = async (profile: EntryPoint, principalId: string) => {
@@ -66,7 +116,7 @@ const fixture = async () => {
   const mailboxPassword = randomUUID()
   const mailboxTransport: MailboxTransport = {
     async verify(login, password) {
-      expect(login).toBe(inbox.login)
+      expect(login).toBe(inboxLogin)
       expect(password).toBe(mailboxPassword)
     },
     async list() { return [] },
@@ -77,7 +127,7 @@ const fixture = async () => {
   for (const profile of profiles) {
     if (profile === 'xmail') {
       const issued = await establishMailboxSession({ db: database.db, store: state.store, serverSecret: SECRET, transport: mailboxTransport,
-        entryPoint: profile, mailbox: inbox.login, password: mailboxPassword, ip: '192.0.2.20', userAgent: '' })
+        entryPoint: profile, mailbox: inboxLogin, password: mailboxPassword, ip: '192.0.2.20', userAgent: '' })
       expect(issued.principal.id).toBe(mailbox.id)
       sessions.set(profile, { cookie: sessionCookieName(profile, true) + '=' + issued.rawToken, id: issued.session.id })
     } else sessions.set(profile, await session(profile, profile === 'xwhm' ? root.id : owner.id))

@@ -13,7 +13,7 @@ const range = (mode: 'month' | 'week' | 'day', anchor: string) => { const { firs
 const id = (number: number): string => 'aaaaaaaa-aaaa-4aaa-8aaa-' + String(number).padStart(12, '0')
 const rev = (number: number): string => String(number).padStart(64, '0')
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value))
-const tick = async () => { for (let index = 0; index < 6; index++) await new Promise(resolve => setTimeout(resolve, 0)) }
+const tick = async () => { for (let index = 0; index < 8; index++) await Promise.resolve() }
 type StoredEvent = { id: string; uid: string; summary: string; description: string; location: string; dtstart: string; dtend: string; timezone: string }
 const event = (number: number, patch: Partial<StoredEvent> = {}): StoredEvent => ({ id: id(100 + number), uid: 'uid-' + number + '@example.test', summary: 'Event ' + number, description: '', location: '', dtstart: '20261102T090000', dtend: '20261102T110000', timezone: 'America/New_York', ...patch })
 const calendar = (patch: Record<string, unknown> = {}) => ({ id: id(1), owner: MAILBOX, name: 'Work', color: '#4f6bed', timezone: 'UTC', revision: rev(1), storedBytes: 300, canWrite: true, canManage: true,
@@ -44,17 +44,34 @@ const cell = (value: string) => $(`[data-calview-day="${value}"]`)
 const status = () => $('[data-calview-status]')
 const set = (key: string, value: string) => { $<HTMLInputElement>(`[data-calview-field="${key}"]`).value = value }
 const key = (target: Element, name: string) => target.dispatchEvent(new KeyboardEvent('keydown', { key: name, bubbles: true }))
+const runMailCalendarViewBinding = new Function('return ' + MAIL_CALENDAR_VIEW_CLIENT_BINDING)() as (ask?: unknown) => void
+const calendarViewTemplateCache = new Map<string, HTMLTemplateElement>()
 const boot = (send?: unknown, options: { locale?: 'en' | 'ar'; canManage?: boolean } = {}) => {
   const ask = vi.fn(async () => true)
-  document.documentElement.lang = options.locale ?? 'en'; document.documentElement.dir = options.locale === 'ar' ? 'rtl' : 'ltr'
-  document.body.innerHTML = renderMailCalendarView({ locale: options.locale ?? 'en', mailbox: MAILBOX, canManage: options.canManage ?? true })
+  const locale = options.locale ?? 'en', canManage = options.canManage ?? true
+  document.documentElement.lang = locale; document.documentElement.dir = locale === 'ar' ? 'rtl' : 'ltr'
+  const key = `${locale}:${canManage}`
+  let tpl = calendarViewTemplateCache.get(key)
+  if (!tpl) {
+    tpl = document.createElement('template')
+    tpl.innerHTML = renderMailCalendarView({ locale, mailbox: MAILBOX, canManage })
+    calendarViewTemplateCache.set(key, tpl)
+  }
+  document.body.replaceChildren(tpl.content.cloneNode(true))
   const host = window as Window & { xpanelSessionRequest?: unknown }
   if (send) host.xpanelSessionRequest = send; else delete host.xpanelSessionRequest
-  new Function('return ' + MAIL_CALENDAR_VIEW_CLIENT_BINDING)()(ask)
+  runMailCalendarViewBinding(ask)
   return ask
 }
 
-beforeAll(() => { process.env.TZ = 'UTC' })
+beforeAll(() => {
+  process.env.TZ = 'UTC'
+  for (const locale of ['en', 'ar'] as const) for (const canManage of [true, false]) {
+    const tpl = document.createElement('template')
+    tpl.innerHTML = renderMailCalendarView({ locale, mailbox: MAILBOX, canManage })
+    calendarViewTemplateCache.set(`${locale}:${canManage}`, tpl)
+  }
+})
 afterAll(() => { if (hostZone === undefined) delete process.env.TZ; else process.env.TZ = hostZone })
 beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-11-04T12:00:00Z')); delete (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest })
 afterEach(() => { vi.useRealTimers(); document.body.replaceChildren(); document.documentElement.lang = 'en'; document.documentElement.dir = 'ltr' })

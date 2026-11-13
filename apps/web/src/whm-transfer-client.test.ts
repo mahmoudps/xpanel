@@ -13,12 +13,24 @@ const tick = async () => { await new Promise(resolve => setTimeout(resolve, 0));
 const button = (name: string) => document.querySelector<HTMLButtonElement>('[data-transfer-' + name + ']')!
 const status = () => document.querySelector<HTMLElement>('[data-transfer-status]')!
 const field = (name: string) => document.querySelector<HTMLInputElement>('[data-transfer-field="' + name + '"]')!
+const runWhmTransferBinding = new Function('return ' + WHM_TRANSFER_CLIENT_BINDING)() as (ask?: (options: Record<string, unknown>) => Promise<unknown>) => void
+const standaloneAsciiBytes = new Function('return ' + ASCII_BYTES_BINDING)() as (bytes: number) => string
+const transferWorkspaceTemplates = new Map<string, HTMLTemplateElement>()
+const mountTransferWorkspace = (lang: 'en' | 'ar') => {
+  let tpl = transferWorkspaceTemplates.get(lang)
+  if (!tpl) {
+    tpl = document.createElement('template')
+    tpl.innerHTML = renderWhmTransferWorkspace({ lang, canManage: true, credentials: [{ id: id(2), label: 'Stored source key', kind: 'ssh-key' }] })
+    transferWorkspaceTemplates.set(lang, tpl)
+  }
+  document.body.replaceChildren(tpl.content.cloneNode(true))
+}
 let listeners: EventListener[]
 beforeEach(() => {
   listeners = []
   const add = window.addEventListener.bind(window)
   vi.spyOn(window, 'addEventListener').mockImplementation((name, callback, options) => { if (name === 'beforeunload') listeners.push(callback as EventListener); add(name, callback, options) })
-  document.body.innerHTML = renderWhmTransferWorkspace({ lang: 'en', canManage: true, credentials: [{ id: id(2), label: 'Stored source key', kind: 'ssh-key' }] })
+  mountTransferWorkspace('en')
   delete (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest
 })
 afterEach(() => { for (const listener of listeners) window.removeEventListener('beforeunload', listener); document.body.replaceChildren(); vi.restoreAllMocks(); document.documentElement.lang = 'en'; document.documentElement.dir = 'ltr' })
@@ -46,16 +58,15 @@ const model = (initial = entry(), execute = false) => {
     return clone(current)
   })
   const ask = vi.fn(async () => true)
-  const boot = () => { (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest = send; new Function('return ' + WHM_TRANSFER_CLIENT_BINDING)()(ask) }
+  const boot = () => { (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest = send; runWhmTransferBinding(ask) }
   return { send, ask, boot, setMode: (value: string) => { mode = value }, setCurrent: (value: ReturnType<typeof entry>) => { current = clone(value) }, setImports: (value: Record<string, unknown>[]) => { imports.splice(0, imports.length, ...clone(value)) }, writes: () => send.mock.calls.filter(call => call[0] !== 'GET') }
 }
 
 describe('persisted transfer review browser contract', () => {
   it.each([[0, '\u20660\u00a0B\u2069'], [64, '\u206664\u00a0B\u2069'], [1500, '\u20661.46\u00a0KiB\u2069'], [2_100_000_000, '\u20661.96\u00a0GiB\u2069']] as const)('ships the canonical standalone byte formatter for observed %s bytes', (bytes, expected) => {
     document.documentElement.lang = 'ar'
-    const standalone = new Function('return ' + ASCII_BYTES_BINDING)() as (bytes: number) => string
-    expect(standalone(bytes)).toBe(expected); expect(standalone(bytes)).toBe(formatIsolatedBytes(bytes))
-    expect(standalone(bytes)).not.toMatch(/[\u0660-\u0669\u06f0-\u06f9]/)
+    expect(standaloneAsciiBytes(bytes)).toBe(expected); expect(standaloneAsciiBytes(bytes)).toBe(formatIsolatedBytes(bytes))
+    expect(standaloneAsciiBytes(bytes)).not.toMatch(/[\u0660-\u0669\u06f0-\u06f9]/)
   })
 
   it.each(['transfer-host', 'transfer-archive', 'transfer-cpanel-port'])('refuses a mistyped %s native input before reading saved sessions', async name => {
@@ -72,7 +83,7 @@ describe('persisted transfer review browser contract', () => {
     for (const name of ['refresh', 'create', 'discover', 'select', 'resolve', 'review', 'run', 'stop', 'cancel', 'inspect', 'fetch', 'ssh-key', 'import-run', 'import-discard']) expect(button(name)).not.toBeNull()
   })
   it('locks all controls without an admitted transport', async () => {
-    new Function('return ' + WHM_TRANSFER_CLIENT_BINDING)()(undefined)
+    runWhmTransferBinding(undefined)
     expect(status().dataset.state).toBe('unavailable'); expect(button('create').disabled).toBe(true)
     document.querySelector<HTMLElement>('[data-transfer-workspace]')!.removeAttribute('data-transfer-bound')
     document.querySelector<HTMLElement>('[data-transfer-workspace]')!.dataset.transferManage = 'false'
@@ -217,10 +228,10 @@ describe('transfer human session dates preserve persisted option identity', () =
     const initial = entry(), rawAt = '2026-10-27T14:00:00.123456+02:00'
     initial.session.createdAt = rawAt
     const original = JSON.stringify(initial), f = model(initial)
-    document.body.innerHTML = renderWhmTransferWorkspace({ lang, canManage: true, credentials: [{ id: id(2), label: 'Stored source key', kind: 'ssh-key' }] })
+    mountTransferWorkspace(lang)
     ;(window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest = f.send
     document.documentElement.lang = lang; document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr'
-    new Function('return ' + WHM_TRANSFER_CLIENT_BINDING)()(f.ask)
+    runWhmTransferBinding(f.ask)
     await tick()
     expect(document.querySelector('[data-transfer-archive-limit]')!.textContent).toBe(lang === 'ar' ? 'الحد الأقصى لحجم الأرشيف: 524288 بايت' : 'Maximum archive size: 524288 bytes')
     const picker = document.querySelector<HTMLSelectElement>('[data-transfer-session]')!, option = picker.options[0]!

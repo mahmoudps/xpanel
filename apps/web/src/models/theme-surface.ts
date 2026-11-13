@@ -1,4 +1,4 @@
-import { canOpenRegisteredRoute, canonicalNavigationRoute, isToolAuthorized, navigation, registeredDocumentAliases, tools as defaultCatalog, visibleNavigation, visibleTools, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
+import { canOpenRegisteredRoute, canonicalNavigationRoute, isToolAuthorized, navigation, registeredDocumentAliases, unqualifiedTools as defaultCatalog, visibleNavigation, visibleTools, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
 import type { Account, Principal } from '@xpanel/core'
 import { system as systemRender } from '@xpanel/render'
 import { serviceHealthPresentation } from '../service-area.ts'

@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { builtinEnvironments, type EnvironmentReturn } from 'vitest/runtime'
 import { defaultPlan, type Account } from '@xpanel/core'
 import { translator } from './i18n.ts'
@@ -9,8 +9,9 @@ import { renderV2PanelMailingLists } from './themes/v2/pages/xpanel/email-tools/
 import { MAILX_MAIL_TOOLS_CLIENT_BINDING } from './mailx-mail-tools-client.ts'
 
 let environment: EnvironmentReturn | undefined
-beforeEach(async () => { environment = await builtinEnvironments.jsdom.setup(globalThis, { jsdom: { url: 'https://panel.example.test', runScripts: 'outside-only' } }) })
-afterEach(async () => { document.body.replaceChildren(); delete (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest; await environment?.teardown(globalThis); environment = undefined })
+beforeAll(async () => { environment = await builtinEnvironments.jsdom.setup(globalThis, { jsdom: { url: 'https://panel.example.test', runScripts: 'outside-only' } }) })
+afterAll(async () => { await environment?.teardown(globalThis); environment = undefined })
+afterEach(() => { document.body.replaceChildren(); delete (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest })
 const tick = async () => { for (let n = 0; n < 4; n++) await new Promise(resolve => setTimeout(resolve, 0)) }
 const account: Account = { id: 'account-owner', username: 'alice', uid: 20014, gid: 20014, home: '/home/alice', primaryDomain: 'alice.example', planId: 'plan-owner', ownerId: null, status: 'active', suspendReason: null, contactEmail: '', ipv4: '192.0.2.10', shell: 'jailed', createdAt: '2026-10-29T00:00:00Z' }
 const props = { account, plan: defaultPlan({ id: account.planId, name: 'Plan' }), domains: [] }

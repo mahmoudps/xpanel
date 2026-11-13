@@ -1,13 +1,17 @@
 import assert from 'node:assert/strict'
+import { existsSync } from 'node:fs'
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { request as httpRequest } from 'node:http'
 import { randomUUID } from 'node:crypto'
 import { createServer as createNetServer, type Socket } from 'node:net'
-import { afterEach, beforeEach, describe, it } from 'vitest'
+import { tmpdir } from 'node:os'
+import { dirname, join, relative, sep } from 'node:path'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, it } from 'vitest'
 import WebSocket from 'ws'
-import { createApiToken, createResellerPrincipal, createRootPrincipal, createSession, createTestDb, createUserPrincipal, revokeSession } from '@xpanel/db'
-import { createTestStateStore } from '@xpanel/state'
-import { ACCOUNT_SELF_PASSWORD_MIN_LENGTH, fail } from '@xpanel/core'
-import { computeTotpCode, deriveCsrfToken, sha256Hex, verifyPasswordArgon2id } from './auth.ts'
+import { createApiToken, createDb, createResellerPrincipal, createRootPrincipal, createSession, createTestDb, createUserPrincipal, revokeSession } from '@xpanel/db'
+import { createStateStore, createTestStateStore } from '@xpanel/state'
+import { ACCOUNT_SELF_PASSWORD_MIN_LENGTH, MIN_ARGON2_MEMORY_KIB, fail } from '@xpanel/core'
+import { computeTotpCode, deriveCsrfToken, hashPasswordArgon2id, sha256Hex, verifyPasswordArgon2id } from './auth.ts'
 import type { MailboxTransport } from './mail/inbox.ts'
 import { ENTRY_POINTS, entryPointAllowsApiRoute, sessionCookieName, sessionTokenHash, type EntryPoint } from './entry-points.ts'
 import { createApiApp, listenApiServer, type ApiServerDeps } from './server.ts'
@@ -16,29 +20,63 @@ import { writeSignInLockout } from './testing/sign-in-policy-fixture.ts'
 
 // Public independent libargon2 vector; these identities and network listeners exist only in this test.
 const PASSWORD = 'correct horse battery staple'
-const HASH = '$argon2id$v=19$m=65536,t=3,p=4$MIIRqgvgQbgj220jfp0MPA$YfwJSVjtjSU0zzV/P3S9nnQ/USre2wvJMjfCIjrTQbg'
+let HASH = '$argon2id$v=19$m=65536,t=3,p=4$MIIRqgvgQbgj220jfp0MPA$YfwJSVjtjSU0zzV/P3S9nnQ/USre2wvJMjfCIjrTQbg'
 const SECRET = 'entry-point-security-fixture-32-bytes-minimum'
+const STATE_PARENT = existsSync('/dev/shm') ? '/dev/shm' : tmpdir()
 const profiles = ['xpanel', 'xwhm', 'xmail'] as const
 const origin = (profile: EntryPoint) => `https://panel.example.test:${ENTRY_POINTS[profile].port}`
 const cleanup: Array<() => Promise<unknown>> = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close() })
 
-const fixture = async () => {
-  const database = await createTestDb()
+interface CachedStateFile { relPath: string; bytes: Buffer }
+const buildStateTemplate = async () => {
+  HASH = await hashPasswordArgon2id(PASSWORD, { memoryKiB: MIN_ARGON2_MEMORY_KIB, timeCost: 1, parallelism: 1 })
+  const seedDb = await createTestDb()
   const state = await createTestStateStore()
+  try {
+    const feature = await state.store.createFeatureList({ name: 'Standard', ownerId: null, disabled: [] })
+    const plan = await state.store.createPlan({ name: 'Standard', ownerId: null, featureListId: feature.id,
+      resources: { diskMb: 1024, bandwidthMbMonth: 10240, ioReadBps: 10000000, ioWriteBps: 10000000, ioReadIops: 1000, ioWriteIops: 1000, memoryMb: 512, maxProcesses: 32, cpuPercent: 100 },
+      caps: { addonDomains: 5, aliasDomains: 5, subdomains: 5, mailboxes: 5, forwarders: 5, mailingLists: 2, ftpAccounts: 5, databases: 5, phpWorkers: 4 }, dedicatedIp: false, shell: 'jailed', defaultMailboxQuotaMb: 512 })
+    await state.store.saveServerIp({ address: '203.0.113.10', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
+    const account = await state.store.createAccount({ username: 'alice', passwordHash: HASH, primaryDomain: 'alice.example.test', planId: plan.id, ownerId: null, contactEmail: 'alice@example.test', ipv4: '203.0.113.10', shell: 'jailed',
+      php: { version: '8.3', handler: 'fpm', fpm: { mode: 'ondemand', maxChildren: 4, startServers: 2, minSpareServers: 1, maxSpareServers: 3, maxRequests: 500, processIdleTimeoutSec: 10 }, ini: {} } })
+    // xMail admits mailbox addresses only; the hosting account owner signs in on xPanel.
+    const mailbox = await state.store.createServiceUser({ accountId: account.id, login: 'inbox@alice.example.test', services: { email: true, ftp: false, webdisk: false }, mailboxQuotaMb: 100, ftpDir: 'public_html', passwordHash: HASH })
+    await writeSignInLockout(state.store.rootDir, 20)
+    const user = await createUserPrincipal(seedDb.db, { username: 'alice', passwordHash: HASH, accountId: account.id })
+    await createRootPrincipal(seedDb.db, { username: 'root', passwordHash: HASH, forcePasswordChange: false })
+    await createResellerPrincipal(seedDb.db, { username: 'reseller', passwordHash: HASH })
+    const lock = state.store.getWriterLock()
+    const stateFiles: CachedStateFile[] = []
+    const dirSet = new Set<string>()
+    const walk = async (dir: string): Promise<void> => {
+      for (const entry of await readdir(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name)
+        if (full === lock.mutexFilePath || full.startsWith(lock.mutexFilePath + '-') || full === lock.lockDirPath || full.startsWith(lock.lockDirPath + sep)) continue
+        const rel = relative(state.rootDir, full)
+        if (entry.isDirectory()) { dirSet.add(rel); await walk(full) }
+        else { const d = dirname(rel); if (d !== '.') dirSet.add(d); stateFiles.push({ relPath: rel, bytes: await readFile(full) }) }
+      }
+    }
+    await walk(state.rootDir)
+    return { sqlite: seedDb.sqlite.serialize(), stateFiles, relDirs: [...dirSet], feature, account, mailbox, user }
+  } finally {
+    await state.close()
+    await seedDb.close()
+  }
+}
+let template!: Awaited<ReturnType<typeof buildStateTemplate>>
+
+const fixture = async () => {
+  const database = createDb(':memory:')
+  database.sqlite.deserialize(template.sqlite)
+  const rootDir = await mkdtemp(join(STATE_PARENT, 'xpanel-state-'))
+  for (const relDir of template.relDirs) await mkdir(join(rootDir, relDir), { recursive: true, mode: 0o750 })
+  await Promise.all(template.stateFiles.map(file => writeFile(join(rootDir, file.relPath), file.bytes, { mode: 0o640 })))
+  const state = { store: createStateStore(rootDir), rootDir, close: () => rm(rootDir, { recursive: true, force: true }) }
   cleanup.push(() => database.close(), () => state.close())
-  const feature = await state.store.createFeatureList({ name: 'Standard', ownerId: null, disabled: [] })
-  const plan = await state.store.createPlan({ name: 'Standard', ownerId: null, featureListId: feature.id,
-    resources: { diskMb: 1024, bandwidthMbMonth: 10240, ioReadBps: 10000000, ioWriteBps: 10000000, ioReadIops: 1000, ioWriteIops: 1000, memoryMb: 512, maxProcesses: 32, cpuPercent: 100 },
-    caps: { addonDomains: 5, aliasDomains: 5, subdomains: 5, mailboxes: 5, forwarders: 5, mailingLists: 2, ftpAccounts: 5, databases: 5, phpWorkers: 4 }, dedicatedIp: false, shell: 'jailed', defaultMailboxQuotaMb: 512 })
-  await state.store.saveServerIp({ address: '203.0.113.10', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
-  const account = await state.store.createAccount({ username: 'alice', passwordHash: HASH, primaryDomain: 'alice.example.test', planId: plan.id, ownerId: null, contactEmail: 'alice@example.test', ipv4: '203.0.113.10', shell: 'jailed',
-    php: { version: '8.3', handler: 'fpm', fpm: { mode: 'ondemand', maxChildren: 4, startServers: 2, minSpareServers: 1, maxSpareServers: 3, maxRequests: 500, processIdleTimeoutSec: 10 }, ini: {} } })
-  const user = await createUserPrincipal(database.db, { username: 'alice', passwordHash: HASH, accountId: account.id })
-  await createRootPrincipal(database.db, { username: 'root', passwordHash: HASH, forcePasswordChange: false })
-  await createResellerPrincipal(database.db, { username: 'reseller', passwordHash: HASH })
-  // xMail admits mailbox addresses only; the hosting account owner signs in on xPanel.
-  const mailbox = await state.store.createServiceUser({ accountId: account.id, login: 'inbox@alice.example.test', services: { email: true, ftp: false, webdisk: false }, mailboxQuotaMb: 100, ftpDir: 'public_html', passwordHash: HASH })
+  const { feature, account, mailbox, user } = template
   // A disposable silent listener prevents a watch from reaching any installed mail service.
   const imapSockets = new Set<Socket>()
   const imap = createNetServer(socket => { imapSockets.add(socket); socket.on('error', () => {}); socket.once('close', () => imapSockets.delete(socket)) })
@@ -57,7 +95,6 @@ const fixture = async () => {
     async send() { return { messageId: '<synthetic-entry-point@example.test>' } },
   }
   const servers = new Map<EntryPoint, Awaited<ReturnType<typeof listenApiServer>>>()
-  await writeSignInLockout(state.store.rootDir, 20)
   for (const profile of profiles) {
     const app = createApiApp({ db: database.db, store: state.store, serverSecret: SECRET, entryPoint: profile, publicOrigin: origin(profile), allowedOrigins: [origin(profile)], secureCookies: true, requireOriginHeader: true,
       ...(profile === 'xmail' ? { mailboxTransport, mailboxEnvironment: { XPANEL_IMAP_HOST: '127.0.0.1', XPANEL_IMAP_PORT: String(imapAddress.port), XPANEL_IMAP_TIMEOUT_MS: '100' } } : {}),
@@ -97,6 +134,8 @@ const fixture = async () => {
 
 describe('interactive entry point isolation on real HTTP and WebSocket listeners', () => {
   let f: Awaited<ReturnType<typeof fixture>>
+  beforeAll(async () => { template = await buildStateTemplate() })
+  afterAll(async () => {})
   beforeEach(async () => { f = await fixture() })
 
   it('issues distinct cookies, server-selected homes and audience-separated database credentials', async () => {
@@ -125,7 +164,7 @@ describe('interactive entry point isolation on real HTTP and WebSocket listeners
     }
   })
 
-  it('rejects valid credentials for the wrong role without issuing any cookie', async () => {
+  it('rejects valid credentials for the wrong role without issuing any cookie', { tags: ['slow'] }, async () => {
     for (const [profile, username] of [['xpanel', 'root'], ['xpanel', 'reseller'], ['xmail', 'root'], ['xmail', 'reseller'], ['xmail', 'alice'], ['xwhm', 'alice'], ['xpanel', 'inbox@alice.example.test'], ['xwhm', 'inbox@alice.example.test']] as const) {
       const session = await f.login(profile, username)
       assert.equal(session.response.status, 401); assert.equal(session.response.headers.get('set-cookie'), null)
@@ -140,7 +179,7 @@ describe('interactive entry point isolation on real HTTP and WebSocket listeners
     assert.notEqual(reseller.response.headers.get('set-cookie'), null)
   })
 
-  it('manages only the owner sessions on the real xPanel listener with CSRF and Origin protection', { tags: ['feature'] }, async () => {
+  it('manages only the owner sessions on the real xPanel listener with CSRF and Origin protection', async () => {
     const panel = await f.login('xpanel')
     assert.equal(panel.response.status, 200)
     assert.ok(typeof panel.data.csrfToken === 'string')
@@ -160,7 +199,7 @@ describe('interactive entry point isolation on real HTTP and WebSocket listeners
     assert.equal(before.sessions.length, 2)
     assert.ok(before.sessions.some(row => row.id === other.id && !row.current))
     assert.ok(before.sessions.some(row => row.id === before.currentSessionId && row.current))
-    assert.ok(before.sessions.every(row => row.tokenHash === undefined && row.principalId === undefined && row.id !== foreign.id))
+    assert.ok(before.sessions.every(row => row.id !== foreign.id && row.tokenHash === undefined && row.principalId === undefined))
     assert.equal((await f.request('xpanel', '/api/auth/sessions/' + foreign.id, { method: 'DELETE', cookie: panel.cookie, csrf })).status, 404)
     assert.equal((await f.request('xpanel', '/api/auth/sessions/' + other.id, { method: 'DELETE', cookie: panel.cookie })).status, 403)
     assert.equal((await f.request('xpanel', '/api/auth/sessions/' + other.id, { method: 'DELETE', cookie: panel.cookie, csrf, headers: { origin: origin('xmail') } })).status, 403)
@@ -189,7 +228,7 @@ describe('interactive entry point isolation on real HTTP and WebSocket listeners
     assert.equal((await f.request('xpanel', '/api/auth/me', { cookie: panel.cookie })).status, 401)
   })
 
-  it('keeps the existing self-password boundary at seven rejected and eight accepted on the xPanel listener', { tags: ['feature'] }, async () => {
+  it('keeps the existing self-password boundary at seven rejected and eight accepted on the xPanel listener', async () => {
     const panel = await f.login('xpanel')
     assert.equal(panel.response.status, 200)
     assert.ok(typeof panel.data.csrfToken === 'string')
@@ -291,7 +330,7 @@ describe('interactive entry point isolation on real HTTP and WebSocket listeners
     }
   })
 
-  it('authorizes same-profile WebSockets, including xMail, and denies renamed replay and a wrong origin', async () => {
+  it('authorizes same-profile WebSockets, including xMail, and denies renamed replay and a wrong origin', { tags: ['slow'] }, async () => {
     const panel = await f.login('xpanel')
     const accountMail = await f.login('xmail', 'alice')
     assert.equal(accountMail.response.status, 401)

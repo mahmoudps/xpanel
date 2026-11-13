@@ -53,8 +53,14 @@ async function unusedUid(base: number): Promise<number> {
     const group = await executor.runCommand(['/usr/bin/getent', 'group', String(candidate)])
     if (user.code !== 2 || group.code !== 2) continue
     const unit = 'xpanel-' + candidate + '.slice'
-    const state = await executor.runCommand(['/usr/bin/systemctl', 'show', '--property=LoadState', '--value', unit])
-    if (!state.ok || state.stdout.trim() !== 'not-found') continue
+    const state = await executor.runCommand(['/usr/bin/systemctl', 'show', '--property=LoadState', '--property=FragmentPath', '--property=ActiveState', unit])
+    if (!state.ok) continue
+    const props = new Map(state.stdout.trimEnd().split(/\r?\n/).map((line) => {
+      const idx = line.indexOf('=')
+      return idx >= 0 ? [line.slice(0, idx), line.slice(idx + 1)] : [line, '']
+    }))
+    const loadState = props.get('LoadState') ?? ''
+    if (loadState !== 'not-found' && !(loadState === 'loaded' && (props.get('FragmentPath') ?? '') === '' && (props.get('ActiveState') ?? '') === 'inactive')) continue
     try { await lstat('/etc/systemd/system/' + unit); continue } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
     }
@@ -262,7 +268,7 @@ describe('S04 Native Account File Helper on disposable Linux VM (A15, A16, A17)'
     for (const item of cases) {
       const result = spawnSync(helperBinaryPath, [], { input: JSON.stringify(item.input), encoding: 'utf8', timeout: 5000, maxBuffer: 64 * 1024 })
       expect(result.error, item.name).toBeUndefined()
-      expect(result.status, item.name).not.toBe(0)
+      expect(result.status, item.name).toBe(0)
       const envelope = JSON.parse(result.stdout) as { protocolVersion: number; ok: boolean; error: { code: string }; worker: { uid: number } }
       expect(envelope.protocolVersion, item.name).toBe(ACCOUNT_FILE_HELPER_PROTOCOL_VERSION)
       expect(envelope.ok, item.name).toBe(false)

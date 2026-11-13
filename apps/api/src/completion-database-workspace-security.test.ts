@@ -1,10 +1,12 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { readFile, readdir } from 'node:fs/promises'
-import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { existsSync } from 'node:fs'
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { dirname, join, relative, sep } from 'node:path'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as dbApi from '@xpanel/db'
 import type { Database, DatabaseUser } from '@xpanel/core'
-import { createTestStateStore } from '@xpanel/state'
+import { createStateStore, createTestStateStore, type TestStateStoreHandle } from '@xpanel/state'
 import type { AgentApp } from '@xpanel/agent'
 import { ARGON2 } from '../../../packages/db/src/testing.ts'
 import { sha256Hex } from './auth.ts'
@@ -14,40 +16,74 @@ import { TEST_AGENT_TOKEN, TEST_SERVER_SECRET } from './testing.ts'
 const userPassword = 'SyntheticDbPassword!'
 const nativeHash = '*' + 'B'.repeat(40)
 const defaultPrivileges = ['SELECT', 'INSERT', 'UPDATE', 'DELETE']
+const STATE_PARENT = existsSync('/dev/shm') ? '/dev/shm' : tmpdir()
 const cleanup: Array<() => Promise<unknown>> = []
 type AgentMode = 'none' | 'applied' | 'rejected' | 'malformed' | 'transport'
 type Operation = 'database' | 'user'
 type PublicUser = Pick<DatabaseUser, 'id' | 'name' | 'grants'>
 
+interface CachedStateFile { relPath: string; bytes: Buffer }
+const buildDbWorkspaceTemplate = async () => {
+  const database = await dbApi.createTestDb()
+  const state = await createTestStateStore()
+  try {
+    const feature = await state.store.createFeatureList({ name: 'Database workspace policy', ownerId: null, disabled: [] })
+    const plan = await state.store.createPlan({ name: 'Database workspace plan', ownerId: null, featureListId: feature.id,
+      resources: { diskMb: 1000, bandwidthMbMonth: 10000, ioReadBps: 1048576, ioWriteBps: 1048576, ioReadIops: 100, ioWriteIops: 100, memoryMb: 128, maxProcesses: 16, cpuPercent: 100 },
+      caps: { addonDomains: 3, aliasDomains: 3, subdomains: 3, mailboxes: 4, forwarders: 4, mailingLists: 4, ftpAccounts: 4, databases: 3, phpWorkers: 4 },
+      dedicatedIp: false, shell: 'none', defaultMailboxQuotaMb: 100 })
+    await state.store.saveServerIp({ address: '192.0.2.74', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
+    const account = (username: string) => state.store.createAccount({ username, passwordHash: ARGON2, primaryDomain: username + '.example.test', planId: plan.id, ownerId: null,
+      contactEmail: 'owner@' + username + '.example.test', ipv4: '192.0.2.74', shell: 'none',
+      php: { version: '8.3', handler: 'fpm', fpm: { mode: 'ondemand', maxChildren: 2, startServers: 1, minSpareServers: 1, maxSpareServers: 1, maxRequests: 50, processIdleTimeoutSec: 10 }, ini: {} } })
+    const owner = await account('dbworka'), other = await account('dbworkb')
+    const ownDb = await state.store.createDatabase({ accountId: owner.id, name: owner.username + '_existing' })
+    const trashedDb = await state.store.createDatabase({ accountId: owner.id, name: owner.username + '_trashed' })
+    await state.store.trashDatabase(trashedDb.id)
+    const foreignDb = await state.store.createDatabase({ accountId: other.id, name: other.username + '_existing' })
+    const ownUser = await state.store.createDatabaseUser({ accountId: owner.id, name: owner.username + '_seed', authPlugin: 'mysql_native_password', authString: nativeHash })
+    const foreignUser = await state.store.createDatabaseUser({ accountId: other.id, name: other.username + '_seed', authPlugin: 'mysql_native_password', authString: nativeHash })
+    const principal = await dbApi.createUserPrincipal(database.db, { username: owner.username, accountId: owner.id, passwordHash: ARGON2 })
+    await dbApi.createUserPrincipal(database.db, { username: other.username, accountId: other.id, passwordHash: ARGON2 })
+    const raw = 'xp_' + randomUUID()
+    const record = await dbApi.createApiToken(database.db, { principalId: principal.id, name: 'Synthetic database workspace', tokenHash: sha256Hex(raw), scopes: ['databases:read', 'databases:write'], expiresAt: new Date(Date.now() + 600000).toISOString() })
+    const credential = { raw, id: record.id }
+    await dbApi.reindexFromState(database.db, await state.store.readSnapshot())
+    const lock = state.store.getWriterLock()
+    const stateFiles: CachedStateFile[] = []
+    const dirSet = new Set<string>()
+    const walk = async (dir: string): Promise<void> => {
+      for (const item of await readdir(dir, { withFileTypes: true })) {
+        const full = join(dir, item.name)
+        if (full === lock.mutexFilePath || full.startsWith(lock.mutexFilePath + '-') || full === lock.lockDirPath || full.startsWith(lock.lockDirPath + sep)) continue
+        const rel = relative(state.rootDir, full)
+        if (item.isDirectory()) { dirSet.add(rel); await walk(full) }
+        else { const d = dirname(rel); if (d !== '.') dirSet.add(d); stateFiles.push({ relPath: rel, bytes: await readFile(full) }) }
+      }
+    }
+    await walk(state.rootDir)
+    return { sqlite: database.sqlite.serialize(), stateFiles, relDirs: [...dirSet], feature, plan, owner, other, ownDb, trashedDb, foreignDb, ownUser, foreignUser, principal, credential }
+  } finally {
+    await state.close()
+    await database.close()
+  }
+}
+let dbWorkspaceTemplate: Awaited<ReturnType<typeof buildDbWorkspaceTemplate>>
+
 const fixture = async () => {
-  const database = await dbApi.createTestDb(); cleanup.push(() => database.close())
-  const state = await createTestStateStore(); cleanup.push(() => state.close())
-  const feature = await state.store.createFeatureList({ name: 'Database workspace policy', ownerId: null, disabled: [] })
-  const plan = await state.store.createPlan({ name: 'Database workspace plan', ownerId: null, featureListId: feature.id,
-    resources: { diskMb: 1000, bandwidthMbMonth: 10000, ioReadBps: 1048576, ioWriteBps: 1048576, ioReadIops: 100, ioWriteIops: 100, memoryMb: 128, maxProcesses: 16, cpuPercent: 100 },
-    caps: { addonDomains: 3, aliasDomains: 3, subdomains: 3, mailboxes: 4, forwarders: 4, mailingLists: 4, ftpAccounts: 4, databases: 3, phpWorkers: 4 },
-    dedicatedIp: false, shell: 'none', defaultMailboxQuotaMb: 100 })
-  await state.store.saveServerIp({ address: '192.0.2.74', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
-  const account = (username: string) => state.store.createAccount({ username, passwordHash: ARGON2, primaryDomain: username + '.example.test', planId: plan.id, ownerId: null,
-    contactEmail: 'owner@' + username + '.example.test', ipv4: '192.0.2.74', shell: 'none',
-    php: { version: '8.3', handler: 'fpm', fpm: { mode: 'ondemand', maxChildren: 2, startServers: 1, minSpareServers: 1, maxSpareServers: 1, maxRequests: 50, processIdleTimeoutSec: 10 }, ini: {} } })
-  const owner = await account('dbworka'), other = await account('dbworkb')
-  const ownDb = await state.store.createDatabase({ accountId: owner.id, name: owner.username + '_existing' })
-  const trashedDb = await state.store.createDatabase({ accountId: owner.id, name: owner.username + '_trashed' })
-  await state.store.trashDatabase(trashedDb.id)
-  const foreignDb = await state.store.createDatabase({ accountId: other.id, name: other.username + '_existing' })
-  const ownUser = await state.store.createDatabaseUser({ accountId: owner.id, name: owner.username + '_seed', authPlugin: 'mysql_native_password', authString: nativeHash })
-  const foreignUser = await state.store.createDatabaseUser({ accountId: other.id, name: other.username + '_seed', authPlugin: 'mysql_native_password', authString: nativeHash })
-  const principal = await dbApi.createUserPrincipal(database.db, { username: owner.username, accountId: owner.id, passwordHash: ARGON2 })
-  await dbApi.createUserPrincipal(database.db, { username: other.username, accountId: other.id, passwordHash: ARGON2 })
+  const database = dbApi.createDb(':memory:'); database.sqlite.deserialize(dbWorkspaceTemplate.sqlite); cleanup.push(() => database.close())
+  const rootDir = await mkdtemp(join(STATE_PARENT, 'xpanel-dbwork-'))
+  for (const relDir of dbWorkspaceTemplate.relDirs) await mkdir(join(rootDir, relDir), { recursive: true, mode: 0o750 })
+  await Promise.all(dbWorkspaceTemplate.stateFiles.map(file => writeFile(join(rootDir, file.relPath), file.bytes, { mode: 0o640 })))
+  const state: TestStateStoreHandle = { store: createStateStore(rootDir), rootDir, close: () => rm(rootDir, { recursive: true, force: true }) }
+  cleanup.push(() => state.close())
+  const { feature, plan, owner, other, ownDb, trashedDb, foreignDb, ownUser, foreignUser, principal, credential } = dbWorkspaceTemplate
   const token = async (scopes: string[], principalId = principal.id) => {
     const raw = 'xp_' + randomUUID()
     const record = await dbApi.createApiToken(database.db, { principalId, name: 'Synthetic database workspace', tokenHash: sha256Hex(raw), scopes, expiresAt: new Date(Date.now() + 60000).toISOString() })
     return { raw, id: record.id }
   }
-  const credential = await token(['databases:read', 'databases:write'])
   const seedIndex = async () => dbApi.reindexFromState(database.db, await state.store.readSnapshot())
-  await seedIndex()
   const calls: Array<{ path: string; method: string; principalId: string | null }> = []
   const makeApp = (mode: AgentMode = 'none') => {
     // Declared synthetic global-configuration transport; no MariaDB server or host
@@ -93,6 +129,7 @@ const fixture = async () => {
 
 describe('database workspace API using isolated desired state and real SQLite', () => {
   let f: Awaited<ReturnType<typeof fixture>>
+  beforeAll(async () => { dbWorkspaceTemplate = await buildDbWorkspaceTemplate() })
   beforeEach(async () => { f = await fixture() })
   afterEach(async () => {
     vi.restoreAllMocks()

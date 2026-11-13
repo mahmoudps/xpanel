@@ -5,7 +5,7 @@
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import type { ThemeCatalogOverlay } from './theme-messages.ts'
+import { isImmutableThemeCatalog, type ThemeCatalogOverlay } from './theme-messages.ts'
 import { pageScript, pageScriptBodies, pageScriptTag } from './page-scripts.ts'
 import { CATALOG_LOCALE_DIR } from '@xpanel/catalog'
 import {
@@ -57,12 +57,40 @@ const readCatalog = (dir: string, locale: Locale): Catalog =>
 
 const WEB_CATALOG_DIR = join(dirname(fileURLToPath(import.meta.url)), 'locales')
 // Mutable only through installLocaleOverrides, which runs once at panel start before pages render.
-const CATALOGS = new Map<Locale, Catalog>(LOCALES.map(info => [info.tag, readCatalog(WEB_CATALOG_DIR, info.tag)]))
+const CATALOGS = new Map<Locale, Catalog>()
 // Product rule: every displayed digit is ASCII 0-9, including digits inside interpolated values.
 const ASCII_DIGITS = (text: string): string => text.replace(/[\u0660-\u0669\u06F0-\u06F9]/g, digit => String((digit.charCodeAt(0) & 0xf)))
 const asciiTranslator = (base: Translate): Translate => Object.assign((message: string, values?: MessageValues) => ASCII_DIGITS(base(message, values)), { locale: base.locale })
-const TRANSLATORS = new Map<Locale, Translate>(LOCALES.map(info => [info.tag, asciiTranslator(createTranslator(info.tag, CATALOGS.get(info.tag)))]))
-const TOOL_CATALOGS = new Map<Locale, Catalog>(LOCALES.map(info => [info.tag, readCatalog(CATALOG_LOCALE_DIR, info.tag)]))
+const TRANSLATORS = new Map<Locale, Translate>()
+const TOOL_CATALOGS = new Map<Locale, Catalog>()
+const ensureCatalog = (locale: Locale): Catalog => {
+  let catalog = CATALOGS.get(locale)
+  if (!catalog) {
+    if (!LOCALES.some(info => info.tag === locale)) return undefined!
+    catalog = readCatalog(WEB_CATALOG_DIR, locale)
+    CATALOGS.set(locale, catalog)
+  }
+  return catalog
+}
+const ensureTranslator = (locale: Locale): Translate => {
+  let fn = TRANSLATORS.get(locale)
+  if (!fn) {
+    const catalog = ensureCatalog(locale)
+    if (!catalog) return undefined!
+    fn = asciiTranslator(createTranslator(locale, catalog))
+    TRANSLATORS.set(locale, fn)
+  }
+  return fn
+}
+const ensureToolCatalog = (locale: Locale): Catalog => {
+  let catalog = TOOL_CATALOGS.get(locale)
+  if (!catalog) {
+    if (!LOCALES.some(info => info.tag === locale)) return undefined!
+    catalog = readCatalog(CATALOG_LOCALE_DIR, locale)
+    TOOL_CATALOGS.set(locale, catalog)
+  }
+  return catalog
+}
 // Text of the runtime locales this process installed, read where the release file would be.
 const RUNTIME_PO = new Map<Locale, string>()
 
@@ -206,7 +234,7 @@ export function installRuntimeLocale(info: LocaleInfo & { base: Locale }, po: st
   try { const parsed = parsePo(po); if (parsed.header.Language !== info.tag || !isLocale(info.base)) return false; entries = parsed.entries } catch { return false }
   registerLocale(info)
   const tag = info.tag as Locale, catalog = new Map(catalogFromEntries(entries))
-  RUNTIME_PO.set(tag, po); CATALOGS.set(tag, catalog); TOOL_CATALOGS.set(tag, TOOL_CATALOGS.get(info.base)!); TRANSLATORS.set(tag, asciiTranslator(createTranslator(tag, catalog)))
+  RUNTIME_PO.set(tag, po); CATALOGS.set(tag, catalog); TOOL_CATALOGS.set(tag, ensureToolCatalog(info.base)); TRANSLATORS.set(tag, asciiTranslator(createTranslator(tag, catalog)))
   return true
 }
 
@@ -255,20 +283,20 @@ export function languageName(tag: Locale, inLocale: Locale): string {
 export const alternateLocales = (locale: Locale): readonly (typeof LOCALES)[number][] => LOCALES.filter(info => info.tag !== locale && isOfferedLocale(info.tag))
 
 /** The translator for a supported locale. */
-export const translator = (locale: Locale = SOURCE_LOCALE): Translate => TRANSLATORS.get(locale)!
+export const translator = (locale: Locale = SOURCE_LOCALE): Translate => ensureTranslator(locale)
 
 /** The catalog of a supported locale (empty for the source locale). */
-export const catalogFor = (locale: Locale): Catalog => CATALOGS.get(locale)!
+export const catalogFor = (locale: Locale): Catalog => ensureCatalog(locale)
 
 /** Plain catalog text (tool, group and navigation names): the record's own context first, then the shared name. */
 export const catalogText = (locale: Locale, recordKey: string, source: string): string => {
-  const catalog = TOOL_CATALOGS.get(locale)!
+  const catalog = ensureToolCatalog(locale)
   return catalog.get(catalogKey(source, recordKey)) ?? catalog.get(source) ?? source
 }
 
 /** Extra search keywords a locale provides for a catalog record (none when it has no entry). */
 export const catalogKeywords = (locale: Locale, recordKey: string): string[] =>
-  (TOOL_CATALOGS.get(locale)!.get(catalogKey('keywords', recordKey)) ?? '').split(',').map(keyword => keyword.trim()).filter(Boolean)
+  (ensureToolCatalog(locale).get(catalogKey('keywords', recordKey)) ?? '').split(',').map(keyword => keyword.trim()).filter(Boolean)
 
 /** Authored content (not UI copy) keyed by locale tag; the source locale is always present. */
 export type LocalizedText = Readonly<Partial<Record<Locale, string>> & Record<typeof SOURCE_LOCALE, string>>
@@ -288,12 +316,18 @@ const decodeJsString = (literal: string): string | undefined => {
   }
 }
 
+const EMPTY_KEYS: readonly string[] = []
 const keyCache = new Map<string, readonly string[]>()
 
 /** Message keys a client script may look up: its string literals and msgctxt pairs. */
 export function clientMessageKeys(script: string): readonly string[] {
+  if (!script) return EMPTY_KEYS
   const cached = keyCache.get(script)
-  if (cached) return cached
+  if (cached) {
+    keyCache.delete(script)
+    keyCache.set(script, cached)
+    return cached
+  }
   const keys = new Set<string>()
   for (const match of script.matchAll(CLIENT_LITERAL)) {
     if (match[3]) {
@@ -305,8 +339,8 @@ export function clientMessageKeys(script: string): readonly string[] {
     }
   }
   const result = [...keys]
-  // shortcut: unbounded growth is prevented by clearing; page scripts are mostly module constants
-  if (keyCache.size > 512) keyCache.clear()
+  // shortcut: unbounded growth is prevented by LRU eviction; page scripts are mostly module constants
+  if (keyCache.size >= 2048) keyCache.delete(keyCache.keys().next().value!)
   keyCache.set(script, result)
   return result
 }
@@ -356,10 +390,34 @@ function installClientI18n(messages: Record<string, string>, locale: string): vo
 const CLIENT_RUNTIME = `const parseMessage=${parseMessage.toString()};const compileMessage=${compileMessage.toString()};const isolateClientValues=${isolateClientValues.toString()};(${installClientI18n.toString()})`
 
 const scriptJson = (value: unknown): string => JSON.stringify(value).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029')
+const IMMUTABLE_OVERLAY_JSON = new WeakMap<Catalog, { themeId: string; pairs: string }>()
 
 /** The client translator with the messages the given keys need: a JSON block and the cached runtime that installs it. */
 export function renderClientI18nScript(locale: Locale, keys: Iterable<string>, overlay?: ThemeCatalogOverlay): string {
   const messages = pickMessages(catalogFor(locale), keys)
+  if (overlay && isImmutableThemeCatalog(overlay.messages)) {
+    if (overlay.locale !== locale || !/^[a-z][a-z0-9-]*$/.test(overlay.themeId)) throw new Error('theme_message_scope')
+    let cached = IMMUTABLE_OVERLAY_JSON.get(overlay.messages)
+    if (!cached || cached.themeId !== overlay.themeId) {
+      const prefix = 'theme:' + overlay.themeId + '\u0004'
+      const obj: Record<string, string> = {}
+      for (const [key, value] of overlay.messages) {
+        if (!key.startsWith(prefix) || typeof value !== 'string') throw new Error('theme_message_scope')
+        obj[key] = value
+      }
+      cached = { themeId: overlay.themeId, pairs: scriptJson(obj).slice(1, -1) }
+      IMMUTABLE_OVERLAY_JSON.set(overlay.messages, cached)
+    }
+    const pickedKeys = Object.keys(messages)
+    if (pickedKeys.every(key => !overlay.messages.has(key))) {
+      const messagesJson = pickedKeys.length === 0
+        ? `{${cached.pairs}}`
+        : cached.pairs.length === 0
+          ? scriptJson(messages)
+          : `${scriptJson(messages).slice(0, -1)},${cached.pairs}}`
+      return `<script type="application/json" id="xpanel-i18n-messages">{"locale":${scriptJson(locale)},"messages":${messagesJson}}</script>${pageScriptTag(I18N_RUNTIME, 'xpanel-i18n')}`
+    }
+  }
   if (overlay) {
     if (overlay.locale !== locale || !/^[a-z][a-z0-9-]*$/.test(overlay.themeId)) throw new Error('theme_message_scope')
     const prefix = 'theme:' + overlay.themeId + '\u0004'

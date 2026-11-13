@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { builtinEnvironments, type EnvironmentReturn } from 'vitest/runtime'
 import { translator } from './i18n.ts'
 import { renderWhmSurface } from './surfaces/xwhm.ts'
@@ -19,8 +19,11 @@ type Theme = 'classic' | 'v2'
 type Send = (method: string, path: string, body?: unknown) => Promise<unknown>
 type TestDom = { window: Window & typeof globalThis }
 let testDom: EnvironmentReturn | undefined
-beforeEach(async () => {
+beforeAll(async () => {
   testDom = await builtinEnvironments.jsdom.setup(globalThis, { jsdom: { url: 'https://whm.example.test/whm', runScripts: 'outside-only' } })
+})
+afterAll(async () => {
+  await testDom?.teardown(globalThis); testDom = undefined
 })
 const mount = (html: string): TestDom => {
   document.documentElement.lang = 'en'
@@ -39,13 +42,11 @@ function boot(html: string, binding: string, send: Send, ask: (options: Record<s
   dom.window.eval(binding)(ask)
   return dom
 }
-afterEach(async () => {
-  try {
-    document.body.replaceChildren()
-    delete (window as Window & { xpT?: unknown }).xpT
-    delete (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest
-    vi.restoreAllMocks()
-  } finally { await testDom?.teardown(globalThis); testDom = undefined }
+afterEach(() => {
+  document.body.replaceChildren()
+  delete (window as Window & { xpT?: unknown }).xpT
+  delete (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest
+  vi.restoreAllMocks()
 })
 
 const at = '2026-10-29T12:00:00.000Z', id = '0f3c2a64-8b1d-4c2e-9a7f-5d6e7f8a9b0c'

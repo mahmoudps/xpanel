@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { cp, mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, sep } from 'node:path'
+import { dirname, join, relative, sep } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import {
   createApiToken, createRootPrincipal, createResellerPrincipal, createSession, createTestDb, createUserPrincipal, saveMailboxSession, setTotpSecret,
@@ -43,9 +43,16 @@ vi.mock('../../web/src/index.ts', async importOriginal => {
     const [request, provider] = args
     if (documentFlow.real) return actual.serveWebUi(request, provider ? async (url: URL, req: Request) => {
       const state = await provider(url, req)
+      const { catalog: rawCatalog, ...restState } = state
+      const cloned = JSON.parse(JSON.stringify(restState))
+      if (rawCatalog !== undefined) {
+        cloned.catalog = Array.isArray(rawCatalog)
+          ? rawCatalog.map(tool => ({ id: tool.id, status: tool.status, delivery: { status: tool.delivery.status } }))
+          : JSON.parse(JSON.stringify(rawCatalog))
+      }
       documentFlow.observations.push({ uiTheme: state.uiTheme, nativeFacts: state.panel !== undefined || state.whm !== undefined || state.mail !== undefined,
         qualified: state.catalog?.some(tool => tool.status === 'verified' && tool.delivery.status === 'verified') ?? false, factorKnown: typeof state.security?.totpEnabled === 'boolean',
-        produced: JSON.parse(JSON.stringify(state)) })
+        produced: cloned })
       return state
     } : undefined)
     return new Response(JSON.stringify(provider ? await provider(new URL(request.url), request) : {}), { headers: { 'content-type': 'application/json' } })
@@ -77,6 +84,27 @@ interface TableSnapshot { name: string; columns: string[]; rows: Row[] }
 let mutableSnapshot: TableSnapshot[]
 let loginSequence: Row[]
 let auditGuards: Row[]
+let auditRowExpr = ''
+interface CachedStateFile { relPath: string; bytes: Buffer }
+let baselineFiles: CachedStateFile[] = []
+let baselineRelDirs: string[] = []
+async function snapshotStateFiles(rootDir: string, mutexFilePath: string, lockDirPath: string): Promise<CachedStateFile[]> {
+  const files: CachedStateFile[] = []
+  const walk = async (dir: string): Promise<void> => {
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name)
+      if (full === mutexFilePath || full.startsWith(mutexFilePath + '-') || full === lockDirPath || full.startsWith(lockDirPath + sep)) continue
+      if (entry.isDirectory()) await walk(full)
+      else files.push({ relPath: relative(rootDir, full), bytes: await readFile(full) })
+    }
+  }
+  await walk(rootDir)
+  return files
+}
+async function restoreStateFiles(rootDir: string): Promise<void> {
+  for (const relDir of baselineRelDirs) await mkdir(join(rootDir, relDir), { recursive: true, mode: 0o750 })
+  await Promise.all(baselineFiles.map(file => writeFile(join(rootDir, file.relPath), file.bytes, { mode: 0o640 })))
+}
 
 beforeAll(async () => {
   database = await createTestDb()
@@ -113,6 +141,11 @@ beforeAll(async () => {
   })))
   loginSequence = await database.db.query("SELECT name,seq FROM sqlite_sequence WHERE name='login_attempts'")
   auditGuards = await database.db.query("SELECT name,sql FROM sqlite_master WHERE type='trigger' AND tbl_name='audit_log' ORDER BY name")
+  const auditCols = (await database.db.query<{ name: string }>('PRAGMA table_info("audit_log")')).map(column => column.name)
+  auditRowExpr = auditCols.map(name => 'quote("' + name.replaceAll('"', '""') + '")').join("||','||")
+  const lock = baseline.store.getWriterLock()
+  baselineFiles = await snapshotStateFiles(baseline.rootDir, lock.mutexFilePath, lock.lockDirPath)
+  baselineRelDirs = [...new Set(baselineFiles.map(file => dirname(file.relPath)).filter(dir => dir !== '.'))]
 })
 afterAll(async () => {
   try { await database?.close() }
@@ -129,8 +162,9 @@ afterAll(async () => {
  */
 interface Fixture { db: Db; state: TestStateStoreHandle; close: () => Promise<void> }
 async function openFixture(): Promise<Fixture> {
-  const auditBefore = await database.db.query('SELECT * FROM audit_log ORDER BY id')
-  const auditCursor = Number(auditBefore.at(-1)?.id ?? 0)
+  const [auditBefore] = await database.db.query<{ max_id: number; dump: string }>(`SELECT coalesce(max(id),0) AS max_id, coalesce(group_concat(r, char(10)), '') AS dump FROM (SELECT id, ${auditRowExpr} AS r FROM audit_log ORDER BY id)`)
+  const auditCursor = Number(auditBefore?.max_id ?? 0)
+  const auditPrefixDump = auditBefore?.dump ?? ''
   const state = await createTestStateStore()
   const close = async () => {
     try {
@@ -152,18 +186,14 @@ async function openFixture(): Promise<Fixture> {
         for (const row of loginSequence) await db.query('INSERT INTO sqlite_sequence(name,seq) VALUES ($1,$2)', [row.name, row.seq])
         for (const table of mutableSnapshot) expect(await db.query(`SELECT * FROM "${table.name}" ORDER BY rowid`), table.name).toEqual(table.rows)
         expect(await db.query('PRAGMA foreign_key_check')).toEqual([])
-        expect(await db.query('SELECT * FROM audit_log WHERE id<=$1 ORDER BY id', [auditCursor])).toEqual(auditBefore)
+        const [auditAfter] = await db.query<{ dump: string }>(`SELECT coalesce(group_concat(r, char(10)), '') AS dump FROM (SELECT ${auditRowExpr} AS r FROM audit_log WHERE id<=$1 ORDER BY id)`, [auditCursor])
+        expect(auditAfter?.dump ?? '').toBe(auditPrefixDump)
         expect(await db.query("SELECT name,sql FROM sqlite_master WHERE type='trigger' AND tbl_name='audit_log' ORDER BY name")).toEqual(auditGuards)
       })
     } finally { await state.close() }
   }
   try {
-    const mutex = baseline.store.getWriterLock().mutexFilePath
-    const lockDirectory = baseline.store.getWriterLock().lockDirPath
-    await cp(baseline.rootDir, state.rootDir, { recursive: true, filter: source =>
-      source !== mutex && !source.startsWith(mutex + '-')
-      && source !== lockDirectory && !source.startsWith(lockDirectory + sep),
-    })
+    await restoreStateFiles(state.rootDir)
   } catch (error) { await close(); throw error }
   return { db: database.db, state, close }
 }
@@ -198,14 +228,37 @@ const read = async (application: ReturnType<typeof app>, surface: EntryPoint, au
 const save = (application: ReturnType<typeof app>, surface: EntryPoint, auth: { cookie: string; csrf: string }, view: UiPreferencesView) =>
   request(application, surface, auth, { method: 'PUT', body: { uiTheme: 'classic', expectedRevision: view.revision } })
 
+const checkedSameOriginHrefs = new Map<string, boolean>()
+function leakedAccountHrefs(nodes: ReturnType<typeof parseMarkup>, surface: EntryPoint): string[] {
+  const baseOrigin = ORIGIN[surface]
+  const leaked: string[] = []
+  for (let i = 0; i < nodes.length; i++) {
+    const anchor = nodes[i]!
+    if (anchor.namespace !== 'html' || anchor.template >= 0 || anchor.tag !== 'a' || !anchor.attrs.has('href')) continue
+    const value = anchor.attrs.get('href')
+    if (value === undefined) throw new Error('missing normal document link')
+    const key = surface + '\0' + value
+    let hasAccountId = checkedSameOriginHrefs.get(key)
+    if (hasAccountId === undefined) {
+      const href = new URL(value, baseOrigin)
+      hasAccountId = href.origin === baseOrigin && href.searchParams.has('accountId')
+      checkedSameOriginHrefs.set(key, hasAccountId)
+    }
+    if (hasAccountId) leaked.push(value)
+  }
+  return leaked
+}
+
 // The database web-client pages post their sign-on ticket to the client's own origin; no other document posts away.
 const CROSS_ORIGIN_FORM_ROUTES = new Set(['/databases/phpmyadmin', '/databases/phppgadmin', '/whm/databases/phpmyadmin'])
 /** Every rendered document carries the strict policy, and its own markup runs under it: no inline script or handler. */
-function expectDocumentPolicy(response: Response, body: string, route: string): void {
+function expectDocumentPolicy(response: Response, body: string, route: string, parsedNodes?: ReturnType<typeof parseMarkup>): ReturnType<typeof parseMarkup> {
+  const nodes = parsedNodes ?? parseMarkup(body)
   expect(response.headers.get('content-security-policy')).toBe(CROSS_ORIGIN_FORM_ROUTES.has(route) ? CROSS_ORIGIN_FORM_CSP : DOCUMENT_CSP)
   expect(response.headers.get('referrer-policy')).toBe('same-origin')
   expect(response.headers.get('x-content-type-options')).toBe('nosniff')
-  expect(cspMarkupIssues(body)).toEqual([])
+  expect(cspMarkupIssues(body, nodes)).toEqual([])
+  return nodes
 }
 
 /** One fixture, renderer, session and normally saved theme shared by a route matrix; afterAll closes it. */
@@ -672,18 +725,12 @@ describe('normal registered owner documents with stored facts and unqualified na
         for (const key of ['databases', 'databaseUsers', 'serviceUsers', 'certificates', 'dnsRecords', 'files', 'recentAudit']) expect(produced.panel).not.toHaveProperty(key)
       }
       expect(response.status).toBe(200)
-      expectDocumentPolicy(response, body, route)
-      const nodes = parseMarkup(body)
+      const nodes = expectDocumentPolicy(response, body, route)
       const html = nodes.find(node => node.namespace === 'html' && node.template < 0 && node.tag === 'html')
       expect(html?.attrs.get('lang')).toBe(locale)
       expect(html?.attrs.get('dir')).toBe(locale === 'ar' ? 'rtl' : 'ltr')
       expect(html?.attrs.get('data-ui-theme') ?? 'classic').toBe(uiTheme)
-      for (const anchor of nodes.filter(node => node.namespace === 'html' && node.template < 0 && node.tag === 'a' && node.attrs.has('href'))) {
-        const value = anchor.attrs.get('href')
-        if (value === undefined) throw new Error('missing normal owner document link')
-        const href = new URL(value, ORIGIN.xpanel)
-        if (href.origin === new URL(ORIGIN.xpanel).origin) expect(href.searchParams.has('accountId')).toBe(false)
-      }
+      expect(leakedAccountHrefs(nodes, 'xpanel')).toEqual([])
       expect(observations[0]?.qualified).toBe(false)
     })
   })
@@ -749,18 +796,12 @@ describe('normal registered operator and mailbox documents with stored identity 
           expect(produced).not.toHaveProperty('whm')
         }
         expect(response.status).toBe(200)
-        expectDocumentPolicy(response, body, route)
-        const nodes = parseMarkup(body)
+        const nodes = expectDocumentPolicy(response, body, route)
         const html = nodes.find(node => node.namespace === 'html' && node.template < 0 && node.tag === 'html')
         expect(html?.attrs.get('lang')).toBe(locale)
         expect(html?.attrs.get('dir')).toBe(locale === 'ar' ? 'rtl' : 'ltr')
         expect(html?.attrs.get('data-ui-theme') ?? 'classic').toBe(uiTheme)
-        for (const anchor of nodes.filter(node => node.namespace === 'html' && node.template < 0 && node.tag === 'a' && node.attrs.has('href'))) {
-          const value = anchor.attrs.get('href')
-          if (value === undefined) throw new Error('missing normal realm document link')
-          const href = new URL(value, ORIGIN[surface])
-          if (href.origin === new URL(ORIGIN[surface]).origin) expect(href.searchParams.has('accountId')).toBe(false)
-        }
+        expect(leakedAccountHrefs(nodes, surface)).toEqual([])
         expect(observations[0]?.qualified).toBe(false)
         expect(snapshot).not.toHaveBeenCalled()
         expect(nativeMail).not.toHaveBeenCalled()

@@ -2,11 +2,13 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { BROWSER_ACCEPTANCE, REQUIRED_IDS, SHARD_COUNT, validateManifest } from './browser-acceptance-manifest.mjs'
 import { aggregateReceipts, buildPlan, manifestHash, parseOptions, runShard, sourceIdentity, readSourceBytes } from './browser-acceptance-runner.mjs'
 
 const identity = { commit: 'a'.repeat(40), source_sha256: 'b'.repeat(64), source_files: 19 }
+let cachedActualIdentity: ReturnType<typeof sourceIdentity>
+beforeAll(() => { cachedActualIdentity = sourceIdentity() })
 const fixtures: string[] = []
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value))
 async function fixture() {
@@ -116,7 +118,7 @@ describe('canonical browser acceptance partitions', () => {
   it('exercises real aggregate CLI file IO with explicitly synthetic structural receipts', async () => {
     // Metadata/parser fixture only: no browser command executes and these receipts are never uploaded.
     const directory = await fixture()
-    const actual = sourceIdentity()
+    const actual = cachedActualIdentity
     const items = receipts().map(receipt => ({ ...receipt, ...actual }))
     for (const item of items) {
       const output = join(directory, 'shard-' + item.shard)

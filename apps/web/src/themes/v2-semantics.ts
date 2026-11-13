@@ -1,5 +1,5 @@
 import { checkConformance, routeContracts, type HookRequirement } from './contract.ts'
-import { isHtmlElement, matchesHook, parseMarkup, type HookSelector, type MarkupNode } from './markup.ts'
+import { isHtmlElement, markupNodeSpan, matchesHook, parseMarkup, type HookSelector, type MarkupNode } from './markup.ts'
 import { isLocale, translator } from '../i18n.ts'
 import { escapeHtml } from '../html.ts'
 import { msgctxt } from '@xpanel/core'
@@ -625,10 +625,13 @@ export const V2_TEMPLATE_COUNTERPARTS: readonly { readonly routes: readonly stri
     ] } },
 ]
 
+let cachedV2RouteContracts: ReturnType<typeof routeContracts> | undefined
+
 /** A V2 profile is selected deliberately by conformance tooling. The default Classic API is untouched.
  * Only the explicitly sourced observations below are substituted; all original independent controllers/templates, real announcements, backup and transfer requirements stay active. */
 export function v2RouteContracts(): ReturnType<typeof routeContracts> {
-  return routeContracts().map(base => {
+  if (cachedV2RouteContracts) return cachedV2RouteContracts.slice()
+  cachedV2RouteContracts = routeContracts().map(base => {
     const counterparts = [...V2_OBSERVATION_COUNTERPARTS, ...extraObservations, ...V2_STATEFUL_OBSERVATION_COUNTERPARTS, ...backupCounterparts].filter(item => item.route === base.route)
     const removed: readonly HookSelector[] = ['[data-status]', ...counterparts.map(item => item.legacyHook), ...(base.route === '/home' ? V2_HOME_OBSERVATION_HOOKS : [])]
     const hooks = base.hooks.filter(hook => !removed.includes(hook))
@@ -657,6 +660,7 @@ export function v2RouteContracts(): ReturnType<typeof routeContracts> {
       ...templateCounterparts.flatMap(item => item.requirement ? [item.requirement] : []),
     ] }
   })
+  return cachedV2RouteContracts.slice()
 }
 
 const sameOutlineNode = (a: MarkupNode, b: MarkupNode): boolean => a.tag === b.tag && a.namespace === b.namespace && a.parent === b.parent && a.template === b.template && a.attrs.size === b.attrs.size && [...a.attrs].every(([key, value]) => b.attrs.get(key) === value)
@@ -664,6 +668,16 @@ const sameOutlineNode = (a: MarkupNode, b: MarkupNode): boolean => a.tag === b.t
 function ownedLabelText(html: string, nodes: readonly MarkupNode[], index: number, state: string): string | undefined {
   const target = nodes[index]
   if (!target || nodes.some(node => node.parent === index)) return undefined
+  const span = markupNodeSpan(target)
+  if (span !== undefined) {
+    if (html.indexOf('>', span.start) !== span.openEnd - 1) return undefined
+    const openSlice = html.slice(span.start, span.openEnd)
+    if (!openSlice.includes('data-ws-label="' + state + '"') && !openSlice.includes("data-ws-label='" + state + "'")) return undefined
+    const close = /<\/span\s*>/gi
+    close.lastIndex = span.openEnd
+    const found = close.exec(html)
+    return found ? html.slice(span.openEnd, found.index) : undefined
+  }
   for (const quote of ['"', "'"]) {
     const marker = 'data-ws-label=' + quote + state + quote
     let cursor = 0
@@ -687,6 +701,15 @@ function ownedLabelText(html: string, nodes: readonly MarkupNode[], index: numbe
 function ownedPlainText(html: string,nodes: readonly MarkupNode[],index: number): string | undefined {
   const target=nodes[index]
   if(!target || !isHtmlElement(target) || nodes.some(node=>node.parent===index)) return undefined
+  const span = markupNodeSpan(target)
+  if (span !== undefined) {
+    if (html.indexOf('>', span.start) !== span.openEnd - 1) return undefined
+    if (html.slice(span.start, span.start + 1 + target.tag.length).toLowerCase() !== '<' + target.tag) return undefined
+    const close = new RegExp('</' + target.tag + '\\s*>', 'gi')
+    close.lastIndex = span.openEnd
+    const match = close.exec(html)
+    return match ? html.slice(span.openEnd, match.index) : undefined
+  }
   let cursor=0
   while(cursor<html.length) {
     const start=html.indexOf('<' + target.tag,cursor)
@@ -710,8 +733,8 @@ const asciiCount = (value: string | undefined): number | undefined => {
   return Number.isSafeInteger(number) ? number : undefined
 }
 /** Preserve the core checker, then validate actual V2 visibility/text and optional known count semantics. */
-export function checkV2Conformance(html: string, requirement: HookRequirement): ReturnType<typeof checkConformance> {
-  const issues = checkConformance(html, requirement), nodes = parseMarkup(html)
+export function checkV2Conformance(html: string, requirement: HookRequirement, parsedNodes?: readonly MarkupNode[]): ReturnType<typeof checkConformance> {
+  const nodes = parsedNodes ?? parseMarkup(html), issues = checkConformance(html, requirement, nodes)
   const add = (name: string, controller: string): void => { if (!issues.some(issue => issue.kind === 'element' && issue.name === name && issue.controller === controller)) issues.push({ kind: 'element', name, controller }) }
   const blocked = (index: number): boolean => {
     for (let at = index; at >= 0;) {
