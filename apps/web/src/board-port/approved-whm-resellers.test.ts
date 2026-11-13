@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { qualifyHostTools, tools } from '@xpanel/catalog'
+import { qualifyHostTools, unqualifiedTools as tools } from '@xpanel/catalog'
 import type { Account, Plan, Reseller } from '@xpanel/core'
 import { renderApprovedWhmResellers, resellerDetailAnchor } from './approved-whm-resellers.ts'
 import { renderWhmSurface } from '../surfaces/xwhm.ts'

@@ -47,7 +47,7 @@ echo DONE`
   return { root, last: result.stdout.trim().split('\n').at(-1), stderr: result.stderr, read, calls: (read('calls') ?? '').trim().split('\n') }
 }
 
-describe('EL source rebuild', { tags: ['unit'] }, () => {
+describe('EL source rebuild', { tags: ['feature'] }, () => {
   it('swaps mpm-itk only after Apache accepts it, then records the version and reloads', () => {
     const run = rebuild('mpm-itk')
     expect(run.last, run.stderr).toBe('DONE')

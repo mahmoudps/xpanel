@@ -1,4 +1,4 @@
-import { tools } from './data/index.ts'
+import { unqualifiedTools } from './data/index.ts'
 import { navigation } from './data/navigation.ts'
 import type { CatalogTool, NavPage, NavSurface } from './types.ts'
 import { visibleTools, type VisibilityContext } from './visibility.ts'
@@ -118,17 +118,56 @@ const WORKSPACE_CORE_TOOLS: Readonly<Record<string, string>> = {
   '/mail/settings/calendars': 'webmail-dav-config',
 }
 
+const navCache = new WeakMap<readonly CatalogTool[], Map<string, NavSurface[]>>()
+
+const visibilityCacheKey = (ctx: VisibilityContext, catalogLen: number): string => {
+  const p = ctx.principal
+  const pKey = p.kind === 'root' ? 'root'
+    : p.kind === 'reseller' ? `reseller\0${ctx.reseller?.acl ? [...ctx.reseller.acl].join(',') : ''}`
+      : `user\0${p.accountId.trim().length > 0 ? '1' : '0'}`
+  const dfKey = ctx.disabledFeatures === undefined ? 'u' : ctx.disabledFeatures.size === 0 ? '' : [...ctx.disabledFeatures].sort().join(',')
+  const atKey = ctx.allowedToolIds === undefined ? 'u' : ctx.allowedToolIds.size === 0 ? '' : [...ctx.allowedToolIds].sort().join(',')
+  return `${catalogLen}\x1f${pKey}\x1f${dfKey}\x1f${atKey}`
+}
+
+const cloneNavSurfaces = (surfaces: readonly NavSurface[]): NavSurface[] =>
+  surfaces.map(surface => ({
+    ...surface,
+    sections: surface.sections.map(section => ({
+      ...section,
+      pages: section.pages.slice(),
+    })),
+  }))
+
 /** Pages require their full capability set or an explicitly scoped implemented workspace. */
 export const visibleNavigation = (
   ctx?: VisibilityContext,
-  catalog: readonly CatalogTool[] = tools,
+  catalog: readonly CatalogTool[] = unqualifiedTools,
   design: readonly NavSurface[] = navigation,
 ): NavSurface[] => {
   if (ctx === undefined) return []
+  let byCtx: Map<string, NavSurface[]> | undefined
+  let cacheKey = ''
+  if (design === navigation) {
+    byCtx = navCache.get(catalog)
+    if (!byCtx) {
+      byCtx = new Map()
+      navCache.set(catalog, byCtx)
+    }
+    cacheKey = visibilityCacheKey(ctx, catalog.length)
+    const cached = byCtx.get(cacheKey)
+    if (cached !== undefined) return cloneNavSurfaces(cached)
+  }
   const allowed = new Set(visibleTools(catalog, ctx).map(tool => tool.id))
   // Home opens once the session names an account. Its tools stay listed, qualified or not.
   const accountResolved = ctx.principal.kind === 'user' && ctx.principal.accountId.trim().length > 0
-  if (allowed.size === 0 && !accountResolved) return []
+  if (allowed.size === 0 && !accountResolved) {
+    if (byCtx) {
+      if (byCtx.size >= 128) byCtx.clear()
+      byCtx.set(cacheKey, [])
+    }
+    return []
+  }
   const pageReady = (page: NavPage): boolean => {
     if (!allowsPageRole(page, ctx)) return false
     if (page.route === '/home' && accountResolved) return true
@@ -155,11 +194,17 @@ export const visibleNavigation = (
     const core = WORKSPACE_CORE_TOOLS[page.route]
     return core !== undefined && allowed.has(core)
   }
-  return design.map(surface => ({
+  const result = design.map(surface => ({
     ...surface,
     sections: surface.sections.map(section => ({
       ...section,
       pages: section.pages.filter(pageReady),
     })).filter(section => section.pages.length > 0),
   })).filter(surface => surface.sections.length > 0)
+  if (byCtx) {
+    if (byCtx.size >= 128) byCtx.clear()
+    byCtx.set(cacheKey, result)
+    return cloneNavSurfaces(result)
+  }
+  return result
 }

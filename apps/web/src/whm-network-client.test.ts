@@ -26,7 +26,7 @@ const submit = (selector: string) => $(selector).dispatchEvent(new Event('submit
 const classicIps = () => renderWhmSurface({ locale: 'en', activeRoute: '/whm/server/ips', principal: root, ipPool: pool, accounts: [account], resellers: [reseller] })
 afterEach(() => { document.body.replaceChildren(); delete (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest })
 
-describe('IP and reseller tool client', { tags: ['unit'] }, () => {
+describe('IP and reseller tool client', { tags: ['feature'] }, () => {
   it('serializes a closed helper graph and parses migration pairs strictly', () => {
     expect(WHM_NETWORK_CLIENT_BINDING).not.toContain('__vite_ssr_import_')
     expect(parseIpMigrationPairs('192.0.2.10 198.51.100.10\n\n2001:db8::1 2001:db8::2')).toEqual([{ from: '192.0.2.10', to: '198.51.100.10' }, { from: '2001:db8::1', to: '2001:db8::2' }])

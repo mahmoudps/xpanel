@@ -1,11 +1,12 @@
 import { createServer, type Server } from 'node:net'
 import { request as httpRequest } from 'node:http'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { AgentApp } from '@xpanel/agent'
-import { createDb, createRootPrincipal, createSession, findPrincipalByUsername, migrate, setTotpSecret } from '@xpanel/db'
+import { createDb, createRootPrincipal, createSession, findPrincipalByUsername, getTestDbTemplate, setTotpSecret } from '@xpanel/db'
 import { profileFor } from '@xpanel/os'
 import { ENTRY_POINTS, sessionCookieName, sessionTokenHash, type EntryPoint } from './entry-points.ts'
 import { resolvePanelEntrypoints, startPanelEntrypoints, type PanelEntryPointConfig } from './main.ts'
@@ -43,16 +44,27 @@ const configs = async (): Promise<Record<EntryPoint, PanelEntryPointConfig>> => 
 const cleanups: (() => Promise<unknown>)[] = []
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup() })
 
+const STATE_PARENT = existsSync('/dev/shm') ? '/dev/shm' : tmpdir()
+let startupDbBytes: Uint8Array
+beforeAll(async () => {
+  const tpl = await getTestDbTemplate()
+  const seed = createDb(':memory:')
+  try {
+    seed.sqlite.deserialize(tpl.bytes)
+    seed.sqlite.exec('PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;')
+    const root = await createRootPrincipal(seed.db, { username: 'root', passwordHash: publicHash, forcePasswordChange: false })
+    await setTotpSecret(seed.db, root.id, new Uint8Array(32))
+    startupDbBytes = seed.sqlite.serialize()
+  } finally {
+    await seed.close()
+  }
+})
+
 const fixture = async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'xpanel-entrypoints-'))
+  const dir = await mkdtemp(join(STATE_PARENT, 'xpanel-entrypoints-'))
   cleanups.push(() => rm(dir, { recursive: true, force: true }))
   const dbPath = join(dir, 'control.db')
-  const handle = createDb(dbPath)
-  try {
-    await migrate(handle.runner)
-    const root = await createRootPrincipal(handle.db, { username: 'root', passwordHash: publicHash, forcePasswordChange: false })
-    await setTotpSecret(handle.db, root.id, new Uint8Array(32))
-  } finally { await handle.close() }
+  await writeFile(dbPath, startupDbBytes, { mode: 0o600 })
   const subscriptions = { opened: 0, closed: 0 }
   const agentApp: AgentApp = {
     fetch: async () => new Response(null, { status: 503 }),

@@ -1,8 +1,12 @@
 import { randomUUID } from 'node:crypto'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { existsSync } from 'node:fs'
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { dirname, join, relative, sep } from 'node:path'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as dbApi from '@xpanel/db'
-import { accountContactRevision } from '@xpanel/core'
-import { createTestStateStore } from '@xpanel/state'
+import { MIN_ARGON2_MEMORY_KIB, accountContactRevision, type Account, type FeatureList, type Plan, type ServiceUser } from '@xpanel/core'
+import { createStateStore, createTestStateStore, type TestStateStoreHandle } from '@xpanel/state'
 import type { AgentApp } from '@xpanel/agent'
 import { deriveCsrfToken, hashPasswordArgon2id, sha256Hex } from './auth.ts'
 import { policyForRequest } from './authorization.ts'
@@ -12,36 +16,72 @@ import { TEST_AGENT_TOKEN, TEST_SERVER_SECRET } from './testing.ts'
 
 const PASSWORD = 'Contact-Password-1'
 const HASH = '$argon2id$v=19$m=65536,t=3,p=4$MIIRqgvgQbgj220jfp0MPA$YfwJSVjtjSU0zzV/P3S9nnQ/USre2wvJMjfCIjrTQbg'
+const STATE_PARENT = existsSync('/dev/shm') ? '/dev/shm' : tmpdir()
+let ownerPasswordHash = HASH
+interface CachedStateFile { relPath: string; bytes: Buffer }
+const buildContactTemplate = async () => {
+  ownerPasswordHash = await hashPasswordArgon2id(PASSWORD, { memoryKiB: MIN_ARGON2_MEMORY_KIB, timeCost: 1, parallelism: 1 })
+  const database = await dbApi.createTestDb()
+  const state = await createTestStateStore()
+  try {
+    const features = await state.store.createFeatureList({ name: 'Contact metadata policy', ownerId: null, disabled: [] })
+    const plan = await state.store.createPlan({ name: 'Contact metadata plan', ownerId: null, featureListId: features.id,
+      resources: { diskMb: 1000, bandwidthMbMonth: 10000, ioReadBps: 1048576, ioWriteBps: 1048576, ioReadIops: 100, ioWriteIops: 100, memoryMb: 128, maxProcesses: 16, cpuPercent: 100 },
+      caps: { addonDomains: 4, aliasDomains: 4, subdomains: 4, mailboxes: 4, forwarders: 4, mailingLists: 4, ftpAccounts: 4, databases: 4, phpWorkers: 4 }, dedicatedIp: false, shell: 'none', defaultMailboxQuotaMb: 100 })
+    await state.store.saveServerIp({ address: '192.0.2.64', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
+    const account = async (username: string) => state.store.createAccount({ username, passwordHash: HASH, primaryDomain: username + '.example.test', planId: plan.id, ownerId: null,
+      contactEmail: 'owner@' + username + '.example.test', ipv4: '192.0.2.64', shell: 'none',
+      php: { version: '8.3', handler: 'fpm', fpm: { mode: 'ondemand', maxChildren: 2, startServers: 1, minSpareServers: 1, maxSpareServers: 1, maxRequests: 50, processIdleTimeoutSec: 10 }, ini: {} } })
+    const owner = await account('mbxdeadbeef'), other = await account('contactother')
+    const mailbox = await state.store.createServiceUser({ accountId: owner.id, login: 'inbox@' + owner.primaryDomain, passwordHash: HASH,
+      services: { email: true, ftp: false, webdisk: false }, mailboxQuotaMb: 100, ftpDir: 'public_html' })
+    const principal = await dbApi.createUserPrincipal(database.db, { username: owner.username, accountId: owner.id, passwordHash: ownerPasswordHash })
+    const neighbor = await dbApi.createUserPrincipal(database.db, { username: other.username, accountId: other.id, passwordHash: HASH })
+    await dbApi.syncAccountContactIndex(database.db, owner)
+    await dbApi.syncAccountContactIndex(database.db, other)
+    const credential = 'xp_' + randomUUID()
+    await dbApi.createApiToken(database.db, { principalId: principal.id, name: 'Synthetic contact metadata', tokenHash: sha256Hex(credential), scopes: ['account-preferences:read', 'account-preferences:write'], expiresAt: new Date(Date.now() + 600000).toISOString() })
+    const lock = state.store.getWriterLock()
+    const stateFiles: CachedStateFile[] = []
+    const dirSet = new Set<string>()
+    const walk = async (dir: string): Promise<void> => {
+      for (const item of await readdir(dir, { withFileTypes: true })) {
+        const full = join(dir, item.name)
+        if (full === lock.mutexFilePath || full.startsWith(lock.mutexFilePath + '-') || full === lock.lockDirPath || full.startsWith(lock.lockDirPath + sep)) continue
+        const rel = relative(state.rootDir, full)
+        if (item.isDirectory()) { dirSet.add(rel); await walk(full) }
+        else { const d = dirname(rel); if (d !== '.') dirSet.add(d); stateFiles.push({ relPath: rel, bytes: await readFile(full) }) }
+      }
+    }
+    await walk(state.rootDir)
+    return { sqlite: database.sqlite.serialize(), stateFiles, relDirs: [...dirSet], features, plan, owner, other, mailbox, principal, neighbor, credential }
+  } finally {
+    await state.close()
+    await database.close()
+  }
+}
+let contactTemplate: Awaited<ReturnType<typeof buildContactTemplate>> | null = null
+beforeAll(async () => { contactTemplate = await buildContactTemplate() })
+afterAll(async () => { contactTemplate = null })
 const endpoint = '/api/account/preferences'
 const changedEmail = 'Case+contact@example.test'
 const cleanup: Array<() => Promise<unknown>> = []
 interface ContactView { context: { accountId: string }; preferences: { contactEmail: string }; revision: string }
 
 const fixture = async () => {
-  const database = await dbApi.createTestDb(); cleanup.push(() => database.close())
-  const state = await createTestStateStore(); cleanup.push(() => state.close())
-  const features = await state.store.createFeatureList({ name: 'Contact metadata policy', ownerId: null, disabled: [] })
-  const plan = await state.store.createPlan({ name: 'Contact metadata plan', ownerId: null, featureListId: features.id,
-    resources: { diskMb: 1000, bandwidthMbMonth: 10000, ioReadBps: 1048576, ioWriteBps: 1048576, ioReadIops: 100, ioWriteIops: 100, memoryMb: 128, maxProcesses: 16, cpuPercent: 100 },
-    caps: { addonDomains: 4, aliasDomains: 4, subdomains: 4, mailboxes: 4, forwarders: 4, mailingLists: 4, ftpAccounts: 4, databases: 4, phpWorkers: 4 }, dedicatedIp: false, shell: 'none', defaultMailboxQuotaMb: 100 })
-  await state.store.saveServerIp({ address: '192.0.2.64', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
-  const account = async (username: string) => state.store.createAccount({ username, passwordHash: HASH, primaryDomain: username + '.example.test', planId: plan.id, ownerId: null,
-    contactEmail: 'owner@' + username + '.example.test', ipv4: '192.0.2.64', shell: 'none',
-    php: { version: '8.3', handler: 'fpm', fpm: { mode: 'ondemand', maxChildren: 2, startServers: 1, minSpareServers: 1, maxSpareServers: 1, maxRequests: 50, processIdleTimeoutSec: 10 }, ini: {} } })
-  // This valid hosting username also exercises audit attribution's mailbox-like prefix.
-  const owner = await account('mbxdeadbeef'), other = await account('contactother')
-  const principal = await dbApi.createUserPrincipal(database.db, { username: owner.username, accountId: owner.id, passwordHash: await hashPasswordArgon2id(PASSWORD) })
-  const neighbor = await dbApi.createUserPrincipal(database.db, { username: other.username, accountId: other.id, passwordHash: HASH })
-  const mailbox = await state.store.createServiceUser({ accountId: owner.id, login: 'inbox@' + owner.primaryDomain, passwordHash: HASH,
-    services: { email: true, ftp: false, webdisk: false }, mailboxQuotaMb: 100, ftpDir: 'public_html' })
-  await dbApi.syncAccountContactIndex(database.db, owner)
-  await dbApi.syncAccountContactIndex(database.db, other)
+  const tpl = contactTemplate!
+  const database = dbApi.createDb(':memory:'); database.sqlite.deserialize(tpl.sqlite); cleanup.push(() => database.close())
+  const rootDir = await mkdtemp(join(STATE_PARENT, 'xpanel-contact-'))
+  for (const relDir of tpl.relDirs) await mkdir(join(rootDir, relDir), { recursive: true, mode: 0o750 })
+  await Promise.all(tpl.stateFiles.map(file => writeFile(join(rootDir, file.relPath), file.bytes, { mode: 0o640 })))
+  const state: TestStateStoreHandle = { store: createStateStore(rootDir), rootDir, close: () => rm(rootDir, { recursive: true, force: true }) }
+  cleanup.push(() => state.close())
+  const { features, plan, owner, other, mailbox, principal, neighbor, credential } = tpl
   const token = async (scopes: string[], principalId = principal.id) => {
     const raw = 'xp_' + randomUUID()
     await dbApi.createApiToken(database.db, { principalId, name: 'Synthetic contact metadata', tokenHash: sha256Hex(raw), scopes, expiresAt: new Date(Date.now() + 60000).toISOString() })
     return raw
   }
-  const credential = await token(['account-preferences:read', 'account-preferences:write'])
   let agentCalls = 0
   const agent: AgentApp = { subscribe: () => () => {}, fetch: async () => { agentCalls++; return Response.json({ error: 'unexpected_synthetic_agent_call' }, { status: 503 }) } }
   const makeApp = (attachAgent = true) => createApiApp({ db: database.db, store: state.store, serverSecret: TEST_SERVER_SECRET,

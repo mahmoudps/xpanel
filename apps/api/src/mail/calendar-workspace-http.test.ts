@@ -1,7 +1,12 @@
 import { randomUUID } from 'node:crypto'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { existsSync } from 'node:fs'
+import { cp, mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join, sep } from 'node:path'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import type { Account, ServiceUser } from '@xpanel/core'
 import { createApiToken, createRootPrincipal, createSession, createTestDb, createUserPrincipal } from '@xpanel/db'
-import { createTestStateStore } from '@xpanel/state'
+import { createStateStore, createTestStateStore, type TestStateStoreHandle } from '@xpanel/state'
 import { deriveCsrfToken, sha256Hex } from '../auth.ts'
 import { createApiApp, listenApiServer } from '../server.ts'
 import type { WebmailCalendar } from '../extended-routes.ts'
@@ -12,10 +17,12 @@ import { createMemoryDav } from './dav-testkit.ts'
 // Real loopback HTTP and disposable SQLite, with the store in memory. Credentials are synthetic.
 const HASH = '$argon2id$v=19$m=65536,t=3,p=4$MIIRqgvgQbgj220jfp0MPA$YfwJSVjtjSU0zzV/P3S9nnQ/USre2wvJMjfCIjrTQbg'
 const SECRET = 'calendar-workspace-synthetic-server-secret'
+const STATE_PARENT = existsSync('/dev/shm') ? '/dev/shm' : tmpdir()
 const cleanup: Array<() => Promise<unknown>> = []
-const fixture = async (defaults = false) => {
-  const database = await createTestDb(); cleanup.push(() => database.close())
-  const state = await createTestStateStore(); cleanup.push(() => state.close())
+let stateTemplate: { state: TestStateStoreHandle; own: Account; other: Account; inbox: ServiceUser; sibling: ServiceUser; foreign: ServiceUser } | null = null
+
+beforeAll(async () => {
+  const state = await createTestStateStore()
   const features = await state.store.createFeatureList({ name: 'Calendar fixtures', ownerId: null, disabled: [] })
   const plan = await state.store.createPlan({ name: 'Calendar fixtures', ownerId: null, featureListId: features.id,
     resources: { diskMb: 1000, bandwidthMbMonth: 10000, ioReadBps: 1048576, ioWriteBps: 1048576, ioReadIops: 100, ioWriteIops: 100, memoryMb: 128, maxProcesses: 16, cpuPercent: 100 },
@@ -26,6 +33,26 @@ const fixture = async (defaults = false) => {
   const own = await account('calown'), other = await account('calother')
   const mailbox = (accountId: string, login: string) => state.store.createServiceUser({ accountId, login, passwordHash: HASH, services: { email: true, ftp: false, webdisk: false }, mailboxQuotaMb: 100, ftpDir: 'public_html' })
   const inbox = await mailbox(own.id, `inbox@${own.primaryDomain}`), sibling = await mailbox(own.id, `sibling@${own.primaryDomain}`), foreign = await mailbox(other.id, `foreign@${other.primaryDomain}`)
+  stateTemplate = { state, own, other, inbox, sibling, foreign }
+})
+
+afterAll(async () => {
+  await stateTemplate?.state.close()
+  stateTemplate = null
+})
+
+const fixture = async (defaults = false) => {
+  const database = await createTestDb(); cleanup.push(() => database.close())
+  const rootDir = await mkdtemp(join(STATE_PARENT, 'xpanel-cal-'))
+  const state: TestStateStoreHandle = { store: createStateStore(rootDir), rootDir, close: () => rm(rootDir, { recursive: true, force: true }) }
+  cleanup.push(() => state.close())
+  const tpl = stateTemplate!
+  const mutex = tpl.state.store.getWriterLock().mutexFilePath
+  const lockDirectory = tpl.state.store.getWriterLock().lockDirPath
+  await cp(tpl.state.rootDir, rootDir, { recursive: true, filter: source =>
+    source !== mutex && !source.startsWith(mutex + '-') && source !== lockDirectory && !source.startsWith(lockDirectory + sep),
+  })
+  const { own, other, inbox, sibling, foreign } = tpl
   const ownerPrincipal = await createUserPrincipal(database.db, { username: own.username, accountId: own.id, passwordHash: HASH })
   const foreignPrincipal = await createUserPrincipal(database.db, { username: other.username, accountId: other.id, passwordHash: HASH })
   const root = await createRootPrincipal(database.db, { username: 'root', passwordHash: HASH, forcePasswordChange: false })

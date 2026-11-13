@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { builtinEnvironments, type EnvironmentReturn } from 'vitest/runtime'
 import { translator } from './i18n.ts'
 import { parseMarkup } from './html.ts'
@@ -50,25 +50,34 @@ interface Workspace {
   readonly render: (theme: Theme) => string
 }
 let environment: EnvironmentReturn | undefined
-beforeEach(async () => {
+const renderedWorkspaceHtml = new Map<string, string>()
+const mountedHolders = new Map<string, HTMLDivElement>()
+const compiledBindings = new Map<string, (ask: (options: Record<string, unknown>) => Promise<unknown>) => void>()
+beforeAll(async () => {
   environment = await builtinEnvironments.jsdom.setup(globalThis, { jsdom: { url: 'https://whm.example.test/whm', runScripts: 'outside-only' } })
+})
+afterAll(async () => {
+  mountedHolders.clear()
+  compiledBindings.clear()
+  await environment?.teardown(globalThis)
+  environment = undefined
+})
+beforeEach(() => {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
 })
-afterEach(async () => {
-  try {
-    document.body.replaceChildren()
-    delete (window as Window & { xpT?: unknown }).xpT
-    delete (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest
-    vi.clearAllTimers()
-    vi.useRealTimers()
-    vi.restoreAllMocks()
-  } finally { await environment?.teardown(globalThis); environment = undefined }
+afterEach(() => {
+  document.body.replaceChildren()
+  delete (window as Window & { xpT?: unknown }).xpT
+  delete (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest
+  vi.clearAllTimers()
+  vi.useRealTimers()
+  vi.restoreAllMocks()
 })
 const settle = async () => { for (let step = 0; step < 24; step++) await Promise.resolve() }
 const t = translator('en')
 const authority = { canRead: true, canManage: true }
 const operatorProps = { locale: 'en' as const, principal: { kind: 'root' as const, id: 'fixture-root', username: 'operator' } }
-const workspaces: readonly Workspace[] = [
+const rawWorkspaces: readonly Workspace[] = [
   { name: 'developer', family: 'developer', selector: "[data-developer-workspace]", binding: WHM_DEVELOPER_CLIENT_BINDING, render: theme => theme === 'classic' ? renderWhmDeveloperWorkspace({ locale: 'en', canRead: true, surface: 'administrator' }) : renderV2WhmDeveloper(t, operatorProps, authority) },
   { name: 'jobs', family: 'jobs', selector: "[data-whm-jobs-workspace]", binding: WHM_JOBS_CLIENT_BINDING, render: theme => theme === 'classic' ? renderWhmJobsWorkspace({ locale: 'en', canRead: true, canManage: true }) : renderV2WhmJobs({ ...operatorProps, observationAuthority: authority }) },
   { name: 'mail-server', family: 'mail-server', selector: "[data-whm-mail-server-workspace]", binding: WHM_MAIL_SERVER_CLIENT_BINDING, render: theme => theme === 'classic' ? renderWhmMailServerWorkspace({ locale: 'en', page: 'routing', canRead: true, canManage: true }) : renderV2WhmMailServer({ ...operatorProps, mailAuthority: authority }, 'routing') },
@@ -82,19 +91,42 @@ const workspaces: readonly Workspace[] = [
   { name: 'monitoring', family: 'processes', selector: "[data-whm-monitoring]", binding: WHM_MONITORING_CLIENT_BINDING, render: theme => theme === 'classic' ? renderWhmMonitoringProcesses({ locale: 'en', canRead: true, canSignal: true }) : renderV2WhmProcesses({ ...operatorProps, observationAuthority: authority }) },
   { name: 'support', family: 'support', selector: "[data-whm-support-workspace]", binding: WHM_SUPPORT_CLIENT_BINDING, render: theme => theme === 'classic' ? renderWhmSupportWorkspace({ locale: 'en', canRead: true }) : renderV2WhmSupport({ ...operatorProps, observationAuthority: authority }) },
 ]
+const workspaces: readonly Workspace[] = rawWorkspaces.map(entry => ({
+  ...entry,
+  render: (theme: Theme): string => {
+    const key = `${entry.name}:${theme}`
+    let html = renderedWorkspaceHtml.get(key)
+    if (html === undefined) {
+      html = entry.render(theme)
+      renderedWorkspaceHtml.set(key, html)
+    }
+    return html
+  },
+}))
 const templates = (theme: Theme, family: string): string => (theme === 'classic' ? classicWhmClientTemplates : v2WhmClientTemplates)(family)
 const names = (theme: Theme, family: string): string[] => parseMarkup(templates(theme, family))
   .filter(node => node.tag === 'template').map(node => node.attrs.get('data-xp-template')!)
 const mount = (entry: Workspace, html: string): HTMLElement => {
   document.documentElement.lang = 'en'
-  document.body.innerHTML = '<section data-capability-state="authorized">' + html + '</section>'
+  let holder = mountedHolders.get(html)
+  if (!holder) {
+    holder = document.createElement('div')
+    holder.innerHTML = '<section data-capability-state="authorized">' + html + '</section>'
+    mountedHolders.set(html, holder)
+  }
+  document.body.replaceChildren(...Array.from(holder.childNodes, node => node.cloneNode(true)))
   const root = document.querySelector<HTMLElement>(entry.selector)
   expect(root).not.toBeNull()
   return root!
 }
 const boot = (entry: Workspace, request: Send, ask: (options: Record<string, unknown>) => Promise<unknown> = async () => true): void => {
   Object.assign(window, { xpT: t, xpanelSessionRequest: request })
-  window.eval(entry.binding)(ask)
+  let invoke = compiledBindings.get(entry.name)
+  if (!invoke) {
+    invoke = (window as unknown as { Function: FunctionConstructor }).Function('return ' + entry.binding)() as (ask: (options: Record<string, unknown>) => Promise<unknown>) => void
+    compiledBindings.set(entry.name, invoke)
+  }
+  invoke(ask)
 }
 const damage = (root: HTMLElement, name: string, fault: Fault): void => {
   const template = root.querySelector<HTMLTemplateElement>('template[data-xp-template="' + name + '"]')

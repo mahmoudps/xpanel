@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
 import { PROTECTED_HOME_DIRS } from '@xpanel/core'
 import { createProductionHostTargetMatcher, FakeHostExecutor } from './executor.ts'
 import { ACCOUNT_HOME_POLICY_SCRIPT, ACCOUNT_HOME_POLICY_STAMP, ensureAccountHomeContexts, relabelAccountPaths, SELINUX_ENFORCE_PATH } from './selinux-homes.ts'
@@ -83,11 +83,13 @@ describe('relabelling a tree that arrived in a home', { tags: ['unit'] }, () => 
 
 describe('the account home policy script', { tags: ['unit'] }, () => {
   const stubs = 'semanage() { echo "semanage $*"; [[ "$1 $2" != "fcontext -a" ]]; }\nsetsebool() { echo "setsebool $*"; }\nexport -f semanage setsebool\n'
-  const applied = (): string[] => {
+  let cachedApplied: string[] = []
+  beforeAll(() => {
     const run = spawnSync('bash', ['-c', `${stubs}bash "$1"`, 'stub', ACCOUNT_HOME_POLICY_SCRIPT], { encoding: 'utf8', timeout: 10_000 })
     expect(run.status, run.stdout + run.stderr).toBe(0)
-    return run.stdout.trim().split('\n')
-  }
+    cachedApplied = run.stdout.trim().split('\n')
+  })
+  const applied = (): string[] => cachedApplied
   const rules = (): Map<string, RegExp> => new Map(applied().flatMap(line => {
     const rule = /^semanage fcontext -m -t (\S+) (\S+)$/.exec(line)
     return rule ? [[rule[1]!, new RegExp(`^${rule[2]!}$`)] as const] : []

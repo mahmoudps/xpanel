@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { createRootPrincipal, createSession, createTestDb, listAudit } from '@xpanel/db'
 import { createTestStateStore } from '@xpanel/state'
 import { PANEL_GATE_DEFAULT } from '../../agent/src/panel-gate-policy.ts'
@@ -21,6 +21,11 @@ const ORIGIN = 'https://whm.example.test:2087'
 const HASH = '$argon2id$v=19$m=65536,t=3,p=4$MIIRqgvgQbgj220jfp0MPA$YfwJSVjtjSU0zzV/P3S9nnQ/USre2wvJMjfCIjrTQbg'
 const IP = { remoteAddress: '198.51.100.1' }
 let app: ApiApp, rootDir: string, rootId: string, cookie: string, csrf: string, close: () => Promise<void>, db: Parameters<typeof listAudit>[0]
+let basicPasswordHash: string
+
+beforeAll(async () => {
+  basicPasswordHash = await passwordHashFromInput({ password: 'correct horse battery' })
+})
 
 beforeEach(async () => {
   const database = await createTestDb(), state = await createTestStateStore()
@@ -84,7 +89,7 @@ describe('entrance and unauthenticated response', () => {
   })
 
   it('admits a valid token through basic authentication, and a cluster peer through both', async () => {
-    await saveGate({ entrance, basicAuth: { username: 'guard', passwordHash: await passwordHashFromInput({ password: 'correct horse battery' }), listeners: ['xwhm'] } })
+    await saveGate({ entrance, basicAuth: { username: 'guard', passwordHash: basicPasswordHash, listeners: ['xwhm'] } })
     const gate = (pathname: string, authorization: string, hasSession: boolean) => panelGate({ rootDir, listener: 'xwhm', request: new Request(ORIGIN + pathname, { headers: { authorization } }), pathname, search: '', method: 'POST', secret: 'x'.repeat(64), secure: true, client: () => '192.0.2.1', hasSession: async () => hasSession })
     expect(await gate('/api/server/nodes/peer/live/alice/freeze', 'Bearer real', true)).toBeNull()
     expect((await gate('/api/server/nodes/peer/live/alice/freeze', 'Bearer forged', false))!.status).toBe(404)
@@ -106,7 +111,7 @@ describe('entrance and unauthenticated response', () => {
 
 describe('basic authentication', () => {
   it('asks before the sign-in page and never authenticates a person', async () => {
-    await saveGate({ basicAuth: { username: 'guard', passwordHash: await passwordHashFromInput({ password: 'correct horse battery' }), listeners: ['xwhm'] } })
+    await saveGate({ basicAuth: { username: 'guard', passwordHash: basicPasswordHash, listeners: ['xwhm'] } })
     const asked = await anonymous('/login', { accept: 'text/html' })
     expect(asked.status).toBe(401)
     expect(asked.headers.get('www-authenticate')).toContain('Basic')
@@ -119,7 +124,7 @@ describe('basic authentication', () => {
 
   it('keeps a signed-in browser working when it also sends the basic header', async () => {
     const password = 'correct horse battery'
-    await saveGate({ basicAuth: { username: 'guard', passwordHash: await passwordHashFromInput({ password }), listeners: ['xwhm'] } })
+    await saveGate({ basicAuth: { username: 'guard', passwordHash: basicPasswordHash, listeners: ['xwhm'] } })
     const response = await app.fetch(new Request(`${ORIGIN}/api/auth/me`, { headers: { cookie, authorization: `Basic ${Buffer.from(`guard:${password}`).toString('base64')}` } }), IP)
     expect(response.status).toBe(303)
     const again = await app.fetch(new Request(`${ORIGIN}/api/auth/me`, { headers: { cookie: `${cookie}; ${cookieOf(response)}`, authorization: `Basic ${Buffer.from(`guard:${password}`).toString('base64')}` } }), IP)

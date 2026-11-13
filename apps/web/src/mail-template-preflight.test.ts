@@ -1,7 +1,7 @@
 /// <reference lib="dom" />
 import { createRequire } from 'node:module'
 import { TextDecoder, TextEncoder } from 'node:util'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { msgctxt, msgid } from '@xpanel/core'
 import { translator } from './i18n.ts'
 import { classicMailClientTemplates } from './board-port/mail-client-templates.ts'
@@ -39,7 +39,10 @@ type Slot = { template: string; name: string; type?: 'button' | 'checkbox' }
 type Subject = { name: string; root: string; kind: string; html: () => string; binding: string; slots: readonly Slot[]; compose?: boolean; activate?: (document: Document, window: TestDom['window']) => void }
 const harnessRequire = createRequire(createRequire(import.meta.url).resolve('vitest'))
 const { JSDOM } = harnessRequire('jsdom') as { JSDOM: new (html: string, options: { url: string; runScripts: 'outside-only' }) => TestDom }
-const doms: TestDom[] = []
+const enT = translator('en')
+let sharedDom: TestDom | undefined
+const cachedSubjectFrames = new Map<string, HTMLDivElement>()
+const compiledSubjectBindings = new Map<string, (ask: () => Promise<boolean>, flag: boolean) => void>()
 const mailbox = 'owner@example.test'
 const accountId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 const tick = async () => { await new Promise(resolve => setTimeout(resolve, 0)); await new Promise(resolve => setTimeout(resolve, 0)) }
@@ -109,19 +112,36 @@ function replaceTag(document: Document, previous: Element, tag: string): void {
 }
 function mount(subject: Subject, theme: 'classic' | 'v2', mutate?: (document: Document, root: HTMLElement) => void) {
   // The admitted SSR frame stays fixed; the fragments under test are the real selected-theme factories.
-  const dom = new JSDOM(subject.html(), { url: 'https://mail.example.test/mail/inbox', runScripts: 'outside-only' }); doms.push(dom)
-  const document = dom.window.document, root = document.querySelector<HTMLElement>(subject.root)
-  if (!root) throw new Error('Missing admitted workspace: ' + subject.name)
-  const holder = document.createElement('template'); holder.innerHTML = fragments(subject, theme)
-  for (const replacement of holder.content.querySelectorAll<HTMLTemplateElement>('template[data-xp-template]')) {
-    const name = replacement.getAttribute('data-xp-template')!
-    const old = root.querySelector(`template[data-xp-template="${name}"]`)
-    if (old) old.replaceWith(replacement.cloneNode(true)); else root.append(replacement.cloneNode(true))
+  const dom = sharedDom!
+  const document = dom.window.document
+  const frameKey = `${subject.name}:${theme}`
+  let frame = cachedSubjectFrames.get(frameKey)
+  if (!frame) {
+    frame = document.createElement('div')
+    frame.innerHTML = subject.html()
+    const baseRoot = frame.querySelector<HTMLElement>(subject.root)
+    if (!baseRoot) throw new Error('Missing admitted workspace: ' + subject.name)
+    const holder = document.createElement('template')
+    holder.innerHTML = fragments(subject, theme)
+    for (const replacement of holder.content.querySelectorAll<HTMLTemplateElement>('template[data-xp-template]')) {
+      const name = replacement.getAttribute('data-xp-template')!
+      const old = baseRoot.querySelector(`template[data-xp-template="${name}"]`)
+      if (old) old.replaceWith(replacement.cloneNode(true)); else baseRoot.append(replacement.cloneNode(true))
+    }
+    cachedSubjectFrames.set(frameKey, frame)
   }
+  document.body.replaceChildren(...Array.from(frame.childNodes, node => node.cloneNode(true)))
+  const root = document.querySelector<HTMLElement>(subject.root)
+  if (!root) throw new Error('Missing admitted workspace: ' + subject.name)
   mutate?.(document, root)
   const send = vi.fn((_method: string, _path: string, _body?: unknown) => new Promise<unknown>(() => {}))
-  Object.assign(dom.window, { msgid, msgctxt, TextDecoder, TextEncoder, xpT: translator('en'), xpanelSessionRequest: send })
-  dom.window.Function('return ' + subject.binding)()(async () => true, false)
+  Object.assign(dom.window, { msgid, msgctxt, TextDecoder, TextEncoder, xpT: enT, xpanelSessionRequest: send })
+  let invoke = compiledSubjectBindings.get(subject.name)
+  if (!invoke) {
+    invoke = dom.window.Function('return ' + subject.binding)() as (ask: () => Promise<boolean>, flag: boolean) => void
+    compiledSubjectBindings.set(subject.name, invoke)
+  }
+  invoke(async () => true, false)
   const bytes = new dom.window.Uint8Array([0, 255, 128, 13, 10])
   const file = new dom.window.File([bytes], 'actual.bin', { type: 'application/octet-stream' })
   const readBytes = vi.fn(async () => bytes.slice().buffer)
@@ -146,7 +166,20 @@ async function expectNoAdmission(subject: Subject, theme: 'classic' | 'v2', muta
     expect(mounted.root.querySelector<HTMLButtonElement>('[data-compose-attachment-open]')!.disabled).toBe(true)
   } else expect(mounted.root.querySelector('[data-state="unavailable"]')).not.toBeNull()
 }
-afterEach(() => { for (const dom of doms.splice(0)) dom.window.close() })
+beforeAll(() => {
+  sharedDom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'https://mail.example.test/mail/inbox', runScripts: 'outside-only' })
+})
+afterEach(() => {
+  if (!sharedDom) return
+  sharedDom.window.document.body.replaceChildren()
+  delete (sharedDom.window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest
+})
+afterAll(() => {
+  cachedSubjectFrames.clear()
+  compiledSubjectBindings.clear()
+  sharedDom?.window.close()
+  sharedDom = undefined
+})
 
 describe.each(['classic', 'v2'] as const)('%s actual emitted mailbox preflight', theme => {
   for (const subject of subjects) describe(subject.name, () => {

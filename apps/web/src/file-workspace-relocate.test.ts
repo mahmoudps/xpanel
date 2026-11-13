@@ -1,7 +1,7 @@
 /// <reference lib="dom" />
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { tools } from '@xpanel/catalog'
+import { unqualifiedTools as tools } from '@xpanel/catalog'
 import type { Account } from '@xpanel/core'
 import { FILE_WORKSPACE_CLIENT_BINDING, workspaceArchiveRefusal, workspaceRelocateRefusal } from './file-workspace-client.ts'
 import { renderPanelSurface } from './surfaces/xpanel.ts'
@@ -147,7 +147,7 @@ describe('file selection Copy and Move handlers', { tags: ['feature'] }, () => {
   })
 })
 
-describe('classic selection actions gate', { tags: ['unit'] }, () => {
+describe('classic selection actions gate', { tags: ['feature'] }, () => {
   // The classic surface wraps its native file manager in the approved workspace itself.
   const classic = (verified: boolean) => renderPanelSurface({
     account, activeRoute: '/files/manager', files: [], locale: 'en',

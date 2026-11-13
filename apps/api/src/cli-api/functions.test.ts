@@ -18,13 +18,16 @@ const unlisted = (method: string, path: string): boolean => !cliApiAllowsRoute(s
 
 describe('xuapi / xwhmapi function catalog', { tags: ['unit'] }, () => {
   it('lists only routes admitted on the listener of each command and reachable from the command line', () => {
+    const violations: string[] = []
     for (const [command, functions] of Object.entries(CLI_API_FUNCTIONS) as [keyof typeof AUDIENCE, typeof CLI_API_FUNCTIONS.xuapi][]) {
       for (const [module, fn, method, path] of functions) {
-        expect(path, `${command} ${module} ${fn}`).toMatch(/^\/api\/[a-z0-9{}/._-]+$/i)
-        expect(entryPointAllowsApiRoute(AUDIENCE[command], sample(path), method), `${command} ${module} ${fn}`).toBe(true)
-        expect(unlisted(method, path), `${command} ${module} ${fn}`).toBe(false)
+        const label = `${command} ${module} ${fn}`
+        if (!/^\/api\/[a-z0-9{}/._-]+$/i.test(path)) violations.push(`${label}: invalid path ${path}`)
+        if (!entryPointAllowsApiRoute(AUDIENCE[command], sample(path), method)) violations.push(`${label}: route not admitted`)
+        if (unlisted(method, path)) violations.push(`${label}: unlisted route exposed`)
       }
     }
+    expect(violations).toEqual([])
   })
 
   it('gives every function one unique name and one route', () => {

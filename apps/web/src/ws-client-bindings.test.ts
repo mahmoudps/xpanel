@@ -22,7 +22,8 @@ const detail = { mailbox, folder: 'INBOX', uid: 23, uidValidity: 56 }
 const inboxFixture = (content = attachment()) => '<section data-board-port="xmail-inbox" data-product="true" data-mailbox="reader@example.test" data-mail-folder="INBOX"><article data-mail-pane="reading-pane" data-mail-article="true">' + content + '</article><button data-summary-row>Summary</button></section>'
 const reading = () => document.querySelector<HTMLElement>('[data-mail-article="true"]')!
 const readSelection = (value: unknown, source: Element = reading()) => source.dispatchEvent(new CustomEvent('xpanel:mail-message-read', { detail: value, bubbles: true }))
-const boot = () => new Function('window', 'document', BROWSER_REALTIME_SCRIPT)(window, document)
+const runRealtimeScript = new Function('window', 'document', BROWSER_REALTIME_SCRIPT) as (w: Window & typeof globalThis, d: Document) => void
+const boot = () => runRealtimeScript(window, document)
 const observeWindowErrors = (): ErrorEvent[] => {
   const errors: ErrorEvent[] = []
   window.addEventListener('error', event => { errors.push(event) })

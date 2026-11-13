@@ -18,12 +18,20 @@ const action = (key: string) => document.querySelector<HTMLButtonElement>('[data
 const input = (key: string) => document.querySelector<HTMLInputElement>('#backup-layout-' + key)!
 const status = () => document.querySelector<HTMLElement>('[data-backup-workspace-status]')!
 const edit = (key: string, value: string) => { input(key).value = value; input(key).dispatchEvent(new Event('input', { bubbles: true })) }
+const compileWhmBackupsBinding = new Function('return ' + WHM_BACKUPS_CLIENT_BINDING) as () => (ask?: () => Promise<boolean>) => void
+const runWhmBackupsBinding = compileWhmBackupsBinding()
+const renderedDefaultBackups = renderApprovedWhmBackups({ principal: { kind: 'root', id: id(9), username: 'root' }, accounts: [] })
+let defaultBackupsTemplate: HTMLTemplateElement | undefined
 let listeners: EventListener[]
 beforeEach(() => {
   listeners = []
   const add = window.addEventListener.bind(window)
   vi.spyOn(window, 'addEventListener').mockImplementation((name, callback, options) => { if (name === 'beforeunload') listeners.push(callback as EventListener); add(name, callback, options) })
-  document.body.innerHTML = renderApprovedWhmBackups({ principal: { kind: 'root', id: id(9), username: 'root' }, accounts: [] })
+  if (!defaultBackupsTemplate) {
+    defaultBackupsTemplate = document.createElement('template')
+    defaultBackupsTemplate.innerHTML = renderedDefaultBackups
+  }
+  document.body.replaceChildren(defaultBackupsTemplate.content.cloneNode(true))
   delete (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest
 })
 afterEach(() => { for (const listener of listeners) window.removeEventListener('beforeunload', listener); vi.restoreAllMocks(); document.body.replaceChildren(); document.documentElement.lang = 'en'; document.documentElement.dir = 'ltr' })
@@ -47,7 +55,7 @@ const model = () => {
     current.destinations = [...current.destinations.filter(item => item.id !== destination.id), destination]
     return { destination: clone(mode === 'wrong-ack' ? { ...destination, name: 'Wrong acknowledged destination' } : destination), revision: current.revision, application }
   })
-  const boot = (transport: (method: string, path: string, body?: unknown) => Promise<unknown> = send) => { (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest = transport; new Function('return ' + WHM_BACKUPS_CLIENT_BINDING)()(ask) }
+  const boot = (transport: (method: string, path: string, body?: unknown) => Promise<unknown> = send) => { (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest = transport; runWhmBackupsBinding(ask) }
   return { send, ask, boot, writes: () => send.mock.calls.filter(call => call[0] !== 'GET'), setMode: (value: string) => { mode = value }, getCurrent: () => current }
 }
 
@@ -65,7 +73,7 @@ describe('WHM backups browser controller', () => {
     expect(WHM_BACKUPS_CLIENT_BINDING).not.toContain('fetch(')
   })
   it('keeps every operation unavailable without transport or capability admission', async () => {
-    new Function('return ' + WHM_BACKUPS_CLIENT_BINDING)()(undefined)
+    compileWhmBackupsBinding()(undefined)
     expect(status().dataset.state).toBe('unavailable'); expect(action('save-schedule').disabled).toBe(true)
     document.querySelector<HTMLElement>('[data-approved-whm-backups]')!.removeAttribute('data-backup-bound')
     document.querySelector<HTMLElement>('[data-approved-whm-backups]')!.dataset.capabilityUnavailable = 'true'

@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict'
-import { access, mkdtemp, open, rm, type FileHandle } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
+import { access, copyFile, mkdtemp, open, rm, type FileHandle } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, it, vi } from 'vitest'
 import { createAgentApp, FakeHostExecutor, HostReconciler } from '@xpanel/agent'
-import { createDb, createRootPrincipal, createUserPrincipal, listAudit, migrate } from '@xpanel/db'
+import { createDb, createRootPrincipal, createUserPrincipal, initializeOperationalMetadata, listAudit, migrate } from '@xpanel/db'
 import { defaultPlan } from '@xpanel/core'
 import { profileFor } from '@xpanel/os'
 import { atomicWriteJson, StateStore } from '@xpanel/state'
@@ -16,10 +17,14 @@ import { startPanelServer } from './test-panel-server.ts'
 import { ExtendedFeaturesStore, type InstalledAppRecord } from './extended-routes.ts'
 import * as mailDocuments from './mail/document.ts'
 import { parseMarkup } from '../../web/src/html.ts'
+import { renderWebApp } from '../../web/src/app.ts'
+import { translator } from '../../web/src/i18n.ts'
 import { TEST_AGENT_TOKEN, TEST_SERVER_SECRET } from './testing.ts'
 
 // Fixture hashes use the cheapest accepted cost (as team-test-fixture.ts); route-created hashes keep production cost.
 const FIXTURE_HASH_COST = { timeCost: 1, parallelism: 1 }
+const FAST_TMP = existsSync('/dev/shm') ? '/dev/shm' : tmpdir()
+const TEST_OS = profileFor('ID=ubuntu\nVERSION_ID="24.04"\nVERSION_CODENAME=noble')
 
 interface HttpSessionClient {
   baseUrl: string
@@ -94,6 +99,9 @@ const assertUnqualifiedWorkspaceHasNoLiveActions = (html: string): ReturnType<ty
 
 describe('@xpanel/api extended HTTP contracts with explicit fake host execution', () => {
   let tmpDir: string
+  let templateDir: string
+  let templateDbPath: string
+  let docOwnerPasswordHash: string
   let serverHandle: Extract<Awaited<ReturnType<typeof startPanelServer>>, { quarantined: false }>
   let baseUrl: string
   let agentDb: ReturnType<typeof createDb>
@@ -107,16 +115,37 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
       const sync = vi.spyOn(Object.getPrototypeOf(probe) as FileHandle, 'sync').mockResolvedValue(undefined)
       restoreFileSync = () => sync.mockRestore()
     } finally { await probe.close() }
+    translator('en'); translator('ar')
+    parseMarkup(renderWebApp({ surface: 'login', activeRoute: '/login', locale: 'en', uiTheme: 'v2' }))
+    parseMarkup(renderWebApp({ surface: 'xwhm', activeRoute: '/whm', locale: 'en', uiTheme: 'v2' }))
+    parseMarkup(renderWebApp({ surface: 'xwhm', activeRoute: '/whm/security/sign-in', locale: 'en', uiTheme: 'v2' }))
+    parseMarkup(renderWebApp({ surface: 'xpanel', activeRoute: '/home', locale: 'ar', uiTheme: 'v2' }))
+    parseMarkup(renderWebApp({ surface: 'xpanel', activeRoute: '/domains', locale: 'ar', uiTheme: 'v2' }))
+    templateDir = await mkdtemp(join(FAST_TMP, 'xpanel-ext-tpl-'))
+    templateDbPath = join(templateDir, 'control.db')
+    const [rootPasswordHash, ownerHash] = await Promise.all([
+      hashPasswordArgon2id('RootPassword!2026', FIXTURE_HASH_COST),
+      hashPasswordArgon2id('DocumentOwnerPassword!2026', FIXTURE_HASH_COST),
+    ])
+    docOwnerPasswordHash = ownerHash
+    const tpl = createDb(templateDbPath)
+    try {
+      await migrate(tpl.runner)
+      await initializeOperationalMetadata(tpl.db)
+      await createRootPrincipal(tpl.db, { username: 'root', passwordHash: rootPasswordHash, forcePasswordChange: false })
+    } finally { await tpl.close() }
   })
-  afterAll(() => restoreFileSync())
+  afterAll(async () => {
+    restoreFileSync()
+    if (templateDir) await rm(templateDir, { recursive: true, force: true })
+  })
   beforeEach(async () => {
-    tmpDir = await mkdtemp(join(tmpdir(), 'xpanel-ext-e2e-'))
+    tmpDir = await mkdtemp(join(FAST_TMP, 'xpanel-ext-e2e-'))
     const dbPath = join(tmpDir, 'control.db')
     const stateDir = join(tmpDir, 'state')
-    const os = profileFor('ID=ubuntu\nVERSION_ID="24.04"\nVERSION_CODENAME=noble')
+    const os = TEST_OS
+    await copyFile(templateDbPath, dbPath)
     agentDb = createDb(dbPath)
-    await migrate(agentDb.runner)
-    await createRootPrincipal(agentDb.db, { username: 'root', passwordHash: await hashPasswordArgon2id('RootPassword!2026', FIXTURE_HASH_COST), forcePasswordChange: false })
     const store = new StateStore(stateDir)
     const executor = new FakeHostExecutor()
     const reconciler = new HostReconciler({ db: agentDb.db, store, executor, os })
@@ -132,7 +161,6 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
       dbPath,
       stateDir,
       homeBaseDir: join(tmpDir, 'host'),
-      rootPassword: 'RootPassword!2026',
       agentApp,
       os,
       agentToken: TEST_AGENT_TOKEN,
@@ -213,7 +241,7 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
     const { id: _seedId, ...planInput } = defaultPlan({ name: 'Document plan', featureListId: featureList.id })
     const plan = await serverHandle.store.createPlan(planInput)
     const password = 'DocumentOwnerPassword!2026'
-    const passwordHash = await hashPasswordArgon2id(password, FIXTURE_HASH_COST)
+    const passwordHash = docOwnerPasswordHash
     await serverHandle.store.saveServerIp({ address: '192.0.2.31', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
     const account = await serverHandle.store.createAccount({ username: 'docowner', passwordHash, primaryDomain: 'docowner.example.test', planId: plan.id, ownerId: null,
       contactEmail: 'private-document-contact@example.test', ipv4: '192.0.2.31', shell: 'none',

@@ -292,8 +292,12 @@ export interface RouteContract extends RouteHooks {
 
 export type LoginAudience = keyof typeof LOGIN_HOOKS
 
+let cachedRegisteredDocuments: Array<(typeof navigation)[number]['sections'][number]['pages'][number] & { surface: ThemeSurface }> | undefined
+let cachedRouteContracts: RouteContract[] | undefined
+
 /** Navigation authority for every registered document, including aliases with their own rendered state. */
 export function registeredThemeDocuments() {
+  if (cachedRegisteredDocuments) return cachedRegisteredDocuments.slice()
   const canonical = navigation.flatMap(surface => surface.sections.flatMap(section => section.pages.map(page => ({
     ...page, surface: surface.surface as ThemeSurface,
   }))))
@@ -303,12 +307,14 @@ export function registeredThemeDocuments() {
     if (!parent) throw new Error(`Unknown theme contract parent: ${alias.parentRoute}`)
     return { ...parent, route: alias.route }
   })
-  return [...canonical, ...aliases]
+  cachedRegisteredDocuments = [...canonical, ...aliases]
+  return cachedRegisteredDocuments.slice()
 }
 
 /** A generated observation is required for each document; aliases never silently inherit parent markup. */
 export function routeContracts(): RouteContract[] {
-  return registeredThemeDocuments().map(page => {
+  if (cachedRouteContracts) return cachedRouteContracts.slice()
+  cachedRouteContracts = registeredThemeDocuments().map(page => {
     const own = ROUTE_HOOKS[page.route]
     if (!own) throw new Error(`Missing theme hook snapshot for ${page.route}; regenerate route hooks`)
     return {
@@ -324,6 +330,7 @@ export function routeContracts(): RouteContract[] {
       context: { route: page.route, surface: page.surface, qualified: !own.unavailable },
     }
   })
+  return cachedRouteContracts.slice()
 }
 
 /** Sign-in requires the actual named fields core submits, independently of observed data hooks. */
@@ -349,23 +356,30 @@ export interface ConformanceIssue {
   readonly controller?: string
 }
 
-function checkTemplates(nodes: readonly MarkupNode[], contracts: readonly TemplateContract[], scope: number, issues: ConformanceIssue[]): void {
+function checkTemplates(
+  nodes: readonly MarkupNode[],
+  contracts: readonly TemplateContract[],
+  scope: number,
+  issues: ConformanceIssue[],
+  templatesByScope: ReadonlyMap<number, ReadonlyMap<string, readonly number[]>>,
+  nodesByTemplate: ReadonlyMap<number, readonly MarkupNode[]>,
+): void {
   const parentName = scope < 0 ? undefined : nodes[scope]!.attrs.get('data-xp-template')
+  const scopedTemplates = templatesByScope.get(scope)
   for (const contract of contracts) {
-    const found = nodes.flatMap((node, index) => node.namespace === 'html' && node.tag === 'template' && node.attrs.get('data-xp-template') === contract.name
-      && node.template === scope ? [index] : [])
+    const found = scopedTemplates?.get(contract.name) ?? []
     if (found.length === 0) {
       issues.push({ kind: 'template', name: contract.name, ...(parentName ? { template: parentName } : {}) })
       continue
     }
     // Every copy must be complete: a controller may clone any of them.
     for (const at of found) {
-      const own = nodes.filter(node => node.template === at)
+      const own = nodesByTemplate.get(at) ?? []
       for (const slot of contract.slots)
         if (!own.some(node => node.attrs.get('data-xp-slot') === slot)) issues.push({ kind: 'slot', name: slot, template: contract.name })
       for (const action of contract.actions)
         if (!own.some(node => node.attrs.get('data-xp-action') === action)) issues.push({ kind: 'action', name: action, template: contract.name })
-      checkTemplates(nodes, contract.templates ?? [], at, issues)
+      if (contract.templates?.length) checkTemplates(nodes, contract.templates, at, issues, templatesByScope, nodesByTemplate)
     }
   }
 }
@@ -390,14 +404,52 @@ const isDescendant = (nodes: readonly MarkupNode[], index: number, ancestor: num
 }
 
 /** Checks live controls in the scope actually queried by core, then template structure. */
-export function checkConformance(html: string, requirement: HookRequirement): ConformanceIssue[] {
-  const nodes = parseMarkup(html)
-  const live = nodes.filter(node => node.template < 0)
+export function checkConformance(html: string, requirement: HookRequirement, parsedNodes?: readonly MarkupNode[]): ConformanceIssue[] {
+  const nodes = parsedNodes ?? parseMarkup(html)
+  const live: MarkupNode[] = []
+  const liveIds = new Set<string>()
+  const liveAttrNames = new Set<string>()
+  const liveAttrPairs = new Set<string>()
+  const templatesByScope = new Map<number, Map<string, number[]>>()
+  const nodesByTemplate = new Map<number, MarkupNode[]>()
+  for (let index = 0; index < nodes.length; index++) {
+    const node = nodes[index]!
+    if (node.template < 0) {
+      live.push(node)
+      for (const [k, v] of node.attrs) {
+        liveAttrNames.add(k)
+        liveAttrPairs.add(`${k}\0${v}`)
+        if (k === 'id') liveIds.add(v)
+      }
+    } else {
+      let own = nodesByTemplate.get(node.template)
+      if (!own) { own = []; nodesByTemplate.set(node.template, own) }
+      own.push(node)
+    }
+    if (node.namespace === 'html' && node.tag === 'template') {
+      const tplName = node.attrs.get('data-xp-template')
+      if (tplName !== undefined) {
+        let byName = templatesByScope.get(node.template)
+        if (!byName) { byName = new Map(); templatesByScope.set(node.template, byName) }
+        let indices = byName.get(tplName)
+        if (!indices) { indices = []; byName.set(tplName, indices) }
+        indices.push(index)
+      }
+    }
+  }
+  const probeNode = live[0]
+  const liveHasHook = (hook: HookSelector): boolean => {
+    if (probeNode) matchesHook(probeNode, hook)
+    if (hook.startsWith('#')) return liveIds.has(hook.slice(1))
+    const eq = hook.indexOf('="')
+    if (eq < 0) return liveAttrNames.has(hook.slice(1, -1))
+    return liveAttrPairs.has(`${hook.slice(1, eq)}\0${hook.slice(eq + 2, -2)}`)
+  }
   const issues: ConformanceIssue[] = []
-  const htmlNode = nodes.find(node => node.tag === 'html')
+  const htmlNode = live.find(node => node.tag === 'html')
   const observed = requirement.documentHooks ? (requirement.documentHooks.cases[htmlNode?.attrs.get(requirement.documentHooks.attribute) ?? ''] ?? requirement.documentHooks.fallback) : []
   for (const hook of new Set([...requirement.hooks, ...observed]))
-    if (!live.some(node => matchesHook(node, hook))) issues.push({ kind: 'hook', name: hook })
+    if (probeNode ? !liveHasHook(hook) : !live.some(node => matchesHook(node, hook))) issues.push({ kind: 'hook', name: hook })
   checkElements(live, requirement.elements ?? [], issues)
   for (const controller of requirement.controllers ?? []) {
     const roots = nodes.flatMap((node, index) => node.template < 0 && matchesHook(node, controller.root) ? [index] : [])
@@ -410,6 +462,6 @@ export function checkConformance(html: string, requirement: HookRequirement): Co
     }
   }
   issues.push(...checkControllerDeclarations(nodes, requirement.authoritativeControllers ?? [], requirement.context ?? {}))
-  checkTemplates(nodes, requirement.templates ?? [], -1, issues)
+  checkTemplates(nodes, requirement.templates ?? [], -1, issues, templatesByScope, nodesByTemplate)
   return issues.filter((issue, index) => issues.findIndex(other => other.kind === issue.kind && other.name === issue.name && other.template === issue.template && other.controller === issue.controller) === index)
 }

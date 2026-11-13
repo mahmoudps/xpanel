@@ -1,11 +1,14 @@
 import { createPublicKey, randomBytes } from 'node:crypto'
+import { cp, mkdtemp, rm } from 'node:fs/promises'
 import { createServer, type Socket } from 'node:net'
-import { afterEach, describe, expect, it } from 'vitest'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import WebSocket from 'ws'
 import { FakeHostExecutor, HostReconciler, createAgentApp } from '@xpanel/agent'
-import { createApiToken, createRootPrincipal, createTestDb, createUserPrincipal } from '@xpanel/db'
+import { createApiToken, createDb, createRootPrincipal, createTestDb, createUserPrincipal } from '@xpanel/db'
 import { profileFor } from '@xpanel/os'
-import { createTestStateStore } from '@xpanel/state'
+import { StateStore } from '@xpanel/state'
 import { ensureOpenDkimSigning, readOpenDkimPublicMaterial } from '../../agent/src/services/opendkim-live.ts'
 import { sha256Hex } from './auth.ts'
 import { establishMailboxSession } from './mail/inbox.ts'
@@ -55,24 +58,64 @@ const imapFixture = async () => {
   return { port: address.port, sockets, get connections() { return connections }, get idles() { return idles } }
 }
 
+let templateBaseDir: string
+let templateStateDir: string
+let templateDbBytes: Uint8Array
+let templateFeatures: Awaited<ReturnType<StateStore['createFeatureList']>>
+let templateAccount: Awaited<ReturnType<StateStore['createAccount']>>
+let templateOther: Awaited<ReturnType<StateStore['createAccount']>>
+let templateMailbox: Awaited<ReturnType<StateStore['createServiceUser']>>
+let templateSecond: Awaited<ReturnType<StateStore['createServiceUser']>>
+let templateEstablished: Awaited<ReturnType<typeof establishMailboxSession>>
+const sharedTransport: MailboxTransport = { async verify() {}, async list() { return [] }, async read() { throw new Error('unused') }, async remove() {}, async send() { return { messageId: '<synthetic@example.test>' } } }
+
+beforeAll(async () => {
+  templateBaseDir = await mkdtemp(join(tmpdir(), 'xpanel-mail-live-tpl-'))
+  templateStateDir = join(templateBaseDir, 'state')
+  const seedStore = new StateStore(templateStateDir)
+  const seedDb = await createTestDb()
+  try {
+    templateFeatures = await seedStore.createFeatureList({ name: 'Live mail fixture', ownerId: null, disabled: [] })
+    const plan = await seedStore.createPlan({ name: 'Live mail fixture', ownerId: null, featureListId: templateFeatures.id,
+      resources: { diskMb: 1024, bandwidthMbMonth: 'unlimited', ioReadBps: 1048576, ioWriteBps: 1048576, ioReadIops: 10, ioWriteIops: 10, memoryMb: 512, maxProcesses: 32, cpuPercent: 100 },
+      caps: { addonDomains: 2, aliasDomains: 2, subdomains: 2, mailboxes: 3, forwarders: 2, mailingLists: 2, ftpAccounts: 2, databases: 2, phpWorkers: 2 }, dedicatedIp: false, shell: 'none', defaultMailboxQuotaMb: 100,
+    })
+    await seedStore.saveServerIp({ address: '192.0.2.10', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
+    const php = { version: '8.3', handler: 'fpm' as const, fpm: { mode: 'ondemand' as const, maxChildren: 2, startServers: 1, minSpareServers: 1, maxSpareServers: 1, maxRequests: 50, processIdleTimeoutSec: 10 }, ini: {} }
+    templateAccount = await seedStore.createAccount({ username: 'alpha', primaryDomain: 'alpha.example.test', passwordHash: HASH, planId: plan.id, ownerId: null, contactEmail: 'owner@alpha.example.test', ipv4: '192.0.2.10', shell: 'none', php })
+    templateOther = await seedStore.createAccount({ username: 'beta', primaryDomain: 'beta.example.test', passwordHash: HASH, planId: plan.id, ownerId: null, contactEmail: 'owner@beta.example.test', ipv4: '192.0.2.10', shell: 'none', php })
+    templateMailbox = await seedStore.createServiceUser({ accountId: templateAccount.id, login: 'a@alpha.example.test', services: { email: true, ftp: false, webdisk: false }, mailboxQuotaMb: 100, ftpDir: 'public_html', passwordHash: HASH })
+    templateSecond = await seedStore.createServiceUser({ accountId: templateAccount.id, login: 'b@alpha.example.test', services: { email: true, ftp: false, webdisk: false }, mailboxQuotaMb: 100, ftpDir: 'public_html', passwordHash: HASH })
+    templateEstablished = await establishMailboxSession({ db: seedDb.db, store: seedStore, serverSecret: SECRET, transport: sharedTransport, entryPoint: 'xmail', mailbox: templateMailbox.login, password: 'synthetic-mailbox-password', ip: '127.0.0.1', userAgent: 'local-fixture' })
+    templateDbBytes = seedDb.sqlite.serialize()
+  } finally {
+    await seedDb.close()
+  }
+})
+
+afterAll(async () => {
+  if (templateBaseDir) await rm(templateBaseDir, { recursive: true, force: true })
+})
+
 const fixture = async () => {
-  const database = await createTestDb()
-  const state = await createTestStateStore()
+  const database = createDb(':memory:')
+  database.sqlite.deserialize(templateDbBytes)
+  database.sqlite.exec('PRAGMA foreign_keys = ON')
+  database.sqlite.exec('PRAGMA busy_timeout = 5000')
+  const stateDir = await mkdtemp(join(templateBaseDir, 'case-'))
+  await cp(templateStateDir, stateDir, { recursive: true })
+  const state = { store: new StateStore(stateDir), rootDir: stateDir, close: () => rm(stateDir, { recursive: true, force: true }) }
   cleanup.push(() => database.close(), () => state.close())
-  const features = await state.store.createFeatureList({ name: 'Live mail fixture', ownerId: null, disabled: [] })
-  const plan = await state.store.createPlan({ name: 'Live mail fixture', ownerId: null, featureListId: features.id,
-    resources: { diskMb: 1024, bandwidthMbMonth: 'unlimited', ioReadBps: 1048576, ioWriteBps: 1048576, ioReadIops: 10, ioWriteIops: 10, memoryMb: 512, maxProcesses: 32, cpuPercent: 100 },
-    caps: { addonDomains: 2, aliasDomains: 2, subdomains: 2, mailboxes: 3, forwarders: 2, mailingLists: 2, ftpAccounts: 2, databases: 2, phpWorkers: 2 }, dedicatedIp: false, shell: 'none', defaultMailboxQuotaMb: 100,
-  })
-  await state.store.saveServerIp({ address: '192.0.2.10', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
-  const php = { version: '8.3', handler: 'fpm' as const, fpm: { mode: 'ondemand' as const, maxChildren: 2, startServers: 1, minSpareServers: 1, maxSpareServers: 1, maxRequests: 50, processIdleTimeoutSec: 10 }, ini: {} }
-  const account = await state.store.createAccount({ username: 'alpha', primaryDomain: 'alpha.example.test', passwordHash: HASH, planId: plan.id, ownerId: null, contactEmail: 'owner@alpha.example.test', ipv4: '192.0.2.10', shell: 'none', php })
-  const other = await state.store.createAccount({ username: 'beta', primaryDomain: 'beta.example.test', passwordHash: HASH, planId: plan.id, ownerId: null, contactEmail: 'owner@beta.example.test', ipv4: '192.0.2.10', shell: 'none', php })
-  const mailbox = await state.store.createServiceUser({ accountId: account.id, login: 'a@alpha.example.test', services: { email: true, ftp: false, webdisk: false }, mailboxQuotaMb: 100, ftpDir: 'public_html', passwordHash: HASH })
-  const second = await state.store.createServiceUser({ accountId: account.id, login: 'b@alpha.example.test', services: { email: true, ftp: false, webdisk: false }, mailboxQuotaMb: 100, ftpDir: 'public_html', passwordHash: HASH })
-  const transport: MailboxTransport = { async verify() {}, async list() { return [] }, async read() { throw new Error('unused') }, async remove() {}, async send() { return { messageId: '<synthetic@example.test>' } } }
-  const established = await establishMailboxSession({ db: database.db, store: state.store, serverSecret: SECRET, transport, entryPoint: 'xmail', mailbox: mailbox.login, password: 'synthetic-mailbox-password', ip: '127.0.0.1', userAgent: 'local-fixture' })
-  return { database, state, features, account, other, mailbox, second, transport, established }
+  return {
+    database, state,
+    features: { ...templateFeatures, disabled: [...templateFeatures.disabled] },
+    account: { ...templateAccount },
+    other: { ...templateOther },
+    mailbox: { ...templateMailbox, services: { ...templateMailbox.services } },
+    second: { ...templateSecond, services: { ...templateSecond.services } },
+    transport: sharedTransport,
+    established: { ...templateEstablished, session: { ...templateEstablished.session } },
+  }
 }
 
 const connected = async () => {

@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -7,6 +8,7 @@ import { LIST_POLICY_DEFAULTS, listGateProgram, listGateRules, listGated, parseL
 import { handleListModerationRoute } from './list-moderation-routes.ts'
 import { mailfxListAliasLine, readMailfxLists } from './mailfx-render.ts'
 
+const FAST_TMP = existsSync('/dev/shm') ? '/dev/shm' : tmpdir()
 const os = { paths: { dovecotDir: '/etc/dovecot' } } as never
 const ACC = '22222222-2222-4222-8222-222222222222', LIST = '11111111-1111-4111-8111-111111111111', address = 'team@alice.test'
 const account = { username: 'alice', uid: 2001, gid: 2001, home: '/home/alice' }
@@ -15,7 +17,7 @@ const rules = listGateRules({ address, members: ['a@x.test'], moderation: 'membe
 const dirs: string[] = []
 afterEach(async () => { for (const dir of dirs.splice(0)) await rm(dir, { recursive: true, force: true }) })
 async function saved(list: Record<string, unknown>): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), 'xpanel-list-mod-')); dirs.push(root)
+  const root = await mkdtemp(join(FAST_TMP, 'xpanel-list-mod-')); dirs.push(root)
   await mkdir(join(root, 'extended', 'mail'), { recursive: true })
   await writeFile(join(root, 'extended', 'mail', 'mailing-lists.json'), JSON.stringify([{ id: LIST, accountId: ACC, name: 'team', domain: 'alice.test', address, members: ['a@x.test'], moderation: 'members', archiveEnabled: false, createdAt: '2026-11-07T10:00:00.000Z', ...list }]))
   return root

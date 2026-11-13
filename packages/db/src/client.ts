@@ -95,15 +95,42 @@ export interface TestDbHandle extends DbHandle {
   migration: MigrateResult
 }
 
+let testDbTemplatePromise: Promise<{ bytes: Uint8Array; applied: readonly string[]; version: number }> | null = null
+
+export const getTestDbTemplate = (): Promise<{ bytes: Uint8Array; applied: readonly string[]; version: number }> => {
+  if (!testDbTemplatePromise) {
+    testDbTemplatePromise = (async () => {
+      const seed = createDb(':memory:')
+      try {
+        const migration = await migrate(seed.runner)
+        return { bytes: seed.sqlite.serialize(), applied: [...migration.applied], version: migration.version }
+      } finally {
+        await seed.close()
+      }
+    })().catch((error) => {
+      testDbTemplatePromise = null
+      throw error
+    })
+  }
+  return testDbTemplatePromise
+}
+
 /** In-memory diagnostic database with explicit migration and initialization. */
 export const createTestDb = async (opts: { migrate?: boolean } = {}): Promise<TestDbHandle> => {
   const handle = createDb(':memory:')
   try {
-    const migration = opts.migrate === false
-      ? { applied: [], alreadyApplied: [], unknownApplied: [], version: 0 }
-      : await migrate(handle.runner)
-    if (opts.migrate !== false) await initializeOperationalMetadata(handle.db)
-    return { ...handle, migration }
+    if (opts.migrate === false) {
+      return { ...handle, migration: { applied: [], alreadyApplied: [], unknownApplied: [], version: 0 } }
+    }
+    const template = await getTestDbTemplate()
+    handle.sqlite.deserialize(template.bytes)
+    Reflect.apply(nativeExec, handle.sqlite, ['PRAGMA foreign_keys = ON'])
+    Reflect.apply(nativeExec, handle.sqlite, ['PRAGMA busy_timeout = 5000'])
+    await initializeOperationalMetadata(handle.db)
+    return {
+      ...handle,
+      migration: { applied: [...template.applied], alreadyApplied: [], unknownApplied: [], version: template.version },
+    }
   } catch (error) {
     await handle.close()
     throw error

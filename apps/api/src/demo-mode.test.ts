@@ -32,7 +32,7 @@ function harness(caller = ROOT) {
 beforeEach(async () => { root = await mkdtemp(join(tmpdir(), 'xp-demo-mode-')) })
 afterEach(async () => { await rm(root, { recursive: true, force: true }) })
 
-describe('demo mode workspace', { tags: ['unit'] }, () => {
+describe('demo mode workspace', { tags: ['feature'] }, () => {
   it('lists current accounts, saves a revision-bound list, reads it back and audits the change by username', async () => {
     const h = harness()
     const first = await h.read()

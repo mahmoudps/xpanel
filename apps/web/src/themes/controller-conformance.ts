@@ -245,17 +245,96 @@ function closest(nodes: readonly MarkupNode[], index: number, query: string, sco
   for (let current = index; current >= 0; current = nodeParent(nodes, current, scope)) if (matches(nodes, current, selector, scope)) return current
   return -1
 }
-function select(nodes: readonly MarkupNode[], scope: Scope, query: string, id: string, includeSelf = false): number[] {
+interface NodeLookupIndex {
+  readonly byId: ReadonlyMap<string, readonly number[]>
+  readonly byAttr: ReadonlyMap<string, readonly number[]>
+  readonly byTag: ReadonlyMap<string, readonly number[]>
+}
+function buildNodeLookupIndex(nodes: readonly MarkupNode[]): NodeLookupIndex {
+  const byId = new Map<string, number[]>()
+  const byAttr = new Map<string, number[]>()
+  const byTag = new Map<string, number[]>()
+  for (let index = 0; index < nodes.length; index++) {
+    const node = nodes[index]!
+    let tagList = byTag.get(node.tag)
+    if (!tagList) { tagList = []; byTag.set(node.tag, tagList) }
+    tagList.push(index)
+    for (const [name, value] of node.attrs) {
+      let attrList = byAttr.get(name)
+      if (!attrList) { attrList = []; byAttr.set(name, attrList) }
+      attrList.push(index)
+      if (name === 'id') {
+        let idList = byId.get(value)
+        if (!idList) { idList = []; byId.set(value, idList) }
+        idList.push(index)
+      }
+    }
+  }
+  return { byId, byAttr, byTag }
+}
+function bestCandidatesForCompound(last: Compound, lookup: NodeLookupIndex): readonly number[] | undefined {
+  let best: readonly number[] | undefined
+  const offer = (list: readonly number[] | undefined): void => {
+    const actual = list ?? EMPTY_INDICES
+    if (best === undefined || actual.length < best.length) best = actual
+  }
+  if (last.id !== undefined) offer(lookup.byId.get(last.id))
+  for (const attr of last.attributes) offer(lookup.byAttr.get(attr.name))
+  if (last.tag && last.tag !== '*') offer(lookup.byTag.get(last.tag))
+  return best
+}
+function select(nodes: readonly MarkupNode[], scope: Scope, query: string, id: string, includeSelf = false, lookup?: NodeLookupIndex): number[] {
   const selector = parseSelector(query, id)
-  return nodes.flatMap((node, index) => {
-    if (node.template !== scope.template || scope.root >= 0 && !(includeSelf && index === scope.root) && !descendantOf(nodes, index, scope.root, scope)) return []
-    if (!matches(nodes, index, selector, scope)) return []
-    if (scope.ownRootSelector && closest(nodes, index, scope.ownRootSelector, scope, id) !== scope.root) return []
-    return [index]
-  })
+  const result: number[] = []
+  let candidates: readonly number[] | undefined
+  if (lookup) {
+    if (selector.length === 1) {
+      candidates = bestCandidatesForCompound(selector[0]!.at(-1)!.compound, lookup)
+    } else {
+      const lists: (readonly number[])[] = []
+      let total = 0, indexedAll = true
+      for (const parts of selector) {
+        const list = bestCandidatesForCompound(parts.at(-1)!.compound, lookup)
+        if (!list) { indexedAll = false; break }
+        lists.push(list); total += list.length
+      }
+      if (indexedAll && total * 2 < nodes.length) {
+        if (total === 0) candidates = EMPTY_INDICES
+        else {
+          const merged = new Set<number>()
+          for (const list of lists) for (const idx of list) merged.add(idx)
+          candidates = [...merged].sort((a, b) => a - b)
+        }
+      }
+    }
+  }
+  if (candidates !== undefined) {
+    for (let k = 0; k < candidates.length; k++) {
+      const index = candidates[k]!
+      const node = nodes[index]!
+      if (node.template !== scope.template) continue
+      if (scope.root >= 0 && index === scope.root && !includeSelf) continue
+      if (!matches(nodes, index, selector, scope)) continue
+      if (scope.root >= 0 && index !== scope.root && !descendantOf(nodes, index, scope.root, scope)) continue
+      if (scope.ownRootSelector && closest(nodes, index, scope.ownRootSelector, scope, id) !== scope.root) continue
+      result.push(index)
+    }
+    return result
+  }
+  for (let index = 0; index < nodes.length; index++) {
+    const node = nodes[index]!
+    if (node.template !== scope.template) continue
+    if (scope.root >= 0 && index === scope.root && !includeSelf) continue
+    if (!matches(nodes, index, selector, scope)) continue
+    if (scope.root >= 0 && index !== scope.root && !descendantOf(nodes, index, scope.root, scope)) continue
+    if (scope.ownRootSelector && closest(nodes, index, scope.ownRootSelector, scope, id) !== scope.root) continue
+    result.push(index)
+  }
+  return result
 }
 function attributesMatch(node: MarkupNode | undefined, attributes: AttributePredicates | undefined, id: string): boolean {
-  return Object.entries(attributes ?? {}).every(([name, expected]) => {
+  if (!attributes) return true
+  return Object.entries(attributes).every(([name, expected]) => {
     const actual = node?.attrs.get(name)
     if (typeof expected === 'string') return actual === expected
     if (typeof expected === 'boolean') return (node?.attrs.has(name) ?? false) === expected
@@ -265,12 +344,12 @@ function attributesMatch(node: MarkupNode | undefined, attributes: AttributePred
   })
 }
 const htmlNode = (nodes: readonly MarkupNode[]): MarkupNode | undefined => nodes.find(node => isHtmlElement(node, 'html') && node.template < 0)
-function routeMatches(declaration: ControllerDeclaration, context: ControllerContext, nodes: readonly MarkupNode[]): boolean {
+function routeMatches(declaration: ControllerDeclaration, context: ControllerContext, doc: MarkupNode | undefined): boolean {
   if (declaration.applicableRoutes?.length && context.route !== undefined && !declaration.applicableRoutes.includes(context.route)) return false
   const policy = declaration.routeScope
   if (!policy) return true
-  keys(policy, ['kind', 'surfaces', 'audiences'], declaration.id, 'routeScope')
-  const doc = htmlNode(nodes), surface = context.surface ?? doc?.attrs.get('data-surface')
+  if (!VALIDATED_DECLARATIONS.has(declaration)) keys(policy, ['kind', 'surfaces', 'audiences'], declaration.id, 'routeScope')
+  const surface = context.surface ?? doc?.attrs.get('data-surface')
   const login = context.surface === 'login' || context.loginAudience !== undefined
   const error = doc?.attrs.has('data-status') === true
   if (policy.surfaces && surface !== undefined && !policy.surfaces.includes(surface)) return false
@@ -281,8 +360,12 @@ function routeMatches(declaration: ControllerDeclaration, context: ControllerCon
   return true
 }
 
+const VALIDATED_DECLARATIONS = new WeakSet<ControllerDeclaration>()
+const EMPTY_INDICES: readonly number[] = []
+
 function validateAttributes(value: AttributePredicates | undefined, id: string): void {
-  for (const [name, predicate] of Object.entries(value ?? {})) {
+  if (!value) return
+  for (const [name, predicate] of Object.entries(value)) {
     if (typeof predicate === 'string' || typeof predicate === 'boolean') continue
     if (!predicate || typeof predicate !== 'object') unsupported(id, 'attribute condition', name)
     if ('not' in predicate) { keys(predicate, ['not'], id, 'attribute'); if (typeof predicate.not !== 'string') unsupported(id, 'attribute condition', name) }
@@ -306,6 +389,7 @@ function validateElements(elements: readonly ControllerElementRequirement[] | un
   }
 }
 function validateDeclaration(declaration: ControllerDeclaration): void {
+  if (VALIDATED_DECLARATIONS.has(declaration)) return
   const id = declaration.id || 'unnamed'
   keys(declaration, DECLARATION_KEYS, id, 'declaration')
   if (!declaration.id || !declaration.rootSelector) unsupported(id, 'declaration condition', 'id/rootSelector')
@@ -364,19 +448,39 @@ function validateDeclaration(declaration: ControllerDeclaration): void {
   }
   for (const keyed of declaration.keyedTargets ?? []) { keys(keyed, ['fromSelector', 'fromAttribute', 'templateSelector', 'targetSelector', 'targetAttribute'], id, 'keyed target'); query(keyed.fromSelector); query(keyed.templateSelector); query(keyed.targetSelector) }
   for (const child of [...declaration.variants ?? [], ...declaration.nestedScopes ?? []]) validateDeclaration(child)
+  VALIDATED_DECLARATIONS.add(declaration)
 }
 
 /** Source-authored controller requirements; observed markup never decides which roots or controls are mandatory. */
 export function checkControllerDeclarations(nodes: readonly MarkupNode[], declarations: readonly ControllerDeclaration[], context: ControllerContext): ControllerConformanceIssue[] {
   const issues: ControllerConformanceIssue[] = []
+  const docNode = htmlNode(nodes)
+  const nodeLookup = buildNodeLookupIndex(nodes)
+  const q = (scope: Scope, query: string, id: string, includeSelf = false): number[] => select(nodes, scope, query, id, includeSelf, nodeLookup)
+  let idMap: Map<string, number[]> | undefined
   const add = (kind: ControllerConformanceIssue['kind'], name: string, controller: string, detail?: string) => issues.push({ kind, name, controller, ...(detail ? { detail } : {}) })
   const requireQueries = (scope: Scope, queries: readonly string[] | undefined, id: string): void => {
-    for (const query of queries ?? []) if (!select(nodes, scope, query, id).length) add('hook', query, id)
+    for (const query of queries ?? []) if (!q(scope, query, id).length) add('hook', query, id)
   }
-  const globalIds = (id: string) => nodes.flatMap((node, index) => node.template < 0 && node.attrs.get('id') === id ? [index] : [])
-  const checkRelation = (relation: IdRelation, scope: Scope, id: string): void => {
-    keys(relation, RELATION_KEYS, id, 'ID relation')
-    const owners: (number | null)[] = relation.ownerSelector ? select(nodes, scope, relation.ownerSelector, id) : [null]
+  const globalIds = (id: string): readonly number[] => {
+    if (!idMap) {
+      idMap = new Map()
+      for (let index = 0; index < nodes.length; index++) {
+        const node = nodes[index]!
+        if (node.template >= 0) continue
+        const attrId = node.attrs.get('id')
+        if (attrId !== undefined) {
+          let list = idMap.get(attrId)
+          if (!list) { list = []; idMap.set(attrId, list) }
+          list.push(index)
+        }
+      }
+    }
+    return idMap.get(id) ?? EMPTY_INDICES
+  }
+  const checkRelation = (relation: IdRelation, scope: Scope, id: string, prevalidated: boolean): void => {
+    if (!prevalidated) keys(relation, RELATION_KEYS, id, 'ID relation')
+    const owners: (number | null)[] = relation.ownerSelector ? q(scope, relation.ownerSelector, id) : [null]
     const required = relation.required ?? (!relation.optionalLookup && (relation.guardRequired === true || relation.capabilityRequired === true || relation.ownerSelector !== undefined || relation.targetId !== undefined || relation.targetIds !== undefined || relation.targetIdTemplate !== undefined))
     for (const owner of owners) {
       let targetIds: string[]
@@ -419,31 +523,32 @@ export function checkControllerDeclarations(nodes: readonly MarkupNode[], declar
   }
   const checkElements = (scope: Scope, elements: readonly ControllerElementRequirement[] | undefined, id: string): void => {
     for (const element of elements ?? []) {
-      const found = select(nodes, scope, element.selector, id)
+      const found = q(scope, element.selector, id)
       const selected = element.occurrence === 'every' ? found : found.slice(0, 1)
       if (!selected.length && element.required !== false || selected.some(at => element.tags && !element.tags.some(tag => semanticTagMatches(nodes[at]!, tag)) || Object.keys(element.attributes ?? {}).some(name => HTML_CONTROL_ATTRIBUTES.has(name)) && !isHtmlElement(nodes[at]!) || !attributesMatch(nodes[at], element.attributes, id))) add('element', element.selector, id, 'Selected control semantics differ')
     }
   }
-  const conditional = (rule: ConditionalRequirement, scope: Scope, id: string): void => {
-    keys(rule, CONDITIONAL_KEYS, id, 'conditional')
+  const conditional = (rule: ConditionalRequirement, scope: Scope, id: string, prevalidated: boolean): void => {
+    if (!prevalidated) keys(rule, CONDITIONAL_KEYS, id, 'conditional')
     if (rule.applicableRoutes?.length && context.route !== undefined && !rule.applicableRoutes.includes(context.route)) return
-    if (!attributesMatch(htmlNode(nodes), rule.documentAttributes, id) || !attributesMatch(scope.root < 0 ? htmlNode(nodes) : nodes[scope.root], rule.rootAttributes, id)) return
-    if (rule.rootAttributeExclusions && attributesMatch(scope.root < 0 ? htmlNode(nodes) : nodes[scope.root], rule.rootAttributeExclusions, id)) return
-    const requestedFacts = Object.entries(rule.contextFacts ?? {})
+    const scopeNode = scope.root < 0 ? docNode : nodes[scope.root]
+    if (!attributesMatch(docNode, rule.documentAttributes, id) || !attributesMatch(scopeNode, rule.rootAttributes, id)) return
+    if (rule.rootAttributeExclusions && attributesMatch(scopeNode, rule.rootAttributeExclusions, id)) return
+    const requestedFacts = rule.contextFacts ? Object.entries(rule.contextFacts) : EMPTY_INDICES as unknown as [string, ControllerFact][]
     for (const [key] of requestedFacts) {
       if (!context.facts || !Object.hasOwn(context.facts, key)) throw new Error(`MISSING_CONTROLLER_CONTEXT_FACT ${id}: ${key}`)
       const supplied = context.facts[key]
       if (supplied !== 'present' && supplied !== 'absent') throw new Error(`INVALID_CONTROLLER_CONTEXT_FACT ${id}: ${key}`)
     }
     if (requestedFacts.some(([key, expected]) => context.facts![key] !== expected)) return
-    if (rule.whenScopeMounted && !select(nodes, scope, rule.whenScopeMounted, id, true).length) return
-    const bases = rule.rootSelector ? select(nodes, scope, rule.rootSelector, id, true) : [scope.root]
-    if (!bases.length && (rule.rootRequired || rule.whenButtonSelector && select(nodes, scope, rule.whenButtonSelector, id).length)) add('controller', rule.rootSelector ?? 'conditional scope', id)
+    if (rule.whenScopeMounted && !q(scope, rule.whenScopeMounted, id, true).length) return
+    const bases = rule.rootSelector ? q(scope, rule.rootSelector, id, true) : [scope.root]
+    if (!bases.length && (rule.rootRequired || rule.whenButtonSelector && q(scope, rule.whenButtonSelector, id).length)) add('controller', rule.rootSelector ?? 'conditional scope', id)
     for (const root of bases) {
       const own: Scope = { root, template: scope.template }
-      if (rule.whenButtonSelector && !select(nodes, own, rule.whenButtonSelector, id).length) continue
+      if (rule.whenButtonSelector && !q(own, rule.whenButtonSelector, id).length) continue
       if (rule.semanticTag && root >= 0 && !semanticTagMatches(nodes[root]!, rule.semanticTag)) add('element', rule.rootSelector ?? rule.semanticTag, id)
-      const selectedScope = rule.whenScopeMounted ? select(nodes, own, rule.whenScopeMounted, id, true) : [root]
+      const selectedScope = rule.whenScopeMounted ? q(own, rule.whenScopeMounted, id, true) : [root]
       for (const at of selectedScope) {
         const conditionalScope: Scope = { root: at, template: scope.template }
         requireQueries(conditionalScope, rule.requiredSelectors, id)
@@ -452,86 +557,89 @@ export function checkControllerDeclarations(nodes: readonly MarkupNode[], declar
     }
   }
   const run = (declaration: ControllerDeclaration, incoming: Scope, nested = false, variant = false): void => {
-    keys(declaration, DECLARATION_KEYS, declaration.id, 'declaration')
+    const prevalidated = VALIDATED_DECLARATIONS.has(declaration)
+    if (!prevalidated) keys(declaration, DECLARATION_KEYS, declaration.id, 'declaration')
     const id = declaration.id
     if (!id || !declaration.rootSelector) unsupported(id || 'unnamed', 'declaration condition', 'id/rootSelector')
-    if (!routeMatches(declaration, context, nodes)) return
+    if (!routeMatches(declaration, context, docNode)) return
     if (context.qualified === false && declaration.qualifiedOnly !== false && declaration.applicableRoutes?.length) return
-    if (!attributesMatch(htmlNode(nodes), declaration.documentAttributes, id)) return
-    let roots = declaration.rootSelector === 'document' ? [-1] : select(nodes, incoming, declaration.rootSelector, id, variant)
+    if (!attributesMatch(docNode, declaration.documentAttributes, id)) return
+    let roots = declaration.rootSelector === 'document' ? [-1] : q(incoming, declaration.rootSelector, id, variant)
     if (declaration.parentRootSelector) roots = roots.filter(root => root >= 0 && closest(nodes, nodeParent(nodes, root, incoming), declaration.parentRootSelector!, incoming, id) >= 0)
-    roots = roots.filter(root => attributesMatch(root < 0 ? htmlNode(nodes) : nodes[root], declaration.rootAttributes, id))
+    if (declaration.rootAttributes) roots = roots.filter(root => attributesMatch(root < 0 ? docNode : nodes[root], declaration.rootAttributes, id))
     const routeRequired = declaration.applicableRoutes?.length && context.route !== undefined && declaration.applicableRoutes.includes(context.route)
     const mustMount = declaration.rootRequired ?? ((!nested || variant) && Boolean(routeRequired))
     if (!roots.length && mustMount) add('controller', declaration.rootSelector, id)
     for (const root of roots) {
-      const rootNode = root < 0 ? htmlNode(nodes) : nodes[root]
+      const rootNode = root < 0 ? docNode : nodes[root]
       if (declaration.rootAttributeExclusions && attributesMatch(rootNode, declaration.rootAttributeExclusions, id)) continue
       let scopes: Scope[] = [{ root, template: incoming.template, ...(declaration.ownScopeOnly ? { ownRootSelector: declaration.rootSelector } : {}) }]
       const lookup = declaration.lookupScope
       if (lookup) {
-        keys(lookup, ['kind', 'selector'], id, 'lookupScope')
+        if (!prevalidated) keys(lookup, ['kind', 'selector'], id, 'lookupScope')
         if (lookup.kind === 'document') scopes = [DOCUMENT]
         else if (lookup.kind === 'closest' && lookup.selector) scopes = scopes.flatMap(scope => { const at = root >= 0 ? closest(nodes, root, lookup.selector!, incoming, id) : -1; return at < 0 ? [] : [{ root: at, template: incoming.template }] })
-        else if (lookup.kind === 'descendant' && lookup.selector) scopes = scopes.flatMap(scope => select(nodes, scope, lookup.selector!, id).map(at => ({ root: at, template: incoming.template })))
+        else if (lookup.kind === 'descendant' && lookup.selector) scopes = scopes.flatMap(scope => q(scope, lookup.selector!, id).map(at => ({ root: at, template: incoming.template })))
         else unsupported(id, 'lookupScope condition', lookup.kind)
       }
-      if (declaration.scopeSelector) scopes = scopes.flatMap(scope => select(nodes, scope, declaration.scopeSelector!, id).map(at => ({ root: at, template: scope.template })))
+      if (declaration.scopeSelector) scopes = scopes.flatMap(scope => q(scope, declaration.scopeSelector!, id).map(at => ({ root: at, template: scope.template })))
       if (!scopes.length && declaration.requiredSelectors?.length) add('controller', declaration.scopeSelector ?? lookup?.selector ?? declaration.rootSelector, id, 'Missing lookup scope')
       if (declaration.scopeCount !== undefined && scopes.length !== declaration.scopeCount) add('controller', declaration.scopeSelector ?? declaration.rootSelector, id, 'Lookup scope count differs')
       for (const scope of scopes) {
         requireQueries(scope, declaration.requiredSelectors, id)
         checkElements(scope, declaration.elements, id)
-        for (const rule of [...declaration.conditionalRequired ?? [], ...declaration.additionalConditionalRequired ?? [], ...declaration.conditionalRequirements ?? []]) conditional(rule, scope, id)
+        for (const rule of declaration.conditionalRequired ?? EMPTY_INDICES as unknown as ConditionalRequirement[]) conditional(rule, scope, id, prevalidated)
+        for (const rule of declaration.additionalConditionalRequired ?? EMPTY_INDICES as unknown as ConditionalRequirement[]) conditional(rule, scope, id, prevalidated)
+        for (const rule of declaration.conditionalRequirements ?? EMPTY_INDICES as unknown as ConditionalRequirement[]) conditional(rule, scope, id, prevalidated)
         for (const rule of declaration.perMatchRequired ?? []) {
-          keys(rule, ['selector', 'eachAttributes'], id, 'perMatchRequired')
-          const collection = select(nodes, scope, rule.selector, id, true)
+          if (!prevalidated) keys(rule, ['selector', 'eachAttributes'], id, 'perMatchRequired')
+          const collection = q(scope, rule.selector, id, true)
           for (const [name, values] of Object.entries(rule.eachAttributes)) for (const value of values)
             if (!collection.some(at => nodes[at]!.attrs.get(name) === value)) add('hook', `${rule.selector}[${name}="${value}"]`, id, 'Missing collection variant')
         }
         for (const projection of declaration.templateScopes ?? []) {
-          keys(projection, ['templateSelector', 'required', 'perItemSelector', 'requiredSelectors', 'conditionalSelectors'], id, 'templateScope')
-          const templates = select(nodes, scope, projection.templateSelector, id)
+          if (!prevalidated) keys(projection, ['templateSelector', 'required', 'perItemSelector', 'requiredSelectors', 'conditionalSelectors'], id, 'templateScope')
+          const templates = q(scope, projection.templateSelector, id)
           if (!templates.length && projection.required !== false) add('controller', projection.templateSelector, id, 'Missing template')
           for (const template of templates) {
             if (!isHtmlElement(nodes[template]!, 'template')) { add('element', projection.templateSelector, id, 'Expected HTML template element'); continue }
             const content: Scope = { root: template, template }
-            const items = projection.perItemSelector ? select(nodes, content, projection.perItemSelector, id) : [template]
+            const items = projection.perItemSelector ? q(content, projection.perItemSelector, id) : [template]
             for (const item of items) {
               const itemScope: Scope = { root: item, template }
               requireQueries(itemScope, projection.requiredSelectors, id)
               for (const condition of projection.conditionalSelectors ?? []) {
-                keys(condition, ['scopeSelector', 'requiredSelectors'], id, 'template conditional')
-                for (const at of select(nodes, itemScope, condition.scopeSelector, id, true)) requireQueries({ root: at, template }, condition.requiredSelectors, id)
+                if (!prevalidated) keys(condition, ['scopeSelector', 'requiredSelectors'], id, 'template conditional')
+                for (const at of q(itemScope, condition.scopeSelector, id, true)) requireQueries({ root: at, template }, condition.requiredSelectors, id)
               }
             }
           }
         }
         for (const relation of declaration.semanticRelations ?? []) {
-          keys(relation, ['selector', 'ancestorHook', 'tag'], id, 'semantic relation')
-          for (const at of select(nodes, scope, relation.selector, id)) {
+          if (!prevalidated) keys(relation, ['selector', 'ancestorHook', 'tag'], id, 'semantic relation')
+          for (const at of q(scope, relation.selector, id)) {
             if (relation.tag && !semanticTagMatches(nodes[at]!, relation.tag) || relation.ancestorHook && closest(nodes, nodeParent(nodes, at, scope), relation.ancestorHook, scope, id) < 0) add('relation', relation.selector, id, 'Element ancestry/tag differs')
           }
         }
-        for (const relation of declaration.relations ?? []) checkRelation(relation, scope, id)
+        for (const relation of declaration.relations ?? []) checkRelation(relation, scope, id, prevalidated)
         if (declaration.associatedEditor) {
           const editor = declaration.associatedEditor
-          keys(editor, ['id', 'allowedKinds'], id, 'associatedEditor')
+          if (!prevalidated) keys(editor, ['id', 'allowedKinds'], id, 'associatedEditor')
           const candidates = globalIds(editor.id)
           if (candidates.length !== 1) add('relation', `#${editor.id}`, id, 'Editor must exist once')
           else if (!editor.allowedKinds.some(kind => {
-            keys(kind, ['tag', 'contenteditable', 'role'], id, 'editor kind')
+            if (!prevalidated) keys(kind, ['tag', 'contenteditable', 'role'], id, 'editor kind')
             const node = nodes[candidates[0]!]!
             return isHtmlElement(node) && (!kind.tag || node.tag === kind.tag) && (!kind.contenteditable || node.attrs.get('contenteditable') === kind.contenteditable) && (!kind.role || node.attrs.get('role') === kind.role)
           })) add('element', `#${editor.id}`, id, 'Editor semantics differ')
         }
         for (const keyed of declaration.keyedTargets ?? []) {
-          keys(keyed, ['fromSelector', 'fromAttribute', 'templateSelector', 'targetSelector', 'targetAttribute'], id, 'keyed target')
-          const owners = select(nodes, scope, keyed.fromSelector, id)
-          const templates = select(nodes, scope, keyed.templateSelector, id)
+          if (!prevalidated) keys(keyed, ['fromSelector', 'fromAttribute', 'templateSelector', 'targetSelector', 'targetAttribute'], id, 'keyed target')
+          const owners = q(scope, keyed.fromSelector, id)
+          const templates = q(scope, keyed.templateSelector, id)
           for (const owner of owners) {
             const key = nodes[owner]!.attrs.get(keyed.fromAttribute)
-            const targets = templates.flatMap(template => isHtmlElement(nodes[template]!, 'template') ? select(nodes, { root: template, template }, keyed.targetSelector, id) : [])
+            const targets = templates.flatMap(template => isHtmlElement(nodes[template]!, 'template') ? q({ root: template, template }, keyed.targetSelector, id) : [])
               .filter(target => nodes[target]!.attrs.get(keyed.targetAttribute) === key)
             if (!key || targets.length !== 1) add('relation', `${keyed.fromAttribute}=>${keyed.targetAttribute}`, id, 'Loaded row needs one matching reading projection')
           }

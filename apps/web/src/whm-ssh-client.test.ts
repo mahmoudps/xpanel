@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { createHash, generateKeyPairSync, webcrypto } from 'node:crypto'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderWhmSshEffective, renderWhmSshFailures, renderWhmSshKeys } from './board-port/whm-security-components.ts'
 import { WHM_SSH_CLIENT_BINDING } from './whm-ssh-client.ts'
 import { renderV2WhmSsh } from './themes/v2/pages/xwhm/security/ssh.ts'
@@ -17,12 +17,18 @@ const status = () => document.querySelector<HTMLElement>('[data-whm-ssh-status]'
 const draft = () => document.querySelector<HTMLTextAreaElement>('[data-whm-ssh-public-key]')!
 const add = () => document.querySelector<HTMLButtonElement>('[data-whm-ssh-add]')!
 const fill = (key: string) => { draft().value = key; draft().dispatchEvent(new Event('input')) }
+const runWhmSshBinding = new Function('return ' + WHM_SSH_CLIENT_BINDING)() as (ask?: (options: Record<string, unknown>) => Promise<boolean>) => void
+let defaultSshTemplate: HTMLTemplateElement | undefined
 let listeners: EventListener[], subtleDescriptor: PropertyDescriptor | undefined
 beforeEach(() => {
   listeners = []; const listen = window.addEventListener.bind(window)
   vi.spyOn(window, 'addEventListener').mockImplementation((name, callback, options) => { if (name === 'beforeunload') listeners.push(callback as EventListener); listen(name, callback, options) })
   subtleDescriptor = Object.getOwnPropertyDescriptor(window.crypto, 'subtle'); Object.defineProperty(window.crypto, 'subtle', { value: webcrypto.subtle, configurable: true })
-  document.body.innerHTML = '<section data-whm-detail-route="/whm/security/ssh">' + renderWhmSshKeys({ locale: 'en', canManage: true }) + renderWhmSshEffective({ locale: 'en' }) + renderWhmSshFailures({ locale: 'en' }) + '</section>'
+  if (!defaultSshTemplate) {
+    defaultSshTemplate = document.createElement('template')
+    defaultSshTemplate.innerHTML = '<section data-whm-detail-route="/whm/security/ssh">' + renderWhmSshKeys({ locale: 'en', canManage: true }) + renderWhmSshEffective({ locale: 'en' }) + renderWhmSshFailures({ locale: 'en' }) + '</section>'
+  }
+  document.body.replaceChildren(defaultSshTemplate.content.cloneNode(true))
   delete (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest
 })
 afterEach(() => { for (const listener of listeners) window.removeEventListener('beforeunload', listener); if (subtleDescriptor) Object.defineProperty(window.crypto, 'subtle', subtleDescriptor); else delete (window.crypto as unknown as Record<string, unknown>).subtle; vi.restoreAllMocks(); document.body.replaceChildren(); document.documentElement.lang = 'en'; document.documentElement.dir = 'ltr' })
@@ -39,10 +45,10 @@ const model = () => {
     else keys = { ...keys, revision: 'c'.repeat(64), items: keys.items.filter(key => key.fingerprint !== input.fingerprint) }
     return { applied: true, keys: structuredClone(keys) }
   })
-  const boot = () => { (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest = send; new Function('return ' + WHM_SSH_CLIENT_BINDING)()(ask) }
+  const boot = () => { (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest = send; runWhmSshBinding(ask) }
   return { send, ask, boot, actions, events, current: () => keys, mode: (value: string) => { mode = value }, writes: () => send.mock.calls.filter(call => call[0] !== 'GET') }
 }
-const ready = async () => vi.waitFor(() => expect(status().dataset.state).toBe('read'))
+const ready = async () => vi.waitFor(() => expect(status().dataset.state).toBe('read'), { interval: 5 })
 
 describe('root SSH observation and key controller', () => {
   it('refuses reads and writes under the canonical unavailable capability wrapper', () => {
@@ -143,11 +149,19 @@ describe('root SSH observation and key controller', () => {
 })
 
 type SshTheme = 'classic' | 'v2'
+const sshDomCache = new Map<string, HTMLTemplateElement>()
 const mountSsh = (theme: SshTheme, locale: 'en' | 'ar' = 'en', canManage = true): HTMLElement => {
   document.documentElement.lang = locale; document.documentElement.dir = locale === 'ar' ? 'rtl' : 'ltr'
-  document.body.innerHTML = theme === 'classic'
-    ? '<section data-whm-detail-route="/whm/security/ssh">' + renderWhmSshKeys({ locale, canManage }) + renderWhmSshEffective({ locale }) + renderWhmSshFailures({ locale }) + '</section>'
-    : renderV2WhmSsh({ locale, observationAuthority: { canRead: true, canManage } })
+  const key = `${theme}:${locale}:${canManage}`
+  let tpl = sshDomCache.get(key)
+  if (!tpl) {
+    tpl = document.createElement('template')
+    tpl.innerHTML = theme === 'classic'
+      ? '<section data-whm-detail-route="/whm/security/ssh">' + renderWhmSshKeys({ locale, canManage }) + renderWhmSshEffective({ locale }) + renderWhmSshFailures({ locale }) + '</section>'
+      : renderV2WhmSsh({ locale, observationAuthority: { canRead: true, canManage } })
+    sshDomCache.set(key, tpl)
+  }
+  document.body.replaceChildren(tpl.content.cloneNode(true))
   return document.querySelector<HTMLElement>('[data-whm-detail-route="/whm/security/ssh"]')!
 }
 const sshTemplate = (root: HTMLElement, name: string) => root.querySelector<HTMLTemplateElement>('template[data-xp-template="' + name + '"]')!
@@ -167,6 +181,7 @@ const sshCorruptions: readonly (readonly [string, (template: HTMLTemplateElement
 ]
 
 describe('selected-theme SSH factories', () => {
+  beforeAll(() => { mountSsh('classic', 'en', true); mountSsh('v2', 'en', true); document.body.replaceChildren() })
   it.each(['classic', 'v2'] as const)('uses actual %s markup for facts and managed removal while retaining native payloads', async theme => {
     for (const locale of ['en', 'ar'] as const) {
       const root = mountSsh(theme, locale), f = model(), key = generatedKey(); f.boot(); await ready()

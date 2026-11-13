@@ -1,5 +1,5 @@
 /// <reference lib="dom" />
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createRequire } from 'node:module'
 import { defaultPlan, msgctxt, msgid, type Account, type Domain } from '@xpanel/core'
 import { translator } from './i18n.ts'
@@ -31,16 +31,35 @@ const domainView = (domains = [domain, addon]) => ({ context: { accountId, home:
 type TestDom = { window: Window & typeof globalThis }
 const requireFromHarness = createRequire(createRequire(import.meta.url).resolve('vitest'))
 const { JSDOM } = requireFromHarness('jsdom') as { JSDOM: new (html: string, options: { url: string; runScripts: 'outside-only' }) => TestDom }
-const liveDoms: TestDom[] = []
+let sharedDom: TestDom | undefined
+const compiledBindings = new Map<string, (confirm: unknown) => void>()
 const settle = async (): Promise<void> => { await new Promise(resolve => setTimeout(resolve, 0)); await new Promise(resolve => setTimeout(resolve, 0)) }
+beforeAll(() => {
+  sharedDom = new JSDOM('<!doctype html><html lang="en"><body></body></html>', { url: 'https://panel.example.test/', runScripts: 'outside-only' })
+  Object.assign(sharedDom.window, { msgid, msgctxt, xpT: translator('en') })
+})
+afterAll(() => {
+  compiledBindings.clear()
+  sharedDom?.window.close()
+  sharedDom = undefined
+})
 function mount(html: string, binding: string, request: (method: string, path: string, body?: unknown) => Promise<unknown>) {
-  const dom = new JSDOM(html, { url: 'https://panel.example.test/', runScripts: 'outside-only' }); liveDoms.push(dom)
+  const dom = sharedDom!
+  dom.window.document.body.innerHTML = html
   Object.assign(dom.window, { msgid, msgctxt, xpT: translator('en'), xpanelSessionRequest: request })
-  const boot = dom.window.Function('return ' + binding)() as (confirm: unknown) => void
+  let boot = compiledBindings.get(binding)
+  if (!boot) {
+    boot = dom.window.Function('return ' + binding)() as (confirm: unknown) => void
+    compiledBindings.set(binding, boot)
+  }
   boot(async () => true)
   return { dom, document: dom.window.document, boot }
 }
-afterEach(() => { for (const dom of liveDoms.splice(0)) dom.window.close() })
+afterEach(() => {
+  if (!sharedDom) return
+  sharedDom.window.document.body.replaceChildren()
+  delete (sharedDom.window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest
+})
 
 describe.each(['classic', 'v2'] as const)('%s authenticated domain row updates', theme => {
   const v2 = theme === 'v2'

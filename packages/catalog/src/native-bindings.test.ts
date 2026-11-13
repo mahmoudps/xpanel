@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { tools } from './data/index.ts'
+import { unqualifiedTools as tools } from './data/index.ts'
 import { navigation } from './data/navigation.ts'
 import { HOST_PROBES, PHASE1_TOOL_PROBES, qualifyHostTools, type HostQualificationReport } from './host-qualification.ts'
 import { canOpenRegisteredRoute, visibleNavigation } from './navigation.ts'

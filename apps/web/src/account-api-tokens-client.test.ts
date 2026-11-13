@@ -14,12 +14,26 @@ type Locale = 'en' | 'ar'
 type Transport = (method: string, path: string, body?: unknown) => Promise<unknown>
 const token = (id = firstId, name = 'owner_sync'): AccountApiTokenView => ({ id, name, scopes: ['files:read'], allowedIps: [], createdAt: '2026-10-01T00:00:00.000Z', expiresAt: '2027-01-01T00:00:00.000Z', lastUsedAt: null, lastUsedIp: null, revokedAt: null, state: 'active' })
 const list = (tokens: AccountApiTokenView[]) => ({ tokens: structuredClone(tokens), usageRecorded: true })
+const renderedMarkupCache = new Map<string, HTMLDivElement>()
+const runAccountApiTokensBinding = new Function('window', 'document', 'xpT', 'askDialog', '(' + ACCOUNT_API_TOKENS_CLIENT_BINDING + ')(askDialog);') as (
+  win: Window & typeof globalThis,
+  doc: Document,
+  xpT: (message: string) => string,
+  ask: (options: Record<string, unknown>) => Promise<unknown>,
+) => void
 function markup(theme: Theme, locale: Locale): HTMLElement {
-  const html = theme === 'classic'
-    ? renderApprovedXpanelWorkspace({ route: '/security/account', locale, readOnly: true, authPersonal })
-    : renderV2AccountSecurityPage({ locale, activeRoute: '/security/account', authPersonal }, { presentation: 'read-only', canRead: false, canManage: false })
-  if (typeof html !== 'string') throw new Error('actual_theme_security_page_missing')
-  document.body.innerHTML = html
+  const key = `${theme}:${locale}`
+  let holder = renderedMarkupCache.get(key)
+  if (!holder) {
+    const html = theme === 'classic'
+      ? renderApprovedXpanelWorkspace({ route: '/security/account', locale, readOnly: true, authPersonal })
+      : renderV2AccountSecurityPage({ locale, activeRoute: '/security/account', authPersonal }, { presentation: 'read-only', canRead: false, canManage: false })
+    if (typeof html !== 'string') throw new Error('actual_theme_security_page_missing')
+    holder = document.createElement('div')
+    holder.innerHTML = html
+    renderedMarkupCache.set(key, holder)
+  }
+  document.body.replaceChildren(...Array.from(holder.childNodes, node => node.cloneNode(true)))
   const roots = document.querySelectorAll<HTMLElement>('[data-account-api-tokens]')
   if (roots.length !== 1 || !roots[0]) throw new Error('actual_theme_token_root_missing_or_ambiguous')
   return roots[0]
@@ -36,7 +50,7 @@ function begin(transport: Transport, askDialog: (options: Record<string, unknown
   const ask = vi.fn(askDialog)
   Reflect.set(window, 'xpanelSessionRequest', request)
   // Exercise the same serialized binding installed by the shared host assembly, not a direct imported binder.
-  new Function('window', 'document', 'xpT', 'askDialog', '(' + ACCOUNT_API_TOKENS_CLIENT_BINDING + ')(askDialog);')(window, document, translate, ask)
+  runAccountApiTokensBinding(window, document, translate, ask)
   return { request, ask }
 }
 const read = async (root: HTMLElement): Promise<void> => { await vi.waitFor(() => expect(field(root, 'status').dataset.state).toBe('read'), { timeout: 2000, interval: 5 }) }

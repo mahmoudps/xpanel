@@ -3,7 +3,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { afterEach, beforeEach, describe, it } from 'vitest'
 import type { AgentApp } from '@xpanel/agent'
-import { admitForQualification, PHASE1_TOOL_PROBES, qualifyHostTools, tools, type HostQualificationReport } from '@xpanel/catalog'
+import { admitForQualification, PHASE1_TOOL_PROBES, qualifyHostTools, unqualifiedTools, type HostQualificationReport } from '@xpanel/catalog'
 import { createRootPrincipal, createTestDb, listAudit, type TestDbHandle } from '@xpanel/db'
 import { createTestStateStore, type TestStateStoreHandle } from '@xpanel/state'
 import { HOST_PROBES } from '../../../packages/catalog/src/host-qualification.ts'
@@ -68,7 +68,7 @@ describe('qualification mode switch', () => {
 
 const report = (probes: Record<string, string>, executor: HostQualificationReport['executor'] = 'linux'): HostQualificationReport => ({ executor, probes: probes as HostQualificationReport['probes'] })
 const ready = () => report({ audit_log: 'passed' })
-const admitted = (next: HostQualificationReport | null, toolId: string) => admitForQualification(qualifyHostTools(tools, next, true), next).find(tool => tool.id === toolId)!
+const admitted = (next: HostQualificationReport | null, toolId: string) => admitForQualification(qualifyHostTools(unqualifiedTools, next, true), next).find(tool => tool.id === toolId)!
 
 describe('qualification admission', () => {
   it('opens a ready tool as an admission that carries no evidence', () => {
@@ -87,9 +87,9 @@ describe('qualification admission', () => {
 
   it('keeps a tool without declared prerequisites and an out-of-scope tool closed', () => {
     const everything = report(Object.fromEntries(HOST_PROBES.map(probe => [probe, 'passed'])))
-    const unprobed = tools.find(tool => tool.status === 'researched' && !Object.hasOwn(PHASE1_TOOL_PROBES, tool.id))!
+    const unprobed = unqualifiedTools.find(tool => tool.status === 'researched' && !Object.hasOwn(PHASE1_TOOL_PROBES, tool.id))!
     assert.equal(admitted(everything, unprobed.id).status, 'researched')
-    const outside = tools.find(tool => tool.status === 'out-of-scope')!
+    const outside = unqualifiedTools.find(tool => tool.status === 'out-of-scope')!
     assert.equal(admitted(everything, outside.id).status, 'out-of-scope')
   })
 })
@@ -100,7 +100,7 @@ describe('qualified catalog provider', () => {
 
   it('stays closed without the switch and closes the moment the switch goes', async () => {
     let mode = false
-    const provider = createQualifiedCatalogProvider(undefined, () => mode), agent = host()
+    const provider = createQualifiedCatalogProvider(undefined, () => mode, unqualifiedTools), agent = host()
     assert.equal(auditLog(await provider.load(agent)), 'researched')
     mode = true
     assert.equal(auditLog(await provider.load(agent)), 'verified')
@@ -109,7 +109,7 @@ describe('qualified catalog provider', () => {
   })
 
   it('refuses admission without a connected agent or with host qualification off', async () => {
-    const provider = createQualifiedCatalogProvider(undefined, () => true)
+    const provider = createQualifiedCatalogProvider(undefined, () => true, unqualifiedTools)
     assert.equal(auditLog(await provider.load(null)), 'researched')
     process.env.XPANEL_HOST_QUALIFICATION = 'off'
     try { assert.equal(auditLog(await provider.load(host())), 'researched') }

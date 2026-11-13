@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { builtinEnvironments, type EnvironmentReturn } from 'vitest/runtime'
 import { translator } from './i18n.ts'
 import { renderWhmBackupFilesWorkspace } from './board-port/whm-backup-files-workspace.ts'
@@ -7,13 +7,18 @@ import { renderV2WhmRestoreFilesPage } from './themes/v2/pages/xwhm/recovery-too
 import { WHM_BACKUP_FILES_CLIENT_BINDING } from './whm-backup-files-client.ts'
 
 let environment: EnvironmentReturn | undefined
-beforeEach(async () => {
+const runBackupFilesBinding = new Function('return ' + WHM_BACKUP_FILES_CLIENT_BINDING)() as () => void
+beforeAll(async () => {
   environment = await builtinEnvironments.jsdom.setup(globalThis, { jsdom: { url: 'https://whm.example.test/whm/backups/files', runScripts: 'outside-only' } })
+})
+afterAll(async () => {
+  await environment?.teardown(globalThis); environment = undefined
+})
+beforeEach(() => {
   vi.stubGlobal('xpT', translator('en'))
 })
-afterEach(async () => {
-  try { document.body.replaceChildren(); delete (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest; vi.unstubAllGlobals() }
-  finally { await environment?.teardown(globalThis); environment = undefined }
+afterEach(() => {
+  document.body.replaceChildren(); delete (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest; vi.unstubAllGlobals()
 })
 const file = 'xpanel-backup-alice-20261026T100000Z.tar.gz'
 const folder = 'restored-20261026T100000Z'
@@ -29,7 +34,7 @@ const html = (theme: 'classic' | 'v2', canRead = true, canRestore = true) => {
 const get = <T extends Element = HTMLElement>(selector: string): T => document.querySelector<T>(selector)!
 const boot = (send: (method: string, path: string, body?: unknown) => Promise<unknown>) => {
   Object.assign(window, { xpanelSessionRequest: send })
-  new Function('return ' + WHM_BACKUP_FILES_CLIENT_BINDING)()()
+  runBackupFilesBinding()
 }
 const sendFixture = () => vi.fn(async (_method: string, path: string, body?: unknown) => {
   if (path === '/api/backups/files') return { accounts: [{ username: 'alice', primaryDomain: 'alice.example.test' }] }

@@ -104,7 +104,7 @@ describe('sec Cloudflare for account owners', () => {
   })
 })
 
-describe('provider DNS records', { tags: ['unit'] }, () => {
+describe('provider DNS records', { tags: ['feature'] }, () => {
   const RECORD = 'f'.repeat(32), row = { id: RECORD, type: 'A', name: 'www.alice.test', content: '203.0.113.5', ttl: 300, proxied: false, proxiable: true, comment: 'web' }
   const linked = async (fetcher: ReturnType<typeof vi.fn>) => {
     const h = harness(fetcher as never)
@@ -150,7 +150,7 @@ describe('provider DNS records', { tags: ['unit'] }, () => {
   })
 })
 
-describe('automatic record for a new site', { tags: ['unit'] }, () => {
+describe('automatic record for a new site', { tags: ['feature'] }, () => {
   const on = () => atomicWriteJson(join(root, 'extended/dns/auto-dns.json'), { version: 1, policy: { enabled: true, ttl: 3600, proxied: false }, updatedAt: '2026-11-07T00:00:00.000Z' })
   const saved = (name: string) => ({ id: 'f'.repeat(32), type: 'A', name, content: '1.1.1.1', ttl: 3600, proxied: false })
   const provider = async (fetcher: ReturnType<typeof vi.fn>) => {

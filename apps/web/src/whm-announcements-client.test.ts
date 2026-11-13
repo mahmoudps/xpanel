@@ -24,13 +24,22 @@ const record = (overrides: Record<string, unknown> = {}) => ({
 const view = (overrides: Record<string, unknown> = {}) => ({ state: 'saved', revision: R1, announcements: [record()], choices, ...overrides })
 type Send = (method: string, path: string, body?: unknown) => Promise<unknown>
 type Ask = (options: Record<string, unknown>) => Promise<unknown>
-const flush = async () => { for (let i = 0; i < 10; i++) await new Promise(resolve => setTimeout(resolve, 0)) }
+const flush = async () => { for (let i = 0; i < 10; i++) await Promise.resolve() }
+const runAnnouncementsBinding = new Function('return ' + WHM_ANNOUNCEMENTS_CLIENT_BINDING)() as (ask?: Ask) => void
+const announcementsTemplateCache = new Map<string, HTMLTemplateElement>()
 const boot = (send?: Send, locale: 'en' | 'ar' = 'en', canManage = true, ask?: Ask, theme: 'classic' | 'v2' = 'classic', prepare?: (root: HTMLElement) => void) => {
   document.documentElement.lang = locale; document.documentElement.dir = locale === 'ar' ? 'rtl' : 'ltr'
-  document.body.innerHTML = theme === 'v2' ? renderV2WhmAccountAnnouncementsPage({ activeRoute: '/whm/accounts/announcements', locale }, { canRead: true, canManage }) : renderWhmAnnouncementsWorkspace({ locale, canManage })
+  const key = `${theme}:${locale}:${canManage}`
+  let tpl = announcementsTemplateCache.get(key)
+  if (!tpl) {
+    tpl = document.createElement('template')
+    tpl.innerHTML = theme === 'v2' ? renderV2WhmAccountAnnouncementsPage({ activeRoute: '/whm/accounts/announcements', locale }, { canRead: true, canManage }) : renderWhmAnnouncementsWorkspace({ locale, canManage })
+    announcementsTemplateCache.set(key, tpl)
+  }
+  document.body.replaceChildren(tpl.content.cloneNode(true))
   prepare?.(document.querySelector<HTMLElement>('[data-whm-announcements-workspace]')!)
   if (send) (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest = send
-  new Function('return ' + WHM_ANNOUNCEMENTS_CLIENT_BINDING)()(ask)
+  runAnnouncementsBinding(ask)
 }
 const $ = <T extends Element = HTMLElement>(selector: string) => document.querySelector<T>(selector)!
 const input = (name: string) => $<HTMLInputElement>(`[data-whm-announcements-input="${name}"]`)

@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs'
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
 import { navigation, registeredDocumentAliases, tools, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
 import { defaultPlan, type Domain, type MailIpConfig } from '@xpanel/core'
 import { renderWebApp } from '../app.ts'
@@ -158,6 +158,21 @@ describe('classic conforms to every registered document contract', () => {
   }
 
   const mailIpConfig: MailIpConfig = { mode: 'server-default', defaultIpv4: null, defaultIpv6: null, defaultHelo: null, domainOverrides: [] }
+
+  beforeAll(() => {
+    const contractsByRoute = new Map(routeContracts().map(item => [item.route, item]))
+    const docs = registeredThemeDocuments()
+    for (const surface of ['xwhm', 'xpanel', 'xmail'] as const) {
+      const doc = docs.find(item => item.surface === surface)!
+      const identity = surface === 'xwhm'
+        ? { visibility: visibility({ kind: 'root', id: '33333333-3333-4333-8333-333333333333', username: 'contractroot' }) }
+        : surface === 'xpanel'
+          ? { visibility: visibility(user), panel: { account, plan: defaultPlan({ id: '22222222-2222-4222-8222-222222222222', name: 'Basic' }) } }
+          : { visibility: visibility(user), mail: { mailbox: 'contractuser@example.test', domain: 'example.test' } }
+      const html = renderWebApp({ uiTheme: 'classic', ...identity, surface, activeRoute: doc.route, locale: 'ar', theme: 'dark', catalog, liveState: live })
+      checkConformance(html, contractsByRoute.get(doc.route)!)
+    }
+  })
 
   it.each(registeredThemeDocuments())('$route', document => {
     const identity = document.surface === 'xwhm'

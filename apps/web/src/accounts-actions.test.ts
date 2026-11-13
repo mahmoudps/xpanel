@@ -1,6 +1,6 @@
 /// <reference lib="dom" />
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defaultPlan, type Account } from '@xpanel/core'
 import { tools } from '@xpanel/catalog'
 const fixtureCatalog = tools.filter(tool => ['create-account', 'list-accounts'].includes(tool.id)).map(tool => ({ ...tool, status: 'verified' as const, delivery: { ...tool.delivery, status: 'verified' as const } }))
@@ -13,12 +13,31 @@ const plan = defaultPlan({id:'plan-fixture',name:'Standard',featureListId:'featu
 const creationPlan = { ...plan, id: accountCreationPlanId }
 const account: Account = {id:'internal-alpha',username:'alpha',uid:20001,gid:20001,home:'/home/alpha',primaryDomain:'alpha.example.test',planId:plan.id,ownerId:null,status:'active',suspendReason:null,contactEmail:'alpha@example.test',ipv4:'192.0.2.10',ipv6:'2001:db8::10',extraIps:['192.0.2.11'],shell:'jailed',createdAt:'2026-10-23T00:00:00Z'}
 const second = {...account,id:'internal-beta',username:'beta',status:'suspended' as const,primaryDomain:'beta.example.test'}
-const render = (locale:'en'|'ar'='en') => renderWhmSurface({locale,activeRoute:'/whm/accounts',principal:{kind:'root',id:'fixture-root',username:'operator'},accounts:[account,second],plans:[plan],catalog:fixtureCatalog})
+const renderCache = new Map<string, string>()
+const domTemplateCache = new Map<string, HTMLTemplateElement>()
+const getCachedBodyTemplate = (html: string): HTMLTemplateElement => {
+  let tpl = domTemplateCache.get(html)
+  if (!tpl) {
+    tpl = document.createElement('template')
+    tpl.innerHTML = html
+    domTemplateCache.set(html, tpl)
+  }
+  return tpl
+}
+const setCachedBody = (html: string): void => {
+  document.body.replaceChildren(getCachedBodyTemplate(html).content.cloneNode(true))
+}
+const render = (locale:'en'|'ar'='en') => { let html = renderCache.get(locale); if (!html) renderCache.set(locale, html = renderWhmSurface({locale,activeRoute:'/whm/accounts',principal:{kind:'root',id:'fixture-root',username:'operator'},accounts:[account,second],plans:[plan],catalog:fixtureCatalog})); return html }
+const renderNew = (locale:'en'|'ar'='en') => { const key = 'new:' + locale; let html = renderCache.get(key); if (!html) renderCache.set(key, html = renderWhmSurface({locale,activeRoute:'/whm/accounts/new',principal:{kind:'root',id:'fixture-root',username:'operator'},plans:[creationPlan],accounts:[],catalog:fixtureCatalog})); return html }
+const renderV2List = () => { const key = 'v2:en'; let html = renderCache.get(key); if (!html) renderCache.set(key, html = renderV2WhmAccountList(translator('en'), { principal: { kind: 'root', id: 'fixture-root', username: 'operator' }, accounts: [account, second], plans: [plan], catalog: fixtureCatalog })); return html }
+beforeAll(() => { for (const html of [render('en'), render('ar'), renderNew('en'), renderNew('ar'), renderV2List()]) getCachedBodyTemplate(html) })
+const runRealtimeScript = new Function('window','document',BROWSER_REALTIME_SCRIPT) as (w: Window & typeof globalThis, d: Document) => void
 const el = <T extends HTMLElement=HTMLElement>(selector:string) => document.querySelector<T>(selector)!
 let listeners: [EventTarget,string,EventListenerOrEventListenerObject,boolean|AddEventListenerOptions|undefined][]
-beforeEach(()=>{listeners=[];window.sessionStorage.clear();for(const target of [document,window]) {const add=target.addEventListener.bind(target);vi.spyOn(target,'addEventListener').mockImplementation((name,handler,options)=>{listeners.push([target,name,handler,options]);add(name,handler,options)})}document.documentElement.dataset.realtimeEnabled='false';document.documentElement.lang='en';document.body.innerHTML=render()})
-afterEach(()=>{for(const [target,name,handler,options] of listeners)target.removeEventListener(name,handler,options);vi.restoreAllMocks();document.body.replaceChildren();delete (window as any).xpanelSessionRequest})
-function boot(){ const dialog=el<HTMLDialogElement>('[data-account-dialog]'); dialog.showModal=()=>dialog.setAttribute('open','');dialog.close=()=>{dialog.removeAttribute('open');dialog.dispatchEvent(new Event('close'))}; new Function('window','document',BROWSER_REALTIME_SCRIPT)(window,document);return dialog }
+const clearListeners = () => { for (const [target,name,handler,options] of listeners.splice(0)) target.removeEventListener(name,handler,options) }
+beforeEach(()=>{listeners=[];window.sessionStorage.clear();for(const target of [document,window]) {const add=target.addEventListener.bind(target);vi.spyOn(target,'addEventListener').mockImplementation((name,handler,options)=>{listeners.push([target,name,handler,options]);add(name,handler,options)})}document.documentElement.dataset.realtimeEnabled='false';document.documentElement.lang='en';setCachedBody(render())})
+afterEach(()=>{clearListeners();vi.restoreAllMocks();document.body.replaceChildren();delete (window as any).xpanelSessionRequest})
+function boot(){ clearListeners(); const dialog=el<HTMLDialogElement>('[data-account-dialog]'); dialog.showModal=()=>dialog.setAttribute('open','');dialog.close=()=>{dialog.removeAttribute('open');dialog.dispatchEvent(new Event('close'))}; runRealtimeScript(window,document);return dialog }
 const tick=()=>new Promise(resolve=>setTimeout(resolve,0))
 const preferenceRoute = '/api/auth/ui-preferences'
 const whmShellReads = ['/api/admin/favorites', '/api/admin/notifications']
@@ -40,7 +59,7 @@ describe('account action target and confirmation contracts',()=>{
  it('uses explicit suspend and unsuspend routes and never a generic success toast',async()=>{const request=vi.fn().mockRejectedValue(Object.assign(new Error('bounded'),{status:503,details:{stateChanged:true,verificationRequired:true}}));(window as any).xpanelSessionRequest=request;boot();el('[data-account-row="beta"] [data-action="unsuspend-account"]').click();el('[data-account-action-form]').dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));await tick();expect(request).toHaveBeenCalledWith('POST','/api/accounts/internal-beta/unsuspend',{});expect(el('[data-account-action-status]').textContent).toMatch(/not be verified/i);expect(el('[data-account-action-status]').getAttribute('data-state')).toBe('failed');expect(document.querySelector('#xp-toast-region')).toBeNull()})
  it('hides mutation actions for a reseller without the corresponding ACL',()=>{document.body.innerHTML=renderWhmSurface({activeRoute:'/whm/accounts',principal:{kind:'reseller',id:'reseller-fixture',username:'reseller'},activeReseller:{id:'reseller-fixture',username:'reseller',acl:['list-accounts'],maxAccounts:5,totalDiskMb:100,totalBandwidthMb:100,oversell:{disk:false,bandwidth:false},nameservers:[],delegatedIps:[]},accounts:[account],plans:[plan]});expect(document.querySelector('[data-action="terminate-account"]')).toBeNull();expect(document.querySelector('[data-action="suspend-account"]')).toBeNull()})
  it('offers a one-time Log in to xPanel only for active accounts the viewer may edit',()=>{const handoff=(row:string)=>document.querySelector<HTMLButtonElement>(`[data-account-row="${row}"] button[data-handoff="xpanel"]`);expect(handoff('alpha')?.dataset.handoffAccount).toBe('internal-alpha');expect(handoff('beta')).toBeNull();expect(document.body.innerHTML).not.toMatch(/data-panel-switch|href="https?:/);document.body.innerHTML=renderWhmSurface({activeRoute:'/whm/accounts',principal:{kind:'reseller',id:'reseller-fixture',username:'reseller'},activeReseller:{id:'reseller-fixture',username:'reseller',acl:['list-accounts'],maxAccounts:5,totalDiskMb:100,totalBandwidthMb:100,oversell:{disk:false,bandwidth:false},nameservers:[],delegatedIps:[]},accounts:[{...account,ownerId:'reseller-fixture'}],plans:[plan]});expect(document.querySelector('[data-handoff]')).toBeNull()})
- it('localizes bounded refusal without raw server messages',async()=>{document.documentElement.lang='ar';document.body.innerHTML=render('ar');(window as any).xpanelSessionRequest=vi.fn().mockRejectedValue(Object.assign(new Error('private-host-output'),{status:412,details:{verificationRequired:true,stateChanged:false}}));boot();el('[data-account-row="alpha"] [data-action="terminate-account"]').click();const input=el<HTMLInputElement>('[data-type-to-confirm]');input.value='alpha';input.dispatchEvent(new Event('input'));el('[data-account-action-form]').dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));await tick();expect(el('[data-account-action-status]').textContent).toContain('غير متاح');expect(el('[data-account-action-status]').textContent).not.toContain('private-host-output')})
+ it('localizes bounded refusal without raw server messages',async()=>{document.documentElement.lang='ar';setCachedBody(render('ar'));(window as any).xpanelSessionRequest=vi.fn().mockRejectedValue(Object.assign(new Error('private-host-output'),{status:412,details:{verificationRequired:true,stateChanged:false}}));boot();el('[data-account-row="alpha"] [data-action="terminate-account"]').click();const input=el<HTMLInputElement>('[data-type-to-confirm]');input.value='alpha';input.dispatchEvent(new Event('input'));el('[data-account-action-form]').dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));await tick();expect(el('[data-account-action-status]').textContent).toContain('غير متاح');expect(el('[data-account-action-status]').textContent).not.toContain('private-host-output')})
 })
 
 describe('account configuration acknowledgements', () => {
@@ -50,10 +69,7 @@ describe('account configuration acknowledgements', () => {
     { theme: 'v2', username: 'alpha', verb: 'suspend', state: 'suspended' },
     { theme: 'v2', username: 'beta', verb: 'unsuspend', state: 'active' },
   ] as const)('uses the theme-owned pending status after $theme $verb acceptance', async ({ theme, username, verb, state }) => {
-    if (theme === 'v2') document.body.innerHTML = renderV2WhmAccountList(translator('en'), {
-      principal: { kind: 'root', id: 'fixture-root', username: 'operator' },
-      accounts: [account, second], plans: [plan], catalog: fixtureCatalog,
-    })
+    if (theme === 'v2') setCachedBody(renderV2List())
     const chosen = username === 'alpha' ? account : second
     const request = vi.fn().mockResolvedValue({ account: { ...chosen, status: state }, reconcile: { status: 'applied' }, execution: { status: 'configuration_applied', scope: 'global_configuration', targetVerified: false, verificationRequired: true } })
     ;(window as any).xpanelSessionRequest = request
@@ -93,10 +109,10 @@ describe('account configuration acknowledgements', () => {
     expectedAccountMutation(request, 'POST', `/api/accounts/${account.id}/suspend`)
   })
   it('creates through the actual API, clears the password, and preserves non-secret drafts on refusal', async () => {
-    document.body.innerHTML = renderWhmSurface({ activeRoute: '/whm/accounts/new', principal: { kind: 'root', id: 'fixture-root', username: 'operator' }, plans: [creationPlan], accounts: [], catalog: fixtureCatalog })
+    setCachedBody(renderNew())
     const request = vi.fn().mockRejectedValue(Object.assign(new Error('private-output'), { status: 412, details: { stateChanged: false } }))
     ;(window as any).xpanelSessionRequest = request
-    new Function('window', 'document', BROWSER_REALTIME_SCRIPT)(window, document)
+    runRealtimeScript(window, document)
     el<HTMLInputElement>('#new-acc-username').value = 'newowner'
     el<HTMLInputElement>('#new-acc-domain').value = 'newowner.example.test'
     el<HTMLInputElement>('#new-acc-password').value = 'fixture-' + 'x'.repeat(16)
@@ -119,7 +135,7 @@ describe('phase-1 write responses', () => {
     { status: 500, code: 'INTERNAL_ERROR', details: { stateChanged: false } },
     { status: 500, code: 'INTERNAL_ERROR', details: { stateChanged: true, verificationRequired: true, unknownOutcome: true, needsAttention: true } },
   ])('keeps the submitted identity and blocks repeat after an injected post-save failure: %j', async failure => {
-    document.body.innerHTML = renderWhmSurface({ activeRoute: '/whm/accounts/new', principal: { kind: 'root', id: 'fixture-root', username: 'operator' }, plans: [creationPlan], accounts: [], catalog: fixtureCatalog })
+    setCachedBody(renderNew())
     const stored: { username: string; primaryDomain: string }[] = []
     const request = vi.fn(async (method: string, path: string, body?: { username: string; primaryDomain: string }) => {
       if (method === 'GET' && path === preferenceRoute) return preferenceView
@@ -127,7 +143,7 @@ describe('phase-1 write responses', () => {
       throw Object.assign(new Error('private post-save failure'), failure)
     })
     ;(window as any).xpanelSessionRequest = request
-    new Function('window', 'document', BROWSER_REALTIME_SCRIPT)(window, document)
+    runRealtimeScript(window, document)
     el<HTMLInputElement>('#new-acc-username').value = 'newowner'
     el<HTMLInputElement>('#new-acc-domain').value = 'newowner.example.test'
     el<HTMLInputElement>('#new-acc-password').value = 'fixture-' + 'x'.repeat(16)
@@ -152,17 +168,17 @@ describe('phase-1 write responses', () => {
     expect(JSON.parse(window.sessionStorage.getItem('xpanel.account-create.v1.' + encodeURIComponent('root:operator'))!).phase).toBe('pending')
   })
   it('accepts the API create, suspend and terminate bodies', async () => {
-    document.body.innerHTML = renderWhmSurface({ activeRoute: '/whm/accounts/new', principal: { kind: 'root', id: 'fixture-root', username: 'operator' }, plans: [creationPlan], accounts: [], catalog: fixtureCatalog })
+    setCachedBody(renderNew())
     const creation = verifiedCreation('submitted')
     ;(window as any).xpanelSessionRequest = vi.fn(async (method: string, path: string) => method === 'GET' && path === preferenceRoute ? preferenceView : creation)
-    new Function('window', 'document', BROWSER_REALTIME_SCRIPT)(window, document)
+    runRealtimeScript(window, document)
     el<HTMLInputElement>('#new-acc-username').value = 'submitted'
     el<HTMLInputElement>('#new-acc-domain').value = 'submitted.example.test'
     el<HTMLInputElement>('#new-acc-password').value = 'synthetic-' + 'x'.repeat(16)
     el<HTMLFormElement>('[data-create-account-form]').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
     await tick()
     expect(el('[data-account-create-status]').textContent).toBe('Account created.')
-    document.body.innerHTML = render()
+    setCachedBody(render())
     const dialog = boot()
     ;(window as any).xpanelSessionRequest = vi.fn().mockResolvedValue({ ok: true, purged: true })
     el('[data-account-row="alpha"] [data-action="terminate-account"]').click()
@@ -173,7 +189,7 @@ describe('phase-1 write responses', () => {
     await tick()
     expect(el('[data-account-action-status]').textContent).toContain('Account removed')
     expect(dialog.open).toBe(true)
-    document.body.innerHTML = render()
+    setCachedBody(render())
     boot()
     ;(window as any).xpanelSessionRequest = vi.fn().mockResolvedValue({ account: { ...account, status: 'suspended' }, reconcile: applied, execution })
     el('[data-account-row="alpha"] [data-action="suspend-account"]').click()
@@ -185,12 +201,12 @@ describe('phase-1 write responses', () => {
 describe('creation request identity and uncertain outcomes', () => {
   it('localizes creation uncertainty without exposing raw server output', async () => {
     document.documentElement.lang = 'ar'
-    document.body.innerHTML = renderWhmSurface({ locale: 'ar', activeRoute: '/whm/accounts/new', principal: { kind: 'root', id: 'fixture-root', username: 'operator' }, plans: [creationPlan], accounts: [], catalog: fixtureCatalog })
+    setCachedBody(renderNew('ar'))
     ;(window as any).xpanelSessionRequest = vi.fn(async (method: string, path: string) => {
       if (method === 'GET' && path === preferenceRoute) return preferenceView
       throw Object.assign(new Error('private-creation-output'), { status: 409, unknownOutcome: true })
     })
-    new Function('window', 'document', BROWSER_REALTIME_SCRIPT)(window, document)
+    runRealtimeScript(window, document)
     el<HTMLInputElement>('#new-acc-username').value = 'arabowner'
     el<HTMLInputElement>('#new-acc-domain').value = 'arabowner.example.test'
     el<HTMLInputElement>('#new-acc-password').value = 'synthetic-' + 'x'.repeat(16)
@@ -207,12 +223,12 @@ describe('creation request identity and uncertain outcomes', () => {
     ['current independent observation', reobservedAccountCreationFixture, 'Account created.'],
     ['completed historical replay', completedAccountCreationReplayFixture, 'Current hosting verification is still required.'],
   ] as const)('accepts the actual public creation contract for %s', async (_name, response, message) => {
-    document.body.innerHTML = renderWhmSurface({ activeRoute: '/whm/accounts/new', principal: { kind: 'root', id: 'fixture-root', username: 'operator' }, plans: [creationPlan], accounts: [], catalog: fixtureCatalog })
+    setCachedBody(renderNew())
     const result = response({ username: 'submitted', planId: creationPlan.id,
       shell: el<HTMLInputElement>('[name="shell"]:checked')?.value === 'none' ? 'none' : 'jailed' })
     const request = vi.fn(async (method: string, path: string) => method === 'GET' && path === preferenceRoute ? preferenceView : result)
     ;(window as any).xpanelSessionRequest = request
-    new Function('window', 'document', BROWSER_REALTIME_SCRIPT)(window, document)
+    runRealtimeScript(window, document)
     el<HTMLInputElement>('#new-acc-username').value = 'submitted'
     el<HTMLInputElement>('#new-acc-domain').value = 'submitted.example.test'
     el<HTMLInputElement>('#new-acc-password').value = 'synthetic-' + 'x'.repeat(16)
@@ -230,8 +246,8 @@ describe('creation request identity and uncertain outcomes', () => {
   })
 
   function prepare() {
-    document.body.innerHTML = renderWhmSurface({ activeRoute: '/whm/accounts/new', principal: { kind: 'root', id: 'fixture-root', username: 'operator' }, plans: [creationPlan], accounts: [], catalog: fixtureCatalog })
-    new Function('window', 'document', BROWSER_REALTIME_SCRIPT)(window, document)
+    setCachedBody(renderNew())
+    runRealtimeScript(window, document)
     el<HTMLInputElement>('#new-acc-username').value = 'submitted'
     el<HTMLInputElement>('#new-acc-domain').value = 'submitted.example.test'
     el<HTMLInputElement>('#new-acc-password').value = 'synthetic-' + 'x'.repeat(16)

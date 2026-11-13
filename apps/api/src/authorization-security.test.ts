@@ -1,9 +1,11 @@
 import { randomUUID } from 'node:crypto'
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { cp, mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import type { Account, PhpSettings } from '@xpanel/core'
 import { createApiToken, createResellerPrincipal, createRootPrincipal, createTestDb, createUserPrincipal, getPrincipal, setTotpSecret, setPasswordHash } from '@xpanel/db'
 import type { TestDbHandle } from '@xpanel/db'
-import { atomicWriteJson, createTestStateStore } from '@xpanel/state'
+import { atomicWriteJson, createStateStore, createTestStateStore } from '@xpanel/state'
 import type { TestStateStoreHandle } from '@xpanel/state'
 import { join } from 'node:path'
 import { hashPasswordArgon2id, sha256Hex, sealTotpSecret } from './auth.ts'
@@ -14,7 +16,21 @@ import type { ApiApp } from './server.ts'
 const SERVER_SECRET = 'test-only-authorization-server-secret-at-least-32-bytes'
 const php: PhpSettings = { version: '8.3', handler: 'fpm', fpm: { mode: 'ondemand', maxChildren: 2, startServers: 1, minSpareServers: 1, maxSpareServers: 1, maxRequests: 50, processIdleTimeoutSec: 10 }, ini: {} }
 let passwordHash: string
-beforeAll(async () => { passwordHash = await hashPasswordArgon2id('GeneratedFixturePassword!') })
+
+const buildStateTemplate = async () => {
+  passwordHash = await hashPasswordArgon2id('GeneratedFixturePassword!', { timeCost: 1, parallelism: 1 })
+  const state = await createTestStateStore()
+  const featureListId = (await state.store.createFeatureList({ name: 'Fixture features', ownerId: null, disabled: [] })).id
+  const plan = await state.store.createPlan({ name: 'Fixture plan', ownerId: null, featureListId, resources: { diskMb: 1000, bandwidthMbMonth: 10000, ioReadBps: 1048576, ioWriteBps: 1048576, ioReadIops: 100, ioWriteIops: 100, memoryMb: 128, maxProcesses: 16, cpuPercent: 100 }, caps: { addonDomains: 5, aliasDomains: 5, subdomains: 5, mailboxes: 10, forwarders: 10, mailingLists: 5, ftpAccounts: 5, databases: 5, phpWorkers: 5 }, dedicatedIp: false, shell: 'none', defaultMailboxQuotaMb: 100 })
+  await state.store.saveServerIp({ address: '192.0.2.10', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
+  const alice = await state.store.createAccount({ username: 'alice', passwordHash, primaryDomain: 'alice.example.test', planId: plan.id, ownerId: null, contactEmail: 'owner@alice.example.test', ipv4: '192.0.2.10', shell: 'none', php })
+  const bob = await state.store.createAccount({ username: 'bobby', passwordHash, primaryDomain: 'bob.example.test', planId: plan.id, ownerId: null, contactEmail: 'owner@bob.example.test', ipv4: '192.0.2.10', shell: 'none', php })
+  for (const account of [alice, bob]) await state.store.createServiceUser({ accountId: account.id, login: `inbox@${account.primaryDomain}`, passwordHash: `{ARGON2ID}${passwordHash}`, services: { email: true, ftp: false, webdisk: false }, mailboxQuotaMb: 100, ftpDir: 'public_html' })
+  return { state, featureListId, alice, bob }
+}
+let template: Awaited<ReturnType<typeof buildStateTemplate>> | undefined
+beforeAll(async () => { template = await buildStateTemplate() })
+afterAll(async () => { await template?.state.close() })
 
 describe('HTTP authorization security regressions', () => {
   let db: TestDbHandle
@@ -28,16 +44,13 @@ describe('HTTP authorization security regressions', () => {
 
   beforeEach(async () => {
     db = await createTestDb()
-    state = await createTestStateStore()
+    const rootDir = await mkdtemp(join(tmpdir(), 'xpanel-state-'))
+    await cp(template!.state.rootDir, rootDir, { recursive: true })
+    state = { store: createStateStore(rootDir), rootDir, close: () => rm(rootDir, { recursive: true, force: true }) }
+    ;({ featureListId, alice, bob } = template!)
     rootId = (await createRootPrincipal(db.db, { username: 'root', passwordHash, forcePasswordChange: false })).id
     await setTotpSecret(db.db, rootId, sealTotpSecret('JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP', SERVER_SECRET), [])
-    featureListId = (await state.store.createFeatureList({ name: 'Fixture features', ownerId: null, disabled: [] })).id
-    const plan = await state.store.createPlan({ name: 'Fixture plan', ownerId: null, featureListId, resources: { diskMb: 1000, bandwidthMbMonth: 10000, ioReadBps: 1048576, ioWriteBps: 1048576, ioReadIops: 100, ioWriteIops: 100, memoryMb: 128, maxProcesses: 16, cpuPercent: 100 }, caps: { addonDomains: 5, aliasDomains: 5, subdomains: 5, mailboxes: 10, forwarders: 10, mailingLists: 5, ftpAccounts: 5, databases: 5, phpWorkers: 5 }, dedicatedIp: false, shell: 'none', defaultMailboxQuotaMb: 100 })
-    await state.store.saveServerIp({ address: '192.0.2.10', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
-    alice = await state.store.createAccount({ username: 'alice', passwordHash, primaryDomain: 'alice.example.test', planId: plan.id, ownerId: null, contactEmail: 'owner@alice.example.test', ipv4: '192.0.2.10', shell: 'none', php })
-    bob = await state.store.createAccount({ username: 'bobby', passwordHash, primaryDomain: 'bob.example.test', planId: plan.id, ownerId: null, contactEmail: 'owner@bob.example.test', ipv4: '192.0.2.10', shell: 'none', php })
     aliceId = (await createUserPrincipal(db.db, { username: alice.username, accountId: alice.id, passwordHash })).id
-    for (const account of [alice, bob]) await state.store.createServiceUser({ accountId: account.id, login: `inbox@${account.primaryDomain}`, passwordHash: `{ARGON2ID}${passwordHash}`, services: { email: true, ftp: false, webdisk: false }, mailboxQuotaMb: 100, ftpDir: 'public_html' })
     app = createApiApp({ db: db.db, store: state.store, serverSecret: SERVER_SECRET, davExchange: createMemoryDav().exchange })
   })
 
@@ -71,7 +84,7 @@ describe('HTTP authorization security regressions', () => {
     expect((await request(token, '/api/auth/change-password', 'POST', { currentPassword: 'GeneratedFixturePassword!', newPassword: 'ReplacementFixturePassword!' })).status).toBe(403)
   })
 
-  it('password change needs JSON, session CSRF and fresh current password then requires a new login', async () => {
+  it('password change needs JSON, session CSRF and fresh current password then requires a new login', { tags: ['slow'] }, async () => {
     await setPasswordHash(db.db, aliceId, passwordHash, { forceChange: true })
     const signedIn = await login()
     const { csrfToken } = await signedIn.json() as { csrfToken: string }

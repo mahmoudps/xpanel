@@ -13,7 +13,7 @@ const program = createRequire(import.meta.url)('./host-task-program.cjs') as {
 const ID = 'aaaaaaaaaaa1', TRIGGER = 'bbbbbbbbbbb1'
 const echo = (text: string, code = 0): string[] => [process.execPath, '-e', `process.stdout.write(${JSON.stringify(text)});process.exit(${code})`]
 
-describe('host task program', { tags: ['unit'] }, () => {
+describe('host task program', { tags: ['feature'] }, () => {
   let root: string, paths: Options['paths']
   const write = (spec: Record<string, unknown>): void => writeFileSync(join(paths.tasks, `${ID}.json`), JSON.stringify({ id: ID, name: 'Check', steps: [], stamped: false, returns: 'string', alert: false, retention: null, triggers: [], refuse: null, ...spec }))
   const runs = (id = ID): Record<string, any>[] => readFileSync(join(paths.logs, `${id}.runs`), 'utf8').trim().split('\n').map(line => JSON.parse(line)) // eslint-disable-line @typescript-eslint/no-explicit-any

@@ -1,4 +1,4 @@
-import { canOpenRegisteredRoute, isToolAuthorized, tools as defaultCatalog, visibleNavigation, visibleTools } from '@xpanel/catalog'
+import { canOpenRegisteredRoute, isToolAuthorized, unqualifiedTools as defaultCatalog, visibleNavigation, visibleTools } from '@xpanel/catalog'
 import { resolveResourceUsage, type Domain, type Limit, type Plan } from '@xpanel/core'
 import { alternateLocales, localeInfo, type Translate } from '../../../../i18n.ts'
 import { auditActionLabel, auditActorLabel, auditTargetLabel } from '../../../../audit-labels.ts'

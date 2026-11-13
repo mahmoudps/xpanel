@@ -1,21 +1,25 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { cp, mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { createTestDb, createUserPrincipal } from '@xpanel/db'
 import { system } from '@xpanel/render'
-import { createTestStateStore } from '@xpanel/state'
+import { createStateStore, createTestStateStore } from '@xpanel/state'
+import { hashPasswordArgon2id } from './auth.ts'
 import { createApiApp } from './server.ts'
 
 // Public independent libargon2 vector of 'correct horse battery staple'; these identities exist only in this test.
 const PASSWORD = 'correct horse battery staple'
-const HASH = '$argon2id$v=19$m=65536,t=3,p=4$MIIRqgvgQbgj220jfp0MPA$YfwJSVjtjSU0zzV/P3S9nnQ/USre2wvJMjfCIjrTQbg'
+let HASH = '$argon2id$v=19$m=65536,t=3,p=4$MIIRqgvgQbgj220jfp0MPA$YfwJSVjtjSU0zzV/P3S9nnQ/USre2wvJMjfCIjrTQbg'
 const SECRET = 'dav-authorize-fixture-secret-32-bytes-minimum'
 const INGRESS = 'dav_authorize_ingress_credential_32_bytes_min'
 const ORIGIN = 'https://panel.example.test:2083'
 const cleanup: Array<() => Promise<unknown>> = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close() })
 
-const fixture = async () => {
-  const database = await createTestDb(), state = await createTestStateStore()
-  cleanup.push(() => database.close(), () => state.close())
+const buildStateTemplate = async () => {
+  HASH = await hashPasswordArgon2id(PASSWORD, { timeCost: 1, parallelism: 1 })
+  const state = await createTestStateStore()
   const features = await state.store.createFeatureList({ name: 'Standard', ownerId: null, disabled: [] })
   const plan = await state.store.createPlan({ name: 'Standard', ownerId: null, featureListId: features.id,
     resources: { diskMb: 1024, bandwidthMbMonth: 10240, ioReadBps: 10000000, ioWriteBps: 10000000, ioReadIops: 1000, ioWriteIops: 1000, memoryMb: 512, maxProcesses: 32, cpuPercent: 100 },
@@ -23,8 +27,19 @@ const fixture = async () => {
   await state.store.saveServerIp({ address: '203.0.113.10', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
   const account = await state.store.createAccount({ username: 'alice', passwordHash: HASH, primaryDomain: 'alice.example.test', planId: plan.id, ownerId: null, contactEmail: 'alice@example.test', ipv4: '203.0.113.10', shell: 'none',
     php: { version: '8.3', handler: 'fpm', fpm: { mode: 'ondemand', maxChildren: 4, startServers: 2, minSpareServers: 1, maxSpareServers: 3, maxRequests: 500, processIdleTimeoutSec: 10 }, ini: {} } })
-  await createUserPrincipal(database.db, { username: 'alice', passwordHash: HASH, accountId: account.id })
   const disk = await state.store.createServiceUser({ accountId: account.id, login: 'docs@alice.example.test', services: { email: false, ftp: false, webdisk: true }, mailboxQuotaMb: 100, ftpDir: 'public_html', webdiskReadOnly: true, passwordHash: `{ARGON2ID}${HASH}` })
+  return { state, account, disk }
+}
+let template: Awaited<ReturnType<typeof buildStateTemplate>> | undefined
+
+const fixture = async () => {
+  const database = await createTestDb()
+  const rootDir = await mkdtemp(join(tmpdir(), 'xpanel-state-'))
+  await cp(template!.state.rootDir, rootDir, { recursive: true })
+  const state = { store: createStateStore(rootDir), rootDir, close: () => rm(rootDir, { recursive: true, force: true }) }
+  cleanup.push(() => database.close(), () => state.close())
+  const { account, disk } = template!
+  await createUserPrincipal(database.db, { username: 'alice', passwordHash: HASH, accountId: account.id })
   const app = createApiApp({ db: database.db, store: state.store, serverSecret: SECRET, entryPoint: 'xpanel', publicOrigin: ORIGIN, allowedOrigins: [ORIGIN], requireSecureCookies: true, secureCookies: true, ingressSecret: INGRESS })
   const ask = (headers: Record<string, string>) => app.fetch(new Request(`${ORIGIN}/api/dav/authorize`, { headers }), { remoteAddress: '127.0.0.1' })
   const basic = (login: string, password: string) => 'Basic ' + Buffer.from(`${login}:${password}`).toString('base64')
@@ -32,7 +47,9 @@ const fixture = async () => {
   return { ask, basic, edge, disk, state, account }
 }
 
-describe('DAV verification on the real xPanel listener', { tags: ['feature'] }, () => {
+describe('DAV verification on the real xPanel listener', () => {
+  beforeAll(async () => { template = await buildStateTemplate() })
+  afterAll(async () => { await template?.state.close() })
   it('answers only the authenticated management ingress', async () => {
     const f = await fixture()
     const credentials = { authorization: f.basic('alice', PASSWORD), 'x-xpanel-dav-service': 'webdisk', 'x-xpanel-dav-account': 'alice' }

@@ -1,15 +1,17 @@
 // @vitest-environment node
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { builtinEnvironments, type EnvironmentReturn } from 'vitest/runtime'
 import { cloneViewRecord, viewAction, VIEW_RECORD_HELPERS } from './workspace-view-templates.ts'
 
 let testDom: EnvironmentReturn | undefined
-beforeEach(async () => {
+beforeAll(async () => {
   testDom = await builtinEnvironments.jsdom.setup(globalThis, { jsdom: { url: 'https://whm.example.test/whm', runScripts: 'outside-only' } })
 })
-afterEach(async () => {
-  try { document.body.replaceChildren() }
-  finally { await testDom?.teardown(globalThis); testDom = undefined }
+afterAll(async () => {
+  await testDom?.teardown(globalThis); testDom = undefined
+})
+afterEach(() => {
+  document.body.replaceChildren()
 })
 const root = (html: string) => { const element = document.createElement('section'); element.innerHTML = html; return element }
 describe('selected-theme view records', () => {

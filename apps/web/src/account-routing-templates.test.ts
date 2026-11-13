@@ -1,11 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { builtinEnvironments, type EnvironmentReturn } from 'vitest/runtime'
 import * as classic from './board-port/account-routing-client-templates.ts'
 import * as v2 from './themes/v2/pages/xpanel/email-tools/routing-client-templates.ts'
 import { clientTemplate, cloneClientTemplate } from './client-templates.ts'
 let environment: EnvironmentReturn
-beforeEach(async () => { environment = await builtinEnvironments.jsdom.setup(globalThis, { jsdom: { url: 'https://panel.example.test' } }) })
-afterEach(async () => { await environment.teardown(globalThis) })
+beforeAll(async () => { environment = await builtinEnvironments.jsdom.setup(globalThis, { jsdom: { url: 'https://panel.example.test' } }) })
+afterAll(async () => { await environment.teardown(globalThis) })
 const contracts = [
   ['account-mailing-list-row','tr',['address','members','moderation','archive','remove']],
   ['account-quarantine-message','li',['title','sender','inspect']],

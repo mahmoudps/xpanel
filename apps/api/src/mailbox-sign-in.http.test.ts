@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { fail } from '@xpanel/core'
+import { MIN_ARGON2_MEMORY_KIB, fail } from '@xpanel/core'
 import { createSession } from '@xpanel/db'
 import { computeTotpCode, deriveCsrfToken, hashPasswordArgon2id, verifyPasswordArgon2id } from './auth.ts'
 import { sessionCookieName, sessionTokenHash, type EntryPoint } from './entry-points.ts'
@@ -21,14 +21,22 @@ let apps: Record<EntryPoint, ApiApp>
 let secret = '', recoveryCodes: string[] = []
 beforeAll(async () => {
   f = await createTeamFixture()
-  const hash = await hashPasswordArgon2id(PASSWORD, { timeCost: 1, parallelism: 1 })
+  const hash = await hashPasswordArgon2id(PASSWORD, { memoryKiB: MIN_ARGON2_MEMORY_KIB, timeCost: 1, parallelism: 1 })
   await f.state.store.createServiceUser({ accountId: f.alice.id, login: MAILBOX, services: { email: true, ftp: false, webdisk: false }, mailboxQuotaMb: 100, ftpDir: 'public_html', passwordHash: hash })
+  const verifiedHashes = new Map<string, boolean>()
   const transport: MailboxTransport = {
     async verify(login, password) {
       const user = await f.state.store.getServiceUserByLogin(login)
       const stored = user ? await f.state.store.getServiceUserHash(user.id) : null
       const value = stored?.startsWith('{ARGON2ID}') ? stored.slice('{ARGON2ID}'.length) : stored
-      if (!user?.services.email || typeof value !== 'string' || !await verifyPasswordArgon2id(password, value)) fail('UNAUTHENTICATED', 'invalid mailbox credentials')
+      if (!user?.services.email || typeof value !== 'string') return fail('UNAUTHENTICATED', 'invalid mailbox credentials')
+      const cacheKey = `${value}\0${password}`
+      let ok = verifiedHashes.get(cacheKey)
+      if (ok === undefined) {
+        ok = await verifyPasswordArgon2id(password, value)
+        verifiedHashes.set(cacheKey, ok)
+      }
+      if (!ok) fail('UNAUTHENTICATED', 'invalid mailbox credentials')
     },
     async list() { return [] }, async read() { return fail('NOT_FOUND', 'message not found') }, async remove() {}, async send() { return { messageId: '<fixture@example.test>' } },
   }

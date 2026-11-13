@@ -30,7 +30,7 @@ const reviewed: HookHost = async (_caller, path, body) => path === '/host/hooks/
 beforeEach(async () => { root = await mkdtemp(join(tmpdir(), 'xp-hooks-api-')) })
 afterEach(async () => { await rm(root, { recursive: true, force: true }) })
 
-describe('hooks workspace', { tags: ['unit'] }, () => {
+describe('hooks workspace', { tags: ['feature'] }, () => {
   it('registers a reviewed executable with its pinned digest, then enables, reorders within its event and deletes', async () => {
     const h = harness(reviewed)
     const first = await h.read()

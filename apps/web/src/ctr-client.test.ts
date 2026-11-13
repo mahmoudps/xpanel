@@ -28,7 +28,7 @@ const pick = async () => { const select = field<HTMLSelectElement>('account'); s
 describe.each([
   ['classic', () => renderSwContainersWorkspace({ locale: 'en', canRead: true, canManage: true }), () => renderSwContainerEngineWorkspace({ locale: 'en', canRead: true, canManage: true })],
   ['v2', () => renderV2WhmContainers({ locale: 'en', dataAuthority: { canRead: true, canManage: true } } as never), () => renderV2WhmContainers({ locale: 'en', dataAuthority: { canRead: true, canManage: true } } as never, true)],
-])('rootless workspace on the %s theme', { tags: ['unit'] }, (_name, listPage, enginePage) => {
+])('rootless workspace on the %s theme', { tags: ['feature'] }, (_name, listPage, enginePage) => {
   beforeEach(() => { document.body.innerHTML = ''; document.body.removeAttribute('data-capability-state'); vi.stubGlobal('fetch', vi.fn(async () => stream('{"line":"live one"}\n{"alive":true}\n{"end":"exit"}\n'))) })
   it('reads accounts, keeps writes off on the host scope and scopes writes to the chosen account', async () => {
     document.body.innerHTML = listPage()

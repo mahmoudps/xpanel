@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { builtinEnvironments, type EnvironmentReturn } from 'vitest/runtime'
 import type { Account } from '@xpanel/core'
 import { translator } from './i18n.ts'
@@ -23,19 +23,30 @@ import { WHM_ACCOUNT_TEMPLATES_CLIENT_BINDING } from './acct-templates-client.ts
 type Theme = 'classic' | 'v2'
 type Family = 'deployments' | 'composer' | 'optimize' | 'projects' | 'convert' | 'templates'
 let environment: EnvironmentReturn | undefined
-beforeEach(async () => {
+const htmlCache = new Map<string, string>()
+beforeAll(async () => {
   environment = await builtinEnvironments.jsdom.setup(globalThis, { jsdom: { url: 'https://whm.example.test/whm', runScripts: 'outside-only' } })
+  translator('en')
+  for (const theme of ['classic', 'v2'] as const) {
+    for (const family of ['deployments', 'composer', 'optimize', 'projects', 'convert', 'templates'] as const) {
+      htmlCache.set(`${theme}:${family}`, buildHtml(theme, family))
+    }
+  }
+})
+afterAll(async () => {
+  await environment?.teardown(globalThis); environment = undefined
+})
+beforeEach(() => {
   vi.stubGlobal('xpT', translator('en'))
 })
-afterEach(async () => {
-  try { document.body.replaceChildren(); delete (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest; vi.unstubAllGlobals() }
-  finally { await environment?.teardown(globalThis); environment = undefined }
+afterEach(() => {
+  document.body.replaceChildren(); delete (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest; vi.unstubAllGlobals()
 })
 const settle = async () => { for (let i = 0; i < 4; i++) await new Promise(resolve => setTimeout(resolve, 0)) }
 const id = (value: number) => 'bbbbbbbb-bbbb-4bbb-8bbb-' + String(value).padStart(12, '0')
 const account: Account = { id: id(5), username: 'alice', uid: 20001, gid: 20001, home: '/home/alice', primaryDomain: 'alice.test', planId: id(4), ownerId: null, status: 'active', suspendReason: null, contactEmail: '', ipv4: '192.0.2.10', shell: 'jailed', createdAt: '2026-10-29T00:00:00Z' }
 const authority = { canRead: true, canManage: true }
-function html(theme: Theme, family: Family): string {
+function buildHtml(theme: Theme, family: Family): string {
   if (theme === 'v2') {
     if (family === 'convert') return renderV2WhmConvertAddonPage({}, authority)
     if (family === 'templates') return renderV2WhmAccountTemplatesPage({}, authority)
@@ -49,12 +60,20 @@ function html(theme: Theme, family: Family): string {
   if (family === 'composer') return renderWhmComposerWorkspace({ locale: 'en', canRead: true })
   return renderSwDeploymentsWorkspace({ locale: 'en', canRead: true, canManage: true })
 }
-const bindings = { deployments: SW_DEPLOYMENTS_CLIENT_BINDING, composer: WHM_COMPOSER_CLIENT_BINDING, optimize: SW_OPTIMIZE_CLIENT_BINDING, projects: SW_APP_PROJECTS_CLIENT_BINDING, convert: ACCT_CONVERT_ADDON_CLIENT_BINDING, templates: WHM_ACCOUNT_TEMPLATES_CLIENT_BINDING }
+const html = (theme: Theme, family: Family): string => htmlCache.get(`${theme}:${family}`) ?? buildHtml(theme, family)
+const compiledBindings: Record<Family, (confirm: () => Promise<boolean>) => void> = {
+  deployments: new Function('return ' + SW_DEPLOYMENTS_CLIENT_BINDING)(),
+  composer: new Function('return ' + WHM_COMPOSER_CLIENT_BINDING)(),
+  optimize: new Function('return ' + SW_OPTIMIZE_CLIENT_BINDING)(),
+  projects: new Function('return ' + SW_APP_PROJECTS_CLIENT_BINDING)(),
+  convert: new Function('return ' + ACCT_CONVERT_ADDON_CLIENT_BINDING)(),
+  templates: new Function('return ' + WHM_ACCOUNT_TEMPLATES_CLIENT_BINDING)(),
+}
 const template = { deployments: 'software-deployment-repository-row', composer: 'software-composer-package-row', optimize: 'software-optimize-domain-row', projects: 'software-project-runtime-row', convert: 'account-convert-domains-row', templates: 'account-template-row' }
 const status = { deployments: '[data-sw-dep-status]', composer: '[data-composer-status]', optimize: '[data-sw-optimize-status]', projects: '[data-sw-projects-status]', convert: '[data-acct-convert-status]', templates: '[data-acct-templates-status]' }
 const boot = (family: Family, send: (method: string, path: string, body?: unknown) => Promise<unknown>) => {
   Object.assign(window, { xpanelSessionRequest: send })
-  new Function('return ' + bindings[family])()(async () => true)
+  compiledBindings[family](async () => true)
 }
 const optimize = { context: { accountId: account.id, username: account.username }, state: 'read', reason: null, policy: { compression: 'on', types: ['text/html'], minLength: 1024, proxied: ['any'], cache: { configured: true, maxSize: '1024m' } }, domains: [{ name: 'alice.test', redirect: false, suspended: false }], actions: { siteCompression: false } }
 const projects = { page: 'runtime', state: 'read', components: [{ id: 'golang', state: 'installed', installed: [{ name: 'golang-go', versions: ['1.22'] }] }] }

@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto'
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
+import { dirname, join, relative, sep } from 'node:path'
 import type { MailboxMetadataAuthority } from '@xpanel/core'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createApiToken, createTestDb, createUserPrincipal, revokeAllApiTokensForPrincipal } from '@xpanel/db'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createApiToken, createDb, createTestDb, createUserPrincipal, revokeAllApiTokensForPrincipal } from '@xpanel/db'
 import { createTestStateStore } from '@xpanel/state'
 import { sha256Hex } from './auth.ts'
 import { createMemoryDav } from './mail/dav-testkit.ts'
@@ -22,33 +24,66 @@ interface Ack { context: { mailbox: string }; contact: Contact; stateChanged: tr
 const draft = (patch: Record<string, unknown> = {}) => ({ fullName: 'Alex Example', email: 'alex@example.test', phone: '+123456789', organization: 'Example Team', title: 'Coordinator', ...patch })
 const fields = (contact: Contact) => Object.fromEntries(editable.map(key => [key, contact[key]]))
 
+interface CachedStateFile { relPath: string; bytes: Buffer }
+const buildContactsTemplate = async () => {
+  const database = await createTestDb()
+  const state = await createTestStateStore()
+  try {
+    const features = await state.store.createFeatureList({ name: 'Contacts policy', ownerId: null, disabled: [] })
+    const plan = await state.store.createPlan({ name: 'Contacts plan', ownerId: null, featureListId: features.id,
+      resources: { diskMb: 1000, bandwidthMbMonth: 10000, ioReadBps: 1048576, ioWriteBps: 1048576, ioReadIops: 100, ioWriteIops: 100, memoryMb: 128, maxProcesses: 16, cpuPercent: 100 },
+      caps: { addonDomains: 5, aliasDomains: 5, subdomains: 5, mailboxes: 4, forwarders: 4, mailingLists: 5, ftpAccounts: 5, databases: 5, phpWorkers: 5 }, dedicatedIp: false, shell: 'none', defaultMailboxQuotaMb: 100 })
+    await state.store.saveServerIp({ address: '192.0.2.10', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
+    const account = (username: string) => state.store.createAccount({ username, passwordHash: HASH, primaryDomain: `${username}.example.test`, planId: plan.id, ownerId: null,
+      contactEmail: `owner@${username}.example.test`, ipv4: '192.0.2.10', shell: 'none',
+      php: { version: '8.3', handler: 'fpm', fpm: { mode: 'ondemand', maxChildren: 2, startServers: 1, minSpareServers: 1, maxSpareServers: 1, maxRequests: 50, processIdleTimeoutSec: 10 }, ini: {} } })
+    const owner = await account('contactworka9'), other = await account('contactworkb9')
+    const mailbox = (accountId: string, login: string) => state.store.createServiceUser({ accountId, login, passwordHash: HASH,
+      services: { email: true, ftp: false, webdisk: false }, mailboxQuotaMb: 100, ftpDir: 'public_html' })
+    const inbox = await mailbox(owner.id, `inbox@${owner.primaryDomain}`)
+    const sibling = await mailbox(owner.id, `support@${owner.primaryDomain}`)
+    const foreign = await mailbox(other.id, `inbox@${other.primaryDomain}`)
+    const principal = await createUserPrincipal(database.db, { username: owner.username, accountId: owner.id, passwordHash: HASH })
+    const foreignPrincipal = await createUserPrincipal(database.db, { username: other.username, accountId: other.id, passwordHash: HASH })
+    const issueToken = async (scopes: string[], principalId = principal.id) => {
+      const raw = `xp_${randomUUID()}`
+      await createApiToken(database.db, { principalId, name: 'Synthetic contacts acceptance', tokenHash: sha256Hex(raw), scopes, expiresAt: new Date(Date.now() + 600000).toISOString() })
+      return raw
+    }
+    const credential = await issueToken([`mailbox:${inbox.id}`, 'webmail:read', 'webmail:write'])
+    const readOnly = await issueToken([`mailbox:${inbox.id}`, 'webmail:read'])
+    const foreignCredential = await issueToken([`mailbox:${foreign.id}`, 'webmail:read', 'webmail:write'], foreignPrincipal.id)
+    const lock = state.store.getWriterLock()
+    const stateFiles: CachedStateFile[] = []
+    const walk = async (dir: string): Promise<void> => {
+      for (const entry of await readdir(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name)
+        if (full === lock.mutexFilePath || full.startsWith(lock.mutexFilePath + '-') || full === lock.lockDirPath || full.startsWith(lock.lockDirPath + sep)) continue
+        if (entry.isDirectory()) await walk(full)
+        else stateFiles.push({ relPath: relative(state.rootDir, full), bytes: await readFile(full) })
+      }
+    }
+    await walk(state.rootDir)
+    const relDirs = [...new Set(stateFiles.map(file => dirname(file.relPath)).filter(dir => dir !== '.'))]
+    return { sqlite: database.sqlite.serialize(), stateFiles, relDirs, features, owner, other, inbox, sibling, foreign, principal, credential, readOnly, foreignCredential }
+  } finally {
+    await state.close()
+    await database.close()
+  }
+}
+let contactsTemplate: Awaited<ReturnType<typeof buildContactsTemplate>>
+
 const fixture = async () => {
-  const database = await createTestDb(); cleanup.push(() => database.close())
+  const database = createDb(':memory:'); database.sqlite.deserialize(contactsTemplate.sqlite); cleanup.push(() => database.close())
   const state = await createTestStateStore(); cleanup.push(() => state.close())
-  const features = await state.store.createFeatureList({ name: 'Contacts policy', ownerId: null, disabled: [] })
-  const plan = await state.store.createPlan({ name: 'Contacts plan', ownerId: null, featureListId: features.id,
-    resources: { diskMb: 1000, bandwidthMbMonth: 10000, ioReadBps: 1048576, ioWriteBps: 1048576, ioReadIops: 100, ioWriteIops: 100, memoryMb: 128, maxProcesses: 16, cpuPercent: 100 },
-    caps: { addonDomains: 5, aliasDomains: 5, subdomains: 5, mailboxes: 4, forwarders: 4, mailingLists: 5, ftpAccounts: 5, databases: 5, phpWorkers: 5 }, dedicatedIp: false, shell: 'none', defaultMailboxQuotaMb: 100 })
-  await state.store.saveServerIp({ address: '192.0.2.10', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
-  const account = (username: string) => state.store.createAccount({ username, passwordHash: HASH, primaryDomain: `${username}.example.test`, planId: plan.id, ownerId: null,
-    contactEmail: `owner@${username}.example.test`, ipv4: '192.0.2.10', shell: 'none',
-    php: { version: '8.3', handler: 'fpm', fpm: { mode: 'ondemand', maxChildren: 2, startServers: 1, minSpareServers: 1, maxSpareServers: 1, maxRequests: 50, processIdleTimeoutSec: 10 }, ini: {} } })
-  const owner = await account('contactworka9'), other = await account('contactworkb9')
-  const mailbox = (accountId: string, login: string) => state.store.createServiceUser({ accountId, login, passwordHash: HASH,
-    services: { email: true, ftp: false, webdisk: false }, mailboxQuotaMb: 100, ftpDir: 'public_html' })
-  const inbox = await mailbox(owner.id, `inbox@${owner.primaryDomain}`)
-  const sibling = await mailbox(owner.id, `support@${owner.primaryDomain}`)
-  const foreign = await mailbox(other.id, `inbox@${other.primaryDomain}`)
-  const principal = await createUserPrincipal(database.db, { username: owner.username, accountId: owner.id, passwordHash: HASH })
-  const foreignPrincipal = await createUserPrincipal(database.db, { username: other.username, accountId: other.id, passwordHash: HASH })
+  for (const relDir of contactsTemplate.relDirs) await mkdir(join(state.rootDir, relDir), { recursive: true, mode: 0o750 })
+  await Promise.all(contactsTemplate.stateFiles.map(file => writeFile(join(state.rootDir, file.relPath), file.bytes, { mode: 0o640 })))
+  const { features, owner, other, inbox, sibling, foreign, principal, credential, readOnly, foreignCredential } = contactsTemplate
   const token = async (scopes: string[], principalId = principal.id) => {
     const raw = `xp_${randomUUID()}`
     await createApiToken(database.db, { principalId, name: 'Synthetic contacts acceptance', tokenHash: sha256Hex(raw), scopes, expiresAt: new Date(Date.now() + 60000).toISOString() })
     return raw
   }
-  const credential = await token([`mailbox:${inbox.id}`, 'webmail:read', 'webmail:write'])
-  const readOnly = await token([`mailbox:${inbox.id}`, 'webmail:read'])
-  const foreignCredential = await token([`mailbox:${foreign.id}`, 'webmail:read', 'webmail:write'], foreignPrincipal.id)
   const dav = createMemoryDav({ defaults: true })
   const app = createApiApp({ db: database.db, store: state.store, serverSecret: 'contacts-synthetic-server-secret-at-least-32-bytes', davExchange: dav.exchange })
   const request = (path: string, method = 'GET', body?: unknown, raw: string | null = credential) => app.fetch(new Request(`http://localhost${path}`, { method,
@@ -70,6 +105,7 @@ const fixture = async () => {
 
 describe('sealed mailbox Contacts list/create/edit HTTP security acceptance', () => {
   let f: Awaited<ReturnType<typeof fixture>>
+  beforeAll(async () => { contactsTemplate = await buildContactsTemplate() })
   beforeEach(async () => { f = await fixture() })
   afterEach(async () => {
     vi.restoreAllMocks()

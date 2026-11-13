@@ -12,11 +12,20 @@ const listView = (items: unknown[], changed?: string) => ({ revision: String(ite
 const session = () => ({ session: { id: id(1), actor: 'root', createdAt: '2026-10-28T10:00:00.000Z', state: 'inventoried', auth: { kind: 'api-token', url: 'https://source.example.test', tokenId: id(2), tlsFingerprint: null },
   source: { hostname: 'source.example.test', version: '0.1.0' }, inventory: { accounts: [{ username: 'alice', primaryDomain: 'alice.example.test', plan: 'gold', diskBytes: 1, databases: [], mailboxes: 0 }, { username: 'bob', primaryDomain: 'bob.example.test', plan: 'gold', diskBytes: 1, databases: [], mailboxes: 0 }], plans: [{ name: 'gold' }] },
   local: null, selection: { accounts: [], plans: [] }, conflicts: [], resolutions: {}, reviewDigest: null, progress: {}, log: [], error: null }, revision: '1'.repeat(64), review: null, digest: null })
+const runAcctTransferCredentials = new Function('return ' + ACCT_TRANSFER_CREDENTIALS_CLIENT_BINDING)() as (ask: (options: Record<string, unknown>) => Promise<unknown>) => void
+const runWhmTransfer = new Function('return ' + WHM_TRANSFER_CLIENT_BINDING)() as (ask: (options: Record<string, unknown>) => Promise<unknown>, auto?: boolean) => void
+const acctTransferTemplates = new Map<boolean, HTMLTemplateElement>()
 const boot = (send: (method: string, path: string, body?: unknown) => Promise<unknown>, canManage = true, ask = vi.fn(async () => true)) => {
-  document.body.innerHTML = renderAcctTransferServerWorkspace({ locale: 'en', canManage })
+  let tpl = acctTransferTemplates.get(canManage)
+  if (!tpl) {
+    tpl = document.createElement('template')
+    tpl.innerHTML = renderAcctTransferServerWorkspace({ locale: 'en', canManage })
+    acctTransferTemplates.set(canManage, tpl)
+  }
+  document.body.replaceChildren(tpl.content.cloneNode(true))
   ;(window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest = send
-  new Function('return ' + ACCT_TRANSFER_CREDENTIALS_CLIENT_BINDING)()(ask)
-  new Function('return ' + WHM_TRANSFER_CLIENT_BINDING)()(ask, false)
+  runAcctTransferCredentials(ask)
+  runWhmTransfer(ask, false)
   return ask
 }
 const q = <T extends Element>(selector: string) => document.querySelector<T>(selector)!

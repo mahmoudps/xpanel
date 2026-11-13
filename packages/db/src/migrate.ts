@@ -67,11 +67,20 @@ export const assertSequence = (migrations: readonly Migration[]): void => {
   })
 }
 
+let cachedDefaultMigrations: readonly Migration[] | null = null
+
 export const loadMigrations = async (dir: string = MIGRATIONS_DIR): Promise<Migration[]> => {
+  if (dir === MIGRATIONS_DIR && cachedDefaultMigrations) {
+    return cachedDefaultMigrations.map((m) => ({ ...m }))
+  }
   const files = (await readdir(dir)).filter((f) => f.endsWith('.sql')).sort()
   const migrations = await Promise.all(files.map(async (f) => parseMigration(f, await readFile(join(dir, f), 'utf8'))))
   assertSequence(migrations)
-  return migrations.sort((a, b) => a.version - b.version)
+  const sorted = migrations.sort((a, b) => a.version - b.version)
+  if (dir === MIGRATIONS_DIR) {
+    cachedDefaultMigrations = sorted.map((m) => ({ ...m }))
+  }
+  return sorted
 }
 
 const EXPAND_ONLY_RULES: { what: string; re: RegExp }[] = [

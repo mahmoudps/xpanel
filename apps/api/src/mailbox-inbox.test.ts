@@ -1,10 +1,12 @@
 import { createHash } from 'node:crypto'
-import { readFile } from 'node:fs/promises'
-import { join } from 'node:path'
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { fail, SESSION_ABSOLUTE_TIMEOUT_MS, SESSION_IDLE_TIMEOUT_MS } from '@xpanel/core'
-import { appendAudit, createRootPrincipal, createUserPrincipal, createTestDb, enqueueDurableJob, findActiveSessionByTokenHash, findPrincipalByUsername, initializeOperationalMetadata, listAudit, requestJobCancellation, setTotpSecret, type PrincipalRecord } from '@xpanel/db'
-import { createTestStateStore, ExtendedFeaturesStore } from '@xpanel/state'
+import { existsSync } from 'node:fs'
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { dirname, join, relative, sep } from 'node:path'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { MIN_ARGON2_MEMORY_KIB, fail, SESSION_ABSOLUTE_TIMEOUT_MS, SESSION_IDLE_TIMEOUT_MS, type Account } from '@xpanel/core'
+import { appendAudit, createDb, createRootPrincipal, createUserPrincipal, createTestDb, enqueueDurableJob, findActiveSessionByTokenHash, findPrincipalByUsername, initializeOperationalMetadata, listAudit, requestJobCancellation, setTotpSecret, type PrincipalRecord } from '@xpanel/db'
+import { createStateStore, createTestStateStore, ExtendedFeaturesStore, type TestStateStoreHandle } from '@xpanel/state'
 import { authenticateRequest, hashPasswordArgon2id } from './auth.ts'
 import { assertAccountAuthorized, assertRequestAuthorized } from './authorization.ts'
 import { sessionTokenHash } from './entry-points.ts'
@@ -18,6 +20,52 @@ const SECRET = 'mailbox-inbox-synthetic-server-secret-32b'
 const ORIGIN = 'https://mail.example.test'
 const HASH = '$argon2id$v=19$m=65536,t=3,p=4$MIIRqgvgQbgj220jfp0MPA$YfwJSVjtjSU0zzV/P3S9nnQ/USre2wvJMjfCIjrTQbg'
 const SERVICE_HASH = '{SHA512-CRYPT}$6$mailboxfixture$abcdefghijklmnopqrstuvwxyz0123456789'
+const STATE_PARENT = existsSync('/dev/shm') ? '/dev/shm' : tmpdir()
+let retirementActorPasswordHash = HASH
+let rootActorPasswordHash = HASH
+interface CachedStateFile { relPath: string; bytes: Buffer }
+let harnessTemplate: { sqlite: Uint8Array; stateFiles: CachedStateFile[]; relDirs: string[]; alpha: Account; beta: Account } | null = null
+beforeAll(async () => {
+  retirementActorPasswordHash = await hashPasswordArgon2id('SyntheticRetirementActor!2026', { memoryKiB: MIN_ARGON2_MEMORY_KIB, timeCost: 1, parallelism: 1 })
+  rootActorPasswordHash = await hashPasswordArgon2id('RootPassword!2026', { memoryKiB: MIN_ARGON2_MEMORY_KIB, timeCost: 1, parallelism: 1 })
+  const seedDb = await createTestDb()
+  const state = await createTestStateStore()
+  try {
+    const features = await state.store.createFeatureList({ name: 'Mail features', ownerId: null, disabled: [] })
+    const plan = await state.store.createPlan({
+      name: 'Mail plan', ownerId: null, featureListId: features.id,
+      resources: { diskMb: 1024, bandwidthMbMonth: 'unlimited', ioReadBps: 1048576, ioWriteBps: 1048576, ioReadIops: 10, ioWriteIops: 10, memoryMb: 512, maxProcesses: 32, cpuPercent: 100 },
+      caps: { addonDomains: 1, aliasDomains: 1, subdomains: 1, mailboxes: 2, forwarders: 1, mailingLists: 1, ftpAccounts: 1, databases: 1, phpWorkers: 2 },
+      dedicatedIp: false, shell: 'none', defaultMailboxQuotaMb: 100,
+    })
+    await state.store.saveServerIp({ address: '192.0.2.10', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
+    const php = { version: '8.3', handler: 'fpm' as const, fpm: { mode: 'ondemand' as const, maxChildren: 2, startServers: 1, minSpareServers: 1, maxSpareServers: 1, maxRequests: 50, processIdleTimeoutSec: 10 }, ini: {} }
+    const alpha = await state.store.createAccount({ username: 'alpha', passwordHash: HASH, primaryDomain: 'alpha.example.test', planId: plan.id, ownerId: null, contactEmail: 'owner@alpha.example.test', ipv4: '192.0.2.10', shell: 'none', php })
+    const beta = await state.store.createAccount({ username: 'beta', passwordHash: HASH, primaryDomain: 'beta.example.test', planId: plan.id, ownerId: null, contactEmail: 'owner@beta.example.test', ipv4: '192.0.2.10', shell: 'none', php })
+    await state.store.createServiceUser({ accountId: alpha.id, login: 'inbox@alpha.example.test', services: { email: true, ftp: false, webdisk: false }, mailboxQuotaMb: 100, ftpDir: 'public_html', passwordHash: SERVICE_HASH })
+    await state.store.createServiceUser({ accountId: beta.id, login: 'other@beta.example.test', services: { email: true, ftp: false, webdisk: false }, mailboxQuotaMb: 100, ftpDir: 'public_html', passwordHash: SERVICE_HASH })
+    await state.store.createServiceUser({ accountId: alpha.id, login: 'closed@alpha.example.test', services: { email: false, ftp: true, webdisk: false }, mailboxQuotaMb: 100, ftpDir: 'public_html', passwordHash: SERVICE_HASH })
+    const lock = state.store.getWriterLock()
+    const stateFiles: CachedStateFile[] = []
+    const walk = async (dir: string): Promise<void> => {
+      for (const entry of await readdir(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name)
+        if (full === lock.mutexFilePath || full.startsWith(lock.mutexFilePath + '-') || full === lock.lockDirPath || full.startsWith(lock.lockDirPath + sep)) continue
+        if (entry.isDirectory()) await walk(full)
+        else stateFiles.push({ relPath: relative(state.rootDir, full), bytes: await readFile(full) })
+      }
+    }
+    await walk(state.rootDir)
+    const relDirs = [...new Set(stateFiles.map(file => dirname(file.relPath)).filter(dir => dir !== '.'))]
+    harnessTemplate = { sqlite: seedDb.sqlite.serialize(), stateFiles, relDirs, alpha, beta }
+  } finally {
+    await state.close()
+    await seedDb.close()
+  }
+})
+afterAll(() => {
+  harnessTemplate = null
+})
 const cleanup: Array<() => Promise<unknown>> = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close() })
 
@@ -32,24 +80,15 @@ const message = (uid: number, subject: string, body: string): InboxMessage => ({
 })
 
 const harness = async (transport: MailboxTransport) => {
-  const database = await createTestDb()
-  await initializeOperationalMetadata(database.db)
-  const state = await createTestStateStore()
+  const tpl = harnessTemplate!
+  const database = createDb(':memory:')
+  database.sqlite.deserialize(tpl.sqlite)
+  const rootDir = await mkdtemp(join(STATE_PARENT, 'xpanel-mbx-'))
+  const state: TestStateStoreHandle = { store: createStateStore(rootDir), rootDir, close: () => rm(rootDir, { recursive: true, force: true }) }
   cleanup.push(() => database.close(), () => state.close())
-  const features = await state.store.createFeatureList({ name: 'Mail features', ownerId: null, disabled: [] })
-  const plan = await state.store.createPlan({
-    name: 'Mail plan', ownerId: null, featureListId: features.id,
-    resources: { diskMb: 1024, bandwidthMbMonth: 'unlimited', ioReadBps: 1048576, ioWriteBps: 1048576, ioReadIops: 10, ioWriteIops: 10, memoryMb: 512, maxProcesses: 32, cpuPercent: 100 },
-    caps: { addonDomains: 1, aliasDomains: 1, subdomains: 1, mailboxes: 2, forwarders: 1, mailingLists: 1, ftpAccounts: 1, databases: 1, phpWorkers: 2 },
-    dedicatedIp: false, shell: 'none', defaultMailboxQuotaMb: 100,
-  })
-  await state.store.saveServerIp({ address: '192.0.2.10', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
-  const php = { version: '8.3', handler: 'fpm' as const, fpm: { mode: 'ondemand' as const, maxChildren: 2, startServers: 1, minSpareServers: 1, maxSpareServers: 1, maxRequests: 50, processIdleTimeoutSec: 10 }, ini: {} }
-  const alpha = await state.store.createAccount({ username: 'alpha', passwordHash: HASH, primaryDomain: 'alpha.example.test', planId: plan.id, ownerId: null, contactEmail: 'owner@alpha.example.test', ipv4: '192.0.2.10', shell: 'none', php })
-  const beta = await state.store.createAccount({ username: 'beta', passwordHash: HASH, primaryDomain: 'beta.example.test', planId: plan.id, ownerId: null, contactEmail: 'owner@beta.example.test', ipv4: '192.0.2.10', shell: 'none', php })
-  await state.store.createServiceUser({ accountId: alpha.id, login: 'inbox@alpha.example.test', services: { email: true, ftp: false, webdisk: false }, mailboxQuotaMb: 100, ftpDir: 'public_html', passwordHash: SERVICE_HASH })
-  await state.store.createServiceUser({ accountId: beta.id, login: 'other@beta.example.test', services: { email: true, ftp: false, webdisk: false }, mailboxQuotaMb: 100, ftpDir: 'public_html', passwordHash: SERVICE_HASH })
-  await state.store.createServiceUser({ accountId: alpha.id, login: 'closed@alpha.example.test', services: { email: false, ftp: true, webdisk: false }, mailboxQuotaMb: 100, ftpDir: 'public_html', passwordHash: SERVICE_HASH })
+  for (const relDir of tpl.relDirs) await mkdir(join(rootDir, relDir), { recursive: true, mode: 0o750 })
+  await Promise.all(tpl.stateFiles.map(file => writeFile(join(rootDir, file.relPath), file.bytes, { mode: 0o640 })))
+  const { alpha, beta } = tpl
   const app = createApiApp({ db: database.db, store: state.store, serverSecret: SECRET, entryPoint: 'xmail', publicOrigin: ORIGIN, allowedOrigins: [ORIGIN], secureCookies: true, mailboxTransport: transport })
   const call = async (method: string, path: string, body?: unknown, session?: { cookie: string; csrf: string }) => {
     const response = await app.fetch(new Request(`${ORIGIN}${path}`, {
@@ -86,7 +125,7 @@ const retirementFixture = async (kind: 'root' | 'user' = 'root', verify?: () => 
   if (!original || !service) throw new Error('mailbox retirement fixture missing identity')
   await setTotpSecret(f.database.db, original.id, new Uint8Array(48).fill(7), ['a'.repeat(64)])
   const enrolled = await findPrincipalByUsername(f.database.db, original.username)
-  const passwordHash = await hashPasswordArgon2id('SyntheticRetirementActor!2026')
+  const passwordHash = retirementActorPasswordHash
   const actor = kind === 'root'
     ? await createRootPrincipal(f.database.db, { username: 'root', passwordHash, forcePasswordChange: false })
     : await createUserPrincipal(f.database.db, { username: 'alpha', accountId: f.alpha.id, passwordHash, forcePasswordChange: false })
@@ -658,7 +697,7 @@ describe('xMail mailbox inbox', () => {
 
     await createRootPrincipal(database.db, {
       username: 'root',
-      passwordHash: await hashPasswordArgon2id('RootPassword!2026'),
+      passwordHash: rootActorPasswordHash,
       forcePasswordChange: false,
     })
     const origin = 'https://whm.example.test'

@@ -1,13 +1,15 @@
 import { createServer as createHttpServer, request as httpRequest } from 'node:http'
 import { createHash, randomUUID } from 'node:crypto'
-import { readFile, readdir } from 'node:fs/promises'
-import { join, relative } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { existsSync } from 'node:fs'
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { dirname, join, relative, sep } from 'node:path'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  createApiToken, createResellerPrincipal, createRootPrincipal, createSession, createTestDb,
+  createApiToken, createDb, createResellerPrincipal, createRootPrincipal, createSession, createTestDb,
   createUserPrincipal, deletePrincipal, findPrincipalByUsername, listAudit, setTotpSecret,
 } from '@xpanel/db'
-import { StateStore, createTestStateStore } from '@xpanel/state'
+import { StateStore, createStateStore, type TestStateStoreHandle } from '@xpanel/state'
 import { WRITER_MUTEX_FILE } from '../../../packages/state/src/writer-mutex.ts'
 import * as dbApi from '@xpanel/db'
 import type { AgentApp } from '@xpanel/agent'
@@ -66,28 +68,108 @@ const memoryPreparations = (store: StateStore): ProvisioningPreparationStore => 
 }
 afterEach(async () => { vi.restoreAllMocks(); for (const close of cleanup.splice(0).reverse()) await close() })
 
-const fixture = async () => {
-  const database = await createTestDb()
-  const state = await createTestStateStore()
-  cleanup.push(() => database.close(), () => state.close())
-  const features = await state.store.createFeatureList({ name: 'Mutation features', ownerId: null, disabled: [] })
-  const plan = await state.store.createPlan({ name: 'Mutation plan', ownerId: null, featureListId: features.id,
-    resources: { diskMb: 1024, bandwidthMbMonth: 'unlimited', ioReadBps: 1048576, ioWriteBps: 1048576, ioReadIops: 10, ioWriteIops: 10, memoryMb: 512, maxProcesses: 32, cpuPercent: 100 },
-    caps: { addonDomains: 2, aliasDomains: 2, subdomains: 2, mailboxes: 2, forwarders: 2, mailingLists: 2, ftpAccounts: 2, databases: 2, phpWorkers: 4 }, dedicatedIp: false, shell: 'none', defaultMailboxQuotaMb: 100,
-  })
-  await state.store.saveServerIp({ address: '192.0.2.42', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: false, notes: '' })
-  const reseller = await state.store.createReseller({ username: 'reseller7', passwordHash: HASH, acl: ['create-account', 'list-accounts', 'edit-account', 'suspend-account', 'terminate-account', 'change-plan'], maxAccounts: 10, totalDiskMb: 100000, totalBandwidthMb: 'unlimited', oversell: { disk: false, bandwidth: false }, nameservers: [], delegatedIps: ['192.0.2.42'] })
-  const accountInput = { passwordHash: HASH, planId: plan.id, contactEmail: 'owner@example.test', ipv4: '192.0.2.42', shell: 'none' as const,
-    php: { version: '8.3', handler: 'fpm' as const, fpm: { mode: 'ondemand' as const, maxChildren: 4, startServers: 2, minSpareServers: 1, maxSpareServers: 3, maxRequests: 100, processIdleTimeoutSec: 10 }, ini: {} },
+interface CachedStateFile { relPath: string; bytes: Buffer }
+async function snapshotStateFiles(rootDir: string, mutexFilePath: string, lockDirPath: string): Promise<CachedStateFile[]> {
+  const files: CachedStateFile[] = []
+  const walk = async (dir: string): Promise<void> => {
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name)
+      if (full === mutexFilePath || full.startsWith(mutexFilePath + '-') || full === lockDirPath || full.startsWith(lockDirPath + sep)) continue
+      if (entry.isDirectory()) await walk(full)
+      else files.push({ relPath: relative(rootDir, full), bytes: await readFile(full) })
+    }
   }
-  const account = await state.store.createAccount({ ...accountInput, username: 'owner7', primaryDomain: 'owner7.example.test', ownerId: reseller.id })
-  const other = await state.store.createAccount({ ...accountInput, username: 'other7', primaryDomain: 'other7.example.test', ownerId: null })
-  const root = await createRootPrincipal(database.db, { username: 'root', passwordHash: HASH, forcePasswordChange: false })
-  await setTotpSecret(database.db, root.id, new Uint8Array(32))
-  const resellerPrincipal = await createResellerPrincipal(database.db, { id: reseller.id, username: reseller.username, passwordHash: HASH })
-  const owner = await createUserPrincipal(database.db, { username: account.username, accountId: account.id, passwordHash: HASH })
-  const alias = await createUserPrincipal(database.db, { username: 'alias7', accountId: account.id, passwordHash: HASH })
-  const neighbor = await createUserPrincipal(database.db, { username: other.username, accountId: other.id, passwordHash: HASH })
+  await walk(rootDir)
+  return files
+}
+async function restoreStateFiles(rootDir: string, files: readonly CachedStateFile[]): Promise<void> {
+  const dirs = new Set(files.map(file => dirname(join(rootDir, file.relPath))))
+  for (const dir of dirs) await mkdir(dir, { recursive: true, mode: 0o750 })
+  await Promise.all(files.map(file => writeFile(join(rootDir, file.relPath), file.bytes, { mode: 0o640 })))
+}
+
+let fixtureTemplatePromise: Promise<{
+  sqlite: Uint8Array
+  stateFiles: CachedStateFile[]
+  features: Awaited<ReturnType<StateStore['createFeatureList']>>
+  plan: Awaited<ReturnType<StateStore['createPlan']>>
+  reseller: Awaited<ReturnType<StateStore['createReseller']>>
+  accountInput: {
+    passwordHash: string
+    planId: string
+    contactEmail: string
+    ipv4: string
+    shell: 'none'
+    php: {
+      version: string
+      handler: 'fpm'
+      fpm: { mode: 'ondemand'; maxChildren: number; startServers: number; minSpareServers: number; maxSpareServers: number; maxRequests: number; processIdleTimeoutSec: number }
+      ini: Record<string, string>
+    }
+  }
+  account: Awaited<ReturnType<StateStore['createAccount']>>
+  other: Awaited<ReturnType<StateStore['createAccount']>>
+  root: Awaited<ReturnType<typeof createRootPrincipal>>
+  resellerPrincipal: Awaited<ReturnType<typeof createResellerPrincipal>>
+  owner: Awaited<ReturnType<typeof createUserPrincipal>>
+  alias: Awaited<ReturnType<typeof createUserPrincipal>>
+  neighbor: Awaited<ReturnType<typeof createUserPrincipal>>
+}> | undefined
+
+const STATE_PARENT = existsSync('/dev/shm') ? '/dev/shm' : tmpdir()
+const createFastTestStateStore = async (): Promise<TestStateStoreHandle> => {
+  const rootDir = await mkdtemp(join(STATE_PARENT, 'xpanel-acct-mut-'))
+  return { store: createStateStore(rootDir), rootDir, close: () => rm(rootDir, { recursive: true, force: true }) }
+}
+
+function getMutationFixtureTemplate() {
+  if (!fixtureTemplatePromise) {
+    fixtureTemplatePromise = (async () => {
+      const database = await createTestDb()
+      const state = await createFastTestStateStore()
+      try {
+        const features = await state.store.createFeatureList({ name: 'Mutation features', ownerId: null, disabled: [] })
+        const plan = await state.store.createPlan({ name: 'Mutation plan', ownerId: null, featureListId: features.id,
+          resources: { diskMb: 1024, bandwidthMbMonth: 'unlimited', ioReadBps: 1048576, ioWriteBps: 1048576, ioReadIops: 10, ioWriteIops: 10, memoryMb: 512, maxProcesses: 32, cpuPercent: 100 },
+          caps: { addonDomains: 2, aliasDomains: 2, subdomains: 2, mailboxes: 2, forwarders: 2, mailingLists: 2, ftpAccounts: 2, databases: 2, phpWorkers: 4 }, dedicatedIp: false, shell: 'none', defaultMailboxQuotaMb: 100,
+        })
+        await state.store.saveServerIp({ address: '192.0.2.42', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: false, notes: '' })
+        const reseller = await state.store.createReseller({ username: 'reseller7', passwordHash: HASH, acl: ['create-account', 'list-accounts', 'edit-account', 'suspend-account', 'terminate-account', 'change-plan'], maxAccounts: 10, totalDiskMb: 100000, totalBandwidthMb: 'unlimited', oversell: { disk: false, bandwidth: false }, nameservers: [], delegatedIps: ['192.0.2.42'] })
+        const accountInput = { passwordHash: HASH, planId: plan.id, contactEmail: 'owner@example.test', ipv4: '192.0.2.42', shell: 'none' as const,
+          php: { version: '8.3', handler: 'fpm' as const, fpm: { mode: 'ondemand' as const, maxChildren: 4, startServers: 2, minSpareServers: 1, maxSpareServers: 3, maxRequests: 100, processIdleTimeoutSec: 10 }, ini: {} },
+        }
+        const account = await state.store.createAccount({ ...accountInput, username: 'owner7', primaryDomain: 'owner7.example.test', ownerId: reseller.id })
+        const other = await state.store.createAccount({ ...accountInput, username: 'other7', primaryDomain: 'other7.example.test', ownerId: null })
+        const root = await createRootPrincipal(database.db, { username: 'root', passwordHash: HASH, forcePasswordChange: false })
+        await setTotpSecret(database.db, root.id, new Uint8Array(32))
+        const resellerPrincipal = await createResellerPrincipal(database.db, { id: reseller.id, username: reseller.username, passwordHash: HASH })
+        const owner = await createUserPrincipal(database.db, { username: account.username, accountId: account.id, passwordHash: HASH })
+        const alias = await createUserPrincipal(database.db, { username: 'alias7', accountId: account.id, passwordHash: HASH })
+        const neighbor = await createUserPrincipal(database.db, { username: other.username, accountId: other.id, passwordHash: HASH })
+        const lock = state.store.getWriterLock()
+        const stateFiles = await snapshotStateFiles(state.rootDir, lock.mutexFilePath, lock.lockDirPath)
+        return { sqlite: database.sqlite.serialize(), stateFiles, features, plan, reseller, accountInput, account, other, root, resellerPrincipal, owner, alias, neighbor }
+      } finally {
+        await state.close()
+        await database.close()
+      }
+    })()
+  }
+  return fixtureTemplatePromise
+}
+
+beforeAll(async () => {
+  await getMutationFixtureTemplate()
+})
+
+const fixture = async () => {
+  const tpl = await getMutationFixtureTemplate()
+  const database = createDb(':memory:')
+  database.sqlite.deserialize(tpl.sqlite)
+  const state = await createFastTestStateStore()
+  cleanup.push(() => database.close(), () => state.close())
+  await restoreStateFiles(state.rootDir, tpl.stateFiles)
+  const { features, plan, reseller, accountInput, account, other, root, resellerPrincipal, owner, alias, neighbor } = tpl
   for (const principal of [owner, alias, neighbor]) {
     await createSession(database.db, { principalId: principal.id, tokenHash: sessionTokenHash('test-session-' + principal.username, 'xpanel'), expiresAt: new Date(Date.now() + 60000).toISOString(), mfaVerified: true })
     await createApiToken(database.db, { principalId: principal.id, name: 'Synthetic token', tokenHash: createHash('sha256').update('test-token-' + principal.username).digest('hex'), scopes: ['accounts:read'], expiresAt: new Date(Date.now() + 60000).toISOString() })

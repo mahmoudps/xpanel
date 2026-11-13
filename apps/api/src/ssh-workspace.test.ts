@@ -26,16 +26,19 @@ const call = async (method: string, path: string, body?: unknown, use = helpers(
 const refusal = async (run: () => Promise<unknown>): Promise<{ code: string; detail: Record<string, unknown> }> => { try { await run() } catch (error) { return error as { code: string; detail: Record<string, unknown> } } throw new Error('expected a refusal') }
 const change = async (patch: Record<string, unknown>) => ({ port: 22, passwordAuth: false, pubkeyAuth: true, rootLogin: 'prohibit-password', expectedRevision: sshRevision((await h.store.getServerSettings())!), ...patch })
 
-beforeEach(async () => {
-  h = await createTestStateStore(); audits = []; saved = {}
-  await h.store.saveServerSettings(settings)
-  await h.store.replaceFirewall({ rules, prefixLists: [], enabled: true }, { lockout: null })
-  reconcile = vi.fn(async () => ({ ok: true, status: 200, body: { status: 'applied' } }))
-  host = vi.fn(async (_caller: unknown, path: string) => path.endsWith('/prepare') ? prepared : path.endsWith('/probe') ? { answer: 'banner' } : path.endsWith('/counters') ? counters : path.endsWith('/logins') ? { cursor: 'c1', items: [], complete: true } : path.endsWith('/service') ? { action: 'stop', active: 'inactive', answer: 'refused', verified: true } : {})
-})
-afterEach(async () => { await h.close() })
+const withStore = () => {
+  beforeEach(async () => {
+    h = await createTestStateStore(); audits = []; saved = {}
+    await h.store.saveServerSettings(settings)
+    await h.store.replaceFirewall({ rules, prefixLists: [], enabled: true }, { lockout: null })
+    reconcile = vi.fn(async () => ({ ok: true, status: 200, body: { status: 'applied' } }))
+    host = vi.fn(async (_caller: unknown, path: string) => path.endsWith('/prepare') ? prepared : path.endsWith('/probe') ? { answer: 'banner' } : path.endsWith('/counters') ? counters : path.endsWith('/logins') ? { cursor: 'c1', items: [], complete: true } : path.endsWith('/service') ? { action: 'stop', active: 'inactive', answer: 'refused', verified: true } : {})
+  })
+  afterEach(async () => { await h.close() })
+}
 
 describe('SSH settings', () => {
+  withStore()
   it('reads the saved policy, the daemon and the login counts', async () => {
     const { body } = await call('GET', '/api/server/ssh')
     expect(body.settings).toMatchObject({ port: 22, passwordAuth: false, pubkeyAuth: true, rootLogin: 'prohibit-password', loginAlarm: false, previousPort: null })
@@ -77,6 +80,7 @@ describe('SSH settings', () => {
 })
 
 describe('SSH port change', () => {
+  withStore()
   it('opens the new port, proves it, then closes the old one', async () => {
     const seen: { rules: string[]; port: number; previous: number | undefined }[] = []
     reconcile.mockImplementation(async () => { const state = await h.store.getFirewallState(), stored = (await h.store.getServerSettings())!; seen.push({ rules: state.rules.filter(rule => rule.id === SSH_TRANSITION_RULE || rule.id === 'default-ssh').map(rule => rule.port!), port: stored.sshPort, previous: stored.ssh?.previousPort }); return { ok: true, status: 200, body: { status: 'applied' } } })
@@ -111,6 +115,7 @@ describe('SSH port change', () => {
 })
 
 describe('SSH daemon and alarm', () => {
+  withStore()
   it('passes a verified stop through and refuses other verbs', async () => {
     expect((await call('POST', '/api/server/ssh/service', { action: 'stop' })).body).toEqual({ action: 'stop', active: 'inactive', answer: 'refused', verified: true })
     expect((await refusal(() => call('POST', '/api/server/ssh/service', { action: 'mask' }))).code).toBe('VALIDATION')
@@ -129,6 +134,7 @@ describe('SSH daemon and alarm', () => {
 })
 
 describe('shell jail policy', () => {
+  withStore()
   const policy = async (patch: Record<string, unknown>) => ({ privateTmp: true, hiddenHomes: true, systemView: false, exceptions: [], expectedRevision: shellJailRevision((await h.store.getServerSettings())!), ...patch })
   it('saves through a generation and keeps the sign-in policy', async () => {
     const { body } = await call('PUT', '/api/server/security-tools/isolation/policy', await policy({ exceptions: [{ username: 'alice', reason: 'legacy deploy' }] }))

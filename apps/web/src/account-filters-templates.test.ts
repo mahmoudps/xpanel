@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { builtinEnvironments, type EnvironmentReturn } from 'vitest/runtime'
 import { translator } from './i18n.ts'
 import { ACCOUNT_FILTERS_CLIENT_BINDING, type FilterRecord, type FilterSelection } from './account-filters-client.ts'
@@ -8,16 +8,33 @@ import { renderV2PanelEmailFilters } from './themes/v2/pages/xpanel/email-tools/
 import { renderMailFiltersPage } from './themes/v2/pages/xmail/workspaces/settings.ts'
 
 let testDom: EnvironmentReturn | undefined
-beforeEach(async () => {
+let runFilterBinding!: (ask: (options: Record<string, unknown>) => Promise<unknown>) => void
+const pageTemplateCache = new Map<'classic' | 'v2' | 'v2-mail', HTMLTemplateElement>()
+beforeAll(async () => {
   testDom = await builtinEnvironments.jsdom.setup(globalThis, { jsdom: { url: 'https://panel.example.test/email-filters', runScripts: 'outside-only' } })
+  translator('en')
+  runFilterBinding = (window as unknown as { Function: FunctionConstructor }).Function('return ' + ACCOUNT_FILTERS_CLIENT_BINDING)() as (ask: (options: Record<string, unknown>) => Promise<unknown>) => void
+  for (const theme of ['classic', 'v2', 'v2-mail'] as const) {
+    const tpl = document.createElement('template')
+    tpl.innerHTML = buildPage(theme)
+    pageTemplateCache.set(theme, tpl)
+  }
+})
+afterAll(async () => {
+  pageTemplateCache.clear()
+  await testDom?.teardown(globalThis); testDom = undefined
 })
 
 const account = { id: 'account-a', username: 'alice', uid: 20014, gid: 20014, home: '/home/alice', primaryDomain: 'alice.example.test', planId: 'p1', ownerId: null, status: 'active' as const, suspendReason: null, contactEmail: '', ipv4: '192.0.2.1', ipv6: null, extraIps: [], shell: 'jailed' as const, createdAt: '2026-10-29T00:00:00Z' }
 const record = (): FilterRecord => ({ id: 'r1', accountId: account.id, scope: 'global', mailbox: null, name: 'Invoices <img src=x>', priority: 1, enabled: true, matchAll: true, conditions: [{ field: 'subject', comparator: 'contains', value: 'invoice <script>text</script>' }], actions: [{ type: 'fileinto', target: 'Invoices' }, { type: 'stop' }], createdAt: '2026-10-25T00:00:00Z', application: { state: 'pending', reason: null } })
 const scope: FilterSelection = { scope: 'global', mailbox: null }
-const page = (theme: 'classic' | 'v2' | 'v2-mail') => theme === 'classic' ? renderFilterWorkspace({ lang: 'en', canManage: true, expectedAccountId: account.id, mailboxes: [{ login: 'info@alice.example.test' }] }) : theme === 'v2' ? renderV2PanelEmailFilters({ locale: 'en', account, serviceUsers: [] }, { canRead: true, canManage: true }) : renderMailFiltersPage({ locale: 'en', route: '/mail/filters', mailbox: 'info@alice.example.test', canRead: true, canManage: true })
+const buildPage = (theme: 'classic' | 'v2' | 'v2-mail') => theme === 'classic' ? renderFilterWorkspace({ lang: 'en', canManage: true, expectedAccountId: account.id, mailboxes: [{ login: 'info@alice.example.test' }] }) : theme === 'v2' ? renderV2PanelEmailFilters({ locale: 'en', account, serviceUsers: [] }, { canRead: true, canManage: true }) : renderMailFiltersPage({ locale: 'en', route: '/mail/filters', mailbox: 'info@alice.example.test', canRead: true, canManage: true })
 const q = <T extends Element = HTMLElement>(selector: string): T => document.querySelector<T>(selector)!
-const idle = async () => vi.waitFor(() => expect(q('[data-filter-workspace]').getAttribute('aria-busy')).toBe('false'))
+const idle = async () => {
+  await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve()
+  if (q('[data-filter-workspace]').getAttribute('aria-busy') === 'false') return
+  await vi.waitFor(() => expect(q('[data-filter-workspace]').getAttribute('aria-busy')).toBe('false'), { interval: 5 })
+}
 function mount(theme: 'classic' | 'v2' | 'v2-mail', options: { rows?: FilterRecord[]; blocked?: boolean; failWrite?: boolean; tamper?: (root: HTMLElement) => void } = {}) {
   const selected: FilterSelection = theme === 'v2-mail' ? { scope: 'mailbox', mailbox: 'info@alice.example.test' } : scope
   let rows: FilterRecord[] = (options.rows ?? [record()]).map(row => ({ ...row, ...selected })), revision = 'a'.repeat(64)
@@ -33,20 +50,22 @@ function mount(theme: 'classic' | 'v2' | 'v2-mail', options: { rows?: FilterReco
     const next = { ...rows[0]!, ...payload, id: 'r1', application: { state: 'pending' as const, reason: null } } as FilterRecord
     rows = [next]; return { ...envelope(), filter: next }
   })
-  document.documentElement.lang = 'en'; document.body.innerHTML = page(theme)
+  document.documentElement.lang = 'en'
+  const tpl = pageTemplateCache.get(theme)
+  if (tpl) document.body.replaceChildren(tpl.content.cloneNode(true))
+  else document.body.innerHTML = buildPage(theme)
   options.tamper?.(q('[data-filter-workspace]'))
   Object.assign(window, { xpT: translator('en'), xpanelSessionRequest: request })
   const ask = vi.fn(async () => true)
-  window.eval(ACCOUNT_FILTERS_CLIENT_BINDING)(ask)
+  runFilterBinding(ask)
   return { request, ask }
 }
-afterEach(async () => {
-  try {
-    document.body.replaceChildren()
-    delete (window as Window & { xpT?: unknown }).xpT
-    delete (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest
-    vi.restoreAllMocks()
-  } finally { await testDom?.teardown(globalThis); testDom = undefined }
+afterEach(() => {
+  document.body.replaceChildren()
+  window.location.hash = ''
+  delete (window as Window & { xpT?: unknown }).xpT
+  delete (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest
+  vi.restoreAllMocks()
 })
 
 it.each(['classic', 'v2', 'v2-mail'] as const)('reads saved %s filters inside a read-only frame but never writes, with every control disabled', async theme => {

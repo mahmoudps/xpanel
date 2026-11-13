@@ -3,11 +3,11 @@ import type { IncomingMessage } from 'node:http'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
-import { fail } from '@xpanel/core'
+import { afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { MIN_ARGON2_MEMORY_KIB, fail } from '@xpanel/core'
 import { createApiToken, createTestDb, createUserPrincipal, findActiveApiTokenByHash } from '@xpanel/db'
 import { atomicWriteJson, createTestStateStore } from '@xpanel/state'
-import { sha256Hex, verifyPasswordArgon2id } from './auth.ts'
+import { hashPasswordArgon2id, sha256Hex, verifyPasswordArgon2id } from './auth.ts'
 import { createMemoryDav } from './mail/dav-testkit.ts'
 import { createApiApp, listenApiServer } from './server.ts'
 import { sessionCookieName } from './entry-points.ts'
@@ -18,7 +18,10 @@ import type { MailSearchClient } from './mail/search-workspace.ts'
 const SECRET = 'native-mailbox-rest-synthetic-server-secret-32'
 const ORIGIN = 'https://mail.example.test:2096'
 const PASSWORD = 'correct horse battery staple'
-const HASH = '$argon2id$v=19$m=65536,t=3,p=4$MIIRqgvgQbgj220jfp0MPA$YfwJSVjtjSU0zzV/P3S9nnQ/USre2wvJMjfCIjrTQbg'
+let HASH = '$argon2id$v=19$m=65536,t=3,p=4$MIIRqgvgQbgj220jfp0MPA$YfwJSVjtjSU0zzV/P3S9nnQ/USre2wvJMjfCIjrTQbg'
+beforeAll(async () => {
+  HASH = await hashPasswordArgon2id(PASSWORD, { memoryKiB: MIN_ARGON2_MEMORY_KIB, timeCost: 1, parallelism: 1 })
+})
 const cleanup: Array<() => Promise<unknown>> = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close() })
 

@@ -3,7 +3,7 @@
 // the ratchet of known empty controls (new-entry inputs, client-painted values and open gaps); see the report in the PR.
 // Measure: XPANEL_FORM_CENSUS=all prints one ROW line per empty control.
 import { readFileSync } from 'node:fs'
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
 import { buildDeliveryCatalog, navigation, registeredDocumentAliases, tools } from '@xpanel/catalog'
 import { defaultPlan, type Account, type Domain, type Principal } from '@xpanel/core'
 import { renderWebApp, type WebAppRenderState } from './app.ts'
@@ -24,8 +24,8 @@ const unqualified = buildDeliveryCatalog([], null)
 const HOST_SUPPLY: Record<'xpanel' | 'xwhm' | 'xmail', readonly string[]> = { xpanel: ['account', 'plan', 'domains'], xwhm: ['principal', 'activeReseller', 'serverSettings', 'accounts', 'plans', 'featureLists', 'resellers', 'domains', 'dnsZones', 'ipPool', 'mailIpConfig'], xmail: ['mailbox'] }
 const supplied = <T extends object>(facts: T, surface: 'xpanel' | 'xwhm' | 'xmail', connected: boolean): T =>
   connected ? facts : Object.fromEntries(Object.entries(facts).filter(([key]) => HOST_SUPPLY[surface].includes(key))) as T
-const stateFor = (surface: 'xpanel' | 'xwhm' | 'xmail', route: string, uiTheme: string, connected: boolean): WebAppRenderState => ({
-  surface, activeRoute: route, uiTheme, locale: 'en', realtimeEnabled: false, accountId: account.id,
+const buildBaseState = (surface: 'xpanel' | 'xwhm' | 'xmail', uiTheme: string, connected: boolean): Omit<WebAppRenderState, 'activeRoute'> => ({
+  surface, uiTheme, locale: 'en', realtimeEnabled: false, accountId: account.id,
   security: { totpEnabled: false }, catalog: connected ? verified : unqualified,
   visibility: { principal: surface === 'xwhm' ? root : owner, disabledFeatures: new Set() },
   ...(surface === 'xwhm' ? { whm: supplied({
@@ -51,6 +51,13 @@ const stateFor = (surface: 'xpanel' | 'xwhm' | 'xmail', route: string, uiTheme: 
   } as unknown as NonNullable<WebAppRenderState['panel']>, surface, connected) } : {}),
   ...(surface === 'xmail' ? { mail: supplied({ mailbox, domain: domain.name, quotaUsedMb: 160, quotaLimitMb: 1024, messages: [], sieveRules: [], vacationEnabled: false }, surface, connected) } : {}),
 })
+const baseStateCache = new Map<string, Omit<WebAppRenderState, 'activeRoute'>>()
+const stateFor = (surface: 'xpanel' | 'xwhm' | 'xmail', route: string, uiTheme: string, connected: boolean): WebAppRenderState => {
+  const key = `${surface}:${uiTheme}:${connected}`
+  let base = baseStateCache.get(key)
+  if (!base) baseStateCache.set(key, base = buildBaseState(surface, uiTheme, connected))
+  return { ...base, activeRoute: route }
+}
 
 interface DocumentCase { surface: 'xpanel' | 'xwhm' | 'xmail'; route: string }
 const canonical: DocumentCase[] = navigation.flatMap(surface => surface.surface === 'xpanel' || surface.surface === 'xwhm' || surface.surface === 'xmail'
@@ -66,6 +73,9 @@ const CENSUS_EXCLUDED: Readonly<Record<string, string>> = Object.freeze({
   'data-account-api-tokens': 'API tokens: the session transport check is a security guard; no read in a read-only frame.',
   'data-account-sessions': 'Sessions: the session transport check is a security guard; no read in a read-only frame.',
 })
+const CENSUS_EXCLUDED_KEYS = Object.keys(CENSUS_EXCLUDED)
+const FRAME_READER_SET = new Set<string>(FRAME_READERS)
+const CENSUS_EXCLUDED_SET = new Set<string>(CENSUS_EXCLUDED_KEYS)
 
 interface EmptyControl { key: string; tag: string; type: string; label: string; placeholder: string; scope: string; chain: string }
 const text = (html: string): string => html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
@@ -73,11 +83,28 @@ const text = (html: string): string => html.replace(/<[^>]*>/g, ' ').replace(/\s
 /** Live, visible form controls that render without a value: no value, no checked radio, a placeholder select or empty text. */
 function emptyControls(html: string): EmptyControl[] {
   const nodes = parseMarkup(html)
-  const textareas = [...html.matchAll(/<textarea\b[^>]*>([\s\S]*?)<\/textarea>/gi)].map(match => match[1]!)
+  const textareas = html.includes('<textarea') ? [...html.matchAll(/<textarea\b[^>]*>([\s\S]*?)<\/textarea>/gi)].map(match => match[1]!) : []
   const labels = new Map([...html.matchAll(/<label\b[^>]*\bfor="([^"]+)"[^>]*>([\s\S]*?)<\/label>/gi)].map(match => [match[1]!, text(match[2]!)]))
+  const selectOptions = new Map<number, number[]>()
+  for (let at = 0; at < nodes.length; at++) {
+    const option = nodes[at]!
+    if (option.tag !== 'option' || option.parent < 0) continue
+    const parent = nodes[option.parent]!
+    const selectIndex = parent.tag === 'select' ? option.parent : parent.tag === 'optgroup' && parent.parent >= 0 && nodes[parent.parent]?.tag === 'select' ? parent.parent : -1
+    if (selectIndex < 0) continue
+    let list = selectOptions.get(selectIndex)
+    if (!list) selectOptions.set(selectIndex, list = [])
+    list.push(at)
+  }
   // Hidden, templated, painted by a frame reader's authorized read (read-only-frame.ts) or excluded above: not a server-rendered empty value.
   const hiddenBy = (index: number): boolean => {
-    for (let at = index; at >= 0; at = nodes[at]!.parent) if (nodes[at]!.template >= 0 || nodes[at]!.attrs.has('hidden') || FRAME_READERS.some(name => nodes[at]!.attrs.get(name) === 'true') || Object.keys(CENSUS_EXCLUDED).some(name => nodes[at]!.attrs.has(name))) return true
+    for (let at = index; at >= 0; at = nodes[at]!.parent) {
+      const ancestor = nodes[at]!
+      if (ancestor.template >= 0 || ancestor.attrs.has('hidden')) return true
+      for (const [name, value] of ancestor.attrs) {
+        if (CENSUS_EXCLUDED_SET.has(name) || (value === 'true' && FRAME_READER_SET.has(name))) return true
+      }
+    }
     return false
   }
   const scopeOf = (index: number): string => {
@@ -99,6 +126,7 @@ function emptyControls(html: string): EmptyControl[] {
   let textarea = 0
   nodes.forEach((node, index) => {
     if (node.namespace !== 'html') return
+    if (node.tag !== 'input' && node.tag !== 'textarea' && node.tag !== 'select') return
     const content = node.tag === 'textarea' ? textareas[textarea++] ?? '' : ''
     if (hiddenBy(index)) return
     const type = (node.attrs.get('type') ?? 'text').toLowerCase()
@@ -111,7 +139,7 @@ function emptyControls(html: string): EmptyControl[] {
     if (node.tag === 'input') empty = !VALUELESS.has(type) && !(node.attrs.get('value') ?? '').trim()
     else if (node.tag === 'textarea') empty = !content.trim()
     else if (node.tag === 'select') {
-      const options = nodes.flatMap((option, at) => option.tag === 'option' && option.parent === index || option.tag === 'option' && nodes[option.parent]?.tag === 'optgroup' && nodes[option.parent]!.parent === index ? [at] : [])
+      const options = selectOptions.get(index) ?? []
       empty = !options.some(at => nodes[at]!.attrs.has('selected')) && (options.length === 0 || !(nodes[options[0]!]!.attrs.get('value') ?? 'x'))
     }
     if (empty) result.push({ key: keyOf(node), tag: node.tag, type: node.tag === 'input' ? type : '', label: labels.get(node.attrs.get('id') ?? '') ?? node.attrs.get('aria-label') ?? '', placeholder: node.attrs.get('placeholder') ?? '', scope: scopeOf(index), chain: chainOf(index) })
@@ -135,7 +163,12 @@ function censusEntries(route: string, surface: DocumentCase['surface'], rows?: A
 // may join it unseen. A form that renders a saved setting or product default empty fails here; so does a stale entry.
 const baseline = JSON.parse(readFileSync(new URL('./form-state-census.baseline.json', import.meta.url), 'utf8')) as Record<string, string[]>
 
-describe('every form control renders its saved value or real default', { tags: ['feature'] }, () => {
+describe('every form control renders its saved value or real default', () => {
+  beforeAll(() => {
+    censusEntries('/whm/server/setup', 'xwhm')
+    censusEntries('/dashboard', 'xpanel')
+    censusEntries('/mail', 'xmail')
+  })
   it('names each excluded controller and keeps it off the frame gate', () => {
     for (const [root, client] of [['data-account-api-tokens', 'account-api-tokens-client.ts'], ['data-account-sessions', 'account-sessions-client.ts']] as const) {
       expect(CENSUS_EXCLUDED[root]).toMatch(/security guard/)

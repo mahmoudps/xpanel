@@ -55,7 +55,7 @@ describe('Web Disk and device connection readers', { tags: ['unit'] }, () => {
   })
 })
 
-describe('Web Disk controller', { tags: ['unit'] }, () => {
+describe('Web Disk controller', { tags: ['feature'] }, () => {
   it.each([['classic', classic], ['v2', v2]])('adds a login and reads it back in the %s theme', async (_theme, html) => {
     let saved = false
     const request = vi.fn(async (method: string, path: string, _body?: unknown) => {
@@ -153,7 +153,7 @@ describe('Web Disk controller', { tags: ['unit'] }, () => {
   })
 })
 
-describe('classic Web Disk route', { tags: ['unit'] }, () => {
+describe('classic Web Disk route', { tags: ['feature'] }, () => {
   const page = (status: string) => renderApprovedXpanelWorkspace({ route: '/files/web-disk', locale: 'en', readOnly: false, account, domains: [domain], catalog: [{ id: 'web-disk', status }],
     visibility: { principal: { kind: 'user', id: accountId, username: 'alice', accountId }, disabledFeatures: new Set() } } as never)
 
@@ -165,7 +165,7 @@ describe('classic Web Disk route', { tags: ['unit'] }, () => {
   })
 })
 
-describe('device connection controller', { tags: ['unit'] }, () => {
+describe('device connection controller', { tags: ['feature'] }, () => {
   it('shows every login of the account and names domains that are not served', async () => {
     const request = vi.fn(async () => ({ context: { accountId }, unsecuredDomains: ['plain.test'], principals: [principal] }))
     await install(renderDavConnectionWorkspace({ locale: 'en', accountId, canRead: true }), request)

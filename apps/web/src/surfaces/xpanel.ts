@@ -1,5 +1,5 @@
 import { roleLabel, type UserMenuModel } from '../chrome.ts'
-import { tools as defaultCatalog, visibleNavigation, visibleTools, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
+import { unqualifiedTools as defaultCatalog, visibleNavigation, visibleTools, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
 import { renderAccountAnnouncementsBanner } from '../board-port/account-announcements-banner.ts'
 import { renderAccountPlugins } from '../board-port/account-plugins-home.ts'
 import { renderFtpAccountTools } from '../board-port/ftp-tools-workspace.ts'

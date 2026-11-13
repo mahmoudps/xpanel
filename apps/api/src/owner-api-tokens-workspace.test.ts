@@ -1,9 +1,13 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { randomUUID } from 'node:crypto'
+import { existsSync } from 'node:fs'
+import { cp, mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { captureMfaRuntimePolicy, fail, SESSION_ABSOLUTE_TIMEOUT_MS, SESSION_IDLE_TIMEOUT_MS } from '@xpanel/core'
 import { createApiToken, createRootPrincipal, createSession, createTestDb, createUserPrincipal, findActiveApiTokenByHash, findActiveSessionByTokenHash, listApiTokensForPrincipal, renameApiToken, setTotpSecret } from '@xpanel/db'
 import type { Db } from '@xpanel/db'
-import { createTestStateStore, StateStore } from '@xpanel/state'
+import { createStateStore, StateStore, type TestStateStoreHandle } from '@xpanel/state'
 import { authenticateRequest, computeTotpCode, deriveCsrfToken, generateTotpSecret, sealTotpSecret, sha256Hex } from './auth.ts'
 import { assertAuthPersonalOwner } from './auth-personal.ts'
 import { sessionCookieName, sessionTokenHash } from './entry-points.ts'
@@ -25,17 +29,41 @@ const createdBody = async (response: Response | null) => {
   return { id: value.token.id, secret: value.secret }
 }
 
-async function fixture() {
-  const database = await createTestDb(), state = await createTestStateStore()
-  const features = await state.store.createFeatureList({ name: 'Owner token features', ownerId: null, disabled: [] })
-  const plan = await state.store.createPlan({ name: 'Owner token plan', ownerId: null, featureListId: features.id,
+const OWNER_TOK_TMP = existsSync('/dev/shm') ? '/dev/shm' : tmpdir()
+let ownerTokTplDir: string
+let ownerTokSeed: {
+  features: Awaited<ReturnType<TestStateStoreHandle['store']['createFeatureList']>>
+  plan: Awaited<ReturnType<TestStateStoreHandle['store']['createPlan']>>
+  account: Awaited<ReturnType<TestStateStoreHandle['store']['createAccount']>>
+  neighborAccount: Awaited<ReturnType<TestStateStoreHandle['store']['createAccount']>>
+}
+
+beforeAll(async () => {
+  await createTestDb().then(h => h.close())
+  ownerTokTplDir = await mkdtemp(join(OWNER_TOK_TMP, 'xpanel-owntok-tpl-'))
+  const tplStore = createStateStore(ownerTokTplDir)
+  const features = await tplStore.createFeatureList({ name: 'Owner token features', ownerId: null, disabled: [] })
+  const plan = await tplStore.createPlan({ name: 'Owner token plan', ownerId: null, featureListId: features.id,
     resources: { diskMb: 1024, bandwidthMbMonth: 'unlimited', ioReadBps: 1048576, ioWriteBps: 1048576, ioReadIops: 10, ioWriteIops: 10, memoryMb: 512, maxProcesses: 32, cpuPercent: 100 },
     caps: { addonDomains: 2, aliasDomains: 2, subdomains: 2, mailboxes: 2, forwarders: 2, mailingLists: 2, ftpAccounts: 2, databases: 2, phpWorkers: 4 }, dedicatedIp: false, shell: 'none', defaultMailboxQuotaMb: 100 })
-  await state.store.saveServerIp({ address: '192.0.2.42', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: false, notes: '' })
+  await tplStore.saveServerIp({ address: '192.0.2.42', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: false, notes: '' })
   const accountInput = { passwordHash: PASSWORD_HASH, planId: plan.id, contactEmail: 'owner@example.test', ipv4: '192.0.2.42', shell: 'none' as const,
     php: { version: '8.3', handler: 'fpm' as const, fpm: { mode: 'ondemand' as const, maxChildren: 4, startServers: 2, minSpareServers: 1, maxSpareServers: 3, maxRequests: 100, processIdleTimeoutSec: 10 }, ini: {} } }
-  const account = await state.store.createAccount({ ...accountInput, username: 'tokowner', primaryDomain: 'tokowner.example.test', ownerId: null })
-  const neighborAccount = await state.store.createAccount({ ...accountInput, username: 'tokother', primaryDomain: 'tokother.example.test', ownerId: null })
+  const account = await tplStore.createAccount({ ...accountInput, username: 'tokowner', primaryDomain: 'tokowner.example.test', ownerId: null })
+  const neighborAccount = await tplStore.createAccount({ ...accountInput, username: 'tokother', primaryDomain: 'tokother.example.test', ownerId: null })
+  ownerTokSeed = { features, plan, account, neighborAccount }
+})
+
+afterAll(async () => {
+  if (ownerTokTplDir) await rm(ownerTokTplDir, { recursive: true, force: true })
+})
+
+async function fixture() {
+  const database = await createTestDb()
+  const rootDir = await mkdtemp(join(OWNER_TOK_TMP, 'xpanel-owntok-'))
+  await cp(ownerTokTplDir, rootDir, { recursive: true, force: true })
+  const state: TestStateStoreHandle = { store: createStateStore(rootDir), rootDir, close: () => rm(rootDir, { recursive: true, force: true }) }
+  const { features, plan, account, neighborAccount } = ownerTokSeed
   const owner = await createUserPrincipal(database.db, { username: account.username, accountId: account.id, passwordHash: PASSWORD_HASH })
   const neighbor = await createUserPrincipal(database.db, { username: neighborAccount.username, accountId: neighborAccount.id, passwordHash: PASSWORD_HASH })
   let sessionSecret = 'isolated-owner-session-not-a-live-credential'

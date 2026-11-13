@@ -272,6 +272,25 @@ describe('candidate V2 full-document controller conformance', () => {
   }
 
   const mailIpConfig: MailIpConfig = { mode: 'server-default', defaultIpv4: null, defaultIpv6: null, defaultHelo: null, domainOverrides: [] }
+  const contractsByRoute = new Map(v2RouteContracts().map(item => [item.route, item]))
+
+  beforeAll(() => {
+    const warmRoutes = ['/whm/ssl/install', '/whm/backups/restore-more', '/email/forwarders', '/mail/inbox'] as const
+    for (const locale of locales) {
+      for (const route of warmRoutes) {
+        const doc = documents.find(item => item.route === route)!
+        const identity = doc.surface === 'xwhm'
+          ? { visibility: visibility({ kind: 'root', id: '33333333-3333-4333-8333-333333333333', username: 'contractroot' }) }
+          : doc.surface === 'xpanel'
+            ? { visibility: visibility(user), panel: { account, plan: defaultPlan({ id: '22222222-2222-4222-8222-222222222222', name: 'Basic' }), ...(doc.route === '/email/forwarders' ? { domains: [sslDomain] } : {}) } }
+            : { visibility: visibility(user), mail: { mailbox: 'contractuser@example.test', domain: 'example.test' } }
+        const html = renderWebApp({ ...identity, surface: doc.surface, activeRoute: doc.route, locale, uiTheme: 'v2', theme: 'dark', catalog, liveState: live })
+        const nodes = parseMarkup(html)
+        const contract = contractsByRoute.get(doc.route)!
+        checkV2Conformance(html, { ...contract, context: { ...contract.context, facts: { 'account-domains': doc.route === '/email/forwarders' ? 'present' : 'absent' } } }, nodes)
+      }
+    }
+  })
 
   for (const locale of locales) it.each(documents)('$route core V2 contract in ' + locale, document => {
     const identity = document.surface === 'xwhm'
@@ -281,7 +300,8 @@ describe('candidate V2 full-document controller conformance', () => {
         : { visibility: visibility(user), mail: { mailbox: 'contractuser@example.test', domain: 'example.test' } }
     const securityFixture = document.route === '/security/account' ? { security: { totpEnabled: false }, mfaRuntimeMode: 'disabled' as const } : {}
     const html = renderWebApp({ ...identity, ...securityFixture, surface: document.surface, activeRoute: document.route, locale, uiTheme: 'v2', theme: 'dark', catalog, liveState: live })
-    const roots = parseMarkup(html).filter(node => node.template < 0 && isHtmlElement(node, 'html'))
+    const nodes = parseMarkup(html)
+    const roots = nodes.filter(node => node.template < 0 && isHtmlElement(node, 'html'))
     expect(roots).toHaveLength(1)
     const attributes = roots[0]?.attrs
     expect(attributes?.get('data-ui-theme')).toBe('v2')
@@ -289,11 +309,11 @@ describe('candidate V2 full-document controller conformance', () => {
     expect(attributes?.get('dir')).toBe(locale === 'ar' ? 'rtl' : 'ltr')
     expect(attributes?.get('data-theme')).toBe('dark')
     expect(attributes?.get('data-surface')).toBe(document.surface)
-    const contract = v2RouteContracts().find(item => item.route === document.route)!
+    const contract = contractsByRoute.get(document.route)!
     // Mirror the authorized domain filter passed to renderAccountForwarders by account-pages.ts.
     const accountDomains = (identity.panel?.domains ?? []).filter(domain => domain.accountId === identity.panel?.account.id)
     const domainFact: 'present' | 'absent' = accountDomains.length ? 'present' : 'absent'
-    const issues = checkV2Conformance(html, { ...contract, context: { ...contract.context, facts: { 'account-domains': domainFact } } })
+    const issues = checkV2Conformance(html, { ...contract, context: { ...contract.context, facts: { 'account-domains': domainFact } } }, nodes)
     expect(issues, 'CONFORMANCE_JSON=' + JSON.stringify({ route: document.route, locale, issues }) + '\n').toEqual([])
   })
 

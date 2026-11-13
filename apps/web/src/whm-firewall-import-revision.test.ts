@@ -1,10 +1,14 @@
 // @vitest-environment jsdom
-import {it,expect,vi} from 'vitest';
-import {writeFile,readFile} from 'node:fs/promises';
+import {beforeAll,it,expect,vi} from 'vitest';
+import {existsSync} from 'node:fs';
+import {mkdtemp,rm,writeFile,readFile} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import {URL as NodeURL} from 'node:url';
 import {defaultFirewallRules,parsePo,catalogFromEntries,createTranslator} from '@xpanel/core';
 import type {FirewallRule,ServerSettings} from '@xpanel/core';
-import {createTestStateStore,firewallRevision} from '../../../packages/state/src/index.ts';
+import {createStateStore,firewallRevision} from '../../../packages/state/src/index.ts';
+import type {TestStateStoreHandle} from '../../../packages/state/src/index.ts';
 import {settings as serverSettingsFixture} from '../../../packages/render/src/edge/testkit.ts';
 import type {AuthenticatedCaller} from '../../api/src/auth.ts';
 import {handleFirewallWorkspaceRoute,exportFirewall} from '../../api/src/firewall-workspace.ts';
@@ -35,8 +39,22 @@ async function settled<T>(promise:Promise<T>):Promise<T>{
 }
 function recorded(calls:Call[],predicate:(call:Call)=>boolean):Call {const call=calls.find(predicate);if(!call)throw new Error('Expected API call was not recorded');return call}
 function bodyOf(call:Call):JsonObject {if(!call.body)throw new Error('Expected request body');return call.body}
+const FIREWALL_TMP = existsSync('/dev/shm') ? '/dev/shm' : tmpdir();
+let firewallMarkupTemplate: HTMLTemplateElement;
+let bindFirewallClient: (ask?: unknown) => void;
+let arFirewallTranslator: ReturnType<typeof createTranslator>;
+beforeAll(async()=>{
+  firewallMarkupTemplate=document.createElement('template');
+  firewallMarkupTemplate.innerHTML=markup;
+  const bound:unknown=new Function('return '+WHM_FIREWALL_CLIENT_BINDING)();
+  if(typeof bound!=='function')throw new Error('Expected the actual browser binding');
+  bindFirewallClient=bound as (ask?:unknown)=>void;
+  const parsedPo=parsePo(await readFile(new NodeURL('./locales/ar.po',import.meta.url),'utf8'));
+  arFirewallTranslator=createTranslator('ar',catalogFromEntries(parsedPo.entries));
+});
 it('refuses a stale import confirmation and accepts the accurately reviewed fresh import',{tags:['feature'],timeout:15000},async()=>{
-  const h=await createTestStateStore();
+  const rootDir=await mkdtemp(join(FIREWALL_TMP,'xpanel-fw-rev-'));
+  const h:TestStateStoreHandle={store:createStateStore(rootDir),rootDir,close:()=>rm(rootDir,{recursive:true,force:true})};
   const previewRelease=deferred<void>(),previewSeen=deferred<Preview>(),importQuestion=deferred<JsonObject>(),importConfirm=deferred<boolean>();
   const freshQuestionSeen=deferred<JsonObject>(),freshConfirm=deferred<boolean>();
   const inFlight=new Set<Promise<unknown>>(),calls:Call[]=[],audits:string[]=[];
@@ -86,7 +104,7 @@ it('refuses a stale import confirmation and accepts the accurately reviewed fres
     const before=await h.store.getFirewallState(),revisionA=firewallRevision(before);
     const exported:unknown=JSON.parse(exportFirewall(before,clock));
     const documentData={...object(exported),rules:before.rules.map(rule=>rule.id==='other-app'?{...rule,comment:'reviewed import'}:rule)};
-    document.documentElement.lang='en';document.body.innerHTML=markup;
+    document.documentElement.lang='en';document.body.replaceChildren(firewallMarkupTemplate.content.cloneNode(true));
     Object.assign(window,{xpanelSessionRequest:send});
     let importQuestions=0;
     const ask=vi.fn(async(options:JsonObject)=>{
@@ -97,10 +115,8 @@ it('refuses a stale import confirmation and accepts the accurately reviewed fres
       }
       return true;
     });
-    const bind:unknown=new Function('return '+WHM_FIREWALL_CLIENT_BINDING)();
-    if(typeof bind!=='function')throw new Error('Expected the actual browser binding');
-    bind(ask);
-    await expect.poll(()=>document.querySelector('[data-firewall-rule-id="office-mysql"]'),{timeout:5000}).not.toBeNull();
+    bindFirewallClient(ask);
+    await expect.poll(()=>document.querySelector('[data-firewall-rule-id="office-mysql"]'),{timeout:5000,interval:5}).not.toBeNull();
     required('[name="firewall-import-json"]',HTMLTextAreaElement).value=JSON.stringify(documentData);
     const importButton=required('[data-firewall-action="import"]',HTMLButtonElement);
     expect(importButton.disabled).toBe(false);importButton.click();
@@ -112,8 +128,8 @@ it('refuses a stale import confirmation and accepts the accurately reviewed fres
     const deleteButton=[...officeRow.querySelectorAll('button')].find(button=>button.textContent==='Delete');
     if(!deleteButton)throw new Error('Expected the real row delete action');
     expect(deleteButton.disabled).toBe(false);deleteButton.click();
-    await expect.poll(()=>calls.filter(call=>call.path==='/api/firewall/confirm').length,{timeout:5000}).toBe(1);
-    await expect.poll(()=>document.querySelector('[data-firewall-rule-id="office-mysql"]'),{timeout:5000}).toBeNull();
+    await expect.poll(()=>calls.filter(call=>call.path==='/api/firewall/confirm').length,{timeout:5000,interval:5}).toBe(1);
+    await expect.poll(()=>document.querySelector('[data-firewall-rule-id="office-mysql"]'),{timeout:5000,interval:5}).toBeNull();
     const revisionB=firewallRevision(await h.store.getFirewallState());
     expect(revisionB).not.toBe(revisionA);
     expect(bodyOf(recorded(calls,call=>call.method==='DELETE')).expectedRevision).toBe(revisionA);
@@ -122,7 +138,7 @@ it('refuses a stale import confirmation and accepts the accurately reviewed fres
     const question=await settled(importQuestion.promise);
     expect(question.body).toContain('0 added, 0 removed, 1 changed');
     importConfirm.resolve(true);
-    await expect.poll(()=>required('[data-firewall-manage-status]',HTMLParagraphElement).textContent,{timeout:5000}).toBe('The firewall rules changed after the preview. Preview the import again; this import was not applied.');
+    await expect.poll(()=>required('[data-firewall-manage-status]',HTMLParagraphElement).textContent,{timeout:5000,interval:5}).toBe('The firewall rules changed after the preview. Preview the import again; this import was not applied.');
     expect(calls.filter(call=>call.path==='/api/firewall/import'&&call.body?.dryRun!==true)).toHaveLength(0);
     const afterStale=await h.store.getFirewallState();
     expect(firewallRevision(afterStale)).toBe(revisionB);
@@ -138,8 +154,8 @@ it('refuses a stale import confirmation and accepts the accurately reviewed fres
     expect(bodyOf(freshPreview).expectedRevision).toBe(revisionB);
     expect(freshPreview.reply.diff).toMatchObject({added:['office-mysql'],removed:[],changed:['other-app']});
     freshConfirm.resolve(true);
-    await expect.poll(()=>calls.filter(call=>call.path==='/api/firewall/confirm').length,{timeout:5000}).toBe(2);
-    await expect.poll(()=>document.querySelector('[data-firewall-rule-id="office-mysql"]'),{timeout:5000}).not.toBeNull();
+    await expect.poll(()=>calls.filter(call=>call.path==='/api/firewall/confirm').length,{timeout:5000,interval:5}).toBe(2);
+    await expect.poll(()=>document.querySelector('[data-firewall-rule-id="office-mysql"]'),{timeout:5000,interval:5}).not.toBeNull();
     const imported=recorded(calls,call=>call.path==='/api/firewall/import'&&call.body?.dryRun!==true);
     expect(bodyOf(imported).expectedRevision).toBe(revisionB);
     expect(imported.reply.diff).toMatchObject({added:['office-mysql'],removed:[],changed:['other-app']});
@@ -147,8 +163,7 @@ it('refuses a stale import confirmation and accepts the accurately reviewed fres
     expect(after.rules.find(rule=>rule.id==='office-mysql')).toBeDefined();
     expect(after.rules.find(rule=>rule.id==='other-app')?.comment).toBe('reviewed import');
     expect(reconcile).toHaveBeenCalledTimes(2);
-    const parsedPo=parsePo(await readFile(new NodeURL('./locales/ar.po',import.meta.url),'utf8'));
-    expect(createTranslator('ar',catalogFromEntries(parsedPo.entries))('The firewall rules changed after the preview. Preview the import again; this import was not applied.')).toBe('تغيّرت قواعد جدار الحماية بعد المعاينة. أعد معاينة الاستيراد؛ لم يُطبَّق هذا الاستيراد.');
+    expect(arFirewallTranslator('The firewall rules changed after the preview. Preview the import again; this import was not applied.')).toBe('تغيّرت قواعد جدار الحماية بعد المعاينة. أعد معاينة الاستيراد؛ لم يُطبَّق هذا الاستيراد.');
     const proofPath=process.env.XPANEL_FIREWALL_PROOF;
     if(proofPath)await writeFile(proofPath,JSON.stringify({
       status:'STALE_CONFIRMATION_REFUSED_FRESH_REPREVIEW_ACCEPTED',revisionA,revisionB,

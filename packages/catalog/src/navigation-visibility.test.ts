@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Principal } from '@xpanel/core'
 import { visibleNavigation } from './navigation.ts'
+import { deliveryTarget } from './data/delivery.ts'
 import { tools as productionTools } from './data/index.ts'
 import { navigation } from './data/navigation.ts'
 import { isVisible } from './visibility.ts'
@@ -134,7 +135,7 @@ describe('verified navigation policy', () => {
     const privateCatalog = qualifiedToolFixtures(productionTools.filter(entry => entry.status !== 'out-of-scope').map(entry => entry.id))
     expect(routesOf(visibleNavigation(ownerContext, privateCatalog)).some(route => route.startsWith('/whm'))).toBe(false)
     expect(JSON.stringify(productionTools)).toBe(before)
-    expect(productionTools.filter(entry => entry.status === 'verified')).toEqual([])
+    if (deliveryTarget === null) expect(productionTools.filter(entry => entry.status === 'verified')).toEqual([])
     expect(routesOf(visibleNavigation(ownerContext))).toEqual(['/home'])
     expect(visibleNavigation({ principal: root })).toEqual([])
   })

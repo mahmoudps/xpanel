@@ -455,7 +455,7 @@ const open = async (browser: Browser, html: string): Promise<Page> => {
 }
 
 describe('Arabic computed type', () => {
-  it('keeps body and nav at least 14.5px and labels at least 12.5px', async () => {
+  it('keeps body and nav at least 14.5px and labels at least 12.5px', { tags: ['slow', 'visual'], timeout: 60_000 }, async () => {
     const browser = await chromium.launch({
       executablePath: executable as string,
       args: ['--font-render-hinting=none', '--disable-lcd-text'],
@@ -546,9 +546,9 @@ describe('Arabic computed type', () => {
     } finally {
       await browser.close()
     }
-  }, 60_000)
+  })
 
-  it('does not scroll sideways at 390', { tags: ['slow'], timeout: 60_000 }, async () => {
+  it('does not scroll sideways at 390', { tags: ['slow', 'visual'], timeout: 60_000 }, async () => {
     const browser = await chromium.launch({
       executablePath: executable as string,
       args: ['--font-render-hinting=none', '--disable-lcd-text'],

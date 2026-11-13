@@ -17,7 +17,7 @@ export interface SelectorSourceReview {
 export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   {
     "path": "apps/web/src/account-api-tokens-client.ts",
-    "sha256": "3955102d59bfd84f56e3867d8632609e09195c11304a614cfc808de287874c7f",
+    "sha256": "2ff49c9fe7003242fe0a9ceabc945d9610c1652b151837792e0f21d32b1eb6c9",
     "sites": [
       {
         "line": 55,
@@ -30,8 +30,8 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 95,
-        "column": 153,
+        "line": 117,
+        "column": 43,
         "method": "closest",
         "argument": "denied",
         "classification": "literal-ineligibility-ancestor-policy",
@@ -40,8 +40,8 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 105,
-        "column": 128,
+        "line": 118,
+        "column": 43,
         "method": "closest",
         "argument": "denied",
         "classification": "literal-ineligibility-ancestor-policy",
@@ -4248,10 +4248,10 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/whm-php-client.ts",
-    "sha256": "a8eeda2d1a7022ec5e132c285666683eef7f7325b41789937b10f40296e8f1c6",
+    "sha256": "aa838743a7f407763a88b9b63bdf082acd3b73ad789d291a85b1208ddcedfe29",
     "sites": [
       {
-        "line": 127,
+        "line": 143,
         "column": 102,
         "method": "querySelector",
         "argument": "'[name=\"' + name + '\"]'",
@@ -4261,7 +4261,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 140,
+        "line": 158,
         "column": 64,
         "method": "querySelectorAll",
         "argument": "selector",
@@ -4271,7 +4271,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 163,
+        "line": 194,
         "column": 450,
         "method": "querySelectorAll",
         "argument": "'[name=\"' + name + '\"]'",
@@ -4285,7 +4285,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 164,
+        "line": 195,
         "column": 258,
         "method": "querySelectorAll",
         "argument": "'[data-php-action=\"' + name + '\"]'",
@@ -4295,7 +4295,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 296,
+        "line": 329,
         "column": 65,
         "method": "closest",
         "argument": "denied",
@@ -4305,7 +4305,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 297,
+        "line": 330,
         "column": 100,
         "method": "querySelector",
         "argument": "'[data-php-action=\"' + name + '\"]'",
@@ -4315,8 +4315,8 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 301,
-        "column": 52,
+        "line": 335,
+        "column": 54,
         "method": "querySelector",
         "argument": "'[data-whm-detail-section=\"' + section + '\"]'",
         "classification": "finite-source-classified",
@@ -4325,7 +4325,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 407,
+        "line": 442,
         "column": 186,
         "method": "querySelector",
         "argument": "'[name=\"' + name + '\"]'",
@@ -4336,7 +4336,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 420,
+        "line": 455,
         "column": 60,
         "method": "querySelector",
         "argument": "'[name=\"' + name + '\"]'",
@@ -4347,7 +4347,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 562,
+        "line": 597,
         "column": 91,
         "method": "querySelector",
         "argument": "'[name=\"' + name + '\"]'",
@@ -4358,7 +4358,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 589,
+        "line": 624,
         "column": 176,
         "method": "querySelector",
         "argument": "'[name=\"' + name + '\"]'",
@@ -4368,7 +4368,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 595,
+        "line": 630,
         "column": 95,
         "method": "querySelector",
         "argument": "'[name=\"php-exception-' + fn + '\"]'",
@@ -4763,7 +4763,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/whm-transfer-client.ts",
-    "sha256": "f4a3d1a967dd0c1ca9218aabaa99e7dc45b687a7d060964e35a161e58a890ca7",
+    "sha256": "261ec7235db640b7a5171f642723e8293ee82f5f7c8475b8e1e767fa9c41bef6",
     "sites": [
       {
         "line": 45,
@@ -4786,7 +4786,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 112,
+        "line": 153,
         "column": 64,
         "method": "querySelectorAll",
         "argument": "selector",
@@ -4798,7 +4798,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 295,
+        "line": 357,
         "column": 65,
         "method": "querySelector",
         "argument": "`[data-transfer-import-${key}]`",
@@ -4808,7 +4808,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 295,
+        "line": 357,
         "column": 125,
         "method": "querySelector",
         "argument": "`[data-transfer-import-part=\"${key}\"] tbody`",
@@ -4818,7 +4818,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 444,
+        "line": 506,
         "column": 41,
         "method": "querySelector",
         "argument": "'[' + hook + ']'",

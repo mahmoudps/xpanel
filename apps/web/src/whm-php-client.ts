@@ -118,10 +118,26 @@ function bindWhmPhp(askDialog?: (options: Record<string, unknown>) => Promise<un
     const transport = frameRequest(root)
     if (!page || !status || !refresh) return
     const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-    let templateContractIntact = true
+    let templateContractIntact = true, domDirty = true
+    const observedFragments = new WeakSet<DocumentFragment>()
+    const observeOpts = { subtree: true, childList: true, attributes: true, characterData: true } as const
+    const domObserver = new MutationObserver(() => {
+      if (!root.isConnected) { domObserver.disconnect(); return }
+      domDirty = true
+    })
+    domObserver.observe(document, observeOpts)
+    const syncClean = <T>(fn: () => T): T => {
+      const wasDirty = domDirty || domObserver.takeRecords().length > 0
+      try { return fn() } finally {
+        if (!wasDirty) { domObserver.takeRecords(); domDirty = false }
+        else domDirty = true
+      }
+    }
+    const unsafePhpTags = new Set(['SCRIPT', 'STYLE', 'IFRAME', 'OBJECT', 'EMBED', 'FORM', 'TEXTAREA', 'SELECT', 'A', 'IMG', 'AUDIO', 'VIDEO', 'SOURCE', 'LINK', 'META', 'BASE', 'BUTTON'])
+    const unsafePhpAttrs = new Set(['id', 'api-url', 'data-api-url', 'data-action', 'data-xp-action', 'data-php-action', 'data-presentation-tabs', 'data-presentation-tab', 'data-presentation-tab-link', 'href', 'src', 'srcset', 'formaction', 'contenteditable'])
     const admitted = () => templateContractIntact && root.isConnected && root.dataset.phpCanRead === 'true' && typeof transport === 'function'
     let busy = false, confirmationPending = false, inventory: PhpInventoryView | null = null, manage: PhpManageView | null = null, savedUsage: PhpUsageView[] | null = null
-    const note = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
+    const note = (state: string, message: string): void => syncClean(() => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', state === 'failed' ? 'alert' : 'status') })
     const cell = (row: HTMLTableRowElement, value: string, technical = false): void => { const td = document.createElement('td'), text = document.createElement(technical ? 'bdi' : 'span'); if (technical) text.dir = 'ltr'; text.textContent = value; td.append(text); row.append(td) }
     const empty = (body: HTMLElement | null, count: number, message: string): void => { if (!body) return; body.textContent = ''; const row = document.createElement('tr'), td = document.createElement('td'); td.colSpan = count; td.textContent = message; row.append(td); body.append(row) }
     const select = (name: string): HTMLSelectElement | null => page.querySelector<HTMLSelectElement>('[name="' + name + '"]')
@@ -133,7 +149,9 @@ function bindWhmPhp(askDialog?: (options: Record<string, unknown>) => Promise<un
       })
     }
     const verifyTemplates = (): boolean => {
-      if (!admitted()) { disableNative(); note('unavailable', t('Unavailable')); return false }
+      if (!admitted()) { if (!root.isConnected) domObserver.disconnect(); disableNative(); note('unavailable', t('Unavailable')); return false }
+      if (domObserver.takeRecords().length > 0) domDirty = true
+      if (!domDirty) return true
       try {
         if (!['cards', 'table'].includes(layout ?? '') || root.dataset.phpVersionLayout !== layout || !entries || entries.tagName !== (layout === 'cards' ? 'DIV' : 'TBODY')) throw new Error('invalid_php_workspace')
         for (const [selector, expected, tag] of [['[data-whm-php-status]', status, 'P'], ['[data-whm-php-refresh]', refresh, 'BUTTON'], ['[data-whm-php-version-entries]', entries, layout === 'cards' ? 'DIV' : 'TBODY']] as const) {
@@ -151,14 +169,27 @@ function bindWhmPhp(askDialog?: (options: Record<string, unknown>) => Promise<un
         assertWhmClientTemplates(root, contracts)
         for (const [name, tag] of contracts) {
           const template = clientTemplate(root, name), node = cloneClientTemplate(template, tag, [])
-          if (template.closest('[data-whm-php-workspace]') !== root || node.querySelector('script,style,iframe,object,embed,form,textarea,select,a,img,audio,video,source,link,meta,base,button')) throw new Error('invalid_php_template')
-          for (const item of [node, ...node.querySelectorAll<HTMLElement>('*')]) if ([...item.attributes].some(attr => /^on/i.test(attr.name) || ['id', 'api-url', 'data-api-url', 'data-action', 'data-xp-action', 'data-php-action', 'data-presentation-tabs', 'data-presentation-tab', 'data-presentation-tab-link', 'href', 'src', 'srcset', 'formaction', 'contenteditable'].includes(attr.name))) throw new Error('invalid_php_template')
+          if (template.closest('[data-whm-php-workspace]') !== root) throw new Error('invalid_php_template')
+          if (!observedFragments.has(template.content)) { domObserver.observe(template.content, observeOpts); observedFragments.add(template.content) }
+          let inputCount = 0
+          for (const stack: Element[] = [node]; stack.length;) {
+            const item = stack.pop()!, itemTag = item.tagName
+            if (item !== node) {
+              if (unsafePhpTags.has(itemTag)) throw new Error('invalid_php_template')
+              if (itemTag === 'INPUT') inputCount++
+            }
+            for (let i = 0; i < item.attributes.length; i++) {
+              const attrName = item.attributes[i]!.name
+              if (/^on/i.test(attrName) || unsafePhpAttrs.has(attrName)) throw new Error('invalid_php_template')
+            }
+            for (let child = item.firstElementChild; child; child = child.nextElementSibling) stack.push(child)
+          }
           if (node instanceof HTMLButtonElement && (node.type !== 'button' || !node.disabled || name !== 'whm-php-version-tab' && node.hasAttribute('role') && node.getAttribute('role') !== 'button')) throw new Error('invalid_php_button')
           if (name === 'whm-php-version-entry' && (clientTemplateSlot(node, 'version', 'bdi').getAttribute('dir') !== 'ltr' || layout === 'table' && (node.children.length !== 6 || [...node.children].some(cell => cell.tagName !== 'TD')))) throw new Error('invalid_php_version_template')
           if (name === 'whm-php-versions-empty' && layout === 'table' && (node.children.length !== 1 || node.firstElementChild?.tagName !== 'TD' || (node.firstElementChild as HTMLTableCellElement).colSpan !== 6)) throw new Error('invalid_php_empty_template')
           if (name === 'whm-php-version-tab' && (node.getAttribute('role') !== 'tab' || clientTemplateSlot(node, 'content', 'bdi').getAttribute('dir') !== 'ltr')) throw new Error('invalid_php_version_tab')
-          if (name === 'whm-php-extension-switch') { const input = clientTemplateSlot(node, 'input', 'input') as HTMLInputElement; if (input.type !== 'checkbox' || !input.disabled || input.hasAttribute('role') || node.querySelectorAll('input').length !== 1) throw new Error('invalid_php_extension_switch') }
-          else if (node.querySelector('input')) throw new Error('invalid_php_template')
+          if (name === 'whm-php-extension-switch') { const input = clientTemplateSlot(node, 'input', 'input') as HTMLInputElement; if (input.type !== 'checkbox' || !input.disabled || input.hasAttribute('role') || inputCount !== 1) throw new Error('invalid_php_extension_switch') }
+          else if (inputCount > 0) throw new Error('invalid_php_template')
         }
         for (const name of ['php-selected-version', 'php-extension-version', 'php-version', 'php-install-request', 'memory_limit', 'upload_max_filesize', 'post_max_size', 'max_execution_time', 'max_input_vars', 'php-exception-account', 'php-exception-reason', 'php-pool-mode', 'php-pool-max-children', 'php-pool-idle-timeout', 'php-pool-start-servers', 'php-pool-min-spare', 'php-pool-max-spare', 'php-pool-max-requests']) if (page.querySelectorAll('[name="' + name + '"]').length > 1) throw new Error('ambiguous_php_control')
         for (const name of ['set-default', 'reinstall-version', 'remove-version', 'confirm-remove', 'cancel-remove', 'install-version', 'apply-ini', 'discard-ini', 'add-exception', 'grant-exception', 'apply-pool', 'discard-pool']) if (page.querySelectorAll('[data-php-action="' + name + '"]').length > 1) throw new Error('ambiguous_php_action')
@@ -166,8 +197,10 @@ function bindWhmPhp(askDialog?: (options: Record<string, unknown>) => Promise<un
         if (lists.length || panels.length) {
           if (lists.length !== 1 || panels.length !== 1 || lists[0]!.tagName !== 'DIV' || panels[0]!.tagName !== 'DIV' || !/^[a-z][a-z0-9-]{0,95}$/.test(panels[0]!.id) || [...document.querySelectorAll('[id]')].filter(node => node.id === panels[0]!.id).length !== 1) throw new Error('invalid_php_version_panel')
         }
+        domObserver.takeRecords()
+        domDirty = false
         return true
-      } catch { templateContractIntact = false; disableNative(); note('unavailable', t('Unavailable')); return false }
+      } catch { templateContractIntact = false; domObserver.disconnect(); disableNative(); note('unavailable', t('Unavailable')); return false }
     }
     const request = async (method: string, path: string, body?: unknown): Promise<unknown> => {
       if (!verifyTemplates()) throw new Error('php_workspace_unavailable')
@@ -298,13 +331,15 @@ function bindWhmPhp(askDialog?: (options: Record<string, unknown>) => Promise<un
     const live = (control: HTMLInputElement | HTMLSelectElement | HTMLButtonElement | HTMLTextAreaElement | null, on: boolean): void => { if (!control) return; control.removeAttribute('data-wiring'); control.disabled = !on }
     const sectionNote = (section: string, state: string, message: string): void => {
       if (!verifyTemplates()) return
-      const card = page.querySelector<HTMLElement>('[data-whm-detail-section="' + section + '"]')
-      if (!card) return
-      let node = card.querySelector<HTMLElement>('[data-php-manage-status]')
-      if (!node) { node = cloneClientTemplate(clientTemplate(root, 'whm-php-status'), 'p', ['content']); card.append(node) }
-      const content = node.querySelector<HTMLElement>('[data-php-status-content]')
-      if (node.tagName !== 'P' || !content || content.tagName !== 'SPAN') { templateContractIntact = false; disableNative(); note('unavailable', t('Unavailable')); return }
-      node.dataset.state = state; content.textContent = message; node.setAttribute('role', state === 'failed' ? 'alert' : 'status')
+      syncClean(() => {
+        const card = page.querySelector<HTMLElement>('[data-whm-detail-section="' + section + '"]')
+        if (!card) return
+        let node = card.querySelector<HTMLElement>('[data-php-manage-status]')
+        if (!node) { node = cloneClientTemplate(clientTemplate(root, 'whm-php-status'), 'p', ['content']); card.append(node) }
+        const content = node.querySelector<HTMLElement>('[data-php-status-content]')
+        if (node.tagName !== 'P' || !content || content.tagName !== 'SPAN') { templateContractIntact = false; domObserver.disconnect(); disableNative(); note('unavailable', t('Unavailable')); return }
+        node.dataset.state = state; content.textContent = message; node.setAttribute('role', state === 'failed' ? 'alert' : 'status')
+      })
     }
     const failure = (error: unknown): string => { const detail = error && typeof error === 'object' ? (error as { message?: unknown }).message : null; return typeof detail === 'string' && detail.length < 300 ? detail : t('The request failed. Nothing was changed.') }
     const confirmed = async (title: string, body: string, danger = false): Promise<boolean> => {
@@ -476,7 +511,7 @@ function bindWhmPhp(askDialog?: (options: Record<string, unknown>) => Promise<un
     /** Preview on the host, confirm with the user, then submit the reviewed job. */
     const submit = async (section: string, input: Record<string, unknown>, title: string, body: string, danger = false): Promise<void> => {
       if (!writable() || busy || !manage?.revision) return
-      busy = true; root.setAttribute('aria-busy', 'true'); sectionNote(section, 'reading', t('Checking the change on the host…'))
+      busy = true; syncClean(() => { root.setAttribute('aria-busy', 'true') }); sectionNote(section, 'reading', t('Checking the change on the host…'))
       try {
         const payload = { ...input, expectedRevision: manage.revision }
         const result = await request!('POST', '/api/server/php/manage/preview', payload) as { preview?: { state?: string; reason?: string | null } }
@@ -487,7 +522,7 @@ function bindWhmPhp(askDialog?: (options: Record<string, unknown>) => Promise<un
         const reference = applied.job?.referenceCode
         sectionNote(section, 'stored', t('Submitted as job {reference}. php-fpm -t runs before pools reload; a failed test restores the previous configuration.', { reference: typeof reference === 'string' && reference.trim() ? reference : t('Unnumbered') }))
       } catch (error) { sectionNote(section, 'failed', failure(error)) }
-      finally { busy = false; root.setAttribute('aria-busy', 'false') }
+      finally { busy = false; syncClean(() => { root.setAttribute('aria-busy', 'false') }) }
     }
     const switchExtension = async (version: string, extension: string, box: HTMLInputElement): Promise<void> => {
       const enabled = box.checked
@@ -599,7 +634,7 @@ function bindWhmPhp(askDialog?: (options: Record<string, unknown>) => Promise<un
     })
     const load = async (): Promise<void> => {
       if (busy || !transport || !verifyTemplates()) return
-      busy = true; refresh.disabled = true; root.setAttribute('aria-busy', 'true'); note('reading', t('Reading installed PHP inventory and saved domain assignments…'))
+      busy = true; syncClean(() => { refresh.disabled = true; root.setAttribute('aria-busy', 'true') }); note('reading', t('Reading installed PHP inventory and saved domain assignments…'))
       const results = await Promise.allSettled([request('GET', '/api/server/php/inventory').then(readPhpInventoryView), request('GET', '/api/server/php/usage').then(readPhpUsageView), request('GET', '/api/server/php/manage').then(readPhpManageView)])
       if (verifyTemplates()) {
         const [runtime, usage, managed] = results
@@ -613,7 +648,7 @@ function bindWhmPhp(askDialog?: (options: Record<string, unknown>) => Promise<un
           ? t('Package inventory and saved assignments read. FPM extension enablement, global defaults and application requests remain unverified.')
           : t('Some PHP reads are unavailable. Any retained observations are from the last successful read; no installed runtime or applied change is assumed.'))
       }
-      busy = false; refresh.disabled = !admitted(); root.setAttribute('aria-busy', 'false')
+      busy = false; syncClean(() => { refresh.disabled = !admitted(); root.setAttribute('aria-busy', 'false') })
     }
     if (!transport || !admitted()) { refresh.disabled = true; note('unavailable', t('PHP inventory is unavailable here. Nothing was read or changed.')); return }
     if (!verifyTemplates()) return

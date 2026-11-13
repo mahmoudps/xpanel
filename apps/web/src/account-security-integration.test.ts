@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { runInNewContext } from 'node:vm'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { builtinEnvironments, type EnvironmentReturn } from 'vitest/runtime'
 import { renderWebApp, serveWebUi, type WebAppRenderState } from './app.ts'
 import { isLocale, translator } from './i18n.ts'
@@ -20,22 +20,23 @@ const securityPages = [
 ] as const
 
 let testDom: EnvironmentReturn | undefined
-beforeEach(async () => {
+beforeAll(async () => {
   testDom = await builtinEnvironments.jsdom.setup(globalThis, { jsdom: { url: 'https://panel.example.test/security/account', runScripts: 'outside-only' } })
+})
+afterAll(async () => {
+  await testDom?.teardown(globalThis)
+  testDom = undefined
+})
+beforeEach(() => {
   vi.stubGlobal('xpT', (message: string, values?: Readonly<Record<string, string | number>>) => {
     const lang = document.documentElement.lang
     return translator(isLocale(lang) ? lang : undefined)(message, values)
   })
 })
-afterEach(async () => {
-  try {
-    vi.restoreAllMocks()
-    document.body.replaceChildren()
-    vi.unstubAllGlobals()
-  } finally {
-    await testDom?.teardown(globalThis)
-    testDom = undefined
-  }
+afterEach(() => {
+  vi.restoreAllMocks()
+  document.body.replaceChildren()
+  vi.unstubAllGlobals()
 })
 
 describe('core account security body dispatch', () => {

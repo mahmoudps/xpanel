@@ -26,7 +26,7 @@ async function callbackPair(canary: (peer: Socket, received: Buffer[]) => void) 
 }
 const reasonOf = (work: Promise<unknown>) => work.then(() => 'released', (error: { detail?: { reason?: string }; message?: string }) => error.detail?.reason ?? error.message)
 
-describe('release of the held account callback', { tags: ['unit'] }, () => {
+describe('release of the held account callback', { tags: ['feature'] }, () => {
   it('refuses by name a callback the canary ended after its verified frame and before release', async () => {
     const { client, received } = await callbackPair(peer => peer.end())
     await new Promise(resolve => client.once('end', resolve))
@@ -58,7 +58,7 @@ describe('release of the held account callback', { tags: ['unit'] }, () => {
   })
 })
 
-describe('why a held callback ended', { tags: ['unit'] }, () => {
+describe('why a held callback ended', { tags: ['feature'] }, () => {
   it('records which side ended first, how, and whether release had started', async () => {
     const marks: string[] = []
     const canary = await callbackPair(peer => peer.end())

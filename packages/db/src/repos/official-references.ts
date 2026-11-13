@@ -16,9 +16,18 @@ interface ReferenceRow extends Record<string, unknown> {
   tombstoned_at: string | null
 }
 
-const normalizedSql = (sql: string): string => lexSql(sql).filter(segment => segment.kind !== 'comment').map(segment => segment.kind === 'code'
-  ? segment.text.replace(/\bIF\s+NOT\s+EXISTS\b/gi, '').replace(/\s+/g, '').toLowerCase() : segment.text).join('').replace(/;$/, '')
+let lastNormInput = ''
+let lastNormOutput = ''
+const normalizedSql = (sql: string): string => {
+  if (sql === lastNormInput && sql.length > 0) return lastNormOutput
+  const out = lexSql(sql).filter(segment => segment.kind !== 'comment').map(segment => segment.kind === 'code'
+    ? segment.text.replace(/\bIF\s+NOT\s+EXISTS\b/gi, '').replace(/\s+/g, '').toLowerCase() : segment.text).join('').replace(/;$/, '')
+  lastNormInput = sql
+  lastNormOutput = out
+  return out
+}
 const appliedMigrations = (db: Db) => db.query<{ version: number; name: string; checksum: string }>('SELECT version,name,checksum FROM xpanel_schema_migrations ORDER BY version')
+let cachedInitSpec: { expected: { version: number; name: string; checksum: string }[]; expectedJson: string; expectedRuntimeNorm: string } | null = null
 const canonicalReference = /^XP-JOB-([0-9]{4})-([0-9]{6,16})$/
 
 const parsedSequence = (reference: string): { year: number; sequence: number } | null => {
@@ -42,18 +51,22 @@ export const initializeOperationalMetadata = (db: Db): Promise<{ issuerId: strin
   withSqliteErrors(async () => {
     assertRegisteredDatabaseRunner(db)
     assertNoActiveDatabaseTransaction()
-    const migrations = await loadMigrations()
-    const expected = migrations.map(({ version, name, checksum }) => ({ version, name, checksum }))
-    if (!isReviewedOperationalMigrationSet(expected, 'complete')) return fail('PRECONDITION_FAILED', 'this operational implementation supports only the reviewed migration set')
-    const expectedJson = JSON.stringify(expected)
-    const sql = migrations.find(m => m.version === OPERATIONAL_SCHEMA_VERSION)?.sql
-    const expectedRuntime = sql?.match(/CREATE TABLE IF NOT EXISTS job_runtime_leases\s*\([\s\S]*?\) STRICT;/)?.[0]
-    if (!expectedRuntime) return fail('PRECONDITION_FAILED', 'the operational migration is unavailable')
+    if (!cachedInitSpec) {
+      const migrations = await loadMigrations()
+      const expected = migrations.map(({ version, name, checksum }) => ({ version, name, checksum }))
+      if (!isReviewedOperationalMigrationSet(expected, 'complete')) return fail('PRECONDITION_FAILED', 'this operational implementation supports only the reviewed migration set')
+      const expectedJson = JSON.stringify(expected)
+      const sql = migrations.find(m => m.version === OPERATIONAL_SCHEMA_VERSION)?.sql
+      const expectedRuntime = sql?.match(/CREATE TABLE IF NOT EXISTS job_runtime_leases\s*\([\s\S]*?\) STRICT;/)?.[0]
+      if (!expectedRuntime) return fail('PRECONDITION_FAILED', 'the operational migration is unavailable')
+      cachedInitSpec = { expected, expectedJson, expectedRuntimeNorm: normalizedSql(expectedRuntime) }
+    }
+    const { expected, expectedJson, expectedRuntimeNorm } = cachedInitSpec
     return db.transaction(async tx => {
       assertDatabaseTransaction(tx)
       if (JSON.stringify(await appliedMigrations(tx)) !== expectedJson) return fail('PRECONDITION_FAILED', 'applied operational migration names, versions or checksums require review')
       const [runtime] = await tx.query<{ sql: string }>("SELECT sql FROM sqlite_master WHERE type='table' AND name='job_runtime_leases'")
-      if (!runtime || normalizedSql(runtime.sql) !== normalizedSql(expectedRuntime)) fail('PRECONDITION_FAILED', 'existing job runtime schema requires explicit compatibility review')
+      if (!runtime || normalizedSql(runtime.sql) !== expectedRuntimeNorm) fail('PRECONDITION_FAILED', 'existing job runtime schema requires explicit compatibility review')
       const existing = await tx.query<IdentityRow>('SELECT issuer_id,schema_version,migration_checksums_json FROM operational_identity WHERE singleton=1')
       if (existing[0]) {
         if (existing[0].schema_version !== OPERATIONAL_SCHEMA_VERSION || !matchesReviewedOperationalMigrations(existing[0].migration_checksums_json, expected, 'complete')) fail('PRECONDITION_FAILED', 'unsupported operational metadata version or migration receipt')

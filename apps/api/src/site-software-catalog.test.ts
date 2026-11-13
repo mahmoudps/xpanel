@@ -25,7 +25,7 @@ function harness(callHost?: SiteSoftwareHelpers['callHost'], caller = ROOT) {
 beforeEach(async () => { root = await mkdtemp(join(tmpdir(), 'xp-site-software-api-')) })
 afterEach(async () => { await rm(root, { recursive: true, force: true }) })
 
-describe('site software catalog workspace', { tags: ['unit'] }, () => {
+describe('site software catalog workspace', { tags: ['feature'] }, () => {
   it('offers only applications of the verified signed catalog and withdraws them without it', async () => {
     const h = harness(async () => hostView)
     const first = await h.read()

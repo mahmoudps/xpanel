@@ -1,13 +1,15 @@
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { fail } from '@xpanel/core'
 import type { StateStore } from '@xpanel/state'
-import type { AuthenticatedCaller } from '../auth.ts'
+import { hashPasswordArgon2id, type AuthenticatedCaller } from '../auth.ts'
 import { handleMailboxListAdminRoute, handleMailingListAdminRoute } from './mailing-list-admin.ts'
 
 const LIST = '11111111-1111-4111-8111-111111111111', ACC = '22222222-2222-4222-8222-222222222222', SU = '33333333-3333-4333-8333-333333333333'
+let fastListHash = ''
+beforeAll(async () => { fastListHash = await hashPasswordArgon2id('first secret 1', { timeCost: 1, parallelism: 1 }) })
 const dirs: string[] = []
 afterEach(async () => { for (const dir of dirs.splice(0)) await rm(dir, { recursive: true, force: true }) })
 
@@ -33,8 +35,8 @@ async function fixture(options: { kind?: 'user' | 'root'; ownsList?: boolean } =
   return { rootDir, audits, applied, password, listAdmin, authority, advance: (ms: number) => { clock += ms }, admin }
 }
 
-describe('mailing list administrator password', { tags: ['feature'] }, () => {
-  it('lets the owner set a password that then unlocks member administration from webmail, and a root reset replaces it', async () => {
+describe('mailing list administrator password', () => {
+  it('lets the owner set a password that then unlocks member administration from webmail, and a root reset replaces it', { tags: ['slow'] }, async () => {
     const t = await fixture()
     expect(await (await t.password(`/api/mail/mailing-lists/${LIST}/password`, 'first secret 1'))!.json()).toEqual({ id: LIST, address: 'news@alice.test', passwordSet: true })
     const stored = await readFile(join(t.rootDir, 'extended', 'mail', 'mailing-list-passwords.json'), 'utf8')
@@ -56,7 +58,7 @@ describe('mailing list administrator password', { tags: ['feature'] }, () => {
   })
   it('locks webmail list sign-in after five wrong passwords and refuses another account, a short password and a reseller on the root routes', async () => {
     const t = await fixture()
-    await t.password(`/api/mail/mailing-lists/${LIST}/password`, 'first secret 1')
+    await writeFile(join(t.rootDir, 'extended', 'mail', 'mailing-list-passwords.json'), JSON.stringify({ [LIST]: { hash: fastListHash, failures: 0, lockedUntil: null, updatedAt: '2026-11-07T10:00:00.000Z' } }))
     for (let i = 0; i < 4; i++) await expect(t.listAdmin({ password: 'wrong', op: 'read', member: null })).rejects.toMatchObject({ detail: { reason: 'list_password_wrong' } })
     await expect(t.listAdmin({ password: 'wrong', op: 'read', member: null })).rejects.toMatchObject({ detail: { reason: 'list_admin_locked' } })
     await expect(t.listAdmin({ password: 'first secret 1', op: 'read', member: null })).rejects.toMatchObject({ detail: { reason: 'list_admin_locked' } })

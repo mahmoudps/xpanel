@@ -1,5 +1,5 @@
 import { mailHomeGroups } from '../mail-home-groups.ts'
-import { tools as defaultCatalog, visibleNavigation, visibleTools, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
+import { unqualifiedTools as defaultCatalog, visibleNavigation, visibleTools, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
 import { renderMailTrackDelivery } from '../board-port/xmail-track-delivery.ts'
 import { renderMailFolders } from '../board-port/xmail-folders.ts'
 import { renderMailDiskUsage } from '../board-port/xmail-disk-usage.ts'

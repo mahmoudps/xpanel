@@ -1,7 +1,7 @@
 /// <reference lib="dom" />
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
-import { tools, navigation, registeredDocumentAliases, canonicalNavigationRoute, canOpenRegisteredRoute, visibleNavigation, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
+import { unqualifiedTools as tools, navigation, registeredDocumentAliases, canonicalNavigationRoute, canOpenRegisteredRoute, visibleNavigation, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
 import { serveWebUi } from './app.ts'
 import { resolveWebDocumentRoute } from './document-routes.ts'
 import { renderMailSurface, type MailSurfaceProps } from './surfaces/xmail.ts'

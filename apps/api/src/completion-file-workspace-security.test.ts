@@ -1,13 +1,18 @@
 import { randomUUID } from 'node:crypto'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { createApiToken, createResellerPrincipal, createTestDb, createUserPrincipal } from '@xpanel/db'
-import { createTestStateStore } from '@xpanel/state'
+import { existsSync } from 'node:fs'
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { dirname, join, relative, sep } from 'node:path'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { createApiToken, createDb, createResellerPrincipal, createTestDb, createUserPrincipal } from '@xpanel/db'
+import { createStateStore, createTestStateStore, type TestStateStoreHandle } from '@xpanel/state'
 import type { AgentApp } from '@xpanel/agent'
 import { sha256Hex } from './auth.ts'
 import { createApiApp } from './server.ts'
 import { TEST_AGENT_TOKEN, TEST_SERVER_SECRET } from './testing.ts'
 
 const HASH = '$argon2id$v=19$m=65536,t=3,p=4$MIIRqgvgQbgj220jfp0MPA$YfwJSVjtjSU0zzV/P3S9nnQ/USre2wvJMjfCIjrTQbg'
+const STATE_PARENT = existsSync('/dev/shm') ? '/dev/shm' : tmpdir()
 const stamp = '2026-01-01T00:00:00.000Z'
 const path = 'public_html/index.txt'
 const editLimit = 1024 * 1024
@@ -16,27 +21,59 @@ type Body = Record<string, unknown>
 interface Entry { name: string; path: string; kind: 'file' | 'directory' | 'symlink'; sizeBytes: number; mode: number; mtime: string }
 const entry = (target = path, patch: Partial<Entry> = {}): Entry => ({ name: target.split('/').at(-1)!, path: target, kind: 'file', sizeBytes: 9, mode: 0o640, mtime: stamp, ...patch })
 
+interface CachedStateFile { relPath: string; bytes: Buffer }
+const buildFileWorkspaceTemplate = async () => {
+  const database = await createTestDb()
+  const state = await createTestStateStore()
+  try {
+    const features = await state.store.createFeatureList({ name: 'File workspace policy', ownerId: null, disabled: [] })
+    const plan = await state.store.createPlan({ name: 'File workspace plan', ownerId: null, featureListId: features.id,
+      resources: { diskMb: 1000, bandwidthMbMonth: 10000, ioReadBps: 1048576, ioWriteBps: 1048576, ioReadIops: 100, ioWriteIops: 100, memoryMb: 128, maxProcesses: 16, cpuPercent: 100 },
+      caps: { addonDomains: 5, aliasDomains: 5, subdomains: 5, mailboxes: 4, forwarders: 4, mailingLists: 5, ftpAccounts: 5, databases: 5, phpWorkers: 5 }, dedicatedIp: false, shell: 'none', defaultMailboxQuotaMb: 100 })
+    await state.store.saveServerIp({ address: '192.0.2.10', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
+    const account = async (username: string) => state.store.createAccount({ username, passwordHash: HASH, primaryDomain: `${username}.example.test`, planId: plan.id, ownerId: null,
+      contactEmail: `owner@${username}.example.test`, ipv4: '192.0.2.10', shell: 'none',
+      php: { version: '8.3', handler: 'fpm', fpm: { mode: 'ondemand', maxChildren: 2, startServers: 1, minSpareServers: 1, maxSpareServers: 1, maxRequests: 50, processIdleTimeoutSec: 10 }, ini: {} } })
+    const owner = await account('browse9'), other = await account('other9')
+    const principal = await createUserPrincipal(database.db, { username: owner.username, accountId: owner.id, passwordHash: HASH })
+    const mailbox = await state.store.createServiceUser({ accountId: owner.id, login: `inbox@${owner.primaryDomain}`, passwordHash: HASH,
+      services: { email: true, ftp: false, webdisk: false }, mailboxQuotaMb: 100, ftpDir: 'public_html' })
+    const credential = `xp_${randomUUID()}`
+    await createApiToken(database.db, { principalId: principal.id, name: 'Synthetic file workspace', tokenHash: sha256Hex(credential), scopes: ['files:read', 'files:write'], expiresAt: new Date(Date.now() + 600000).toISOString() })
+    const lock = state.store.getWriterLock()
+    const stateFiles: CachedStateFile[] = []
+    const dirSet = new Set<string>()
+    const walk = async (dir: string): Promise<void> => {
+      for (const item of await readdir(dir, { withFileTypes: true })) {
+        const full = join(dir, item.name)
+        if (full === lock.mutexFilePath || full.startsWith(lock.mutexFilePath + '-') || full === lock.lockDirPath || full.startsWith(lock.lockDirPath + sep)) continue
+        const rel = relative(state.rootDir, full)
+        if (item.isDirectory()) { dirSet.add(rel); await walk(full) }
+        else { const d = dirname(rel); if (d !== '.') dirSet.add(d); stateFiles.push({ relPath: rel, bytes: await readFile(full) }) }
+      }
+    }
+    await walk(state.rootDir)
+    return { sqlite: database.sqlite.serialize(), stateFiles, relDirs: [...dirSet], features, owner, other, principal, mailbox, credential }
+  } finally {
+    await state.close()
+    await database.close()
+  }
+}
+let fileWorkspaceTemplate: Awaited<ReturnType<typeof buildFileWorkspaceTemplate>>
+
 const fixture = async () => {
-  const database = await createTestDb(); cleanup.push(() => database.close())
-  const state = await createTestStateStore(); cleanup.push(() => state.close())
-  const features = await state.store.createFeatureList({ name: 'File workspace policy', ownerId: null, disabled: [] })
-  const plan = await state.store.createPlan({ name: 'File workspace plan', ownerId: null, featureListId: features.id,
-    resources: { diskMb: 1000, bandwidthMbMonth: 10000, ioReadBps: 1048576, ioWriteBps: 1048576, ioReadIops: 100, ioWriteIops: 100, memoryMb: 128, maxProcesses: 16, cpuPercent: 100 },
-    caps: { addonDomains: 5, aliasDomains: 5, subdomains: 5, mailboxes: 4, forwarders: 4, mailingLists: 5, ftpAccounts: 5, databases: 5, phpWorkers: 5 }, dedicatedIp: false, shell: 'none', defaultMailboxQuotaMb: 100 })
-  await state.store.saveServerIp({ address: '192.0.2.10', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
-  const account = async (username: string) => state.store.createAccount({ username, passwordHash: HASH, primaryDomain: `${username}.example.test`, planId: plan.id, ownerId: null,
-    contactEmail: `owner@${username}.example.test`, ipv4: '192.0.2.10', shell: 'none',
-    php: { version: '8.3', handler: 'fpm', fpm: { mode: 'ondemand', maxChildren: 2, startServers: 1, minSpareServers: 1, maxSpareServers: 1, maxRequests: 50, processIdleTimeoutSec: 10 }, ini: {} } })
-  const owner = await account('browse9'), other = await account('other9')
-  const principal = await createUserPrincipal(database.db, { username: owner.username, accountId: owner.id, passwordHash: HASH })
-  const mailbox = await state.store.createServiceUser({ accountId: owner.id, login: `inbox@${owner.primaryDomain}`, passwordHash: HASH,
-    services: { email: true, ftp: false, webdisk: false }, mailboxQuotaMb: 100, ftpDir: 'public_html' })
+  const database = createDb(':memory:'); database.sqlite.deserialize(fileWorkspaceTemplate.sqlite); cleanup.push(() => database.close())
+  const rootDir = await mkdtemp(join(STATE_PARENT, 'xpanel-files-'))
+  for (const relDir of fileWorkspaceTemplate.relDirs) await mkdir(join(rootDir, relDir), { recursive: true, mode: 0o750 })
+  await Promise.all(fileWorkspaceTemplate.stateFiles.map(file => writeFile(join(rootDir, file.relPath), file.bytes, { mode: 0o640 })))
+  const state: TestStateStoreHandle = { store: createStateStore(rootDir), rootDir, close: () => rm(rootDir, { recursive: true, force: true }) }
+  cleanup.push(() => state.close())
+  const { features, owner, other, principal, mailbox, credential } = fileWorkspaceTemplate
   const token = async (scopes: string[], principalId = principal.id) => {
     const raw = `xp_${randomUUID()}`
     await createApiToken(database.db, { principalId, name: 'Synthetic file workspace', tokenHash: sha256Hex(raw), scopes, expiresAt: new Date(Date.now() + 60000).toISOString() })
     return raw
   }
-  const credential = await token(['files:read', 'files:write'])
   const files = new Map<string, string>([[path, 'Original\n']])
   const directories = new Set(['public_html'])
   const trash = new Map<string, { id: string; originalPath: string; name: string; sizeBytes: number; deletedAt: string; content: string }>()
@@ -90,6 +127,7 @@ const fixture = async () => {
 
 describe('file workspace API boundary with explicitly fake agent transport', () => {
   let f: Awaited<ReturnType<typeof fixture>>
+  beforeAll(async () => { fileWorkspaceTemplate = await buildFileWorkspaceTemplate() })
   beforeEach(async () => { f = await fixture() })
   afterEach(async () => {
     const results = await Promise.allSettled(cleanup.splice(0).reverse().map(close => close()))

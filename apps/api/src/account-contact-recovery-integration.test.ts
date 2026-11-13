@@ -37,7 +37,65 @@ let template: string
 const handles = new Set<DbHandle>()
 const directories: string[] = []
 const children = new Set<ChildProcess>()
+const warmWorkers: ChildProcess[] = []
 const shutdowns: Array<() => Promise<unknown>> = []
+
+const WORKER_SCRIPT = `
+  import { StateStore, WriterLock } from ${JSON.stringify(pathToFileURL(resolve('packages/state/src/store.ts')).href)};
+  import { createDb } from ${JSON.stringify(pathToFileURL(resolve('packages/db/src/client.ts')).href)};
+  import { prepareAccountContactIndexRollback } from ${JSON.stringify(pathToFileURL(resolve('packages/db/src/repos/account-contact-checkpoint.ts')).href)};
+  import { syncAccountContactIndex } from ${JSON.stringify(pathToFileURL(resolve('packages/db/src/repos/reindex.ts')).href)};
+  import { accountContactRevision } from ${JSON.stringify(pathToFileURL(resolve('packages/core/src/index.ts')).href)};
+  process.send({ phase: 'ready' });
+  process.once('message', async msg => {
+    try {
+      if (msg.kind === 'interrupted-sql') {
+        const store = new StateStore(msg.root), db = createDb(msg.dbPath);
+        const acc = await store.getAccount(msg.accountId);
+        await store.updateAccountContactEmail(acc.id, msg.email, {
+          expectedContactRevision: accountContactRevision(acc), authorize: async () => {},
+          prepareIndex: current => prepareAccountContactIndexRollback(db.db, current.id),
+          synchronizeIndex: async current => {
+            await syncAccountContactIndex(db.db, current);
+            process.send({ phase: 'sql-published' });
+            await new Promise(() => { globalThis.fixtureHold = setInterval(() => {}, 1000); });
+          },
+        });
+      } else if (msg.kind === 'writer-blocked') {
+        try {
+          const lease = await new WriterLock(msg.root, { acquireTimeoutMs: 40, retryIntervalMs: 5 }).acquire();
+          await lease.release();
+          throw new Error('writer entered before the search observation completed');
+        } catch (error) {
+          if (error.code !== 'CONFLICT') throw error;
+          process.send({ phase: 'writer-blocked' });
+          await new Promise(() => { globalThis.fixtureHold = setInterval(() => {}, 1000); });
+        }
+      }
+    } catch (err) {
+      console.error(err);
+      process.exit(1);
+    }
+  });
+`
+
+const spawnWarmWorker = async (): Promise<ChildProcess> => {
+  const child = spawn(process.execPath, ['--input-type=module', '--eval', WORKER_SCRIPT], { cwd: resolve('.'), stdio: ['ignore', 'ignore', 'pipe', 'ipc'] })
+  let diagnostics = ''
+  child.stderr?.on('data', chunk => { diagnostics += String(chunk) })
+  await new Promise<void>((done, reject) => {
+    const timeout = setTimeout(() => { child.kill('SIGKILL'); reject(new Error('warm worker timed out: ' + diagnostics)) }, 10000)
+    const onMsg = (value: unknown) => {
+      if (value && typeof value === 'object' && 'phase' in value && value.phase === 'ready') {
+        child.off('message', onMsg); clearTimeout(timeout); done()
+      }
+    }
+    child.on('message', onMsg)
+    child.once('error', error => { clearTimeout(timeout); reject(error) })
+    child.once('exit', () => { clearTimeout(timeout); reject(new Error('warm worker exited early: ' + diagnostics)) })
+  })
+  return child
+}
 
 beforeAll(async () => {
   base = await mkdtemp(join(tmpdir(), 'xpanel-api-contact-recovery-'))
@@ -50,6 +108,8 @@ beforeAll(async () => {
       scopes: ['*'], expiresAt: new Date(Date.now() + 60 * 60_000).toISOString() })
     await syncAccountContactIndex(prepared.db, account)
   } finally { await prepared.close() }
+  const spawned = await Promise.all(Array.from({ length: 5 }, () => spawnWarmWorker()))
+  warmWorkers.push(...spawned)
 })
 
 const stopChild = async (child: ChildProcess): Promise<void> => {
@@ -67,7 +127,10 @@ afterEach(async () => {
   for (const handle of handles) { await handle.close(); handles.delete(handle) }
   for (const directory of directories.splice(0)) await rm(directory, { recursive: true, force: true })
 })
-afterAll(async () => { await rm(base, { recursive: true, force: true }) })
+afterAll(async () => {
+  for (const w of warmWorkers.splice(0)) await stopChild(w)
+  await rm(base, { recursive: true, force: true })
+})
 
 /**
  * Migrate once and copy only the closed database. These real process/barrier cases
@@ -101,8 +164,8 @@ const fixture = async () => {
 type Fixture = Awaited<ReturnType<typeof fixture>>
 
 /** Wait for the actual child handshake; no fixed observation delay or synthetic PID. */
-const childMessage = async (script: string, expected: string): Promise<ChildProcess> => {
-  const child = spawn(process.execPath, ['--input-type=module', '--eval', script], { cwd: resolve('.'), stdio: ['ignore', 'ignore', 'pipe', 'ipc'] })
+const runWarmTask = async (payload: Record<string, unknown>, expected: string): Promise<ChildProcess> => {
+  const child = warmWorkers.pop() ?? await spawnWarmWorker()
   children.add(child)
   let diagnostics = ''
   child.stderr?.on('data', chunk => { diagnostics += String(chunk) })
@@ -116,30 +179,13 @@ const childMessage = async (script: string, expected: string): Promise<ChildProc
     child.on('message', success)
     child.once('error', error => { clearTimeout(timeout); reject(error) })
     child.once('exit', () => { clearTimeout(timeout); reject(new Error('contact recovery child exited before its handshake: ' + diagnostics)) })
+    child.send(payload)
   })
   return child
 }
 
 const interruptedSqlUpdate = async (f: Fixture): Promise<void> => {
-  const state = pathToFileURL(resolve('packages/state/src/index.ts')).href
-  const db = pathToFileURL(resolve('packages/db/src/index.ts')).href
-  const core = pathToFileURL(resolve('packages/core/src/index.ts')).href
-  const child = await childMessage(`
-    import { StateStore } from ${JSON.stringify(state)};
-    import { createDb, prepareAccountContactIndexRollback, syncAccountContactIndex } from ${JSON.stringify(db)};
-    import { accountContactRevision } from ${JSON.stringify(core)};
-    const store = new StateStore(${JSON.stringify(f.root)}), db = createDb(${JSON.stringify(f.dbPath)});
-    const account = await store.getAccount(${JSON.stringify(account.id)});
-    await store.updateAccountContactEmail(account.id, ${JSON.stringify(NEW_EMAIL)}, {
-      expectedContactRevision: accountContactRevision(account), authorize: async () => {},
-      prepareIndex: current => prepareAccountContactIndexRollback(db.db, current.id),
-      synchronizeIndex: async current => {
-        await syncAccountContactIndex(db.db, current);
-        process.send({ phase: 'sql-published' });
-        await new Promise(() => { globalThis.fixtureHold = setInterval(() => {}, 1000); });
-      },
-    });
-  `, 'sql-published')
+  const child = await runWarmTask({ kind: 'interrupted-sql', root: f.root, dbPath: f.dbPath, accountId: account.id, email: NEW_EMAIL }, 'sql-published')
   await stopChild(child)
   expect(await f.database.db.query('SELECT contact_email FROM idx_accounts WHERE id=$1', [account.id])).toEqual([{ contact_email: NEW_EMAIL }])
   expect(await readFile(f.accountPath, 'utf8')).toContain(NEW_EMAIL)
@@ -210,24 +256,12 @@ describe('API contact projection recovery with actual SQLite and state mutexes',
   it('retains the permanent mutex through the actual search query against a competing process', async () => {
     const f = await fixture()
     const query = f.database.db.query.bind(f.database.db)
-    const stateUrl = pathToFileURL(resolve('packages/state/src/index.ts')).href
     let observedBlockedWriter = false
     // The production runner is frozen. Trace only the query boundary through a
     // forwarding dependency; all statements still execute on that real runner.
     const tracedDb: Db = { ...f.database.db, query: (async (text: string, params?: readonly unknown[]) => {
       if (/FROM search_fts\s+WHERE/.test(text)) {
-        const child = await childMessage(`
-          import { WriterLock } from ${JSON.stringify(stateUrl)};
-          try {
-            const lease = await new WriterLock(${JSON.stringify(f.root)}, { acquireTimeoutMs: 40, retryIntervalMs: 5 }).acquire();
-            await lease.release();
-            throw new Error('writer entered before the search observation completed');
-          } catch (error) {
-            if (error.code !== 'CONFLICT') throw error;
-            process.send({ phase: 'writer-blocked' });
-            await new Promise(() => { globalThis.fixtureHold = setInterval(() => {}, 1000); });
-          }
-        `, 'writer-blocked')
+        const child = await runWarmTask({ kind: 'writer-blocked', root: f.root }, 'writer-blocked')
         observedBlockedWriter = true
         await stopChild(child)
       }

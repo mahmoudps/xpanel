@@ -1,9 +1,11 @@
 import { randomUUID } from 'node:crypto'
-import { access } from 'node:fs/promises'
-import { join } from 'node:path'
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createGeneration, createRootPrincipal, createSession, createTestDb, hostOperationInFlight, markFailed, setTotpSecret } from '@xpanel/db'
-import { createTestStateStore } from '@xpanel/state'
+import { existsSync } from 'node:fs'
+import { access, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { dirname, join, relative, sep } from 'node:path'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { createDb, createGeneration, createRootPrincipal, createSession, createTestDb, hostOperationInFlight, markFailed, setTotpSecret } from '@xpanel/db'
+import { createStateStore, createTestStateStore, type TestStateStoreHandle } from '@xpanel/state'
 import { FakeHostExecutor, HostReconciler, LinuxHostExecutor, type AgentApp } from '@xpanel/agent'
 import { fail } from '@xpanel/core'
 import { services } from '@xpanel/render'
@@ -36,18 +38,68 @@ const os = profileFor('ID=ubuntu\nVERSION_ID=24.04\nVERSION_CODENAME=noble')
 const cleanup: (() => Promise<unknown>)[] = []
 afterEach(async () => { vi.restoreAllMocks(); for (const close of cleanup.splice(0).reverse()) await close() })
 
+interface CachedStateFile { relPath: string; bytes: Buffer }
+async function snapshotStateFiles(rootDir: string, mutexFilePath: string, lockDirPath: string): Promise<CachedStateFile[]> {
+  const files: CachedStateFile[] = []
+  const walk = async (dir: string): Promise<void> => {
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name)
+      if (full === mutexFilePath || full.startsWith(mutexFilePath + '-') || full === lockDirPath || full.startsWith(lockDirPath + sep)) continue
+      if (entry.isDirectory()) await walk(full)
+      else files.push({ relPath: relative(rootDir, full), bytes: await readFile(full) })
+    }
+  }
+  await walk(rootDir)
+  return files
+}
+async function restoreStateFiles(rootDir: string, files: readonly CachedStateFile[]): Promise<void> {
+  const dirs = new Set(files.map(file => dirname(join(rootDir, file.relPath))))
+  for (const dir of dirs) await mkdir(dir, { recursive: true, mode: 0o750 })
+  await Promise.all(files.map(file => writeFile(join(rootDir, file.relPath), file.bytes, { mode: 0o640 })))
+}
+let schedulerBaselinePromise: Promise<{
+  sqlite: Uint8Array
+  stateFiles: CachedStateFile[]
+  feature: Awaited<ReturnType<Awaited<ReturnType<typeof createTestStateStore>>['store']['createFeatureList']>>
+  plan: Awaited<ReturnType<Awaited<ReturnType<typeof createTestStateStore>>['store']['createPlan']>>
+  root: Awaited<ReturnType<typeof createRootPrincipal>>
+}> | undefined
+function getSchedulerBaseline() {
+  if (!schedulerBaselinePromise) {
+    schedulerBaselinePromise = (async () => {
+      const database = await createTestDb(), state = await createTestStateStore()
+      try {
+        const feature = await state.store.createFeatureList({ name: 'Scheduler race', ownerId: null, disabled: [] })
+        const plan = await state.store.createPlan({ name: 'Scheduler race plan', ownerId: null, featureListId: feature.id,
+          resources: { diskMb: 1024, bandwidthMbMonth: 10240, ioReadBps: 1048576, ioWriteBps: 1048576, ioReadIops: 10, ioWriteIops: 10, memoryMb: 128, maxProcesses: 16, cpuPercent: 100 },
+          caps: { addonDomains: 2, aliasDomains: 2, subdomains: 2, mailboxes: 2, forwarders: 2, mailingLists: 2, ftpAccounts: 2, databases: 2, phpWorkers: 2 }, dedicatedIp: false, shell: 'none', defaultMailboxQuotaMb: 128 })
+        await state.store.saveServerIp({ address: '192.0.2.10', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
+        const root = await createRootPrincipal(database.db, { username: 'root', passwordHash: HASH, forcePasswordChange: false })
+        await setTotpSecret(database.db, root.id, new Uint8Array(32))
+        const lock = state.store.getWriterLock()
+        const stateFiles = await snapshotStateFiles(state.rootDir, lock.mutexFilePath, lock.lockDirPath)
+        return { sqlite: database.sqlite.serialize(), stateFiles, feature, plan, root }
+      } finally {
+        await state.close()
+        await database.close()
+      }
+    })()
+  }
+  return schedulerBaselinePromise
+}
+
+const STATE_PARENT = existsSync('/dev/shm') ? '/dev/shm' : tmpdir()
 async function host() {
-  const database = await createTestDb(), state = await createTestStateStore()
+  const baseline = await getSchedulerBaseline()
+  const database = createDb(':memory:')
+  const rootDir = await mkdtemp(join(STATE_PARENT, 'xpanel-sched-'))
+  const state: TestStateStoreHandle = { store: createStateStore(rootDir), rootDir, close: () => rm(rootDir, { recursive: true, force: true }) }
+  database.sqlite.deserialize(baseline.sqlite)
+  await restoreStateFiles(state.rootDir, baseline.stateFiles)
+  const { plan, root } = baseline
   cleanup.push(() => database.close(), () => state.close())
   // As both daemons register it at startup: background writes wait while a host operation binds the revision.
   state.store.registerHostOperationProbe(() => hostOperationInFlight(database.db))
-  const feature = await state.store.createFeatureList({ name: 'Scheduler race', ownerId: null, disabled: [] })
-  const plan = await state.store.createPlan({ name: 'Scheduler race plan', ownerId: null, featureListId: feature.id,
-    resources: { diskMb: 1024, bandwidthMbMonth: 10240, ioReadBps: 1048576, ioWriteBps: 1048576, ioReadIops: 10, ioWriteIops: 10, memoryMb: 128, maxProcesses: 16, cpuPercent: 100 },
-    caps: { addonDomains: 2, aliasDomains: 2, subdomains: 2, mailboxes: 2, forwarders: 2, mailingLists: 2, ftpAccounts: 2, databases: 2, phpWorkers: 2 }, dedicatedIp: false, shell: 'none', defaultMailboxQuotaMb: 128 })
-  await state.store.saveServerIp({ address: '192.0.2.10', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
-  const root = await createRootPrincipal(database.db, { username: 'root', passwordHash: HASH, forcePasswordChange: false })
-  await setTotpSecret(database.db, root.id, new Uint8Array(32))
   const sessionToken = 'scheduler-race-session-' + randomUUID()
   await createSession(database.db, { principalId: root.id, tokenHash: sessionTokenHash(sessionToken, 'xwhm'), expiresAt: new Date(Date.now() + 600_000).toISOString(), mfaVerified: true })
 
@@ -121,6 +173,7 @@ async function host() {
 }
 
 describe('account provisioning beside the scheduled minute work (H)', () => {
+  beforeAll(async () => { await getSchedulerBaseline() })
   it.runIf(process.platform === 'linux')('creates an account while AutoSSL and monitoring run, and leaves its certificate for the next minute', async () => {
     const h = await host()
     h.during.push(() => h.mailCerts.tick())

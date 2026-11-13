@@ -2,7 +2,7 @@ import { generateKeyPairSync, sign } from 'node:crypto'
 import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, unlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { applicationDigest, readApplicationPath } from '../../../packages/os/src/application-artifact.ts'
 import type { ApplicationArtifactDescriptor } from '../../../packages/os/src/application-artifact.ts'
 import { applicationCatalogSigningBytes, verifyApplicationCatalog } from './application-catalog.ts'
@@ -26,19 +26,26 @@ const setup = { database: true, config: { path: 'config.php', template: 'config.
 const homes: string[] = []
 afterEach(async () => { for (const home of homes.splice(0)) await rm(home, { recursive: true, force: true }) })
 
-async function fixture(options: { path?: string; docRoot?: boolean } = {}) {
-  const home = await mkdtemp(join(tmpdir(), 'w8-sites-')); homes.push(home)
-  const artifacts = join(home, 'store'), account = join(home, 'home')
-  await mkdir(artifacts); await mkdir(join(account, 'public_html'), { recursive: true })
-  const key = generateKeyPairSync('ed25519'), policy = { now: new Date('2026-11-07T12:00:00.000Z'), minimumSequence: 1, panelVersion: '1.4.2' }
-  const releases = {
+const sharedPolicy = { now: new Date('2026-11-07T12:00:00.000Z'), minimumSequence: 1, panelVersion: '1.4.2' }
+let sharedReleases!: { '1.0.0': ReturnType<typeof bundle>; '2.0.0': ReturnType<typeof bundle>; '3.0.0': ReturnType<typeof bundle> }
+let sharedCatalog!: ReturnType<typeof verifyApplicationCatalog>
+beforeAll(() => {
+  const key = generateKeyPairSync('ed25519')
+  sharedReleases = {
     '1.0.0': bundle('1.0.0', { 'index.php': 'v1', 'lib/old.php': 'old', 'lib/keep.php': 'keep', 'config.sample': TEMPLATE }, setup),
     '2.0.0': bundle('2.0.0', { 'index.php': 'v2', 'lib/keep.php': 'keep', 'lib/new/added.php': 'added', 'config.sample': TEMPLATE }, setup),
     '3.0.0': bundle('3.0.0', { 'index.php': 'v3' }),
   }
+  const payload = JSON.stringify({ schemaVersion: 1, sequence: 1, issuedAt: '2026-11-07T11:00:00.000Z', expiresAt: '2026-11-08T12:00:00.000Z', applications: [{ id: 'sample', name: 'Sample', releases: (['3.0.0', '2.0.0', '1.0.0'] as const).map(version => ({ version, minimumPanelVersion: '1.0.0', artifact: sharedReleases[version].descriptor })) }] })
+  sharedCatalog = verifyApplicationCatalog({ keyId: 'apps', payload, signature: sign(null, applicationCatalogSigningBytes(payload), key.privateKey).toString('hex') }, [{ keyId: 'apps', publicKeyPem: key.publicKey.export({ type: 'spki', format: 'pem' }).toString() }], sharedPolicy)
+})
+
+async function fixture(options: { path?: string; docRoot?: boolean } = {}) {
+  const home = await mkdtemp(join(tmpdir(), 'w8-sites-')); homes.push(home)
+  const artifacts = join(home, 'store'), account = join(home, 'home')
+  await mkdir(artifacts); await mkdir(join(account, 'public_html'), { recursive: true })
+  const policy = sharedPolicy, releases = sharedReleases, catalog = sharedCatalog
   for (const release of Object.values(releases)) await writeFile(join(artifacts, release.descriptor.sha256), release.bytes)
-  const payload = JSON.stringify({ schemaVersion: 1, sequence: 1, issuedAt: '2026-11-07T11:00:00.000Z', expiresAt: '2026-11-08T12:00:00.000Z', applications: [{ id: 'sample', name: 'Sample', releases: (['3.0.0', '2.0.0', '1.0.0'] as const).map(version => ({ version, minimumPanelVersion: '1.0.0', artifact: releases[version].descriptor })) }] })
-  const catalog = verifyApplicationCatalog({ keyId: 'apps', payload, signature: sign(null, applicationCatalogSigningBytes(payload), key.privateKey).toString('hex') }, [{ keyId: 'apps', publicKeyPem: key.publicKey.export({ type: 'spki', format: 'pem' }).toString() }], policy)
   const calls: string[] = [], control = { failOp: null as string | null, kill: null as string | null }
   const worker: ApplicationWorkerRun = async (_target, request, payloadChunks, seconds) => {
     calls.push(String(request.op))
@@ -134,7 +141,7 @@ describe('site application transactions as the account', () => {
     expect(await readAccountApplications({ ...account, uid: account.uid + 1 })).toEqual([])
   })
 
-  it('refuses an occupied directory, a colliding file and edited files, and removal still works on edits', async () => {
+  it('refuses an occupied directory, a colliding file and edited files, and removal still works on edits', { tags: ['slow'] }, async () => {
     const t = await fixture()
     await writeFile(t.site('index.html'), 'mine')
     await expect(t.job('install', '3.0.0')).rejects.toMatchObject({ detail: { reason: 'application_target_not_empty', stateChanged: false } })
@@ -193,7 +200,7 @@ describe('site application transactions as the account', () => {
     expect(await t.read()).toEqual(installed)
   })
 
-  it('recovers a journal left by a lost process, on either side of the commit', async () => {
+  it('recovers a journal left by a lost process, on either side of the commit', { tags: ['slow'] }, async () => {
     const t = await fixture()
     expect((await t.job('install', '1.0.0')).ok).toBe(true)
     const installed = await t.read()
@@ -219,7 +226,7 @@ describe('site application transactions as the account', () => {
     expect((await t.read()).installation).toMatchObject({ version: '2.0.0', previous: { version: '1.0.0' } })
   })
 
-  it('stops recovery rather than overwrite a file someone else wrote during the transaction', async () => {
+  it('stops recovery rather than overwrite a file someone else wrote during the transaction', { tags: ['slow'] }, async () => {
     const t = await fixture()
     expect((await t.job('install', '1.0.0')).ok).toBe(true)
     const installed = await t.read()

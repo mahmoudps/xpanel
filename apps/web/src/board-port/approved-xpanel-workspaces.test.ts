@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 import { defaultPlan } from '@xpanel/core';
 import type { Account, Domain } from '@xpanel/core';
-import { tools } from '@xpanel/catalog';
+import { unqualifiedTools as tools } from '@xpanel/catalog';
 import { approvedXpanelWorkspaceRoutes, renderApprovedXpanelWorkspace } from './approved-xpanel-workspaces.ts';
 import { groupViews, mono, xpanelHomeFromProps } from './xpanel-home.ts';
 import { renderEmailAccountsExtension } from './extensions/email-accounts.ts';

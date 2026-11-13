@@ -1,10 +1,11 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { readFile, readdir } from 'node:fs/promises'
+import { cp, mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as dbApi from '@xpanel/db'
 import type { DatabaseUser } from '@xpanel/core'
-import { createTestStateStore } from '@xpanel/state'
+import { createStateStore, createTestStateStore } from '@xpanel/state'
 import { ARGON2 } from '../../../packages/db/src/testing.ts'
 import { sha256Hex } from './auth.ts'
 import { createApiApp } from './server.ts'
@@ -12,9 +13,8 @@ import { TEST_SERVER_SECRET } from './testing.ts'
 
 type PublicUser = Pick<DatabaseUser,'id'|'name'|'grants'>
 const cleanup: Array<() => Promise<unknown>> = []
-const fixture = async () => {
-  const database=await dbApi.createTestDb(); cleanup.push(()=>database.close())
-  const state=await createTestStateStore(); cleanup.push(()=>state.close())
+const buildStateTemplate = async () => {
+  const state=await createTestStateStore()
   const feature=await state.store.createFeatureList({name:'Grant workspace policy',ownerId:null,disabled:[]})
   const plan=await state.store.createPlan({name:'Grant workspace plan',ownerId:null,featureListId:feature.id,
     resources:{diskMb:1000,bandwidthMbMonth:10000,ioReadBps:1048576,ioWriteBps:1048576,ioReadIops:100,ioWriteIops:100,memoryMb:128,maxProcesses:16,cpuPercent:100},
@@ -33,6 +33,16 @@ const fixture = async () => {
   const ownUser=await user(owner.id,owner.username+'_user'),sibling=await user(owner.id,owner.username+'_other'),foreignUser=await user(other.id,other.username+'_user')
   await state.store.setGrant({databaseUserId:ownUser.id,databaseId:ownDb.id,privileges:['SELECT']})
   await state.store.setGrant({databaseUserId:foreignUser.id,databaseId:foreignDb.id,privileges:['SELECT']})
+  const snapshot=await state.store.readSnapshot()
+  return{state,snapshot,feature,owner,other,ownDb,secondDb,trashDb,foreignDb,ownUser,sibling,foreignUser}
+}
+let template!: Awaited<ReturnType<typeof buildStateTemplate>>
+const fixture = async () => {
+  const database=await dbApi.createTestDb(); cleanup.push(()=>database.close())
+  const rootDir=await mkdtemp(join(tmpdir(),'xpanel-state-'))
+  await cp(template.state.rootDir,rootDir,{recursive:true})
+  const state={store:createStateStore(rootDir),rootDir,close:()=>rm(rootDir,{recursive:true,force:true})}; cleanup.push(()=>state.close())
+  const {feature,owner,other,ownDb,secondDb,trashDb,foreignDb,ownUser,sibling,foreignUser}=template
   const principal=await dbApi.createUserPrincipal(database.db,{username:owner.username,accountId:owner.id,passwordHash:ARGON2})
   const token=async(scopes:string[],principalId=principal.id)=>{
     const raw='xp_'+randomUUID()
@@ -40,7 +50,7 @@ const fixture = async () => {
     return{raw,id:record.id}
   }
   const credential=await token(['databases:read','databases:write'])
-  await dbApi.reindexFromState(database.db,await state.store.readSnapshot())
+  await dbApi.reindexFromState(database.db,template.snapshot)
   // No agent or MariaDB transport is supplied: this suite proves desired metadata only.
   const app=createApiApp({db:database.db,store:state.store,serverSecret:TEST_SERVER_SECRET})
   const request=(body?:unknown,options:{method?:string;path?:string;userId?:string;token?:string|null}={})=>app.fetch(new Request(
@@ -70,6 +80,8 @@ const fixture = async () => {
 
 describe('conditional database grant API with isolated SQLite and desired state',()=>{
   let f:Awaited<ReturnType<typeof fixture>>
+  beforeAll(async()=>{template=await buildStateTemplate()})
+  afterAll(async()=>{await template?.state.close()})
   beforeEach(async()=>{f=await fixture()})
   afterEach(async()=>{
     vi.restoreAllMocks();const failures:unknown[]=[]
@@ -91,7 +103,7 @@ describe('conditional database grant API with isolated SQLite and desired state'
     expect(after.accounts).toEqual(before.accounts);expect(after.databases).toEqual(before.databases);expect(after.search).toEqual(before.search)
   }
 
-  it('adds a grant only when the last read had no grant and returns safe owned readback',{ tags: ['slow'] }, async()=>{
+  it('adds a grant only when the last read had no grant and returns safe owned readback',{ tags: ['feature'] }, async()=>{
     const before=await f.images(),response=await f.request({databaseId:f.secondDb.id,privileges:['INSERT'],expectedPrivileges:null})
     expect(response.status).toBe(200)
     const data=await response.json() as{user:PublicUser;context:{accountId:string};application:object;stateChanged:boolean}
@@ -106,7 +118,7 @@ describe('conditional database grant API with isolated SQLite and desired state'
     await assertUnrelated(before)
   })
 
-  it('replaces only the selected existing grant and preserves unrelated grants and users',{ tags: ['slow'] }, async()=>{
+  it('replaces only the selected existing grant and preserves unrelated grants and users',{ tags: ['feature'] }, async()=>{
     await f.state.store.setGrant({databaseUserId:f.ownUser.id,databaseId:f.secondDb.id,privileges:['DELETE']})
     const before=await f.images(),response=await f.request(body())
     expect(response.status).toBe(200)
@@ -116,14 +128,14 @@ describe('conditional database grant API with isolated SQLite and desired state'
     await assertUnrelated(before)
   })
 
-  it.each(['null','different-array']as const)('refuses stale expected privileges %s before writing',{ tags: ['slow'] }, async kind=>{
+  it.each(['null','different-array']as const)('refuses stale expected privileges %s before writing',{ tags: ['feature'] }, async kind=>{
     const before=await f.images(),response=await f.request({...body(),expectedPrivileges:kind==='null'?null:['DELETE']})
     expect(response.status).toBe(409)
     expect(await response.json()).toMatchObject({code:'CONFLICT',details:{stateChanged:false}})
     expect(await f.images()).toEqual(before)
   })
 
-  it('compares the grant current under the writer lease instead of an earlier route snapshot',{ tags: ['slow'] }, async()=>{
+  it('compares the grant current under the writer lease instead of an earlier route snapshot',{ tags: ['feature'] }, async()=>{
     const original=f.state.store.setGrant.bind(f.state.store)
     let committed:Awaited<ReturnType<typeof f.images>>|undefined
     vi.spyOn(f.state.store,'setGrant').mockImplementationOnce(async(...args:Parameters<typeof original>)=>{
@@ -136,7 +148,7 @@ describe('conditional database grant API with isolated SQLite and desired state'
     assertGrant((await f.state.store.getDatabaseUser(f.ownUser.id))!,f.ownDb.id,['DELETE'])
   })
 
-  it.each(['foreign-user','foreign-database','trashed-database','missing-database','missing-user']as const)('refuses %s with no file or index effects',{ tags: ['slow'] }, async kind=>{
+  it.each(['foreign-user','foreign-database','trashed-database','missing-database','missing-user']as const)('refuses %s with no file or index effects',{ tags: ['feature'] }, async kind=>{
     const before=await f.images()
     const databaseId=kind==='foreign-database'?f.foreignDb.id:kind==='trashed-database'?f.trashDb.id:kind==='missing-database'?randomUUID():f.ownDb.id
     const userId=kind==='foreign-user'?f.foreignUser.id:kind==='missing-user'?randomUUID():f.ownUser.id
@@ -144,7 +156,7 @@ describe('conditional database grant API with isolated SQLite and desired state'
     await safeFailure(response,kind==='foreign-database'?403:kind==='trashed-database'?412:404,before)
   })
 
-  it.each(['missing-expected','invalid-expected','missing-database','unknown-field']as const)('rejects %s owner input before effects',{ tags: ['slow'] }, async kind=>{
+  it.each(['missing-expected','invalid-expected','missing-database','unknown-field']as const)('rejects %s owner input before effects',{ tags: ['feature'] }, async kind=>{
     const before=await f.images()
     const input=kind==='missing-expected'?{databaseId:f.ownDb.id,privileges:['UPDATE']}
       :kind==='invalid-expected'?{...body(),expectedPrivileges:[]}
@@ -153,28 +165,28 @@ describe('conditional database grant API with isolated SQLite and desired state'
     await safeFailure(await f.request(input),422,before)
   })
 
-  it('rejects empty or unknown desired privileges instead of granting or revoking something else',{ tags: ['slow'] }, async()=>{
+  it('rejects empty or unknown desired privileges instead of granting or revoking something else',{ tags: ['feature'] }, async()=>{
     const before=await f.images()
     for(const privileges of[[],['SELECT; DROP DATABASE']])await safeFailure(await f.request({...body(),privileges}),422,before)
   })
 
-  it('rejects owner query selectors',{ tags: ['slow'] }, async()=>{
+  it('rejects owner query selectors',{ tags: ['feature'] }, async()=>{
     const before=await f.images(),path='/api/databases/users/'+f.ownUser.id+'/grants?accountId='+f.other.id
     await safeFailure(await f.request(body(),{path}),422,before)
   })
 
-  it('requires write scope and authenticated ownership',{ tags: ['slow'] }, async()=>{
+  it('requires write scope and authenticated ownership',{ tags: ['feature'] }, async()=>{
     const read=await f.token(['databases:read']),before=await f.images()
     await safeFailure(await f.request(body(),{token:read.raw}),403,before)
     await safeFailure(await f.request(body(),{token:null}),401,before)
   })
 
-  it('enforces the mysql-databases feature on grant changes',{ tags: ['slow'] }, async()=>{
+  it('enforces the mysql-databases feature on grant changes',{ tags: ['feature'] }, async()=>{
     await f.state.store.updateFeatureList(f.feature.id,{disabled:['mysql-databases']})
     const before=await f.images();await safeFailure(await f.request(body()),403,before)
   })
 
-  it('refuses a credential revoked while the grant writer is queued behind the held lease',{ tags: ['slow'] }, async()=>{
+  it('refuses a credential revoked while the grant writer is queued behind the held lease',{ tags: ['feature'] }, async()=>{
     const original=f.state.store.setGrant.bind(f.state.store),before=await f.images()
     vi.spyOn(f.state.store,'setGrant').mockImplementationOnce(async(...args:Parameters<typeof original>)=>{
       const lease=await f.state.store.getWriterLock().acquire()
@@ -185,7 +197,7 @@ describe('conditional database grant API with isolated SQLite and desired state'
     await safeFailure(await f.request(body()),401,before)
   })
 
-  it.each(['feature','account-status']as const)('rechecks fresh %s before the grant write',{ tags: ['slow'] }, async kind=>{
+  it.each(['feature','account-status']as const)('rechecks fresh %s before the grant write',{ tags: ['feature'] }, async kind=>{
     const original=f.state.store.setGrant.bind(f.state.store)
     let current:Awaited<ReturnType<typeof f.images>>|undefined
     vi.spyOn(f.state.store,'setGrant').mockImplementationOnce(async(...args:Parameters<typeof original>)=>{
@@ -196,7 +208,7 @@ describe('conditional database grant API with isolated SQLite and desired state'
     const response=await f.request(body());expect(current).toBeDefined();await safeFailure(response,403,current!)
   })
 
-  it('restores the exact previous user file after an ordinary write failure before commit',{ tags: ['slow'] }, async()=>{
+  it('restores the exact previous user file after an ordinary write failure before commit',{ tags: ['feature'] }, async()=>{
     type Writer={writeStateJson:(lease:unknown,path:string,data:unknown,mode?:number)=>Promise<void>}
     const writer=f.state.store as unknown as Writer,original=writer.writeStateJson.bind(writer)
     const target=join(f.state.rootDir,'accounts',f.owner.username,'db-users',f.ownUser.name+'.json')
@@ -212,7 +224,7 @@ describe('conditional database grant API with isolated SQLite and desired state'
     expect(await f.images()).toEqual(before)
   })
 
-  it('preserves the administrator legacy grant body without a required expected snapshot',{ tags: ['slow'] }, async()=>{
+  it('preserves the administrator legacy grant body without a required expected snapshot',{ tags: ['feature'] }, async()=>{
     const root=await dbApi.createRootPrincipal(f.database.db,{username:'root',passwordHash:ARGON2})
     await dbApi.setPasswordHash(f.database.db,root.id,ARGON2,{forceChange:false})
     const credential=await f.token(['databases:read','databases:write'],root.id)

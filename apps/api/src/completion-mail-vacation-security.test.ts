@@ -1,21 +1,22 @@
 import { randomUUID } from 'node:crypto'
-import { readFile } from 'node:fs/promises'
-import { request as httpRequest } from 'node:http'
+import { cp, mkdtemp, readFile, rm } from 'node:fs/promises'
+import { Agent as HttpAgent, request as httpRequest } from 'node:http'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { FakeHostExecutor, HostReconciler, createAgentApp } from '@xpanel/agent'
-import { fail } from '@xpanel/core'
+import { MIN_ARGON2_MEMORY_KIB, fail } from '@xpanel/core'
 import { createApiToken, createTestDb, createUserPrincipal, listAudit } from '@xpanel/db'
 import { profileFor } from '@xpanel/os'
-import { atomicWriteJson, createTestStateStore } from '@xpanel/state'
-import { sha256Hex, verifyPasswordArgon2id } from './auth.ts'
+import { atomicWriteJson, createStateStore, createTestStateStore } from '@xpanel/state'
+import { hashPasswordArgon2id, sha256Hex, verifyPasswordArgon2id } from './auth.ts'
 import { mailboxPrincipalUsername } from './mail/inbox.ts'
 import type { MailboxTransport } from './mail/inbox.ts'
 import { createApiApp, listenApiServer } from './server.ts'
 import { TEST_AGENT_TOKEN, TEST_SERVER_SECRET } from './testing.ts'
 
 // Public independent Argon2 fixture vector; these identities authenticate disposable synthetic fixtures only.
-const HASH = '$argon2id$v=19$m=65536,t=3,p=4$MIIRqgvgQbgj220jfp0MPA$YfwJSVjtjSU0zzV/P3S9nnQ/USre2wvJMjfCIjrTQbg'
+let HASH = '$argon2id$v=19$m=65536,t=3,p=4$MIIRqgvgQbgj220jfp0MPA$YfwJSVjtjSU0zzV/P3S9nnQ/USre2wvJMjfCIjrTQbg'
 const PASSWORD = 'correct horse battery staple'
 const ORIGIN = 'https://mail.example.test:2096'
 const route = '/api/webmail/vacation'
@@ -83,11 +84,17 @@ const draft = (patch: Record<string, unknown> = {}): Record<string, unknown> => 
   ...patch,
 })
 
-const fixture = async () => {
-  const database = await createTestDb()
-  cleanup.push(() => database.close())
+const keepAliveAgent = new HttpAgent({ keepAlive: true })
+const mkFastTempDir = async (prefix: string): Promise<string> => {
+  if (process.platform === 'linux') {
+    try { return await mkdtemp(join('/dev/shm', prefix)) } catch {}
+  }
+  return mkdtemp(join(tmpdir(), prefix))
+}
+
+const buildStateTemplate = async () => {
+  HASH = await hashPasswordArgon2id(PASSWORD, { memoryKiB: MIN_ARGON2_MEMORY_KIB, timeCost: 1, parallelism: 1 })
   const state = await createTestStateStore()
-  cleanup.push(() => state.close())
   const features = await state.store.createFeatureList({ name: 'Vacation policy', ownerId: null, disabled: [] })
   const plan = await state.store.createPlan({
     name: 'Vacation plan', ownerId: null, featureListId: features.id,
@@ -109,11 +116,109 @@ const fixture = async () => {
   const inbox = await mailbox(owner.id, 'inbox', owner.primaryDomain)
   const sibling = await mailbox(owner.id, 'support', owner.primaryDomain)
   const foreign = await mailbox(other.id, 'inbox', other.primaryDomain)
-  // Pre-provision the sealed mailbox identities so the real mail login path only seals a session here.
-  const sealedPrincipal = await createUserPrincipal(database.db, { username: mailboxPrincipalUsername(inbox.login), accountId: owner.id, passwordHash: HASH })
-  await createUserPrincipal(database.db, { username: mailboxPrincipalUsername(sibling.login), accountId: owner.id, passwordHash: HASH })
-  await createUserPrincipal(database.db, { username: mailboxPrincipalUsername(foreign.login), accountId: other.id, passwordHash: HASH })
-  const adminPrincipal = await createUserPrincipal(database.db, { username: owner.username, accountId: owner.id, passwordHash: HASH })
+  const seedDb = await createTestDb()
+  const sealedPrincipal = await createUserPrincipal(seedDb.db, { username: mailboxPrincipalUsername(inbox.login), accountId: owner.id, passwordHash: HASH })
+  await createUserPrincipal(seedDb.db, { username: mailboxPrincipalUsername(sibling.login), accountId: owner.id, passwordHash: HASH })
+  await createUserPrincipal(seedDb.db, { username: mailboxPrincipalUsername(foreign.login), accountId: other.id, passwordHash: HASH })
+  const adminPrincipal = await createUserPrincipal(seedDb.db, { username: owner.username, accountId: owner.id, passwordHash: HASH })
+  const credential = `xp_${randomUUID()}`
+  const readOnly = `xp_${randomUUID()}`
+  const expiresAt = new Date(Date.now() + 3_600_000).toISOString()
+  await createApiToken(seedDb.db, { principalId: adminPrincipal.id, name: 'Synthetic vacation acceptance', tokenHash: sha256Hex(credential), scopes: ['webmail:read', 'webmail:write'], expiresAt })
+  await createApiToken(seedDb.db, { principalId: adminPrincipal.id, name: 'Synthetic vacation acceptance', tokenHash: sha256Hex(readOnly), scopes: ['webmail:read'], expiresAt })
+  const seedTransport: MailboxTransport = {
+    async verify(login, password) {
+      const service = await state.store.getServiceUserByLogin(login)
+      const stored = service ? await state.store.getServiceUserHash(service.id) : null
+      const hash = stored?.startsWith('{ARGON2ID}') ? stored.slice('{ARGON2ID}'.length) : stored
+      if (!service?.services.email || !hash || !await verifyPasswordArgon2id(password, hash)) fail('UNAUTHENTICATED', 'invalid mailbox credentials')
+    },
+    async list() { return [] },
+    async read() { return fail('NOT_FOUND', 'message not found') },
+    async remove() {},
+    async send() { return { messageId: '<synthetic@example.test>' } },
+  }
+  const seedExec = new FakeHostExecutor()
+  const seedOs = profileFor('ID=ubuntu\nVERSION_ID="24.04"\n')
+  const seedAgent = createAgentApp({
+    reconciler: new HostReconciler({ store: state.store, db: seedDb.db, executor: seedExec, os: seedOs }),
+    store: state.store, db: seedDb.db, executor: seedExec,
+    os: { id: seedOs.id, versionId: seedOs.versionId, family: seedOs.family },
+    agentToken: TEST_AGENT_TOKEN,
+  })
+  const seedSealedApp = createApiApp({
+    db: seedDb.db, store: state.store, serverSecret: TEST_SERVER_SECRET,
+    entryPoint: 'xmail', publicOrigin: ORIGIN, allowedOrigins: [ORIGIN],
+    secureCookies: true, requireOriginHeader: true,
+    mailboxTransport: seedTransport, agentApp: seedAgent, agentToken: TEST_AGENT_TOKEN,
+  })
+  const seedListener = await listenApiServer(seedSealedApp)
+  const seededSessions = new Map<string, Session>()
+  let seededRows: Array<{ table: string; rows: Array<Record<string, unknown>> }> = []
+  try {
+    for (const address of [inbox.login, sibling.login, foreign.login]) {
+      const response = await new Promise<Response>((resolve, reject) => {
+        const req = httpRequest({
+          hostname: '127.0.0.1', port: seedListener.port, path: '/api/auth/login', method: 'POST',
+          headers: { host: new URL(ORIGIN).host, origin: ORIGIN, 'content-type': 'application/json' },
+        }, res => {
+          const chunks: Buffer[] = []
+          res.on('data', (chunk: Buffer) => chunks.push(Buffer.from(chunk)))
+          res.once('error', reject)
+          res.once('end', () => resolve(new Response(Buffer.concat(chunks), { status: res.statusCode ?? 500, headers: { 'set-cookie': res.headers['set-cookie']?.join(', ') ?? '' } })))
+        })
+        req.once('error', reject)
+        req.end(JSON.stringify({ username: address, password: PASSWORD }))
+      })
+      expect(response.status).toBe(200)
+      const body = await response.json() as { csrfToken?: unknown; mailbox?: unknown; session?: { id?: unknown }; principal?: { username?: unknown } }
+      expect(body.mailbox).toBe(address)
+      expect(body.principal?.username).toMatch(/^mbx[0-9a-f]{28}$/)
+      const cookie = (response.headers.get('set-cookie') ?? '').split(';')[0]!
+      expect(cookie.startsWith('__Host-xmail_session=')).toBe(true)
+      const session: Session = {
+        cookie,
+        csrf: typeof body.csrfToken === 'string' ? body.csrfToken : '',
+        sessionId: typeof body.session?.id === 'string' ? body.session.id : '',
+      }
+      expect(session.csrf).toMatch(/^[0-9a-f]{64}$/)
+      expect(session.sessionId.length).toBeGreaterThan(0)
+      seededSessions.set(address, session)
+    }
+    const seedTables = ['principals', 'sessions', 'mailbox_sessions', 'api_tokens'] as const
+    seededRows = await Promise.all(seedTables.map(async table => ({
+      table,
+      rows: await seedDb.query(`SELECT * FROM ${table}`),
+    })))
+  } finally {
+    seedListener.server.closeAllConnections()
+    await seedListener.close()
+    await seedDb.close()
+  }
+  return {
+    state, features, owner, other, inbox, sibling, foreign,
+    sealedPrincipal, adminPrincipal, credential, readOnly, seededSessions, seededRows,
+    closeAll: async () => { keepAliveAgent.destroy(); await state.close() },
+  }
+}
+let template!: Awaited<ReturnType<typeof buildStateTemplate>>
+
+const fixture = async () => {
+  const rootDir = await mkFastTempDir('xpanel-state-')
+  await cp(template.state.rootDir, rootDir, { recursive: true })
+  const state = { store: createStateStore(rootDir), rootDir, close: () => rm(rootDir, { recursive: true, force: true }) }
+  cleanup.push(() => state.close())
+  const database = await createTestDb()
+  cleanup.push(() => database.close())
+  await database.db.transaction(async tx => {
+    for (const { table, rows } of template.seededRows) {
+      for (const row of rows) {
+        const cols = Object.keys(row)
+        await tx.query(`INSERT INTO ${table} (${cols.join(',')}) VALUES (${cols.map(() => '?').join(',')})`, cols.map(col => row[col]))
+      }
+    }
+  })
+  const { features, owner, other, inbox, sibling, foreign, sealedPrincipal, adminPrincipal, credential, readOnly } = template
   // The existing sanctioned mail transport fake verifies the stored synthetic mailbox hash; no route logic is replaced.
   const transport: MailboxTransport = {
     async verify(login, password) {
@@ -145,16 +250,9 @@ const fixture = async () => {
   const listener = await listenApiServer(sealedApp)
   cleanup.push(async () => { listener.server.closeAllConnections(); await listener.close() })
   const legacy = createApiApp({ db: database.db, store: state.store, serverSecret: TEST_SERVER_SECRET, agentApp, agentToken: TEST_AGENT_TOKEN })
-  const token = async (scopes: string[], principalId = adminPrincipal.id) => {
-    const raw = `xp_${randomUUID()}`
-    await createApiToken(database.db, { principalId, name: 'Synthetic vacation acceptance', tokenHash: sha256Hex(raw), scopes, expiresAt: new Date(Date.now() + 60_000).toISOString() })
-    return raw
-  }
-  const credential = await token(['webmail:read', 'webmail:write'])
-  const readOnly = await token(['webmail:read'])
   const call = (path: string, method = 'GET', body?: unknown, session?: Session, extra: Record<string, string> = {}): Promise<Response> => new Promise((resolve, reject) => {
     const request = httpRequest({
-      hostname: '127.0.0.1', port: listener.port, path, method,
+      hostname: '127.0.0.1', port: listener.port, path, method, agent: keepAliveAgent,
       headers: {
         host: new URL(ORIGIN).host,
         origin: ORIGIN,
@@ -174,7 +272,7 @@ const fixture = async () => {
     request.once('error', reject)
     request.end(body === undefined ? undefined : JSON.stringify(body))
   })
-  const sessions = new Map<string, Session>()
+  const sessions = new Map<string, Session>(template.seededSessions)
   const open = async (address: string = inbox.login): Promise<Session> => {
     const cached = sessions.get(address)
     if (cached) return cached
@@ -296,6 +394,8 @@ const queueNextMutationWriter = (store: Awaited<ReturnType<typeof fixture>>['sta
 
 describe('sealed mailbox vacation responder configuration HTTP security acceptance', () => {
   let f: Awaited<ReturnType<typeof fixture>>
+  beforeAll(async () => { template = await buildStateTemplate() })
+  afterAll(async () => { await template?.closeAll() })
   beforeEach(async () => { f = await fixture() })
   afterEach(async () => {
     vi.restoreAllMocks()
@@ -317,7 +417,7 @@ describe('sealed mailbox vacation responder configuration HTTP security acceptan
     expect(await f.snapshot()).toEqual(before)
   })
 
-  it('saves exactly the seven editable fields with the captured revision and reads the stored rule back exactly', { tags: ['slow'] }, async () => {
+  it('saves exactly the seven editable fields with the captured revision and reads the stored rule back exactly', async () => {
     const session = await f.open()
     const absence = await f.view(session)
     const patch = {
@@ -352,23 +452,30 @@ describe('sealed mailbox vacation responder configuration HTTP security acceptan
     expect((await f.view(session))).toMatchObject({ vacation: later.vacation, revision: later.revision })
   })
 
-  it('rejects bodies that are not exactly the seven editable fields plus expectedRevision', { tags: ['slow'] }, async () => {
+  it('rejects bodies that are not exactly the seven editable fields plus expectedRevision', async () => {
     const session = await f.open()
     await f.saveValid(session)
     const current = (await f.view(session)).revision
     const valid: Record<string, unknown> = { ...draft(), expectedRevision: current }
     const before = await f.snapshot()
-    for (const key of editable) {
-      const body: Record<string, unknown> = { ...valid }
-      delete body[key]
-      await expectValidation(await f.save(session, body), `missing ${key}`)
+    const cases: Array<[string, unknown]> = [
+      ...editable.map((key): [string, unknown] => {
+        const body: Record<string, unknown> = { ...valid }
+        delete body[key]
+        return [`missing ${key}`, body]
+      }),
+      ['missing expectedRevision', { ...draft() }],
+      ...['mailbox', 'owner', 'accountId', 'compiledSieve', 'updatedAt', 'nativeApplied', 'application', 'revision', 'unexpected'].map(
+        (key): [string, unknown] => [`injected ${key}`, { ...valid, [key]: key === 'mailbox' ? f.foreign.login : 'injected' }],
+      ),
+      ...[null, [], 42, 'settings'].map((value): [string, unknown] => [`non-object body ${JSON.stringify(value)}`, value]),
+    ]
+    for (let i = 0; i < cases.length; i += 6) {
+      const batch = cases.slice(i, i + 6)
+      await Promise.all(batch.map(async ([label, body]) => {
+        await expectValidation(await f.save(session, body), label)
+      }))
     }
-    const missingRevision = { ...draft() }
-    await expectValidation(await f.save(session, missingRevision), 'missing expectedRevision')
-    for (const key of ['mailbox', 'owner', 'accountId', 'compiledSieve', 'updatedAt', 'nativeApplied', 'application', 'revision', 'unexpected']) {
-      await expectValidation(await f.save(session, { ...valid, [key]: key === 'mailbox' ? f.foreign.login : 'injected' }), `injected ${key}`)
-    }
-    for (const value of [null, [], 42, 'settings']) await expectValidation(await f.save(session, value), `non-object body ${JSON.stringify(value)}`)
     expect(await f.snapshot()).toEqual(before)
   })
 
@@ -386,7 +493,7 @@ describe('sealed mailbox vacation responder configuration HTTP security acceptan
     expect((await f.view(session)).revision).toBe(current.revision)
   })
 
-  it('rejects a stale revision without overwriting the saved configuration', { tags: ['slow'] }, async () => {
+  it('rejects a stale revision without overwriting the saved configuration', async () => {
     const session = await f.open()
     const absence = await f.view(session)
     const first = await f.saveValid(session)
@@ -400,7 +507,7 @@ describe('sealed mailbox vacation responder configuration HTTP security acceptan
     expect(absence.revision).not.toBe(second.revision)
   })
 
-  it('creates from the known absence revision and treats that revision as stale after the first save', { tags: ['slow'] }, async () => {
+  it('creates from the known absence revision and treats that revision as stale after the first save', async () => {
     const session = await f.open()
     const absence = await f.view(session)
     expect(absence.vacation).toBeNull()
@@ -412,7 +519,7 @@ describe('sealed mailbox vacation responder configuration HTTP security acceptan
     expect(await f.stored()).toEqual({ ...created.vacation, ownerAuthority: f.authorityFor(f.inbox) })
   })
 
-  it('rejects malformed schedules, intervals, header controls, oversized messages and invalid enabled states', { tags: ['slow'] }, async () => {
+  it('rejects malformed schedules, intervals, header controls, oversized messages and invalid enabled states', async () => {
     const session = await f.open()
     await f.saveValid(session)
     const current = (await f.view(session)).revision
@@ -447,14 +554,17 @@ describe('sealed mailbox vacation responder configuration HTTP security acceptan
       ['enabled string boolean', { enabled: 'true' }],
       ['null body field', { body: null }],
     ]
-    for (const [label, patch] of invalid) {
-      await expectValidation(await f.save(session, { ...draft(patch), expectedRevision: current }), label)
-      expect(await f.readBytes(f.inbox.login), label).toBe(before.contents.inbox)
+    for (let i = 0; i < invalid.length; i += 6) {
+      const batch = invalid.slice(i, i + 6)
+      await Promise.all(batch.map(async ([label, patch]) => {
+        await expectValidation(await f.save(session, { ...draft(patch), expectedRevision: current }), label)
+      }))
+      expect(await f.readBytes(f.inbox.login)).toBe(before.contents.inbox)
     }
     expect(await f.snapshot()).toEqual(before)
   })
 
-  it('permits a disabled empty configuration and an enabled HTML-only message', { tags: ['slow'] }, async () => {
+  it('permits a disabled empty configuration and an enabled HTML-only message', async () => {
     const session = await f.open()
     const disabled = await f.saveValid(session, { enabled: false, subject: '', body: '', htmlBody: '' })
     expect(disabled.vacation).toMatchObject({ enabled: false, subject: '', body: '', htmlBody: '', startDate: null, endDate: null, replyIntervalHours: 24 })
@@ -469,7 +579,7 @@ describe('sealed mailbox vacation responder configuration HTTP security acceptan
     expect(await f.snapshot()).toEqual(before)
   })
 
-  it('projects the stored record without stored metadata and keeps its current-value revision', { tags: ['slow'] }, async () => {
+  it('projects the stored record without stored metadata and keeps its current-value revision', async () => {
     const record = {
       mailbox: f.inbox.login, enabled: true, subject: 'Seeded', body: 'Seeded body', htmlBody: '',
       startDate: null, endDate: null, replyIntervalHours: 24, compiledSieve: 'require ["vacation"];\n', updatedAt: '2026-01-01T00:00:00.000Z',
@@ -499,7 +609,7 @@ describe('sealed mailbox vacation responder configuration HTTP security acceptan
     expect(replaced.compiledSieve).toContain(':subject "Replaced"')
   })
 
-  it('serializes a queued save behind the current writer lease', { tags: ['slow'] }, async () => {
+  it('serializes a queued save behind the current writer lease', async () => {
     const session = await f.open(), current = await f.view(session)
     const queue = queueNextMutationWriter(f.state.store)
     let settled = false
@@ -515,7 +625,7 @@ describe('sealed mailbox vacation responder configuration HTTP security acceptan
     } finally { queue.release(); await pending.catch(() => undefined); queue.restore() }
   })
 
-  it('admits only one concurrent save for the same captured revision', { tags: ['slow'] }, async () => {
+  it('admits only one concurrent save for the same captured revision', async () => {
     const session = await f.open()
     const current = await f.view(session)
     const responses = await Promise.all([
@@ -546,7 +656,7 @@ describe('sealed mailbox vacation responder configuration HTTP security acceptan
     } finally { queue.release(); await pending.catch(() => undefined); queue.restore() }
   })
 
-  it('binds a second account sealed mailbox to its own record and refuses mailbox injection', { tags: ['slow'] }, async () => {
+  it('binds a second account sealed mailbox to its own record and refuses mailbox injection', async () => {
     const ownerSession = await f.open(f.inbox.login)
     const foreignSession = await f.open(f.foreign.login)
     const ownerAbsence = await f.view(ownerSession)
@@ -607,7 +717,7 @@ describe('sealed mailbox vacation responder configuration HTTP security acceptan
     expect(await f.readBytes(f.inbox.login)).toBeNull()
   })
 
-  it('keeps the non-mailbox administrator path legacy-shaped and still validates its writes', { tags: ['slow'] }, async () => {
+  it('keeps the non-mailbox administrator path legacy-shaped and still validates its writes', async () => {
     const ownerSession = await f.open()
     const absentResponse = await f.legacyCall(`${route}?mailbox=${encodeURIComponent(f.inbox.login)}`)
     expect(absentResponse.status).toBe(200)
@@ -640,7 +750,7 @@ describe('sealed mailbox vacation responder configuration HTTP security acceptan
     await refuse(await f.legacyCall(route, 'PUT', { mailbox: f.inbox.login, enabled: false }, f.readOnly), 403, 'FORBIDDEN', 'legacy read-only write scope')
   })
 
-  it('joins exactly one account-bound audit entry per successful save and none for refusals', { tags: ['slow'] }, async () => {
+  it('joins exactly one account-bound audit entry per successful save and none for refusals', async () => {
     const session = await f.open()
     expect(await f.audits()).toHaveLength(0)
     const current = await f.view(session)
@@ -666,7 +776,7 @@ describe('sealed mailbox vacation responder configuration HTTP security acceptan
     expect(await f.audits()).toHaveLength(2)
   })
 
-  it('applies the saved responder as the mailbox Sieve script through the host agent', { tags: ['slow'] }, async () => {
+  it('applies the saved responder as the mailbox Sieve script through the host agent', async () => {
     const session = await f.open()
     const before = await f.snapshot()
     expect(before.agentCalls).toBe(0)

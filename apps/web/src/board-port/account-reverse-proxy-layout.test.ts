@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { canOpenRegisteredRoute, tools, visibleNavigation } from '@xpanel/catalog'
+import { canOpenRegisteredRoute, unqualifiedTools as tools, visibleNavigation } from '@xpanel/catalog'
 import type { Account, Domain } from '@xpanel/core'
 import { renderAccountReverseProxyWorkspace } from './account-reverse-proxy-workspace.ts'
 import { renderApprovedXpanelWorkspace } from './approved-xpanel-workspaces.ts'

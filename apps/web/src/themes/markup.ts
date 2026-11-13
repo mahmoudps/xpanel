@@ -16,13 +16,28 @@ export interface MarkupNode {
 }
 
 const RAW_TEXT = new Set(['script', 'style', 'textarea', 'title', 'noscript'])
+const CLOSING_TAGS: Readonly<Record<string, RegExp>> = {
+  script: /<\/script(?=[\t\n\f\r />])/ig,
+  style: /<\/style(?=[\t\n\f\r />])/ig,
+  textarea: /<\/textarea(?=[\t\n\f\r />])/ig,
+  title: /<\/title(?=[\t\n\f\r />])/ig,
+  noscript: /<\/noscript(?=[\t\n\f\r />])/ig,
+}
 const VOID = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'source', 'track', 'wbr'])
 const SVG_HTML_POINTS = new Set(['foreignobject', 'desc', 'title'])
 const MATH_TEXT_POINTS = new Set(['mi', 'mo', 'mn', 'ms', 'mtext'])
 const TOKEN = /<!--[\s\S]*?-->|<![^>]*>|<\/([a-zA-Z][\w:-]*)\s*>|<([a-zA-Z][\w:-]*)((?:\s+[^\s"'>/=]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>`]+))?)*)\s*(\/?)>/g
 const ATTRIBUTE = /([^\s"'>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g
 const ENTITY: Readonly<Record<string, string>> = { amp: '&', lt: '<', gt: '>', quot: '"', '#39': "'", apos: "'" }
-const decode = (value: string): string => value.replace(/&(amp|lt|gt|quot|#39|apos);/g, (_, name: string) => ENTITY[name]!)
+const decode = (value: string): string => value.includes('&') ? value.replace(/&(amp|lt|gt|quot|#39|apos);/g, (_, name: string) => ENTITY[name]!) : value
+const nodeSpans = new WeakMap<MarkupNode, { readonly start: number; readonly openEnd: number }>()
+const EMPTY_ATTRS: ReadonlyMap<string, string> = new Map()
+let cachedHtmlA = ''
+let cachedNodesA: readonly MarkupNode[] | undefined
+let cachedHtmlB = ''
+let cachedNodesB: readonly MarkupNode[] | undefined
+
+export const markupNodeSpan = (node: MarkupNode): { readonly start: number; readonly openEnd: number } | undefined => nodeSpans.get(node)
 
 export const isHtmlElement = (node: MarkupNode, tag?: string): boolean =>
   node.namespace === 'html' && (tag === undefined || node.tag === tag)
@@ -45,6 +60,8 @@ function childNamespace(tag: string, parent?: MarkupNode): MarkupNamespace {
  *  Foreign content retains its namespace, including HTML integration points. Enough to check hooks, not a full
  *  HTML parser: implied end tags are closed at the next matching end tag. */
 export function parseMarkup(html: string): MarkupNode[] {
+  if (cachedNodesA !== undefined && html === cachedHtmlA) return cachedNodesA.slice()
+  if (cachedNodesB !== undefined && html === cachedHtmlB) return cachedNodesB.slice()
   const nodes: MarkupNode[] = []
   const open: number[] = []
   TOKEN.lastIndex = 0
@@ -57,24 +74,38 @@ export function parseMarkup(html: string): MarkupNode[] {
       continue
     }
     if (!startTag) continue
+    const start = match.index
+    const openEnd = TOKEN.lastIndex
     const tag = startTag.toLowerCase()
-    const attrs = new Map<string, string>()
-    for (const attribute of rawAttrs.matchAll(ATTRIBUTE)) {
-      const name = attribute[1]!.toLowerCase()
-      if (!attrs.has(name)) attrs.set(name, decode(attribute[2] ?? attribute[3] ?? attribute[4] ?? ''))
+    let attrs: ReadonlyMap<string, string> = EMPTY_ATTRS
+    if (rawAttrs) {
+      let mutable: Map<string, string> | undefined
+      ATTRIBUTE.lastIndex = 0
+      for (let attribute = ATTRIBUTE.exec(rawAttrs); attribute; attribute = ATTRIBUTE.exec(rawAttrs)) {
+        const name = attribute[1]!.toLowerCase()
+        mutable ??= new Map<string, string>()
+        if (!mutable.has(name)) mutable.set(name, decode(attribute[2] ?? attribute[3] ?? attribute[4] ?? ''))
+      }
+      if (mutable) attrs = mutable
     }
     const parent = open.at(-1) ?? -1
     const parentNode = parent < 0 ? undefined : nodes[parent]!
     const namespace = childNamespace(tag, parentNode)
     const template = parentNode === undefined ? -1 : isHtmlElement(parentNode, 'template') ? parent : parentNode.template
-    nodes.push({ tag, namespace, attrs, parent, template })
+    const node: MarkupNode = { tag, namespace, attrs, parent, template }
+    nodeSpans.set(node, { start, openEnd })
+    nodes.push(node)
     if (namespace === 'html' && RAW_TEXT.has(tag) || tag === 'script' || tag === 'style') {
-      const closing = new RegExp(`</${tag}(?=[\\t\\n\\f\\r />])`, 'ig')
+      const closing = CLOSING_TAGS[tag] ?? new RegExp(`</${tag}(?=[\\t\\n\\f\\r />])`, 'ig')
       closing.lastIndex = TOKEN.lastIndex
       TOKEN.lastIndex = closing.exec(html)?.index ?? html.length
     } else if (!(namespace === 'html' && VOID.has(tag)) && !selfClosing) open.push(nodes.length - 1)
   }
-  return nodes
+  cachedHtmlB = cachedHtmlA
+  cachedNodesB = cachedNodesA
+  cachedHtmlA = html
+  cachedNodesA = nodes
+  return nodes.slice()
 }
 
 const SELECTOR = /^(?:#([\w-]+)|\[(data-[a-z0-9]+(?:-[a-z0-9]+)*|name|role)(?:="([^"]*)")?\])$/

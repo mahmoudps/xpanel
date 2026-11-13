@@ -1,4 +1,4 @@
-import { tools as defaultCatalog, visibleTools } from '@xpanel/catalog'
+import { unqualifiedTools as defaultCatalog, visibleTools } from '@xpanel/catalog'
 import { v2MailToolsClientTemplates } from './mail-tools-client-templates.ts'
 import { v2BoxTrapperSection } from './boxtrapper.ts'
 import type { PanelSurfaceProps } from '../../../../contract.ts'
