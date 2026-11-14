@@ -131,11 +131,11 @@ export default [
     prefix: 'RMTA', probe: SERVICES, paths: restartPaths('mail-queue'), page: servicesPage, unit: unitsOf('RMTA'),
     checks: ['QUEUE-PRESERVED', 'PORT-25-220-BANNER'], hostOnly: ['PORT-25-220-BANNER'],
     async run(x) {
-      const kept = read => (Array.isArray(read.data?.messages) ? read.data.messages.filter(item => ['deferred', 'hold'].includes(item.queue)).map(item => item.queueId) : [])
+      const kept = (read, queues) => (Array.isArray(read.data?.messages) ? read.data.messages.filter(item => queues.includes(item.queue)).map(item => item.queueId) : [])
       const queued = await x.root.get('/api/server/mail-queue')
       const cycle = await restartActive(x, 'postfix')
       const after = await x.root.get('/api/server/mail-queue')
-      const beforeIds = kept(queued), afterIds = kept(after)
+      const beforeIds = kept(queued, ['deferred', 'hold']), afterIds = kept(after, ['deferred', 'hold', 'active', 'incoming'])
       x.check('QUEUE-PRESERVED', cameBack(cycle) && queued.status === 200 && after.status === 200 && Array.isArray(queued.data?.messages) && Array.isArray(after.data?.messages) && beforeIds.every(id => afterIds.includes(id)),
         { ...seen(cycle), queued: beforeIds.length, remaining: afterIds.length })
       if (x.host) {

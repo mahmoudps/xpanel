@@ -67,6 +67,41 @@ beforeAll(async()=>{
   const exported:unknown=JSON.parse(exportFirewall(before,new Date('2026-11-01T00:00:00.000Z')));
   seededDocumentData={...object(exported),rules:before.rules.map(rule=>rule.id==='other-app'?{...rule,comment:'reviewed import'}:rule)};
   seededDocumentJson=JSON.stringify(seededDocumentData);
+  const warmDir=await mkdtemp(join(FIREWALL_TMP,'xpanel-fw-warm-'));
+  try{
+    await cp(firewallSeedDir,warmDir,{recursive:true,filter:copyStoreFilter});
+    const warmStore=createStateStore(warmDir);
+    const warmCaller={principal:{kind:'root',id:'root-id',username:'root'}} as AuthenticatedCaller;
+    const warmHelpers:FirewallWorkspaceHelpers={
+      requireCaller:async()=>warmCaller,assertRoot:async()=>{},
+      store:{
+        getFirewallState:()=>warmStore.getFirewallState(),
+        getFirewallPending:()=>warmStore.getFirewallPending(),
+        replaceFirewall:(next,guard,options)=>warmStore.replaceFirewall(next,guard,options),
+        confirmFirewallChange:id=>warmStore.confirmFirewallChange(id),
+        revertFirewallChange:id=>warmStore.revertFirewallChange(id),
+        getServerSettings:async()=>settings
+      },
+      clientIp:()=>'203.0.113.7',reconcile:async()=>({ok:true,status:200,body:{generation:1,fixtureOnly:true}}),
+      bans:async()=>Response.json({state:'read',bans:[]}),audit:async()=>{},schedule:()=>{},now:()=>new Date()
+    };
+    const warmCall=async(method:string,p:string,body?:unknown)=>{
+      const url=new URL('https://panel.test'+p);
+      const res=await handleFirewallWorkspaceRoute(new Request(url.toString(),{method,...(body===undefined?{}:{body:JSON.stringify(body),headers:{'content-type':'application/json'}})}),url,method,warmHelpers);
+      return res ? await res.json() : {};
+    };
+    document.documentElement.lang='en';document.body.replaceChildren(firewallMarkupTemplate.content.cloneNode(true));
+    Object.assign(window,{xpanelSessionRequest:(m:string,p:string,b?:unknown)=>warmCall(m,p,b)});
+    bindFirewallClient(async()=>true);
+    await vi.waitFor(()=>{if(!document.querySelector('[data-firewall-rule-id="office-mysql"]'))throw new Error('warm')},{timeout:5000,interval:1});
+    await warmCall('POST','/api/firewall/import',{document:seededDocumentData,expectedRevision:seededRevisionA,dryRun:true});
+    const imp=object(await warmCall('POST','/api/firewall/import',{document:seededDocumentData,expectedRevision:seededRevisionA}));
+    const pending=object(imp.pending);
+    if(typeof pending.id==='string')await warmCall('POST','/api/firewall/confirm',{id:pending.id});
+  }finally{
+    Reflect.deleteProperty(window,'xpanelSessionRequest');document.body.innerHTML='';
+    await rm(warmDir,{recursive:true,force:true});
+  }
 });
 afterAll(async()=>{
   if(firewallSeedDir)await rm(firewallSeedDir,{recursive:true,force:true});
@@ -131,7 +166,7 @@ it('refuses a stale import confirmation and accepts the accurately reviewed fres
       return true;
     });
     bindFirewallClient(ask);
-    await expect.poll(()=>document.querySelector('[data-firewall-rule-id="office-mysql"]'),{timeout:5000,interval:5}).not.toBeNull();
+    await expect.poll(()=>document.querySelector('[data-firewall-rule-id="office-mysql"]'),{timeout:5000,interval:1}).not.toBeNull();
     required('[name="firewall-import-json"]',HTMLTextAreaElement).value=seededDocumentJson;
     const importButton=required('[data-firewall-action="import"]',HTMLButtonElement);
     expect(importButton.disabled).toBe(false);importButton.click();
@@ -143,8 +178,8 @@ it('refuses a stale import confirmation and accepts the accurately reviewed fres
     const deleteButton=[...officeRow.querySelectorAll('button')].find(button=>button.textContent==='Delete');
     if(!deleteButton)throw new Error('Expected the real row delete action');
     expect(deleteButton.disabled).toBe(false);deleteButton.click();
-    await expect.poll(()=>calls.filter(call=>call.path==='/api/firewall/confirm').length,{timeout:5000,interval:5}).toBe(1);
-    await expect.poll(()=>document.querySelector('[data-firewall-rule-id="office-mysql"]'),{timeout:5000,interval:5}).toBeNull();
+    await expect.poll(()=>calls.filter(call=>call.path==='/api/firewall/confirm').length,{timeout:5000,interval:1}).toBe(1);
+    await expect.poll(()=>document.querySelector('[data-firewall-rule-id="office-mysql"]'),{timeout:5000,interval:1}).toBeNull();
     const revisionB=firewallRevision(await h.store.getFirewallState());
     expect(revisionB).not.toBe(revisionA);
     expect(bodyOf(recorded(calls,call=>call.method==='DELETE')).expectedRevision).toBe(revisionA);
@@ -153,7 +188,7 @@ it('refuses a stale import confirmation and accepts the accurately reviewed fres
     const question=await settled(importQuestion.promise);
     expect(question.body).toContain('0 added, 0 removed, 1 changed');
     importConfirm.resolve(true);
-    await expect.poll(()=>required('[data-firewall-manage-status]',HTMLParagraphElement).textContent,{timeout:5000,interval:5}).toBe('The firewall rules changed after the preview. Preview the import again; this import was not applied.');
+    await expect.poll(()=>required('[data-firewall-manage-status]',HTMLParagraphElement).textContent,{timeout:5000,interval:1}).toBe('The firewall rules changed after the preview. Preview the import again; this import was not applied.');
     expect(calls.filter(call=>call.path==='/api/firewall/import'&&call.body?.dryRun!==true)).toHaveLength(0);
     const afterStale=await h.store.getFirewallState();
     expect(firewallRevision(afterStale)).toBe(revisionB);
@@ -169,8 +204,8 @@ it('refuses a stale import confirmation and accepts the accurately reviewed fres
     expect(bodyOf(freshPreview).expectedRevision).toBe(revisionB);
     expect(freshPreview.reply.diff).toMatchObject({added:['office-mysql'],removed:[],changed:['other-app']});
     freshConfirm.resolve(true);
-    await expect.poll(()=>calls.filter(call=>call.path==='/api/firewall/confirm').length,{timeout:5000,interval:5}).toBe(2);
-    await expect.poll(()=>document.querySelector('[data-firewall-rule-id="office-mysql"]'),{timeout:5000,interval:5}).not.toBeNull();
+    await expect.poll(()=>calls.filter(call=>call.path==='/api/firewall/confirm').length,{timeout:5000,interval:1}).toBe(2);
+    await expect.poll(()=>document.querySelector('[data-firewall-rule-id="office-mysql"]'),{timeout:5000,interval:1}).not.toBeNull();
     const imported=recorded(calls,call=>call.path==='/api/firewall/import'&&call.body?.dryRun!==true);
     expect(bodyOf(imported).expectedRevision).toBe(revisionB);
     expect(imported.reply.diff).toMatchObject({added:['office-mysql'],removed:[],changed:['other-app']});

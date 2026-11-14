@@ -57,7 +57,8 @@ describe('bounded root index workspace with real journaled desired state', () =>
     expect(saved.configuration.revision).not.toBe(before.configuration.revision)
     expect(await f.state.store.getDomain(f.domain.id)).toEqual({ ...originalDomain, indexFiles: ['home.html', 'index.php'] })
     expect(await f.state.store.getServerSettings()).toEqual(originalSettings)
-    expect(await (await f.write('', true))!.json()).toMatchObject({ configuration: { indexFiles: [...DEFAULT_INDEX_FILES] }, stateChanged: true })
+    expect(await (await f.write('', true))!.json()).toMatchObject({ configuration: { indexFiles: [...DEFAULT_INDEX_FILES], explicit: false }, stateChanged: true })
+    expect(await f.state.store.getDomain(f.domain.id)).toEqual(originalDomain)
   })
   it.each(['user', 'reseller'] as const)('refuses %s before revealing domain data', async kind => {
     const f = await fixture(); vi.mocked(f.helpers.requireCaller).mockResolvedValue({ principal: { kind, id: randomUUID() } } as AuthenticatedCaller)

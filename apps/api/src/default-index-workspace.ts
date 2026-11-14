@@ -101,7 +101,7 @@ export function createDefaultIndexWorkspaceRoutes(helpers: DefaultIndexWorkspace
     const deferred: Audit[] = []
     try {
       try {
-        await helpers.store.updateDomain(current.domain.id, { indexFiles }, { expectedRevision: current.authority, domainGuard: {
+        await helpers.store.updateDomain(current.domain.id, { indexFiles: reset ? undefined : indexFiles }, { expectedRevision: current.authority, domainGuard: {
           accountId: current.account.id, expectedRevision: current.workspace.revision,
           authorize: async (account, domain) => {
             freshCaller = await root(req, 'server.default_index.update', caller, deferred)
@@ -115,7 +115,7 @@ export function createDefaultIndexWorkspaceRoutes(helpers: DefaultIndexWorkspace
         } })
       } finally { for (const audit of deferred) await helpers.emitAudit(audit) }
       const saved = await capture(name)
-      if (committed === undefined || saved.authority !== committed || JSON.stringify(saved.domain.indexFiles) !== JSON.stringify(indexFiles)) return unknown()
+      if (committed === undefined || saved.authority !== committed || (reset ? saved.domain.indexFiles !== undefined : JSON.stringify(saved.domain.indexFiles) !== JSON.stringify(indexFiles))) return unknown()
       freshCaller = await root(req, 'server.default_index.update', caller)
       let application: 'not_requested' | 'global_configuration_applied' = 'not_requested'
       if (helpers.applyConfiguration) {

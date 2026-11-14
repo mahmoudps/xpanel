@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderApprovedWhmBackups } from './board-port/approved-whm-backups.ts'
 import { renderV2BackupsPage } from './themes/v2/pages/xwhm/lifecycle/backups.ts'
 import { bindWhmBackupDestinations } from './whm-backup-destinations-client.ts'
@@ -20,17 +20,38 @@ const status = () => document.querySelector<HTMLElement>('[data-backup-workspace
 const edit = (key: string, value: string) => { input(key).value = value; input(key).dispatchEvent(new Event('input', { bubbles: true })) }
 const compileWhmBackupsBinding = new Function('return ' + WHM_BACKUPS_CLIENT_BINDING) as () => (ask?: () => Promise<boolean>) => void
 const runWhmBackupsBinding = compileWhmBackupsBinding()
-const renderedDefaultBackups = renderApprovedWhmBackups({ principal: { kind: 'root', id: id(9), username: 'root' }, accounts: [] })
-let defaultBackupsTemplate: HTMLTemplateElement | undefined
+let defaultBackupsTemplate: HTMLTemplateElement
+let arBackupsTemplate: HTMLTemplateElement
+let v2BackupsTemplate: HTMLTemplateElement
 let listeners: EventListener[]
+const extractBackupRoot = (html: string): HTMLTemplateElement => {
+  const full = document.createElement('template')
+  full.innerHTML = html
+  const root = full.content.querySelector('[data-approved-whm-backups]')
+  if (!root) return full
+  const trimmed = document.createElement('template')
+  trimmed.content.append(root)
+  return trimmed
+}
+beforeAll(async () => {
+  defaultBackupsTemplate = extractBackupRoot(renderApprovedWhmBackups({ principal: { kind: 'root', id: id(9), username: 'root' }, accounts: [] }))
+  arBackupsTemplate = extractBackupRoot(renderApprovedWhmBackups({ principal: { kind: 'root', id: id(9), username: 'root' }, accounts: [], locale: 'ar' }))
+  v2BackupsTemplate = extractBackupRoot(renderV2BackupsPage({ locale: 'en', canRead: true, canManage: true }))
+  document.body.replaceChildren(v2BackupsTemplate.content.cloneNode(true))
+  ;(window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest = async (_method: string, path: string) =>
+    path === '/api/backups/workspace/destination-lifecycle'
+      ? { revision: '1'.padStart(64, '0'), destinations: [], capabilities: { canTest: false, profiles: [] }, application: { nativeApplied: false, schedulerVerified: false } }
+      : initial()
+  runWhmBackupsBinding(async () => true)
+  bindWhmBackupDestinations(async () => true)
+  await tick()
+  document.body.replaceChildren()
+  delete (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest
+})
 beforeEach(() => {
   listeners = []
   const add = window.addEventListener.bind(window)
   vi.spyOn(window, 'addEventListener').mockImplementation((name, callback, options) => { if (name === 'beforeunload') listeners.push(callback as EventListener); add(name, callback, options) })
-  if (!defaultBackupsTemplate) {
-    defaultBackupsTemplate = document.createElement('template')
-    defaultBackupsTemplate.innerHTML = renderedDefaultBackups
-  }
   document.body.replaceChildren(defaultBackupsTemplate.content.cloneNode(true))
   delete (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest
 })
@@ -194,9 +215,9 @@ describe('WHM backups browser controller', () => {
 describe('readable date closure snapshot metadata', () => {
   for (const locale of ['en', 'ar'] as const) it('formats snapshot creation without changing raw metadata or schedule controls in ' + locale, async () => {
     const source = initial(); source.snapshots[0]!.createdAt = '2026-10-27T09:01:02.123Z'; const before = JSON.stringify(source), send = vi.fn(async () => source)
-    document.body.innerHTML = renderApprovedWhmBackups({ principal: { kind: 'root', id: id(9), username: 'root' }, accounts: [], locale })
+    document.body.replaceChildren((locale === 'ar' ? arBackupsTemplate : defaultBackupsTemplate).content.cloneNode(true))
     document.documentElement.lang = locale; document.documentElement.dir = locale === 'ar' ? 'rtl' : 'ltr'
-    Object.assign(window, { xpanelSessionRequest: send }); new Function('return ' + WHM_BACKUPS_CLIENT_BINDING)()(undefined); await tick()
+    Object.assign(window, { xpanelSessionRequest: send }); runWhmBackupsBinding(undefined); await tick()
     const stamp = document.querySelector('[data-backup-snapshot-rows] tr td:first-child bdi')!
     expect(stamp.textContent).toBe('2026-10-27 09:01 UTC'); expect(stamp.getAttribute('dir')).toBe('ltr')
     const help = document.querySelector('#backup-destination-activation-help')!
@@ -212,7 +233,7 @@ describe('readable date closure snapshot metadata', () => {
 
 describe('inline destination ownership for V2 backup schedules', () => {
   it('keeps schedule reads and confirmed CAS saves working without a second destination writer', async () => {
-    document.body.innerHTML = renderV2BackupsPage({ locale: 'en', canRead: true, canManage: true })
+    document.body.replaceChildren(v2BackupsTemplate.content.cloneNode(true))
     const f = model()
     const shared = vi.fn(async (method: string, path: string, body?: unknown) => path === '/api/backups/workspace/destination-lifecycle'
       ? { revision: f.getCurrent().revision, destinations: [], capabilities: { canTest: false, profiles: [] }, application: { nativeApplied: false, schedulerVerified: false } }
@@ -232,7 +253,7 @@ describe('inline destination ownership for V2 backup schedules', () => {
     expect(endpoint.value).toBe('sftp://draft.example.test')
   })
   it('locks schedule controls and sends nothing after the inline owner is removed', async () => {
-    document.body.innerHTML = renderV2BackupsPage({ locale: 'en', canRead: true, canManage: true })
+    document.body.replaceChildren(v2BackupsTemplate.content.cloneNode(true))
     const f = model(); f.boot(); await tick()
     const before = f.send.mock.calls.length
     document.querySelector('[data-backup-inline-manager]')!.remove()
@@ -241,7 +262,7 @@ describe('inline destination ownership for V2 backup schedules', () => {
     expect(action('save-schedule').disabled).toBe(true)
   })
   it('keeps both real binders closed when duplicate inline managers are present', async () => {
-    document.body.innerHTML = renderV2BackupsPage({ locale: 'en', canRead: true, canManage: true })
+    document.body.replaceChildren(v2BackupsTemplate.content.cloneNode(true))
     const manager = document.querySelector('[data-backup-inline-manager]')!; manager.after(manager.cloneNode(true))
     const f = model(); f.boot(); bindWhmBackupDestinations(f.ask); await tick()
     expect(f.send).not.toHaveBeenCalled()
@@ -249,7 +270,7 @@ describe('inline destination ownership for V2 backup schedules', () => {
     expect([...document.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('[data-approved-whm-backups] input,[data-approved-whm-backups] select,[data-approved-whm-backups] button')].every(node => node.disabled)).toBe(true)
   })
   it('locks both owners after the bound inline manager is replaced', async () => {
-    document.body.innerHTML = renderV2BackupsPage({ locale: 'en', canRead: true, canManage: true })
+    document.body.replaceChildren(v2BackupsTemplate.content.cloneNode(true))
     const f = model()
     const shared = vi.fn(async (method: string, path: string, body?: unknown) => path === '/api/backups/workspace/destination-lifecycle'
       ? { revision: f.getCurrent().revision, destinations: [], capabilities: { canTest: false, profiles: [] }, application: { nativeApplied: false, schedulerVerified: false } }
@@ -263,7 +284,7 @@ describe('inline destination ownership for V2 backup schedules', () => {
     expect([...document.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('[data-approved-whm-backups] input,[data-approved-whm-backups] select,[data-approved-whm-backups] button')].every(node => node.disabled)).toBe(true)
   })
   it('fails closed before transport when delegated destination markup is absent', async () => {
-    document.body.innerHTML = renderV2BackupsPage({ locale: 'en', canRead: true, canManage: true })
+    document.body.replaceChildren(v2BackupsTemplate.content.cloneNode(true))
     document.querySelector('[data-backup-inline-manager]')!.remove()
     const f = model(); f.boot(); await tick()
     expect(f.send).not.toHaveBeenCalled(); expect(status().dataset.state).toBe('unavailable')

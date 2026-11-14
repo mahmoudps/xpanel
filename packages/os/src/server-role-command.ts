@@ -17,14 +17,20 @@ const UNITS: ReadonlySet<string> = new Set(Object.values(SERVER_ROLE_UNITS).flat
 const SYSTEMCTL = '/usr/bin/systemctl'
 
 export const serverRoleSwitchArgv = (verb: 'enable' | 'disable', unit: string): string[] => [SYSTEMCTL, verb, '--now', '--', unit]
+export const serverRoleRuntimeArgv = (verb: 'start' | 'stop', unit: string): string[] => [SYSTEMCTL, verb, '--', unit]
 export const serverRoleLoadArgv = (unit: string): string[] => [SYSTEMCTL, 'show', '-p', 'LoadState', '--value', '--', unit]
 export const serverRoleStateArgv = (unit: string): string[] => [SYSTEMCTL, 'show', '-p', 'ActiveState', '--value', '--', unit]
 
-/** Reviewed grammar: only a role unit, only enable or disable with --now, and the two read-only state queries. */
+/** Reviewed grammar: only a role unit, only enable/disable with --now, runtime start/stop, and the two read-only state queries. */
 export function isServerRoleCommand(argv: readonly unknown[]): boolean {
   if (!Array.isArray(argv) || argv.some(item => typeof item !== 'string')) return false
   const unit = argv.at(-1) as string
   if (!UNITS.has(unit)) return false
   const same = (expected: readonly string[]): boolean => expected.length === argv.length && expected.every((item, index) => item === argv[index])
-  return same(serverRoleSwitchArgv('enable', unit)) || same(serverRoleSwitchArgv('disable', unit)) || same(serverRoleLoadArgv(unit)) || same(serverRoleStateArgv(unit))
+  return same(serverRoleSwitchArgv('enable', unit))
+    || same(serverRoleSwitchArgv('disable', unit))
+    || same(serverRoleRuntimeArgv('start', unit))
+    || same(serverRoleRuntimeArgv('stop', unit))
+    || same(serverRoleLoadArgv(unit))
+    || same(serverRoleStateArgv(unit))
 }
