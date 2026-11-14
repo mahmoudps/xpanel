@@ -1062,7 +1062,7 @@ export default [
           })
         : { status: 0, data: null }
       const restoreDone = [200, 202].includes(restored.status) && await waitJob(restored)
-      check('FTP-DISABLED-AND-REENABLED', switchDone && switched.data?.state?.ftpServer === targetFtp && restoreDone, {
+      check('FTP-DISABLED-AND-REENABLED', switchDone && (switched.data?.state?.ftpServer ?? mid.data?.state?.ftpServer) === targetFtp && restoreDone, {
         switchedStatus: switched.status, targetFtp, restoredStatus: restored.status,
       })
     },

@@ -610,7 +610,7 @@ describe('production web renderer boundary regressions', () => {
   })
 
   it.each([false, true])('serves a scoped account overview over HTTP with populated owner database state: %s', async (populated) => {
-    await cp(scopedTemplateDir, state.rootDir, { recursive: true, force: true })
+    await cp(scopedTemplateDir, state.rootDir, { recursive: true, force: true, filter: source => !/[/\\]\.writer-(?:mutex\.sqlite|lock)/.test(source) })
     const { featureList, plan, owner, other, trashedDatabase, otherDatabase, otherDatabaseUser } = scopedMeta
     const databases = populated ? [await state.store.createDatabase({ accountId: owner.id, name: 'owner7_live' })] : []
     const databaseUsers = populated ? await Promise.all(['app', 'reader'].map(name => state.store.createDatabaseUser({

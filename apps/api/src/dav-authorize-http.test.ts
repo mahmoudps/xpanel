@@ -35,7 +35,7 @@ let template: Awaited<ReturnType<typeof buildStateTemplate>> | undefined
 const fixture = async () => {
   const database = await createTestDb()
   const rootDir = await mkdtemp(join(tmpdir(), 'xpanel-state-'))
-  await cp(template!.state.rootDir, rootDir, { recursive: true })
+  await cp(template!.state.rootDir, rootDir, { recursive: true, filter: source => !/[/\\]\.writer-(?:mutex\.sqlite|lock)/.test(source) })
   const state = { store: createStateStore(rootDir), rootDir, close: () => rm(rootDir, { recursive: true, force: true }) }
   cleanup.push(() => database.close(), () => state.close())
   const { account, disk } = template!

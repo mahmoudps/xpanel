@@ -167,7 +167,7 @@ describe('phase-1 write responses', () => {
     expect(el('[data-account-create-status]').getAttribute('data-state')).toBe('failed')
     expect(JSON.parse(window.sessionStorage.getItem('xpanel.account-create.v1.' + encodeURIComponent('root:operator'))!).phase).toBe('pending')
   })
-  it('accepts the API create, suspend and terminate bodies', async () => {
+  it('accepts the API create body', async () => {
     setCachedBody(renderNew())
     const creation = verifiedCreation('submitted')
     ;(window as any).xpanelSessionRequest = vi.fn(async (method: string, path: string) => method === 'GET' && path === preferenceRoute ? preferenceView : creation)
@@ -178,7 +178,8 @@ describe('phase-1 write responses', () => {
     el<HTMLFormElement>('[data-create-account-form]').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
     await tick()
     expect(el('[data-account-create-status]').textContent).toBe('Account created.')
-    setCachedBody(render())
+  })
+  it('accepts the API terminate and suspend bodies', async () => {
     const dialog = boot()
     ;(window as any).xpanelSessionRequest = vi.fn().mockResolvedValue({ ok: true, purged: true })
     el('[data-account-row="alpha"] [data-action="terminate-account"]').click()

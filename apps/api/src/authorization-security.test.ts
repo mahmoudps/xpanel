@@ -45,7 +45,7 @@ describe('HTTP authorization security regressions', () => {
   beforeEach(async () => {
     db = await createTestDb()
     const rootDir = await mkdtemp(join(tmpdir(), 'xpanel-state-'))
-    await cp(template!.state.rootDir, rootDir, { recursive: true })
+    await cp(template!.state.rootDir, rootDir, { recursive: true, filter: source => !/[/\\]\.writer-(?:mutex\.sqlite|lock)/.test(source) })
     state = { store: createStateStore(rootDir), rootDir, close: () => rm(rootDir, { recursive: true, force: true }) }
     ;({ featureListId, alice, bob } = template!)
     rootId = (await createRootPrincipal(db.db, { username: 'root', passwordHash, forcePasswordChange: false })).id

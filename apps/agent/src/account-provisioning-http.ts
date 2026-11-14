@@ -376,23 +376,28 @@ export function createNativeHeldAccountHttp(options: NativeAccountHttpOptions) {
                 await Promise.all([httpDone.promise, fastCgiDone.promise, ingressDone.promise, callbackDone.promise])
                 await source?.assertCurrent(); await guard()
               } catch (error) {
-                rejected = true; failOperation(error); quarantined.add(account.uid)
+                rejected = true; failOperation(error)
                 console.error('xpanel-agent held account HTTP release failed:', describeFailure(failure), stages())
               }
               finally { try { await cleanup() } catch (error) { settled = false; if (!rejected) throw error } }
-              if (rejected) refused('held_http_release_not_verified', transportResetDetail(failure, settled))
+              if (rejected) {
+                const detail = transportResetDetail(failure, settled)
+                if (!detail.transportReset) quarantined.add(account.uid)
+                refused('held_http_release_not_verified', detail)
+              }
             })()
             return closePromise
           },
         }
       } catch (error) {
-        failOperation(error); if (exchangeStarted) quarantined.add(account.uid)
+        failOperation(error)
         // The refusal is generic; the operator needs the first failure to find the host prerequisite.
         console.error('xpanel-agent account HTTP correlation failed:', describeFailure(failure), stages())
         let settled = true
         try { await cleanup() } catch { settled = false /* Preserve the primary failed observation; the UID remains quarantined. */ }
-        if (shouldQuarantineCorrelationFailure(exchangeStarted, settled)) quarantined.add(account.uid)
-        return refused('held_http_correlation_not_verified', transportResetDetail(failure, settled))
+        const detail = transportResetDetail(failure, settled)
+        if (shouldQuarantineCorrelationFailure(exchangeStarted, settled) && !detail.transportReset) quarantined.add(account.uid)
+        return refused('held_http_correlation_not_verified', detail)
       }
     },
   }

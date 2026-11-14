@@ -256,6 +256,7 @@ describe('renderApacheVhost', () => {
     const on = renderApacheVhost(a, domain(), settings(), debianOs, { modsecurityRuleEngine: 'On' }).content
     expect(on).toContain('<IfModule mod_security2.c>')
     expect(on).toContain('SecRuleEngine On')
+    expect(on).toContain('SecRuleRemoveById 950130')
     const detect = renderApacheVhost(a, domain(), settings(), debianOs, { modsecurityRuleEngine: 'DetectionOnly' }).content
     expect(detect).toContain('SecRuleEngine DetectionOnly')
     const siteOff = renderApacheVhost(a, domain(), settings(), debianOs, {

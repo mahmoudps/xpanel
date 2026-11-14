@@ -220,20 +220,22 @@ describe('selected-theme SSH factories', () => {
     }
   })
 
-  it.each(['classic', 'v2'] as const)('sends zero transport calls for malformed complete %s factory contracts', theme => {
-    for (const name of sshTemplateNames) for (const [reason, corrupt] of sshCorruptions) {
+  it.each((['classic', 'v2'] as const).flatMap(theme => sshTemplateNames.map(name => [theme, name] as const)))('sends zero transport calls for malformed complete %s factory contracts (%s)', (theme, name) => {
+    for (const [reason, corrupt] of sshCorruptions) {
       const root = mountSsh(theme); corrupt(sshTemplate(root, name), root)
       const f = model(); f.boot()
       expect(f.send, name + ': ' + reason).not.toHaveBeenCalled(); expect(f.ask).not.toHaveBeenCalled()
       expect(status().dataset.state).toBe('unavailable'); expect(add().disabled).toBe(true); expect(draft().disabled).toBe(true)
     }
-    for (const name of ['whm-ssh-fact-technical', 'whm-ssh-fact-text'] as const) {
+    if (name === 'whm-ssh-fact-technical' || name === 'whm-ssh-fact-text') {
       const root = mountSsh(theme), value = sshTemplate(root, name).content.querySelector<HTMLElement>('[data-xp-slot="value"]')!
       value.dir = name === 'whm-ssh-fact-technical' ? 'rtl' : 'ltr'
       const f = model(); f.boot(); expect(f.send).not.toHaveBeenCalled(); expect(status().dataset.state).toBe('unavailable')
     }
-    const root = mountSsh(theme); (sshTemplate(root, 'whm-ssh-remove').content.firstElementChild as HTMLButtonElement).disabled = false
-    const f = model(); f.boot(); expect(f.send).not.toHaveBeenCalled(); expect(status().dataset.state).toBe('unavailable')
+    if (name === 'whm-ssh-remove') {
+      const root = mountSsh(theme); (sshTemplate(root, 'whm-ssh-remove').content.firstElementChild as HTMLButtonElement).disabled = false
+      const f = model(); f.boot(); expect(f.send).not.toHaveBeenCalled(); expect(status().dataset.state).toBe('unavailable')
+    }
   })
 
   it.each(['classic', 'v2'] as const)('rejects %s controls or route identity changed during the initial read without painting its reply', async theme => {

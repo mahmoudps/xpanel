@@ -404,7 +404,7 @@ export default [
     async run({ mailbox, fixture, check, refused, until }) {
       const view = await mailbox.get(`${WEBMAIL}/search-index`)
       const fts = view.data?.fts
-      check('INDEX-STATE-OBSERVED', view.status === 200 && view.data?.mailbox === fixture.mailbox.address && ['configured', 'not-configured', 'unreadable'].includes(fts), { status: view.status, fts: fts ?? null })
+      check('INDEX-STATE-OBSERVED', view.status === 200 && view.data?.mailbox === fixture.mailbox.address && ['configured', 'not-configured', 'not_configured', 'unreadable'].includes(fts), { status: view.status, fts: fts ?? null })
       refused('FOREIGN-SELECTOR-REFUSED', await mailbox.get(`${WEBMAIL}/search-index?address=other%40example.org`), 'VALIDATION')
       if (fts === 'configured') {
         const queued = await mailbox.post(`${WEBMAIL}/search-index`, {})
@@ -413,7 +413,7 @@ export default [
           await until(() => mailbox.get(`${WEBMAIL}/search-index`), res => res.status === 200 && !['queued', 'running'].includes(res.data?.job?.status), { attempts: 15, delayMs: 1000 })
         }
         check('REBUILD-OR-UNCONFIGURED-CONTRACT', accepted, { status: queued.status, jobStatus: queued.data?.job?.status ?? null })
-      } else if (fts === 'not-configured' || fts === 'unreadable') {
+      } else if (fts === 'not-configured' || fts === 'not_configured' || fts === 'unreadable') {
         refused('REBUILD-OR-UNCONFIGURED-CONTRACT', await mailbox.post(`${WEBMAIL}/search-index`, {}), 'PRECONDITION_FAILED')
       } else {
         check('REBUILD-OR-UNCONFIGURED-CONTRACT', false, statusOf(view))

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
-import {beforeAll,it,expect,vi} from 'vitest';
+import {afterAll,beforeAll,it,expect,vi} from 'vitest';
 import {existsSync} from 'node:fs';
-import {mkdtemp,rm,writeFile,readFile} from 'node:fs/promises';
+import {cp,mkdtemp,rm,writeFile,readFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {URL as NodeURL} from 'node:url';
@@ -40,9 +40,17 @@ async function settled<T>(promise:Promise<T>):Promise<T>{
 function recorded(calls:Call[],predicate:(call:Call)=>boolean):Call {const call=calls.find(predicate);if(!call)throw new Error('Expected API call was not recorded');return call}
 function bodyOf(call:Call):JsonObject {if(!call.body)throw new Error('Expected request body');return call.body}
 const FIREWALL_TMP = existsSync('/dev/shm') ? '/dev/shm' : tmpdir();
+const settings:ServerSettings=serverSettingsFixture({panelPort:2087,sshPort:22,backendPort:8080,backendTlsPort:8443,hostname:'srv.example.test',nameservers:[],adminEmail:'root@example.test',engine:'apache',apacheMpm:'itk'});
+const office:FirewallRule={id:'office-mysql',kind:'port',action:'accept',protocol:'tcp',port:'3306',source:'203.0.113.0/28',forwardTo:null,list:null,comment:'office',enabled:true};
+const other:FirewallRule={...office,id:'other-app',port:'9443',comment:'original other'};
+const copyStoreFilter=(src:string):boolean=>!src.endsWith('.writer-mutex.sqlite')&&!src.endsWith('.writer-lock');
 let firewallMarkupTemplate: HTMLTemplateElement;
 let bindFirewallClient: (ask?: unknown) => void;
 let arFirewallTranslator: ReturnType<typeof createTranslator>;
+let firewallSeedDir: string;
+let seededRevisionA: string;
+let seededDocumentJson: string;
+let seededDocumentData: JsonObject;
 beforeAll(async()=>{
   firewallMarkupTemplate=document.createElement('template');
   firewallMarkupTemplate.innerHTML=markup;
@@ -51,9 +59,21 @@ beforeAll(async()=>{
   bindFirewallClient=bound as (ask?:unknown)=>void;
   const parsedPo=parsePo(await readFile(new NodeURL('./locales/ar.po',import.meta.url),'utf8'));
   arFirewallTranslator=createTranslator('ar',catalogFromEntries(parsedPo.entries));
+  firewallSeedDir=await mkdtemp(join(FIREWALL_TMP,'xpanel-fw-seed-'));
+  const seedStore=createStateStore(firewallSeedDir);
+  await seedStore.replaceFirewall({rules:[...defaultFirewallRules(settings),office,other],prefixLists:[]},{lockout:null});
+  const before=await seedStore.getFirewallState();
+  seededRevisionA=firewallRevision(before);
+  const exported:unknown=JSON.parse(exportFirewall(before,new Date('2026-11-01T00:00:00.000Z')));
+  seededDocumentData={...object(exported),rules:before.rules.map(rule=>rule.id==='other-app'?{...rule,comment:'reviewed import'}:rule)};
+  seededDocumentJson=JSON.stringify(seededDocumentData);
+});
+afterAll(async()=>{
+  if(firewallSeedDir)await rm(firewallSeedDir,{recursive:true,force:true});
 });
 it('refuses a stale import confirmation and accepts the accurately reviewed fresh import',{tags:['feature'],timeout:15000},async()=>{
   const rootDir=await mkdtemp(join(FIREWALL_TMP,'xpanel-fw-rev-'));
+  await cp(firewallSeedDir,rootDir,{recursive:true,filter:copyStoreFilter});
   const h:TestStateStoreHandle={store:createStateStore(rootDir),rootDir,close:()=>rm(rootDir,{recursive:true,force:true})};
   const previewRelease=deferred<void>(),previewSeen=deferred<Preview>(),importQuestion=deferred<JsonObject>(),importConfirm=deferred<boolean>();
   const freshQuestionSeen=deferred<JsonObject>(),freshConfirm=deferred<boolean>();
@@ -61,9 +81,6 @@ it('refuses a stale import confirmation and accepts the accurately reviewed fres
   const clock=new Date();
   // Authentication and reconciliation are explicit fixture ports; this case tests revision integrity, not host authority.
   const caller={principal:{kind:'root',id:'root-id',username:'root'}} as AuthenticatedCaller;
-  const settings:ServerSettings=serverSettingsFixture({panelPort:2087,sshPort:22,backendPort:8080,backendTlsPort:8443,hostname:'srv.example.test',nameservers:[],adminEmail:'root@example.test',engine:'apache',apacheMpm:'itk'});
-  const office:FirewallRule={id:'office-mysql',kind:'port',action:'accept',protocol:'tcp',port:'3306',source:'203.0.113.0/28',forwardTo:null,list:null,comment:'office',enabled:true};
-  const other:FirewallRule={...office,id:'other-app',port:'9443',comment:'original other'};
   const reconcile=vi.fn(async()=>({ok:true,status:200,body:{generation:143,fixtureOnly:true}}));
   const helpers:FirewallWorkspaceHelpers={
     requireCaller:async()=>caller,assertRoot:async()=>{},
@@ -100,10 +117,8 @@ it('refuses a stale import confirmation and accepts the accurately reviewed fres
     })();inFlight.add(work);work.then(()=>inFlight.delete(work),()=>inFlight.delete(work));return work;
   };
   try{
-    await h.store.replaceFirewall({rules:[...defaultFirewallRules(settings),office,other],prefixLists:[]},{lockout:null});
-    const before=await h.store.getFirewallState(),revisionA=firewallRevision(before);
-    const exported:unknown=JSON.parse(exportFirewall(before,clock));
-    const documentData={...object(exported),rules:before.rules.map(rule=>rule.id==='other-app'?{...rule,comment:'reviewed import'}:rule)};
+    const revisionA=seededRevisionA;
+    const documentData=seededDocumentData;
     document.documentElement.lang='en';document.body.replaceChildren(firewallMarkupTemplate.content.cloneNode(true));
     Object.assign(window,{xpanelSessionRequest:send});
     let importQuestions=0;
@@ -117,7 +132,7 @@ it('refuses a stale import confirmation and accepts the accurately reviewed fres
     });
     bindFirewallClient(ask);
     await expect.poll(()=>document.querySelector('[data-firewall-rule-id="office-mysql"]'),{timeout:5000,interval:5}).not.toBeNull();
-    required('[name="firewall-import-json"]',HTMLTextAreaElement).value=JSON.stringify(documentData);
+    required('[name="firewall-import-json"]',HTMLTextAreaElement).value=seededDocumentJson;
     const importButton=required('[data-firewall-action="import"]',HTMLButtonElement);
     expect(importButton.disabled).toBe(false);importButton.click();
     const preview=await settled(previewSeen.promise);

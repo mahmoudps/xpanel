@@ -80,11 +80,15 @@ beforeAll(() => {
     }
     return origDocQuerySelectorAll.call(this, selectors)
   } as typeof Document.prototype.querySelectorAll
-  mountPhp('classic', 'en', false, false)
-  mountPhp('v2', 'en', false, false)
+  mountPhp('classic', 'en', false, true)
+  startPhp(async (_method: string, path: string) => phpResponse(path))
+  mountPhp('classic', 'ar', false, false)
+  mountPhp('v2', 'en', false, true)
+  startPhp(async (_method: string, path: string) => phpResponse(path))
   mountPhp('v2', 'ar', false, false)
   document.body.replaceChildren()
   document.documentElement.lang = 'en'; document.documentElement.dir = 'ltr'
+  delete (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest
 })
 afterAll(() => {
   window.getComputedStyle = origGetComputedStyle
@@ -146,33 +150,36 @@ describe('PHP selected-theme fidelity and finite native admission', () => {
   beforeAll(() => {
     for (const theme of ['classic', 'v2'] as const) for (const locale of ['en', 'ar'] as const) mountPhp(theme, locale, false, false)
   })
-  it.each(['classic', 'v2'] as const)('paints real %s inventory shapes, source-separated facts and typed native controls in both locales', async theme => {
-    for (const locale of ['en', 'ar'] as const) {
-      const page = mountPhp(theme, locale), fixtures = pairedPhp(), send = vi.fn(async (_method: string, path: string) => phpResponse(path, fixtures))
-      startPhp(send); await wait(() => expect(phpState().dataset.state).toBe('read'))
-      const entries = [...page.querySelectorAll<HTMLElement>('[data-php-version-entry]')]
-      expect(entries).toHaveLength(2); expect(entries.every(node => node.tagName === (theme === 'classic' ? 'ARTICLE' : 'TR'))).toBe(true)
-      if (theme === 'v2') for (const entry of entries) expect(entry.children).toHaveLength(6)
-      expect(entries[0]!.querySelector('[data-xp-slot="version"]')!.textContent).toBe('PHP 8.3')
-      expect(entries[0]!.querySelector<HTMLElement>('[data-xp-slot="default-holder"]')!.hidden).toBe(false)
-      expect(entries[0]!.querySelector('[data-xp-slot="binary"]')!.textContent).toBe('8.3.12')
-      expect(entries[0]!.querySelector('[data-xp-slot="packages"]')!.textContent).toContain('php8.3-curl 8.3.12-1')
-      expect(entries[0]!.querySelector('[data-xp-slot="usage"]')!.textContent).toContain('1')
-      expect(page.querySelector<HTMLTextAreaElement>('[name="php-ini"]')!.disabled).toBe(true)
-      expect(page.querySelector<HTMLInputElement>('[data-php-display-errors]')!.disabled).toBe(true)
-      expect(page.querySelector('[data-php-exception-revoke="omar"]')!.classList.contains(theme === 'classic' ? 'xp-btn' : 'v2-btn')).toBe(true)
-      const exception = page.querySelector('[data-php-exception-revoke="omar"]')!.closest<HTMLTableRowElement>('tr')!
-      expect(exception.cells).toHaveLength(5); expect(exception.cells[3]!.textContent).toBe('2026-08-02 00:00 UTC')
-      expect(page.querySelector('[data-php-extension="opcache"]')!.getAttribute('role')).toBe('switch')
-      const matrix = page.querySelector<HTMLTableSectionElement>('[data-whm-php-handler-rows]')!
-      expect(matrix.closest('table')!.tHead!.rows[0]!.cells).toHaveLength(7)
-      expect([...matrix.rows].every(row => row.cells.length === 7)).toBe(true)
-      expect([...matrix.querySelectorAll<HTMLButtonElement>('button')].every(button => button.disabled)).toBe(true)
-      for (const name of ['php-selected-version', 'php-extension-version', 'php-version', 'memory_limit', 'php-ini']) expect(page.querySelectorAll('[name="' + name + '"]')).toHaveLength(1)
-      expect(send.mock.calls).toEqual([['GET', '/api/server/php/inventory'], ['GET', '/api/server/php/usage'], ['GET', '/api/server/php/manage']])
-      expect(page.textContent).not.toMatch(/[\u0660-\u0669\u06f0-\u06f9]/)
-      expect(page.textContent).not.toContain('/usr/bin/php8.3')
-    }
+  it.each([
+    ['classic', 'en'],
+    ['classic', 'ar'],
+    ['v2', 'en'],
+    ['v2', 'ar'],
+  ] as const)('paints real %s inventory shapes, source-separated facts and typed native controls (%s)', async (theme, locale) => {
+    const page = mountPhp(theme, locale), fixtures = pairedPhp(), send = vi.fn(async (_method: string, path: string) => phpResponse(path, fixtures))
+    startPhp(send); await wait(() => expect(phpState().dataset.state).toBe('read'))
+    const entries = [...page.querySelectorAll<HTMLElement>('[data-php-version-entry]')]
+    expect(entries).toHaveLength(2); expect(entries.every(node => node.tagName === (theme === 'classic' ? 'ARTICLE' : 'TR'))).toBe(true)
+    if (theme === 'v2') for (const entry of entries) expect(entry.children).toHaveLength(6)
+    expect(entries[0]!.querySelector('[data-xp-slot="version"]')!.textContent).toBe('PHP 8.3')
+    expect(entries[0]!.querySelector<HTMLElement>('[data-xp-slot="default-holder"]')!.hidden).toBe(false)
+    expect(entries[0]!.querySelector('[data-xp-slot="binary"]')!.textContent).toBe('8.3.12')
+    expect(entries[0]!.querySelector('[data-xp-slot="packages"]')!.textContent).toContain('php8.3-curl 8.3.12-1')
+    expect(entries[0]!.querySelector('[data-xp-slot="usage"]')!.textContent).toContain('1')
+    expect(page.querySelector<HTMLTextAreaElement>('[name="php-ini"]')!.disabled).toBe(true)
+    expect(page.querySelector<HTMLInputElement>('[data-php-display-errors]')!.disabled).toBe(true)
+    expect(page.querySelector('[data-php-exception-revoke="omar"]')!.classList.contains(theme === 'classic' ? 'xp-btn' : 'v2-btn')).toBe(true)
+    const exception = page.querySelector('[data-php-exception-revoke="omar"]')!.closest<HTMLTableRowElement>('tr')!
+    expect(exception.cells).toHaveLength(5); expect(exception.cells[3]!.textContent).toBe('2026-08-02 00:00 UTC')
+    expect(page.querySelector('[data-php-extension="opcache"]')!.getAttribute('role')).toBe('switch')
+    const matrix = page.querySelector<HTMLTableSectionElement>('[data-whm-php-handler-rows]')!
+    expect(matrix.closest('table')!.tHead!.rows[0]!.cells).toHaveLength(7)
+    expect([...matrix.rows].every(row => row.cells.length === 7)).toBe(true)
+    expect([...matrix.querySelectorAll<HTMLButtonElement>('button')].every(button => button.disabled)).toBe(true)
+    for (const name of ['php-selected-version', 'php-extension-version', 'php-version', 'memory_limit', 'php-ini']) expect(page.querySelectorAll('[name="' + name + '"]')).toHaveLength(1)
+    expect(send.mock.calls).toEqual([['GET', '/api/server/php/inventory'], ['GET', '/api/server/php/usage'], ['GET', '/api/server/php/manage']])
+    expect(page.textContent).not.toMatch(/[\u0660-\u0669\u06f0-\u06f9]/)
+    expect(page.textContent).not.toContain('/usr/bin/php8.3')
     expect(WHM_PHP_CLIENT_BINDING).not.toContain('xp-btn'); expect(WHM_PHP_CLIENT_BINDING).not.toContain('xp-whm-detail-status')
     expect(WHM_PHP_CLIENT_BINDING).not.toContain('innerHTML'); expect(WHM_PHP_CLIENT_BINDING).not.toContain('fetch(')
   })
@@ -191,26 +198,28 @@ describe('PHP selected-theme fidelity and finite native admission', () => {
     expect(page.querySelector('[data-php-version-entry="8.2"]')!.textContent).not.toContain('End of life')
   })
 
-  it.each(['classic', 'v2'] as const)('uses finite %s version tabs without IO, supports RTL/Home/End, and retains same-revision INI drafts', async theme => {
-    for (const locale of ['en', 'ar'] as const) {
-      document.body.replaceChildren(); await Promise.resolve()
-      const page = mountPhp(theme, locale), fixtures = pairedPhp(), send = vi.fn(async (_method: string, path: string) => phpResponse(path, fixtures)), ask = startPhp(send)
-      await wait(() => expect(phpState().dataset.state).toBe('read'))
-      const tabs = [...page.querySelectorAll<HTMLButtonElement>('[data-php-version-pick]')], memory = page.querySelector<HTMLInputElement>('[name="memory_limit"]')!
-      expect(tabs).toHaveLength(2); memory.value = '512M'; tabs[0]!.focus()
-      tabs[0]!.dispatchEvent(new KeyboardEvent('keydown', { key: locale === 'ar' ? 'ArrowLeft' : 'ArrowRight', bubbles: true, cancelable: true }))
-      expect(document.activeElement).toBe(tabs[1]); expect(tabs[1]!.getAttribute('aria-selected')).toBe('true'); expect(memory.value).toBe('128M')
-      expect(page.querySelector<HTMLSelectElement>('[name="php-extension-version"]')!.value).toBe('8.2')
-      expect(page.querySelector<HTMLSelectElement>('[name="php-version"]')!.value).toBe('8.2')
-      tabs[1]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true, cancelable: true })); expect(memory.value).toBe('512M')
-      page.querySelector<HTMLButtonElement>('[data-php-action="discard-ini"]')!.click(); expect(memory.value).toBe('256M')
-      tabs[0]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true, cancelable: true })); expect(document.activeElement).toBe(tabs[1])
-      const fileTab = page.querySelector<HTMLButtonElement>('[data-presentation-tab="file"]')!; fileTab.click()
-      expect(page.querySelector<HTMLTextAreaElement>('[name="php-ini"]')!.closest<HTMLElement>('[role="tabpanel"]')!.hidden).toBe(false)
-      expect(page.querySelector<HTMLTextAreaElement>('[name="php-ini"]')!.disabled).toBe(true)
-      page.querySelector<HTMLButtonElement>('[data-php-action="apply-ini"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-      expect(send).toHaveBeenCalledTimes(3); expect(ask).not.toHaveBeenCalled()
-    }
+  it.each([
+    ['classic', 'en'],
+    ['classic', 'ar'],
+    ['v2', 'en'],
+    ['v2', 'ar'],
+  ] as const)('uses finite %s version tabs without IO, supports RTL/Home/End, and retains same-revision INI drafts (%s)', async (theme, locale) => {
+    const page = mountPhp(theme, locale), fixtures = pairedPhp(), send = vi.fn(async (_method: string, path: string) => phpResponse(path, fixtures)), ask = startPhp(send)
+    await wait(() => expect(phpState().dataset.state).toBe('read'))
+    const tabs = [...page.querySelectorAll<HTMLButtonElement>('[data-php-version-pick]')], memory = page.querySelector<HTMLInputElement>('[name="memory_limit"]')!
+    expect(tabs).toHaveLength(2); memory.value = '512M'; tabs[0]!.focus()
+    tabs[0]!.dispatchEvent(new KeyboardEvent('keydown', { key: locale === 'ar' ? 'ArrowLeft' : 'ArrowRight', bubbles: true, cancelable: true }))
+    expect(document.activeElement).toBe(tabs[1]); expect(tabs[1]!.getAttribute('aria-selected')).toBe('true'); expect(memory.value).toBe('128M')
+    expect(page.querySelector<HTMLSelectElement>('[name="php-extension-version"]')!.value).toBe('8.2')
+    expect(page.querySelector<HTMLSelectElement>('[name="php-version"]')!.value).toBe('8.2')
+    tabs[1]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true, cancelable: true })); expect(memory.value).toBe('512M')
+    page.querySelector<HTMLButtonElement>('[data-php-action="discard-ini"]')!.click(); expect(memory.value).toBe('256M')
+    tabs[0]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true, cancelable: true })); expect(document.activeElement).toBe(tabs[1])
+    const fileTab = page.querySelector<HTMLButtonElement>('[data-presentation-tab="file"]')!; fileTab.click()
+    expect(page.querySelector<HTMLTextAreaElement>('[name="php-ini"]')!.closest<HTMLElement>('[role="tabpanel"]')!.hidden).toBe(false)
+    expect(page.querySelector<HTMLTextAreaElement>('[name="php-ini"]')!.disabled).toBe(true)
+    page.querySelector<HTMLButtonElement>('[data-php-action="apply-ini"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(send).toHaveBeenCalledTimes(3); expect(ask).not.toHaveBeenCalled()
   })
 
   it.each(['classic', 'v2'] as const)('routes one %s version shortcut through the existing default action and preserves focus after readback', async theme => {

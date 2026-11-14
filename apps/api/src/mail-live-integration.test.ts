@@ -103,7 +103,7 @@ const fixture = async () => {
   database.sqlite.exec('PRAGMA foreign_keys = ON')
   database.sqlite.exec('PRAGMA busy_timeout = 5000')
   const stateDir = await mkdtemp(join(templateBaseDir, 'case-'))
-  await cp(templateStateDir, stateDir, { recursive: true })
+  await cp(templateStateDir, stateDir, { recursive: true, filter: source => !/[/\\]\.writer-(?:mutex\.sqlite|lock)/.test(source) })
   const state = { store: new StateStore(stateDir), rootDir: stateDir, close: () => rm(stateDir, { recursive: true, force: true }) }
   cleanup.push(() => database.close(), () => state.close())
   return {

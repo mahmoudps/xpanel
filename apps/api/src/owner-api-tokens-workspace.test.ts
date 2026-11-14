@@ -61,7 +61,7 @@ afterAll(async () => {
 async function fixture() {
   const database = await createTestDb()
   const rootDir = await mkdtemp(join(OWNER_TOK_TMP, 'xpanel-owntok-'))
-  await cp(ownerTokTplDir, rootDir, { recursive: true, force: true })
+  await cp(ownerTokTplDir, rootDir, { recursive: true, force: true, filter: source => !/[/\\]\.writer-(?:mutex\.sqlite|lock)/.test(source) })
   const state: TestStateStoreHandle = { store: createStateStore(rootDir), rootDir, close: () => rm(rootDir, { recursive: true, force: true }) }
   const { features, plan, account, neighborAccount } = ownerTokSeed
   const owner = await createUserPrincipal(database.db, { username: account.username, accountId: account.id, passwordHash: PASSWORD_HASH })

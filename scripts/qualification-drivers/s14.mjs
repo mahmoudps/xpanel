@@ -300,6 +300,7 @@ export default [
 
   tool('task-queue-monitor', {
     prefix: 'S14T10', as: 'root', probe: '/api/jobs',
+    page: { route: '/whm/jobs', read: '/api/jobs', shows: () => ['Job history'] },
     paths: new RegExp(String.raw`^\/api\/jobs(?:\?status=pending|\/not-a-uuid|\/${ID}(?:\/cancel)?)?$`), requests: 15,
     unit: [{ id: 'S14T10-UNIT-1', file: 'apps/api/src/jobs-workspace.test.ts', name: 'API host jobs workspace forwards validated reads to the agent after root authorization' }],
     checks: ['JOB-QUEUE-READ', 'INVALID-STATUS-FILTER-REFUSED', 'MALFORMED-JOB-ID-REFUSED', 'ABSENT-JOB-NOT-FOUND'],

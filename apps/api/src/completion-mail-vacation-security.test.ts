@@ -205,7 +205,7 @@ let template!: Awaited<ReturnType<typeof buildStateTemplate>>
 
 const fixture = async () => {
   const rootDir = await mkFastTempDir('xpanel-state-')
-  await cp(template.state.rootDir, rootDir, { recursive: true })
+  await cp(template.state.rootDir, rootDir, { recursive: true, filter: source => !/[/\\]\.writer-(?:mutex\.sqlite|lock)/.test(source) })
   const state = { store: createStateStore(rootDir), rootDir, close: () => rm(rootDir, { recursive: true, force: true }) }
   cleanup.push(() => state.close())
   const database = await createTestDb()

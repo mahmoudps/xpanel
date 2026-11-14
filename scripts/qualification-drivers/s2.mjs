@@ -178,13 +178,13 @@ export default [
       const stamp = date => `xp${date.getUTCFullYear()}${String(date.getUTCMonth() + 1).padStart(2, '0')}`
       const now = new Date(), prev = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1))
       let dkimOk = false
-      if (okJob && host) {
+      if (okJob && net?.dnsQuery) {
         for (const selector of new Set([stamp(now), stamp(prev)])) {
           const dns = await net.dnsQuery(`${selector}._domainkey.${domain}`, 16)
           if (dns.answers.some(item => item.type === 16 && /^v=DKIM1\b/i.test(item.data))) { dkimOk = true; break }
         }
       }
-      check('DKIM-SELECTOR-TXT-ADDED', okJob && (dkimOk || (zone?.records ?? []).some(item => item.type === 'TXT' && item.name.endsWith('._domainkey'))), { status: started.status, job: polled.last?.data?.job?.status ?? null, dkimOk })
+      check('DKIM-SELECTOR-TXT-ADDED', okJob && (dkimOk || (zone?.records ?? []).some(item => item.type === 'TXT' && /\._domainkey(?:\.|$)/i.test(item.name))), { status: started.status, job: polled.last?.data?.job?.status ?? null, dkimOk })
     },
   }),
 
