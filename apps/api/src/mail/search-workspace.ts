@@ -98,6 +98,36 @@ function project(message: ImapFetchedMessage, mailbox: string, folder: string, v
     unread: !message.flags.some(flag => flag.toLowerCase() === '\\seen'), sizeBytes: message.sizeBytes }
 }
 
+function ftsFallbackTokens(query: string): string[] {
+  const words = [...new Set(query.match(/[\p{L}\p{N}]+/gu) ?? [])]
+  if (words.length === 0 || (words.length === 1 && words[0] === query)) return []
+  const indexable = words.filter(word => [...word].length >= 3)
+  return (indexable.length > 0 ? indexable : words).slice(0, 8)
+}
+
+function matchesParsedQuery(message: ImapFetchedMessage, needle: string): boolean {
+  const parsed = message.parsed
+  if (!parsed) return false
+  const parts = [
+    parsed.subject,
+    parsed.from,
+    parsed.fromName,
+    ...(Array.isArray(parsed.to) ? parsed.to : []),
+    ...(Array.isArray(parsed.cc) ? parsed.cc : []),
+    ...Object.entries(parsed.headers ?? {}).map(([key, value]) => `${key}: ${value}`),
+    parsed.textBody,
+    parsed.rawHtmlBody,
+  ]
+  return parts.some(part => typeof part === 'string' && part.normalize('NFC').toLocaleLowerCase().includes(needle))
+}
+
+function checkSearchUids(raw: unknown): number[] {
+  if (!Array.isArray(raw) || raw.length > SEARCH_MAX_MATCHES || raw.some(uid => !validIdentity(uid))) {
+    return fail('PRECONDITION_FAILED', 'mail search result exceeds its supported bounds; narrow the search', { reason: 'mail_search_capacity' })
+  }
+  return raw
+}
+
 /** Real sealed-mailbox IMAP search, never the administrative JSON message archive. */
 export function createMailSearchWorkspace(deps: MailSearchDependencies) {
   const open = deps.openSession ?? (caller => openAuthorizedMailboxSession(deps.db, deps.store, deps.serverSecret, caller))
@@ -153,30 +183,74 @@ export function createMailSearchWorkspace(deps: MailSearchDependencies) {
       return imap(caller, async (client, session) => {
         const mailbox = session.record.mailbox, validity = observedIdentity(await client.selectFolder(input.folder, mailbox), input.folder)
         const previous = input.cursor ? cursor(input.cursor, session, input.folder, input.query, validity) : null
-        const raw = await client.searchByUtf8Query(input.folder, input.query, mailbox)
-        if (!Array.isArray(raw) || raw.length > SEARCH_MAX_MATCHES || raw.some(uid => !validIdentity(uid))) return fail('PRECONDITION_FAILED', 'mail search result exceeds its supported bounds; narrow the search', { reason: 'mail_search_capacity' })
-        const uids = [...new Set(raw)].sort((left, right) => right - left), remaining = uids.filter(uid => !previous || uid < previous.before)
-        const selected = remaining.slice(0, input.limit), messages: InboxSummary[] = []
-        let bytes = 0
-        for (const uid of selected) {
-          const fetched = await client.fetchMessagesByUid(input.folder, uid, { requestedMailbox: mailbox, mimeLimits: { maxTotalBytes: SEARCH_LITERAL_BYTES } })
-          if (observedIdentity(fetched.state, input.folder) !== validity) return fail('CONFLICT', 'mailbox identity changed; search again', { reason: 'mail_search_identity_changed' })
-          if (!Array.isArray(fetched.messages) || fetched.messages.length > 1 || fetched.messages.some(message => message.uid !== uid)) return fail('PRECONDITION_FAILED', 'mail search returned an unexpected message')
-          for (const message of fetched.messages) {
-            const rawBytes = message.rawMimeBytes instanceof Uint8Array ? message.rawMimeBytes.byteLength : Buffer.byteLength(message.rawMime, 'utf8')
-            bytes += Math.max(message.sizeBytes, rawBytes)
-            if (bytes > SEARCH_PAGE_BYTES) return fail('PRECONDITION_FAILED', 'the search page exceeds its bounded message read size', { reason: 'mail_search_capacity' })
-            messages.push(project(message, mailbox, input.folder, validity))
+        const direct = checkSearchUids(await client.searchByUtf8Query(input.folder, input.query, mailbox))
+        let uids = [...new Set(direct)].sort((left, right) => right - left)
+        let verifySubstring = false
+        if (uids.length === 0) {
+          const tokens = ftsFallbackTokens(input.query)
+          if (tokens.length > 0) {
+            verifySubstring = true
+            let intersected: Set<number> | null = null
+            for (const token of tokens) {
+              const tokenUids = checkSearchUids(await client.searchByUtf8Query(input.folder, token, mailbox))
+              if (tokenUids.length === 0) { intersected = new Set(); break }
+              intersected = intersected === null ? new Set(tokenUids) : new Set(tokenUids.filter(uid => intersected!.has(uid)))
+              if (intersected.size === 0) break
+            }
+            uids = intersected ? [...intersected].sort((left, right) => right - left) : []
           }
+        }
+        const messages: InboxSummary[] = []
+        let bytes = 0, totalMatches = uids.length, remainingCount = 0, cursorBefore: number | undefined
+        if (!verifySubstring) {
+          const remaining = uids.filter(uid => !previous || uid < previous.before)
+          const selected = remaining.slice(0, input.limit)
+          remainingCount = remaining.length
+          if (remaining.length > selected.length && selected.length) cursorBefore = selected.at(-1)
+          for (const uid of selected) {
+            const fetched = await client.fetchMessagesByUid(input.folder, uid, { requestedMailbox: mailbox, mimeLimits: { maxTotalBytes: SEARCH_LITERAL_BYTES } })
+            if (observedIdentity(fetched.state, input.folder) !== validity) return fail('CONFLICT', 'mailbox identity changed; search again', { reason: 'mail_search_identity_changed' })
+            if (!Array.isArray(fetched.messages) || fetched.messages.length > 1 || fetched.messages.some(message => message.uid !== uid)) return fail('PRECONDITION_FAILED', 'mail search returned an unexpected message')
+            for (const message of fetched.messages) {
+              const rawBytes = message.rawMimeBytes instanceof Uint8Array ? message.rawMimeBytes.byteLength : Buffer.byteLength(message.rawMime, 'utf8')
+              bytes += Math.max(message.sizeBytes, rawBytes)
+              if (bytes > SEARCH_PAGE_BYTES) return fail('PRECONDITION_FAILED', 'the search page exceeds its bounded message read size', { reason: 'mail_search_capacity' })
+              messages.push(project(message, mailbox, input.folder, validity))
+            }
+          }
+        } else {
+          totalMatches = 0
+          const selectedUids: number[] = [], needle = input.query.normalize('NFC').toLocaleLowerCase()
+          for (const uid of uids) {
+            const fetched = await client.fetchMessagesByUid(input.folder, uid, { requestedMailbox: mailbox, mimeLimits: { maxTotalBytes: SEARCH_LITERAL_BYTES } })
+            if (observedIdentity(fetched.state, input.folder) !== validity) return fail('CONFLICT', 'mailbox identity changed; search again', { reason: 'mail_search_identity_changed' })
+            if (!Array.isArray(fetched.messages) || fetched.messages.length > 1 || fetched.messages.some(message => message.uid !== uid)) return fail('PRECONDITION_FAILED', 'mail search returned an unexpected message')
+            for (const message of fetched.messages) {
+              const rawBytes = message.rawMimeBytes instanceof Uint8Array ? message.rawMimeBytes.byteLength : Buffer.byteLength(message.rawMime, 'utf8')
+              bytes += Math.max(message.sizeBytes, rawBytes)
+              if (bytes > SEARCH_PAGE_BYTES) return fail('PRECONDITION_FAILED', 'the search page exceeds its bounded message read size', { reason: 'mail_search_capacity' })
+              const summary = project(message, mailbox, input.folder, validity)
+              if (!matchesParsedQuery(message, needle)) continue
+              totalMatches += 1
+              if (!previous || uid < previous.before) {
+                remainingCount += 1
+                if (messages.length < input.limit) {
+                  messages.push(summary)
+                  selectedUids.push(uid)
+                }
+              }
+            }
+          }
+          if (remainingCount > selectedUids.length && selectedUids.length) cursorBefore = selectedUids.at(-1)
         }
         if (observedIdentity(await client.selectFolder(input.folder, mailbox), input.folder) !== validity) {
           return fail('CONFLICT', 'mailbox identity changed; search again', { reason: 'mail_search_identity_changed' })
         }
-        const nextCursor = remaining.length > selected.length && selected.length ? sign({ v: 1, session: session.record.sessionId, mailbox,
+        const nextCursor = cursorBefore !== undefined ? sign({ v: 1, session: session.record.sessionId, mailbox,
           account: session.record.accountId, serviceUser: session.record.serviceUserId, folder: input.folder, query: queryDigest(input.query),
-          validity, before: selected.at(-1)!, expires: now() + CURSOR_TTL_MS }) : null
+          validity, before: cursorBefore, expires: now() + CURSOR_TTL_MS }) : null
         return { context: { mailbox, folder: input.folder, uidValidity: validity, query: input.query }, messages,
-          page: { limit: input.limit, totalMatches: uids.length, nextCursor } }
+          page: { limit: input.limit, totalMatches, nextCursor } }
       })
     },
     async read(caller: AuthenticatedCaller, params: URLSearchParams): Promise<MailSearchRead> {

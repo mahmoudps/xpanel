@@ -160,7 +160,7 @@ async function host() {
   const transports = { serverName: 'server.example.test', email: { send: async () => undefined }, webhook: { send: async () => undefined } } as unknown as DeliveryTransports
   const mailCerts = startMailCertScheduler({ db: database.db, store: state.store, agentApp, agentToken: TOKEN, publicOrigin: ORIGIN, admit: task => task(),
     transports, caa: async () => [], resolves: async () => true, everyMs: 3_600_000 })
-  const monitoring = startAlertScheduler({ db: database.db, store: state.store, agentApp, agentToken: TOKEN, admit: task => task(), everyMs: 100, transports })
+  const monitoring = startAlertScheduler({ db: database.db, store: state.store, agentApp, agentToken: TOKEN, admit: task => task(), everyMs: 150, transports })
   cleanup.push(() => mailCerts.stop(), () => monitoring.stop())
   const api = createApiApp({ db: database.db, store: state.store, serverSecret: SECRET, entryPoint: 'xwhm', publicOrigin: ORIGIN, allowedOrigins: [ORIGIN],
     ingressSecret: INGRESS, requireSecureCookies: true, requireOriginHeader: true, provisioningPreparations: preparations, agentApp, agentToken: TOKEN })
@@ -173,7 +173,13 @@ async function host() {
 }
 
 describe('account provisioning beside the scheduled minute work (H)', () => {
-  beforeAll(async () => { await getSchedulerBaseline() })
+  beforeAll(async () => {
+    await getSchedulerBaseline()
+    if (process.platform === 'linux') {
+      const warm = await host()
+      try { await warm.create('qawarm') } finally { for (const close of cleanup.splice(0).reverse()) await close() }
+    }
+  })
   it.runIf(process.platform === 'linux')('creates an account while AutoSSL and monitoring run, and leaves its certificate for the next minute', async () => {
     const h = await host()
     h.during.push(() => h.mailCerts.tick())

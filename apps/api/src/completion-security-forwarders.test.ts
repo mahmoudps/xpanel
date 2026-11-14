@@ -1,40 +1,113 @@
 import { randomUUID } from 'node:crypto'
-import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { createApiToken, createTestDb, createUserPrincipal } from '@xpanel/db'
-import { atomicWriteJson, createTestStateStore } from '@xpanel/state'
+import { existsSync } from 'node:fs'
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { dirname, join, relative, sep } from 'node:path'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { createApiToken, createDb, createTestDb, createUserPrincipal } from '@xpanel/db'
+import { atomicWriteJson, createStateStore } from '@xpanel/state'
+import type { TestStateStoreHandle } from '@xpanel/state'
+import type { Account, FeatureList } from '@xpanel/core'
 import { sha256Hex } from './auth.ts'
 import { createApiApp } from './server.ts'
 import { scriptedApplyAgent, TEST_AGENT_TOKEN } from './testing.ts'
 
 const HASH = '$argon2id$v=19$m=65536,t=3,p=4$MIIRqgvgQbgj220jfp0MPA$YfwJSVjtjSU0zzV/P3S9nnQ/USre2wvJMjfCIjrTQbg'
+const SECRET = 'forwarder-synthetic-server-secret-at-least-32-bytes'
+const FWD_TMP = existsSync('/dev/shm') ? '/dev/shm' : tmpdir()
+
+let baseDbSqlite: Uint8Array
+let baseStateFiles: { relPath: string; bytes: Buffer }[]
+let baseFeatures: FeatureList
+let baseOwner: Account
+let baseOther: Account
+let basePrincipalId: string
+
+async function snapshotDir(rootDir: string, mutexFilePath: string, lockDirPath: string) {
+  const out: { relPath: string; bytes: Buffer }[] = []
+  const walk = async (dir: string): Promise<void> => {
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name)
+      if (full === mutexFilePath || full.startsWith(mutexFilePath + '-') || full === lockDirPath || full.startsWith(lockDirPath + sep)) continue
+      if (entry.isDirectory()) await walk(full)
+      else out.push({ relPath: relative(rootDir, full), bytes: await readFile(full) })
+    }
+  }
+  await walk(rootDir)
+  return out
+}
+
+async function restoreDir(rootDir: string, files: readonly { relPath: string; bytes: Buffer }[]) {
+  const dirs = new Set(files.map(file => dirname(join(rootDir, file.relPath))))
+  for (const dir of dirs) await mkdir(dir, { recursive: true, mode: 0o750 })
+  await Promise.all(files.map(file => writeFile(join(rootDir, file.relPath), file.bytes, { mode: 0o640 })))
+}
+
+beforeAll(async () => {
+  const seedDb = await createTestDb()
+  const seedDir = await mkdtemp(join(FWD_TMP, 'xpanel-fwd-seed-'))
+  const seedStore = createStateStore(seedDir)
+  try {
+    baseFeatures = await seedStore.createFeatureList({ name: 'Forwarder policy', ownerId: null, disabled: [] })
+    const plan = await seedStore.createPlan({ name: 'Forwarder plan', ownerId: null, featureListId: baseFeatures.id,
+      resources: { diskMb: 1000, bandwidthMbMonth: 10000, ioReadBps: 1048576, ioWriteBps: 1048576, ioReadIops: 100, ioWriteIops: 100, memoryMb: 128, maxProcesses: 16, cpuPercent: 100 },
+      caps: { addonDomains: 5, aliasDomains: 5, subdomains: 5, mailboxes: 10, forwarders: 2, mailingLists: 5, ftpAccounts: 5, databases: 5, phpWorkers: 5 }, dedicatedIp: false, shell: 'none', defaultMailboxQuotaMb: 100 })
+    await seedStore.saveServerIp({ address: '192.0.2.10', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
+    const accounts: Account[] = []
+    for (const username of ['owner7', 'other7']) accounts.push(await seedStore.createAccount({ username, passwordHash: HASH, primaryDomain: `${username}.example.test`, planId: plan.id, ownerId: null,
+      contactEmail: `owner@${username}.example.test`, ipv4: '192.0.2.10', shell: 'none',
+      php: { version: '8.3', handler: 'fpm', fpm: { mode: 'ondemand', maxChildren: 2, startServers: 1, minSpareServers: 1, maxSpareServers: 1, maxRequests: 50, processIdleTimeoutSec: 10 }, ini: {} } }))
+    baseOwner = accounts[0]!
+    baseOther = accounts[1]!
+    const principal = await createUserPrincipal(seedDb.db, { username: baseOwner.username, accountId: baseOwner.id, passwordHash: HASH })
+    basePrincipalId = principal.id
+    baseDbSqlite = seedDb.sqlite.serialize()
+    const lock = seedStore.getWriterLock()
+    baseStateFiles = await snapshotDir(seedDir, lock.mutexFilePath, lock.lockDirPath)
+  } finally {
+    await seedDb.close()
+    await rm(seedDir, { recursive: true, force: true })
+  }
+  const warmDb = createDb(':memory:')
+  warmDb.sqlite.deserialize(baseDbSqlite)
+  const warmDir = await mkdtemp(join(FWD_TMP, 'xpanel-fwd-warm-'))
+  const warmStore = createStateStore(warmDir)
+  try {
+    await restoreDir(warmDir, baseStateFiles)
+    const raw = `xp_${randomUUID()}`
+    await createApiToken(warmDb.db, { principalId: basePrincipalId, name: 'Warm forwarder test', tokenHash: sha256Hex(raw), scopes: ['mail:read', 'mail:write'], expiresAt: new Date(Date.now() + 60000).toISOString() })
+    const warmHost = scriptedApplyAgent()
+    const warmHosted = createApiApp({ db: warmDb.db, store: warmStore, serverSecret: SECRET, agentApp: warmHost, agentToken: TEST_AGENT_TOKEN })
+    await warmHosted.fetch(new Request('http://localhost/api/mail/import-csv', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${raw}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ kind: 'mailboxes', accountId: baseOwner.id, csv: `warm@${baseOwner.primaryDomain},SyntheticMailboxPassword!2026,100` }),
+    }))
+  } finally {
+    await warmDb.close()
+    await rm(warmDir, { recursive: true, force: true })
+  }
+})
 
 const fixture = async () => {
-  const database = await createTestDb()
-  const state = await createTestStateStore()
-  const features = await state.store.createFeatureList({ name: 'Forwarder policy', ownerId: null, disabled: [] })
-  const plan = await state.store.createPlan({ name: 'Forwarder plan', ownerId: null, featureListId: features.id,
-    resources: { diskMb: 1000, bandwidthMbMonth: 10000, ioReadBps: 1048576, ioWriteBps: 1048576, ioReadIops: 100, ioWriteIops: 100, memoryMb: 128, maxProcesses: 16, cpuPercent: 100 },
-    caps: { addonDomains: 5, aliasDomains: 5, subdomains: 5, mailboxes: 10, forwarders: 2, mailingLists: 5, ftpAccounts: 5, databases: 5, phpWorkers: 5 }, dedicatedIp: false, shell: 'none', defaultMailboxQuotaMb: 100 })
-  await state.store.saveServerIp({ address: '192.0.2.10', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
-  const accounts = []
-  for (const username of ['owner7', 'other7']) accounts.push(await state.store.createAccount({ username, passwordHash: HASH, primaryDomain: `${username}.example.test`, planId: plan.id, ownerId: null,
-    contactEmail: `owner@${username}.example.test`, ipv4: '192.0.2.10', shell: 'none',
-    php: { version: '8.3', handler: 'fpm', fpm: { mode: 'ondemand', maxChildren: 2, startServers: 1, minSpareServers: 1, maxSpareServers: 1, maxRequests: 50, processIdleTimeoutSec: 10 }, ini: {} } }))
-  const [owner, other] = accounts
-  const principal = await createUserPrincipal(database.db, { username: owner!.username, accountId: owner!.id, passwordHash: HASH })
-  const app = createApiApp({ db: database.db, store: state.store, serverSecret: 'forwarder-synthetic-server-secret-at-least-32-bytes' })
+  const database = createDb(':memory:')
+  database.sqlite.deserialize(baseDbSqlite)
+  const rootDir = await mkdtemp(join(FWD_TMP, 'xpanel-fwd-run-'))
+  await restoreDir(rootDir, baseStateFiles)
+  const store = createStateStore(rootDir)
+  const state: TestStateStoreHandle = { store, rootDir, close: () => rm(rootDir, { recursive: true, force: true }) }
+  const app = createApiApp({ db: database.db, store: state.store, serverSecret: SECRET })
   const host = scriptedApplyAgent()
-  const hosted = createApiApp({ db: database.db, store: state.store, serverSecret: 'forwarder-synthetic-server-secret-at-least-32-bytes', agentApp: host, agentToken: TEST_AGENT_TOKEN })
+  const hosted = createApiApp({ db: database.db, store: state.store, serverSecret: SECRET, agentApp: host, agentToken: TEST_AGENT_TOKEN })
   const token = async (scopes: string[]) => {
     const raw = `xp_${randomUUID()}`
-    await createApiToken(database.db, { principalId: principal.id, name: 'Synthetic forwarder test', tokenHash: sha256Hex(raw), scopes, expiresAt: new Date(Date.now() + 60000).toISOString() })
+    await createApiToken(database.db, { principalId: basePrincipalId, name: 'Synthetic forwarder test', tokenHash: sha256Hex(raw), scopes, expiresAt: new Date(Date.now() + 60000).toISOString() })
     return raw
   }
   const request = (raw: string, path: string, method = 'GET', body?: unknown, target = app) => target.fetch(new Request(`http://localhost${path}`, { method,
     headers: { authorization: `Bearer ${raw}`, ...(body !== undefined ? { 'content-type': 'application/json' } : {}) },
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}) }))
-  return { database, state, features, owner: owner!, other: other!, token, request, host, hosted }
+  return { database, state, features: baseFeatures, owner: baseOwner, other: baseOther, token, request, host, hosted }
 }
 
 describe('forwarder configuration security acceptance with synthetic state', () => {

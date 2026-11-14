@@ -20,8 +20,10 @@ const fastLtrStyle = { display: 'block', visibility: 'visible', direction: 'ltr'
 let origGetComputedStyle: typeof window.getComputedStyle
 let origQuerySelectorAll: typeof Element.prototype.querySelectorAll
 let origDocQuerySelectorAll: typeof Document.prototype.querySelectorAll
-const simpleAttrRe = /^\[(name|data-php-action)="([a-z0-9_-]+)"\]$/
-const simplePresenceRe = /^\[(id|data-php-[a-z0-9-]+)\]$/
+const simpleAttrRe = /^\[(name|data-php-action|data-xp-template)="([a-z0-9_-]+)"\]$/
+const simplePresenceRe = /^\[(id|data-(?:whm-)?php-[a-z0-9-]+|data-xp-slot)\]$/
+const controlTagSet = new Set(['INPUT', 'SELECT', 'TEXTAREA', 'BUTTON'])
+const inputOnlyTagSet = new Set(['INPUT', 'SELECT', 'TEXTAREA'])
 beforeAll(() => {
   origGetComputedStyle = window.getComputedStyle.bind(window)
   window.getComputedStyle = ((el: Element, pseudoElt?: string | null): CSSStyleDeclaration => {
@@ -42,6 +44,17 @@ beforeAll(() => {
   }) as typeof window.getComputedStyle
   origQuerySelectorAll = Element.prototype.querySelectorAll
   Element.prototype.querySelectorAll = function (this: Element, selectors: string): NodeListOf<Element> {
+    if (selectors === 'input,select,textarea,button' || selectors === 'input,textarea,select') {
+      const tags = selectors.includes('button') ? controlTagSet : inputOnlyTagSet
+      const out: Element[] = [], stack: Element[] = []
+      for (let c = this.lastElementChild; c; c = c.previousElementSibling) stack.push(c)
+      while (stack.length > 0) {
+        const el = stack.pop()!
+        if (tags.has(el.tagName)) out.push(el)
+        for (let c = el.lastElementChild; c; c = c.previousElementSibling) stack.push(c)
+      }
+      return out as unknown as NodeListOf<Element>
+    }
     const m = typeof selectors === 'string' ? simpleAttrRe.exec(selectors) : null
     if (m) {
       const attr = m[1]!, val = m[2]!, out: Element[] = [], stack: Element[] = []
@@ -111,8 +124,15 @@ const mountPhp = (theme: PhpTheme, locale: 'en' | 'ar' = 'en', unavailable = fal
   let tpl = phpTemplateCache.get(key)
   if (!tpl) {
     const props = { activeRoute: '/whm/software/php', locale, principal: phpPrincipal, catalog: phpCatalog, capabilityUnavailable: unavailable }
-    tpl = document.createElement('template')
-    tpl.innerHTML = theme === 'classic' ? renderWhmDetailPage(props)! : renderV2WhmPhp(props)
+    const full = document.createElement('template')
+    full.innerHTML = theme === 'classic' ? renderWhmDetailPage(props)! : renderV2WhmPhp(props)
+    const routeRoot = full.content.querySelector('[data-whm-detail-route="/whm/software/php"]')
+    if (routeRoot) {
+      tpl = document.createElement('template')
+      tpl.content.append(routeRoot)
+    } else {
+      tpl = full
+    }
     phpTemplateCache.set(key, tpl)
   }
   document.body.replaceChildren(tpl.content.cloneNode(true))

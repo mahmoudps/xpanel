@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { defaultServerRoles, SERVER_OPERATIONS_STATE } from '@xpanel/core'
 import type { HostAction, RenderedFile, ServerRoleState } from '@xpanel/core'
 import { profileFor } from '@xpanel/os'
-import { isServerRoleCommand, serverRoleSwitchArgv } from '../../../packages/os/src/server-role-command.ts'
+import { isServerRoleCommand, serverRoleRuntimeArgv, serverRoleSwitchArgv } from '../../../packages/os/src/server-role-command.ts'
 import { applyServerOperations, buildRoleApplyPlan, disabledRoleUnits, handleServerOperationsRoute, readServerOperations, renderZoneCatalog, roleUnitChanges, scanDnsCatalog } from './server-operations.ts'
 import type { ServerOperationsHost, ServerOperationsRouteContext } from './server-operations.ts'
 import { createUpdater } from './update-policy.ts'
@@ -69,7 +69,10 @@ describe('server operations on the host', { tags: ['unit'] }, () => {
 
   it('admits only role units in the reviewed systemctl grammar', () => {
     expect(isServerRoleCommand(serverRoleSwitchArgv('disable', 'pure-ftpd.service'))).toBe(true)
+    expect(isServerRoleCommand(serverRoleRuntimeArgv('stop', 'pure-ftpd.service'))).toBe(true)
+    expect(isServerRoleCommand(serverRoleRuntimeArgv('start', 'pure-ftpd.service'))).toBe(true)
     expect(isServerRoleCommand(serverRoleSwitchArgv('disable', 'nginx.service'))).toBe(false)
+    expect(isServerRoleCommand(serverRoleRuntimeArgv('stop', 'nginx.service'))).toBe(false)
     expect(isServerRoleCommand(serverRoleSwitchArgv('disable', 'xpanel-api.service'))).toBe(false)
     expect(isServerRoleCommand(['/usr/bin/systemctl', 'mask', '--', 'pure-ftpd.service'])).toBe(false)
   })
@@ -80,7 +83,11 @@ describe('server operations on the host', { tags: ['unit'] }, () => {
     expect(units).toEqual([{ role: 'ftp', change: 'disable', unit: 'pure-ftpd.service' }])
     let reconciled = 0
     const plan = buildRoleApplyPlan(units, async () => { reconciled += 1; return { ok: true, status: 'applied' } })
-    expect(plan.steps.map(step => step.argv)).toEqual([['/usr/bin/systemctl', 'disable', '--now', '--', 'pure-ftpd.service']])
+    expect(plan.steps.map(step => step.argv)).toEqual([
+      ['/usr/bin/systemctl', 'disable', '--now', '--', 'pure-ftpd.service'],
+      ['/usr/bin/systemctl', 'stop', '--', 'pure-ftpd.service'],
+    ])
+    expect(plan.policy(['/usr/bin/systemctl', 'stop', '--', 'pure-ftpd.service'])).toBe(true)
     expect(plan.policy(['/usr/bin/systemctl', 'disable', '--now', '--', 'mariadb.service'])).toBe(false)
     expect(await plan.verify!(async () => ({ ok: true, code: 0, stdout: 'active\n', stderr: '', timedOut: false }))).toMatchObject({ ok: false, detail: { failed: 'pure-ftpd.service' } })
     expect(reconciled).toBe(0)

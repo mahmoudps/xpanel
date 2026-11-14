@@ -5,7 +5,7 @@ import {
 } from '@xpanel/core'
 import type { Certificate, DomainForward, HostAction, OsProfile, PanelTlsPolicy, RenderedFile, ServerRole, ServerRoleChange, ServerRoleState, SystemMailForwards } from '@xpanel/core'
 import { edge, system } from '@xpanel/render'
-import { isServerRoleCommand, SERVER_ROLE_UNITS, serverRoleLoadArgv, serverRoleStateArgv, serverRoleSwitchArgv } from '../../../packages/os/src/server-role-command.ts'
+import { isServerRoleCommand, SERVER_ROLE_UNITS, serverRoleLoadArgv, serverRoleRuntimeArgv, serverRoleStateArgv, serverRoleSwitchArgv } from '../../../packages/os/src/server-role-command.ts'
 import type { HostJobCommandStep, HostJobPlan, HostJobView } from './host-job-contract.ts'
 import type { HostToolsInput } from './host-tools.ts'
 import { DEFAULT_DNS_ZONE_DIR, DEFAULT_NAMED_ZONES_CONF } from './services/dns.ts'
@@ -83,11 +83,16 @@ export async function roleUnitChanges(run: RoleCommandRun, changes: readonly Ser
   return found
 }
 
-/** cPanel Server Profile activation: one reviewed systemctl step per unit, then a reconcile with the new roles, verified on the host. */
+/** cPanel Server Profile activation: enable/disable plus explicit start/stop (for SysV-generated units that ignore --now), then reconcile and verify. */
 export function buildRoleApplyPlan(units: readonly { role: ServerRole; change: ServerRoleChange['change']; unit: string }[], reconcile: () => Promise<{ ok: boolean; status: string }>): HostJobPlan {
   const allowed = new Set(units.map(item => item.unit))
-  const steps = units.map(({ change, unit }, index): HostJobCommandStep => ({ id: `unit-${index + 1}`, title: change === 'enable' ? msgid('Start and enable {unit}') : msgid('Stop and disable {unit}'), titleValues: { unit },
-    argv: serverRoleSwitchArgv(change, unit), timeoutMs: STEP_TIMEOUT_MS, mutates: true }))
+  const steps = units.flatMap(({ change, unit }, index): HostJobCommandStep[] => {
+    const title = change === 'enable' ? msgid('Start and enable {unit}') : msgid('Stop and disable {unit}')
+    return [
+      { id: `unit-${index + 1}`, title, titleValues: { unit }, argv: serverRoleSwitchArgv(change, unit), timeoutMs: STEP_TIMEOUT_MS, mutates: true },
+      { id: `unit-${index + 1}-runtime`, title, titleValues: { unit }, argv: serverRoleRuntimeArgv(change === 'enable' ? 'start' : 'stop', unit), timeoutMs: STEP_TIMEOUT_MS, mutates: true },
+    ]
+  })
   return {
     kind: SERVER_ROLE_JOB_KIND, summary: `Apply server role changes to ${units.length} services`, accountId: null, fingerprint: { units }, detail: { units }, steps,
     policy: argv => isServerRoleCommand(argv) && allowed.has(argv.at(-1)!),

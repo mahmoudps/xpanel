@@ -25,7 +25,7 @@ function fixture() {
     uidValidityObserved: observed, uidNext: 10, flags: [], resynced: false, previousUidValidity: null })
   const client = {
     connect: vi.fn(async () => '* OK synthetic transport'), login: vi.fn(async () => undefined), logout: vi.fn(async () => undefined),
-    selectFolder: vi.fn(async (folder: string) => state(folder)), searchByUtf8Query: vi.fn(async () => messages.map(item => item.uid)),
+    selectFolder: vi.fn(async (folder: string) => state(folder)), searchByUtf8Query: vi.fn(async (_folder: string, _term: string, _requestedMailbox?: string) => messages.map(item => item.uid)),
     fetchMessagesByUid: vi.fn(async (folder: string, uid: string | number) => ({ state: state(folder), messages: messages.filter(item => item.uid === Number(uid)).map(item => ({ ...item, folder })) })),
   } satisfies MailSearchClient
   const openSession = vi.fn(async () => structuredClone(session))
@@ -81,6 +81,24 @@ describe('native mailbox search workspace', () => {
     const f = fixture(); f.setMessages([])
     expect(await f.workspace.search(caller, query())).toMatchObject({ messages: [], page: { totalMatches: 0, nextCursor: null } })
     expect(f.client.searchByUtf8Query).toHaveBeenCalledTimes(1); expect(f.client.selectFolder).toHaveBeenCalledTimes(2)
+  })
+  it('intersects word tokens and verifies exact substring matches when FTS splits hyphenated queries', async () => {
+    const f = fixture()
+    f.setMessages([
+      message(12, 'Payment reference invoice-3ca436f0 attached.'),
+      message(11, 'Payment invoice for account 3ca436f0 without hyphen.'),
+      message(10, 'Unrelated note.'),
+    ])
+    f.client.searchByUtf8Query.mockImplementation(async (_folder: string, term: string) => {
+      if (term === 'invoice-3ca436f0') return []
+      if (term === 'invoice') return [12, 11]
+      if (term === '3ca436f0') return [12, 11]
+      return []
+    })
+    const result = await f.workspace.search(caller, new URLSearchParams('q=invoice-3ca436f0&limit=10'))
+    expect(result.messages.map(item => item.uid)).toEqual([12])
+    expect(result.page).toEqual({ limit: 10, totalMatches: 1, nextCursor: null })
+    expect(f.client.searchByUtf8Query.mock.calls.map(call => call[1])).toEqual(['invoice-3ca436f0', 'invoice', '3ca436f0'])
   })
   it('refuses a missing identity observation before issuing a search', async () => {
     const f = fixture(); f.setObserved(false)

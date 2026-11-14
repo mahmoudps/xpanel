@@ -1,10 +1,9 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { existsSync } from 'node:fs'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { createResellerPrincipal, createRootPrincipal, createTestDb, createUserPrincipal, getPrincipal, listSessionsForPrincipal, setPasswordHash, setTotpSecret } from '@xpanel/db'
-import type { TestDbHandle } from '@xpanel/db'
+import { dirname, join, relative, sep } from 'node:path'
+import { createDb, createResellerPrincipal, createRootPrincipal, createTestDb, createUserPrincipal, getPrincipal, listSessionsForPrincipal, setPasswordHash, setTotpSecret } from '@xpanel/db'
 import { createStateStore } from '@xpanel/state'
 import type { TestStateStoreHandle } from '@xpanel/state'
 import { authenticateRequest, hashPasswordArgon2id, sealTotpSecret, sha256Hex } from './auth.ts'
@@ -19,18 +18,60 @@ const SECRET = 'JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP'
 const ORIGIN = 'http://localhost'
 const MFA_TMP = existsSync('/dev/shm') ? '/dev/shm' : tmpdir()
 let passwordHash: string
+let emptyDbSqlite: Uint8Array
+let userDbSqlite: Uint8Array
+let userStateFiles: { relPath: string; bytes: Buffer }[]
+let userBaselinePrincipal: Awaited<ReturnType<typeof createUserPrincipal>>
+
+async function snapshotDir(rootDir: string, mutexFilePath: string, lockDirPath: string) {
+  const out: { relPath: string; bytes: Buffer }[] = []
+  const walk = async (dir: string): Promise<void> => {
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name)
+      if (full === mutexFilePath || full.startsWith(mutexFilePath + '-') || full === lockDirPath || full.startsWith(lockDirPath + sep)) continue
+      if (entry.isDirectory()) await walk(full)
+      else out.push({ relPath: relative(rootDir, full), bytes: await readFile(full) })
+    }
+  }
+  await walk(rootDir)
+  return out
+}
+
+async function restoreDir(rootDir: string, files: readonly { relPath: string; bytes: Buffer }[]) {
+  const dirs = new Set(files.map(file => dirname(join(rootDir, file.relPath))))
+  for (const dir of dirs) await mkdir(dir, { recursive: true, mode: 0o750 })
+  await Promise.all(files.map(file => writeFile(join(rootDir, file.relPath), file.bytes, { mode: 0o640 })))
+}
+
 beforeAll(async () => {
-  passwordHash = await hashPasswordArgon2id(PASSWORD)
-  const warmDb = await createTestDb()
+  passwordHash = await hashPasswordArgon2id(PASSWORD, { timeCost: 1, parallelism: 1 })
+  const baseDb = await createTestDb()
+  try { emptyDbSqlite = baseDb.sqlite.serialize() } finally { await baseDb.close() }
+  const userDb = createDb(':memory:')
+  userDb.sqlite.deserialize(emptyDbSqlite)
+  const userDir = await mkdtemp(join(MFA_TMP, 'xpanel-mfa-user-'))
+  const userStore = createStateStore(userDir)
+  try {
+    await writeSignInLockout(userDir, 2)
+    const features = await userStore.createFeatureList({ name: 'Synthetic features', ownerId: null, disabled: [] })
+    const plan = await userStore.createPlan({ name: 'Synthetic plan', ownerId: null, featureListId: features.id, resources: { diskMb: 1000, bandwidthMbMonth: 10000, ioReadBps: 1048576, ioWriteBps: 1048576, ioReadIops: 100, ioWriteIops: 100, memoryMb: 128, maxProcesses: 16, cpuPercent: 100 }, caps: { addonDomains: 1, aliasDomains: 1, subdomains: 1, mailboxes: 1, forwarders: 1, mailingLists: 1, ftpAccounts: 1, databases: 1, phpWorkers: 1 }, dedicatedIp: false, shell: 'none', defaultMailboxQuotaMb: 100 })
+    await userStore.saveServerIp({ address: '192.0.2.10', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
+    const account = await userStore.createAccount({ username: 'owner', passwordHash, primaryDomain: 'owner.example.test', planId: plan.id, ownerId: null, contactEmail: 'owner@example.test', ipv4: '192.0.2.10', shell: 'none', php: { version: '8.3', handler: 'fpm', fpm: { mode: 'ondemand', maxChildren: 1, startServers: 1, minSpareServers: 1, maxSpareServers: 1, maxRequests: 50, processIdleTimeoutSec: 10 }, ini: {} } })
+    userBaselinePrincipal = await createUserPrincipal(userDb.db, { username: 'owner', accountId: account.id, passwordHash })
+    userDbSqlite = userDb.sqlite.serialize()
+    const lock = userStore.getWriterLock()
+    userStateFiles = await snapshotDir(userDir, lock.mutexFilePath, lock.lockDirPath)
+  } finally {
+    await userDb.close()
+    await rm(userDir, { recursive: true, force: true })
+  }
+  const warmDb = createDb(':memory:')
+  warmDb.sqlite.deserialize(userDbSqlite)
   const warmDir = await mkdtemp(join(MFA_TMP, 'xpanel-mfa-warm-'))
   const warmStore = createStateStore(warmDir)
   try {
+    await restoreDir(warmDir, userStateFiles)
     const root = await createRootPrincipal(warmDb.db, { username: 'root', passwordHash, forcePasswordChange: false })
-    const features = await warmStore.createFeatureList({ name: 'Warm features', ownerId: null, disabled: [] })
-    const plan = await warmStore.createPlan({ name: 'Warm plan', ownerId: null, featureListId: features.id, resources: { diskMb: 1000, bandwidthMbMonth: 10000, ioReadBps: 1048576, ioWriteBps: 1048576, ioReadIops: 100, ioWriteIops: 100, memoryMb: 128, maxProcesses: 16, cpuPercent: 100 }, caps: { addonDomains: 1, aliasDomains: 1, subdomains: 1, mailboxes: 1, forwarders: 1, mailingLists: 1, ftpAccounts: 1, databases: 1, phpWorkers: 1 }, dedicatedIp: false, shell: 'none', defaultMailboxQuotaMb: 100 })
-    await warmStore.saveServerIp({ address: '192.0.2.10', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
-    const account = await warmStore.createAccount({ username: 'owner', passwordHash, primaryDomain: 'owner.example.test', planId: plan.id, ownerId: null, contactEmail: 'owner@example.test', ipv4: '192.0.2.10', shell: 'none', php: { version: '8.3', handler: 'fpm', fpm: { mode: 'ondemand', maxChildren: 1, startServers: 1, minSpareServers: 1, maxSpareServers: 1, maxRequests: 50, processIdleTimeoutSec: 10 }, ini: {} } })
-    await createUserPrincipal(warmDb.db, { username: 'owner', accountId: account.id, passwordHash })
     const warmApi = createApiApp({ db: warmDb.db, store: warmStore, serverSecret: SERVER_SECRET, allowedOrigins: [ORIGIN] })
     const warmRenderer = await createDefaultWebRenderer({ db: warmDb.db, store: warmStore, serverSecret: SERVER_SECRET })
     for (const [u, p] of [['root', '/whm/security/sign-in'], ['owner', '/security/account']] as const) {
@@ -46,10 +87,11 @@ beforeAll(async () => {
 })
 
 describe('trusted development MFA runtime policy', () => {
-  let db: TestDbHandle
+  let db: ReturnType<typeof createDb>
   let state: TestStateStoreHandle
   beforeEach(async () => {
-    db = await createTestDb()
+    db = createDb(':memory:')
+    db.sqlite.deserialize(emptyDbSqlite)
     const rootDir = await mkdtemp(join(MFA_TMP, 'xpanel-mfa-'))
     state = { store: createStateStore(rootDir), rootDir, close: () => rm(rootDir, { recursive: true, force: true }) }
     await writeSignInLockout(state.store.rootDir, 2)
@@ -68,11 +110,9 @@ describe('trusted development MFA runtime policy', () => {
       const reseller = await state.store.createReseller({ username, passwordHash, acl: ['list-accounts'], maxAccounts: 10, totalDiskMb: 1000, totalBandwidthMb: 'unlimited', oversell: { disk: false, bandwidth: false }, nameservers: [], delegatedIps: [] })
       principal = await createResellerPrincipal(db.db, { id: reseller.id, username, passwordHash })
     } else {
-      const features = await state.store.createFeatureList({ name: 'Synthetic features', ownerId: null, disabled: [] })
-      const plan = await state.store.createPlan({ name: 'Synthetic plan', ownerId: null, featureListId: features.id, resources: { diskMb: 1000, bandwidthMbMonth: 10000, ioReadBps: 1048576, ioWriteBps: 1048576, ioReadIops: 100, ioWriteIops: 100, memoryMb: 128, maxProcesses: 16, cpuPercent: 100 }, caps: { addonDomains: 1, aliasDomains: 1, subdomains: 1, mailboxes: 1, forwarders: 1, mailingLists: 1, ftpAccounts: 1, databases: 1, phpWorkers: 1 }, dedicatedIp: false, shell: 'none', defaultMailboxQuotaMb: 100 })
-      await state.store.saveServerIp({ address: '192.0.2.10', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
-      const account = await state.store.createAccount({ username, passwordHash, primaryDomain: 'owner.example.test', planId: plan.id, ownerId: null, contactEmail: 'owner@example.test', ipv4: '192.0.2.10', shell: 'none', php: { version: '8.3', handler: 'fpm', fpm: { mode: 'ondemand', maxChildren: 1, startServers: 1, minSpareServers: 1, maxSpareServers: 1, maxRequests: 50, processIdleTimeoutSec: 10 }, ini: {} } })
-      principal = await createUserPrincipal(db.db, { username, accountId: account.id, passwordHash })
+      db.sqlite.deserialize(userDbSqlite)
+      await restoreDir(state.rootDir, userStateFiles)
+      principal = userBaselinePrincipal
     }
     if (enrolled) await setTotpSecret(db.db, principal.id, corrupt ? new Uint8Array(64) : sealTotpSecret(SECRET, SERVER_SECRET), [sha256Hex('unused-fixture-recovery')])
     return principal
@@ -108,6 +148,8 @@ describe('trusted development MFA runtime policy', () => {
 
   it.each(['root', 'reseller', 'user'] as const)('keeps %s password sessions and REST/HTML/WS consistent for configured and unconfigured factors', async kind => {
     const principal = await actor(kind, false)
+    vi.stubEnv('NODE_ENV', 'development')
+    const devRenderer = await createDefaultWebRenderer({ db: db.db, store: state.store, serverSecret: SERVER_SECRET })
     for (const enrolled of [false, true]) {
       if (enrolled) {
         await setTotpSecret(db.db, principal.id, new Uint8Array(64), [sha256Hex('unused-fixture-recovery')])
@@ -115,7 +157,6 @@ describe('trusted development MFA runtime policy', () => {
       const before = await getPrincipal(db.db, principal.id)
       vi.stubEnv('NODE_ENV', 'development')
       const api = app()
-      const renderer = await createDefaultWebRenderer({ db: db.db, store: state.store, serverSecret: SERVER_SECRET })
       const response = await login(api, principal.username)
       expect(response.status).toBe(200)
       const result = await response.json() as { mfaMode: string; csrfToken: string }
@@ -124,7 +165,7 @@ describe('trusted development MFA runtime policy', () => {
       expect((await sessionRequest(api, cookie, '/api/events/recent')).status).toBe(200)
       expect(await upgrade(api, cookie)).not.toBeNull()
       const path = kind === 'user' ? '/security/account' : '/whm/security/sign-in'
-      const document = await renderer(new Request(ORIGIN + path, { headers: { cookie } }))
+      const document = await devRenderer(new Request(ORIGIN + path, { headers: { cookie } }))
       expect(document.status).toBe(200)
       const html = await document.text()
       expect(html).toContain('data-mfa-mode="disabled"')
