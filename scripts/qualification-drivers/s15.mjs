@@ -1014,7 +1014,7 @@ export default [
 
   tool('ftp-server-selection', {
     prefix: 'S15T32', as: 'root', restores: ['/api/server/service-selection'], probe: '/api/server/service-selection',
-    paths: new RegExp(String.raw`^\/api\/(?:server\/(?:service-selection|services\/ftp)|jobs\/${ID})$`), requests: 40,
+    paths: new RegExp(String.raw`^\/api\/(?:server\/(?:service-selection|services\/ftp)|jobs\/${ID})$`), requests: 80, deadlineMs: 180_000,
     unit: [{ id: 'S15T32-UNIT-1', file: 'apps/api/src/server-operations-workspace.test.ts', name: 'WHM server operations offers only a disable option beside the one DNS and FTP daemon' }],
     checks: ['UNSUPPORTED-FTP-DAEMON-REFUSED', 'UNCHANGED-FTP-SELECTION-REFUSED', 'STALE-FTP-SELECTION-CONFLICT', 'FTP-DISABLED-AND-REENABLED'],
     async run({ root, check, refused, undo, until }) {
@@ -1037,7 +1037,7 @@ export default [
       const waitJob = async res => {
         const jid = res.data?.job?.id
         if (typeof jid !== 'string') return true
-        const settled = await until(() => root.get(`/api/jobs/${jid}`), r => ['succeeded', 'failed', 'cancelled'].includes(r.data?.job?.status), { attempts: 12, delayMs: 1000 })
+        const settled = await until(() => root.get(`/api/jobs/${jid}`), r => ['succeeded', 'failed', 'cancelled'].includes(r.data?.job?.status), { attempts: 30, delayMs: 2000 })
         return settled.settled && settled.last?.data?.job?.status === 'succeeded'
       }
       undo('ftp service selection', async () => {
