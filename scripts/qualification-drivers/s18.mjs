@@ -378,6 +378,7 @@ export default [
 
   tool('aapanel-dashboard', {
     prefix: 'S18T21', as: 'root', probe: '/api/server/monitoring/processes',
+    page: { route: '/whm', read: '/api/server/settings', shows: data => data?.settings?.hostname ? [data.settings.hostname] : ['Server dashboard'] },
     paths: /^\/api\/(?:server\/monitoring\/(?:processes|disk|performance\?window=invalid)|domains)$/,
     unit: [{ id: 'S18T21-UNIT-1', file: 'apps/web/src/board-port/xwhm-dashboard.test.ts', name: 'xWHM dashboard board port uses observed assigned-cap evidence and never treats delegated controllers as enforcement proof' }],
     checks: ['LIVE-PROCESSES-OBSERVED', 'FILESYSTEM-DISK-OBSERVED', 'HOSTED-SITES-COUNTER-READ', 'INVALID-PERFORMANCE-WINDOW-VALIDATION'],
@@ -394,6 +395,7 @@ export default [
 
   tool('aapanel-task-messages', {
     prefix: 'S18T22', as: 'root', probe: '/api/jobs',
+    page: { route: '/whm/jobs', read: '/api/jobs', shows: () => ['Job history'] },
     paths: /^\/api\/jobs(?:\/[0-9a-f-]{36}(?:\/log)?|\?status=(?:failed|invalid))?$/,
     unit: [{ id: 'S18T22-UNIT-1', file: 'apps/agent/src/db-service-jobs.test.ts', name: 'Redis version switch rolls back a failed install and leaves an early failure alone' }],
     checks: ['JOB-HISTORY-LISTED', 'FAILED-JOBS-FILTERED', 'INVALID-STATUS-FILTER-VALIDATION', 'MISSING-JOB-NOT-FOUND'],

@@ -2,7 +2,7 @@ import { constants } from 'node:fs'
 import { lstat, open, realpath, statfs } from 'node:fs/promises'
 import { posix } from 'node:path'
 import { randomBytes, createHash } from 'node:crypto'
-import { fail, type Account, type RenderedFile } from '@xpanel/core'
+import { fail, isXpanelError, type Account, type RenderedFile } from '@xpanel/core'
 import type { StateStore } from '@xpanel/state'
 import { services, system } from '@xpanel/render'
 import { ACCOUNT_PROBE_HOLD_SECONDS } from '../../../packages/render/src/system/account-probe.ts'
@@ -276,59 +276,76 @@ export function createReadonlyAccountProvisioningObserver(options: ReadonlyAccou
       if (serial < 1) return observationFailed('account_dns_serial_unavailable')
       // One account's zone against the whole active catalog, not the complete generation.
       await checked(() => options.dns.verify(files, [], 'zones'))
-      let home: HomeHandle | undefined, response: HeldProvisioningHttpRequest | undefined, processFiles: ProcessFiles | undefined
-      let value: AccountExecutionObservation | undefined, rejected = false, failure: unknown
-      // Capture ownership before the post-acquisition guard can reject.
-      const acquire = async <T>(work: () => Promise<T>, own: (value: T) => void): Promise<T> => {
+      const correlateOnce = async (): Promise<AccountExecutionObservation> => {
+        let home: HomeHandle | undefined, response: HeldProvisioningHttpRequest | undefined, processFiles: ProcessFiles | undefined
+        let value: AccountExecutionObservation | undefined, rejected = false, failure: unknown
+        // Capture ownership before the post-acquisition guard can reject.
+        const acquire = async <T>(work: () => Promise<T>, own: (value: T) => void): Promise<T> => {
+          await guard()
+          const acquired = await work()
+          own(acquired)
+          await guard()
+          return acquired
+        }
+        try {
+          const heldHome = await acquire(() => (options.openHome ?? openNativeProvisioningHome)(input.account), acquired => { home = acquired })
+          await checked(() => heldHome.assertCurrent())
+          const challenge = randomBytes(32).toString('hex')
+          const heldResponse = await acquire(() => http.openHttp({ account: input.account, request: input.request, challenge }, context), acquired => { response = acquired })
+          if (heldResponse.status !== 200 || heldResponse.challenge !== challenge || heldResponse.requestBinding !== input.request.binding
+            || !Number.isSafeInteger(heldResponse.pid) || heldResponse.pid < 2 || typeof heldResponse.assertCurrent !== 'function' || typeof heldResponse.close !== 'function') {
+            observationFailed('http_request_correlation_failed')
+          }
+          await checked(() => heldResponse.assertCurrent())
+          const heldProcess = await acquire(() => (options.openProcessFiles ?? openNativeProvisioningProcess)(heldResponse.pid), acquired => { processFiles = acquired })
+          const snapshot = async () => {
+            const [stat, status, cgroup] = await checked(() => Promise.all([heldProcess.read('stat'), heldProcess.read('status'), heldProcess.read('cgroup')]))
+            await checked(() => heldProcess.assertCurrent())
+            return parseProvisioningProcessFiles(heldResponse.pid, { stat, status, cgroup })
+          }
+          const before = await snapshot()
+          assertProvisioningProcessBinding(before, input.account, unit, mainPid)
+          if (await readUnit() !== mainPid) observationFailed('fpm_master_changed')
+          await checked(() => heldHome.assertCurrent())
+          const after = await snapshot()
+          assertProvisioningProcessBinding(after, input.account, unit, mainPid)
+          if (canonicalProvisioningIdentity(processBindingIdentity(before)) !== canonicalProvisioningIdentity(processBindingIdentity(after))) observationFailed('process_identity_changed')
+          await checked(() => heldResponse.assertCurrent())
+          const uid = after.uids[0], gid = after.gids[0]
+          if (uid === undefined || gid === undefined) observationFailed('process_credentials_missing')
+          value = { accountId: input.account.id, uid, gid, home: input.account.home,
+            revision: input.request.authority.desired.revision, generationId: generation.id, generationChecksum: generation.checksum,
+            sourceChecksum: input.request.authority.desired.checksum, cgroup: after.cgroup, services: [unit],
+            quota: { enforced: true, filesystem: quota.filesystem }, dns: { zone: input.account.primaryDomain, serial, authoritative: true },
+            php: { status: 200, uid, cgroup: after.cgroup } }
+          const accepted = assertProvisioningReply(input.request, { binding: input.request.binding, outcome: 'known', reconciliation: input.reconciliation, execution: value })
+          if (!accepted) observationFailed('execution_receipt_missing')
+          await guard()
+        } catch (error) { rejected = true; failure = error }
+        const closed = await Promise.allSettled([
+          () => processFiles?.close(), () => response?.close(), () => home?.close(),
+        ].map(close => Promise.resolve().then(close)))
+        if (rejected) throw failure
+        const closeFailures = closed.filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+        if (closeFailures.length > 0) {
+          if (closeFailures.every(result => isXpanelError(result.reason) && result.reason.detail?.transportReset === true)) {
+            throw closeFailures[0]!.reason
+          }
+          observationFailed('observation_handle_release_failed')
+        }
         await guard()
-        const acquired = await work()
-        own(acquired)
-        await guard()
-        return acquired
+        if (!value) return observationFailed('execution_receipt_missing')
+        return value
       }
       try {
-        const heldHome = await acquire(() => (options.openHome ?? openNativeProvisioningHome)(input.account), acquired => { home = acquired })
-        await checked(() => heldHome.assertCurrent())
-        const challenge = randomBytes(32).toString('hex')
-        const heldResponse = await acquire(() => http.openHttp({ account: input.account, request: input.request, challenge }, context), acquired => { response = acquired })
-        if (heldResponse.status !== 200 || heldResponse.challenge !== challenge || heldResponse.requestBinding !== input.request.binding
-          || !Number.isSafeInteger(heldResponse.pid) || heldResponse.pid < 2 || typeof heldResponse.assertCurrent !== 'function' || typeof heldResponse.close !== 'function') {
-          observationFailed('http_request_correlation_failed')
+        return await correlateOnce()
+      } catch (error) {
+        if (isXpanelError(error) && error.detail?.transportReset === true) {
+          await guard()
+          return await correlateOnce()
         }
-        await checked(() => heldResponse.assertCurrent())
-        const heldProcess = await acquire(() => (options.openProcessFiles ?? openNativeProvisioningProcess)(heldResponse.pid), acquired => { processFiles = acquired })
-        const snapshot = async () => {
-          const [stat, status, cgroup] = await checked(() => Promise.all([heldProcess.read('stat'), heldProcess.read('status'), heldProcess.read('cgroup')]))
-          await checked(() => heldProcess.assertCurrent())
-          return parseProvisioningProcessFiles(heldResponse.pid, { stat, status, cgroup })
-        }
-        const before = await snapshot()
-        assertProvisioningProcessBinding(before, input.account, unit, mainPid)
-        if (await readUnit() !== mainPid) observationFailed('fpm_master_changed')
-        await checked(() => heldHome.assertCurrent())
-        const after = await snapshot()
-        assertProvisioningProcessBinding(after, input.account, unit, mainPid)
-        if (canonicalProvisioningIdentity(processBindingIdentity(before)) !== canonicalProvisioningIdentity(processBindingIdentity(after))) observationFailed('process_identity_changed')
-        await checked(() => heldResponse.assertCurrent())
-        const uid = after.uids[0], gid = after.gids[0]
-        if (uid === undefined || gid === undefined) observationFailed('process_credentials_missing')
-        value = { accountId: input.account.id, uid, gid, home: input.account.home,
-          revision: input.request.authority.desired.revision, generationId: generation.id, generationChecksum: generation.checksum,
-          sourceChecksum: input.request.authority.desired.checksum, cgroup: after.cgroup, services: [unit],
-          quota: { enforced: true, filesystem: quota.filesystem }, dns: { zone: input.account.primaryDomain, serial, authoritative: true },
-          php: { status: 200, uid, cgroup: after.cgroup } }
-        const accepted = assertProvisioningReply(input.request, { binding: input.request.binding, outcome: 'known', reconciliation: input.reconciliation, execution: value })
-        if (!accepted) observationFailed('execution_receipt_missing')
-        await guard()
-      } catch (error) { rejected = true; failure = error }
-      const closed = await Promise.allSettled([
-        () => processFiles?.close(), () => response?.close(), () => home?.close(),
-      ].map(close => Promise.resolve().then(close)))
-      if (rejected) throw failure
-      if (closed.some(result => result.status === 'rejected')) observationFailed('observation_handle_release_failed')
-      await guard()
-      if (!value) return observationFailed('execution_receipt_missing')
-      return value
+        throw error
+      }
     },
   }
 }

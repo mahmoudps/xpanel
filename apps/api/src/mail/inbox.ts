@@ -818,7 +818,7 @@ export const retireMailboxServiceUser = async (input: MailboxRetirementAttempt):
     await input.audit({ action: previous ? 'mailbox.retirement_resumed' : 'mailbox.retirement_requested', job: created, source })
     if (created.needsAttention || created.status === 'failed') return pending(created, created.completedSteps.includes('configuration_removed') ? 'mailbox_retirement_native_unverified' : 'mailbox_retirement_state_unconfirmed')
     const workerId = 'mailbox-retire-' + randomUUID()
-    const leased = await acquireJobLease(input.db, { jobId: created.id, workerId, leaseDurationMs: 30_000 })
+    const leased = await acquireJobLease(input.db, { jobId: created.id, workerId, leaseDurationMs: 180_000 })
     if (!leased) return pending(created, 'mailbox_retirement_lease_unavailable')
     const assertAttempt = async (sourceGuard: () => Promise<void>): Promise<MailboxRetirementClockGuard> => {
       const admitted = await input.db.transaction(async tx => {

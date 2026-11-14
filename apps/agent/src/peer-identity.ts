@@ -27,16 +27,18 @@ export const AGENT_ROUTE_TIMEOUT_MS: ReadonlyMap<string, number> = new Map([
   ['/host/dns-cluster/sync', 300_000],
   // db-profiles.ts: a connect timeout, then the live client check.
   ['/host/db-profiles/activate', 60_000],
-  // State apply, reconcile, and server service operations compile and reload multiple host daemons synchronously.
+  // State apply, reconcile, application projects, and server service operations compile and reload multiple host daemons synchronously.
   ['/state/apply', 180_000],
   ['/reconcile', 180_000],
   ['/host/server-operations', 180_000],
+  ['/host/application-projects', 180_000],
 ])
 const ACCOUNT_FILES_ROUTE = /^\/accounts\/[a-z][a-z0-9]{0,15}\/files$/
 const ACCOUNT_DB_MAINTENANCE_ROUTE = /^\/accounts\/[a-z][a-z0-9]{0,15}\/databases\/maintenance$/
+const ACCOUNT_RUNTIME_ROUTE = /^\/accounts\/[a-z][a-z0-9]{0,15}\/runtime$/
 /** Account file requests include archive operations, whose confined worker may run 120 s before it answers. */
 export const agentRouteTimeoutMs = (pathname: string): number | undefined =>
-  AGENT_ROUTE_TIMEOUT_MS.get(pathname) ?? (ACCOUNT_FILES_ROUTE.test(pathname) ? 150_000 : ACCOUNT_DB_MAINTENANCE_ROUTE.test(pathname) ? 180_000 : undefined)
+  AGENT_ROUTE_TIMEOUT_MS.get(pathname) ?? (ACCOUNT_FILES_ROUTE.test(pathname) ? 150_000 : ACCOUNT_DB_MAINTENANCE_ROUTE.test(pathname) || ACCOUNT_RUNTIME_ROUTE.test(pathname) ? 180_000 : undefined)
 
 export interface KernelPeerCredentials {
   readonly uid: number

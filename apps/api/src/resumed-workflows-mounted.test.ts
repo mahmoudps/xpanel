@@ -75,7 +75,7 @@ async function fixture() {
   const database = await db.createTestDb()
   cleanup.push(() => database.close())
   const rootDir = await mkdtemp(join(MOUNTED_TMP, 'xpanel-mounted-'))
-  await cp(mountedTplDir, rootDir, { recursive: true, force: true })
+  await cp(mountedTplDir, rootDir, { recursive: true, force: true, filter: source => !/[/\\]\.writer-(?:mutex\.sqlite|lock)/.test(source) })
   const state: TestStateStoreHandle = { store: createStateStore(rootDir), rootDir, close: () => rm(rootDir, { recursive: true, force: true }) }
   cleanup.push(() => state.close())
   const { features, account } = mountedSeed

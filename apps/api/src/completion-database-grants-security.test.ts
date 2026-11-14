@@ -40,7 +40,7 @@ let template!: Awaited<ReturnType<typeof buildStateTemplate>>
 const fixture = async () => {
   const database=await dbApi.createTestDb(); cleanup.push(()=>database.close())
   const rootDir=await mkdtemp(join(tmpdir(),'xpanel-state-'))
-  await cp(template.state.rootDir,rootDir,{recursive:true})
+  await cp(template.state.rootDir,rootDir,{recursive:true,filter:source=>!/[/\\]\.writer-(?:mutex\.sqlite|lock)/.test(source)})
   const state={store:createStateStore(rootDir),rootDir,close:()=>rm(rootDir,{recursive:true,force:true})}; cleanup.push(()=>state.close())
   const {feature,owner,other,ownDb,secondDb,trashDb,foreignDb,ownUser,sibling,foreignUser}=template
   const principal=await dbApi.createUserPrincipal(database.db,{username:owner.username,accountId:owner.id,passwordHash:ARGON2})

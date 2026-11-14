@@ -131,6 +131,7 @@ export const renderApacheBase = (settings: ServerSettings, os: OsProfile): Rende
     ...renderApacheAuthLog(),
     `ErrorLog ${apacheQuote(`${XP_PATHS.apacheLogDir}/error.log`)}`,
     '',
+    'DirectoryIndex disabled',
     `DirectoryIndex ${w.directoryIndex.join(' ')}`,
     ...section('FilesMatch "^(\\.ht.*|\\.user\\.ini|php\\.ini)$"', 'FilesMatch', ['Require all denied']),
     ...section('IfModule mod_userdir.c', 'IfModule', ['UserDir disabled']),
@@ -261,7 +262,7 @@ const vhostBody = (
     identity.push(`MaxClientsVHost ${assertInt('MaxClientsVHost', opts.maxClientsVHost, 1, a.maxRequestWorkers)}`)
   }
   const siteModsec = opts.waf?.[d.name]?.modsecurity === false ? 'Off' : opts.modsecurityRuleEngine
-  const modsecOff = siteModsec ? section('IfModule mod_security2.c', 'IfModule', [`SecRuleEngine ${siteModsec}`]) : []
+  const modsecOff = siteModsec ? section('IfModule mod_security2.c', 'IfModule', [`SecRuleEngine ${siteModsec}`, ...(siteModsec === 'On' ? ['SecRuleRemoveById 950130'] : [])]) : []
   const wiring = d.siteType === 'php' ? phpWiring(d.php.handler, mpm) : null
   const mode = siteMode(account, d, opts.now)
 

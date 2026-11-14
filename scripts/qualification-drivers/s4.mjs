@@ -136,7 +136,7 @@ export default [
       const cycle = await restartActive(x, 'postfix')
       const after = await x.root.get('/api/server/mail-queue')
       const beforeIds = kept(queued), afterIds = kept(after)
-      x.check('QUEUE-PRESERVED', cameBack(cycle) && queued.status === 200 && after.status === 200 && Array.isArray(queued.data?.messages) && Array.isArray(after.data?.messages) && afterIds.length <= beforeIds.length,
+      x.check('QUEUE-PRESERVED', cameBack(cycle) && queued.status === 200 && after.status === 200 && Array.isArray(queued.data?.messages) && Array.isArray(after.data?.messages) && beforeIds.every(id => afterIds.includes(id)),
         { ...seen(cycle), queued: beforeIds.length, remaining: afterIds.length })
       if (x.host) {
         const smtp = cycle.restarted ? await x.net.tcpBanner(25) : null
@@ -246,7 +246,7 @@ export default [
   }),
 
   tool('server-repair', {
-    prefix: 'SRPR', probe: '/api/server/repair/diagnostics', paths: /^\/api\/server\/repair\/(?:diagnostics|preview|run)$/, requests: 8,
+    prefix: 'SRPR', probe: '/api/server/repair/diagnostics', paths: /^\/api\/server\/repair\/(?:diagnostics|preview|run)$/, requests: 12,
     unit: [{ id: 'SRPR-UNIT-DIAGNOSTICS', file: 'apps/agent/src/repair-center.test.ts', name: 'repair diagnostics report reports Debian package, service configuration and drift diagnostics truthfully' }],
     checks: ['HEALTHY-SCAN-NO-PACKAGE-PROBLEMS', 'SERVICES-AND-DRIFT-OBSERVED', 'HEALTHY-REPAIR-REFUSED', 'INVALID-REPAIR-REFUSED'],
     async run(x) {
@@ -259,7 +259,14 @@ export default [
         { status: scan.status, otherChecks: otherAreas.length })
       const repairId = scan.data?.family === 'rhel' ? 'dnf-cache-refresh' : 'dpkg-configure'
       const expectedRevision = typeof scan.data?.revision === 'string' ? scan.data.revision : '0'.repeat(64)
-      x.refused('HEALTHY-REPAIR-REFUSED', await x.root.post('/api/server/repair/preview', { repairId, expectedRevision }), 'PRECONDITION_FAILED')
+      let preview = await x.root.post('/api/server/repair/preview', { repairId, expectedRevision })
+      if (preview.status === 409 && preview.data?.code === 'CONFLICT') {
+        const rescan = await x.root.get('/api/server/repair/diagnostics')
+        if (typeof rescan.data?.revision === 'string') {
+          preview = await x.root.post('/api/server/repair/preview', { repairId, expectedRevision: rescan.data.revision })
+        }
+      }
+      x.refused('HEALTHY-REPAIR-REFUSED', preview, 'PRECONDITION_FAILED')
       x.refused('INVALID-REPAIR-REFUSED', await x.root.post('/api/server/repair/run', { repairId: 'invalid-repair', expectedRevision: 'bad' }), 'VALIDATION')
     },
   }),

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createHash } from 'node:crypto'
+import { fail } from '@xpanel/core'
 import type { ConfigGeneration } from '@xpanel/db'
 import { account, domain } from '../../../packages/render/src/edge/testkit.ts'
 import { canonicalProvisioningIdentity } from '../../../packages/core/src/account-provisioning-contract.ts'
@@ -221,5 +222,22 @@ describe('resource cleanup completion', () => {
     expect(s.processHandle.close).toHaveBeenCalledOnce()
     expect(s.response.close).toHaveBeenCalledOnce()
     expect(s.home.close).toHaveBeenCalledOnce()
+  })
+
+  it('retries correlation once when a settled HTTP transport reset occurs', async () => {
+    const s = scene()
+    const openHttp = s.options.openCorrelatedHttpRequest!
+    let calls = 0
+    const observer = createReadonlyAccountProvisioningObserver({
+      ...s.options,
+      openCorrelatedHttpRequest: async (input, context) => {
+        calls += 1
+        if (calls === 1) return fail('PRECONDITION_FAILED', 'account HTTP correlation did not verify', { verificationRequired: true, reason: 'held_http_correlation_not_verified', transportReset: true })
+        return openHttp(input, context)
+      },
+    })
+    const observed = await observer.observe(s.input, s.context)
+    expect(observed.accountId).toBe(s.input.account.id)
+    expect(calls).toBe(2)
   })
 })

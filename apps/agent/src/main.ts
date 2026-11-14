@@ -13,6 +13,7 @@ import { detectOs, XPANEL_FPM_SOCKET_DIR } from '@xpanel/os'
 import type { XpanelOsProfile } from '@xpanel/os'
 import { StateStore, atomicWriteJson, backgroundStateWrite, readJsonIfExists } from '@xpanel/state'
 import { createProductionAccountFileRunner, DEFAULT_FILE_WORKER_INCIDENT_DIR } from './production-file-runner.ts'
+import { refreshAccountFileHelperIfStale } from './refresh-account-file-helper.ts'
 import { CanonicalIoResourcePipeline, IoAnalyticsEngine, readWebsiteAnalyticsStore, WEBSITE_ANALYTICS_PATH, WebsiteAnalyticsEngine } from './analytics.ts'
 import { createProductionHostTargetMatcher, LinuxHostExecutor } from './executor.ts'
 import { ensureAcmeWebRoot } from './host-access.ts'
@@ -314,10 +315,9 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
           readRotation: () => readJsonIfExists<unknown>(LOG_ROTATION_STATE_PATH), writeRotation: state => withLifecycleWriterAdmission(() => atomicWriteJson(LOG_ROTATION_STATE_PATH, state, 0o600)) }))
         // Engines are distribution packages, or the installer's pinned builds on EL; a host without them spools nothing and reports them unavailable.
         const statsGeoip = createGeoipSource({ dir: WEB_STATS_ROOT + '/geoip', admit: work => withLifecycleWriterAdmission(work) })
-        const statsEngines = { awstats: AWSTATS_BINARIES.find(path => existsSync(path)) ?? null, webalizer: existsSync(WEBALIZER_BINARY) ? WEBALIZER_BINARY : null }
         const readStatsConfig = () => readJsonIfExists(join(stateDir, WEB_STATS_CONFIG_STATE)).then(parseWebStatsConfig, () => null)
         if (process.platform === 'linux') webStats = createWebStats({ readState: () => store.readSnapshot(), run: runBackupCommand, backupBusy: () => backupRuns?.busy() ?? false,
-          readConfig: readStatsConfig, engines: () => statsEngines, geoip: statsGeoip,
+          readConfig: readStatsConfig, engines: () => ({ awstats: AWSTATS_BINARIES.find(path => existsSync(path)) ?? null, webalizer: existsSync(WEBALIZER_BINARY) ? WEBALIZER_BINARY : null }), geoip: statsGeoip,
           geoipReady: () => GEOIP2_PERL_MODULES.some(path => existsSync(path)) && existsSync(statsGeoip.path), admit: work => withLifecycleWriterAdmission(work),
           onError: () => { process.stderr.write('xpanel-agent web statistics: run could not be completed\n') } })
         bandwidthMeter = createBandwidthMeter({ readState: () => store.readSnapshot(), readFrom: readProtectedLogFrom,
@@ -345,6 +345,10 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
 
         const fileHelperBinaryPath =
           opts.fileHelperBinaryPath ?? process.env.XPANEL_FILE_HELPER_BINARY ?? '/opt/xpanel/bin/xpanel-account-files'
+        if (process.platform === 'linux' && process.getuid?.() === 0 && dbPath !== ':memory:'
+          && opts.fileHelperBinaryPath === undefined && process.env.XPANEL_FILE_HELPER_BINARY === undefined) {
+          await refreshAccountFileHelperIfStale(fileHelperBinaryPath)
+        }
         let recoveryDetected = false
         let signalRecovery!: () => void
         const recoveryRequired = new Promise<void>((resolve) => { signalRecovery = resolve })
