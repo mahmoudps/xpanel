@@ -158,7 +158,7 @@ export default [
     prefix: 'DSB', as: 'root', needs: ['account'], probe: '/api/dns/zones', requests: 50, deadlineMs: 180_000,
     paths: new RegExp(`^\\/api\\/(?:${zonePath}|server\\/dns-ops\\/mail-auth|ips)$`),
     unit: [{ id: 'DSB-UNIT-1', file: 'apps/api/src/dkim-provisioning.test.ts', name: 'DNS email-auth public key provisioning publishes the actual public key and active selector without leaking a private key' }],
-    checks: ['SPF-HAS-MAIN-IPV4', 'SPF-KEEPS-INCLUDE', 'DKIM-SELECTOR-TXT-ADDED'],
+    checks: ['SPF-HAS-MAIN-IPV4', 'SPF-KEEPS-INCLUDE', 'DKIM-SELECTOR-TXT-ADDED'], hostOnly: ['DKIM-SELECTOR-TXT-ADDED'],
     async run({ root, net, host, fixture, check, undo, until }) {
       const domain = fixture.domain, original = await zoneOf(root, domain)
       undo('fixture zone', restoreZone(root, domain, original))
@@ -175,16 +175,18 @@ export default [
       const spf = txtAt(zone, '@').find(item => /^v=spf1/i.test(item.content))?.content ?? ''
       check('SPF-HAS-MAIN-IPV4', okJob && typeof main === 'string' && spf.includes(main), { status: started.status, job: polled.last?.data?.job?.status ?? null, pool: pool.status })
       check('SPF-KEEPS-INCLUDE', okJob && spf.includes('include:x'), { status: started.status, job: polled.last?.data?.job?.status ?? null })
-      const stamp = date => `xp${date.getUTCFullYear()}${String(date.getUTCMonth() + 1).padStart(2, '0')}`
-      const now = new Date(), prev = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1))
-      let dkimOk = false
-      if (okJob && net?.dnsQuery) {
-        for (const selector of new Set([stamp(now), stamp(prev)])) {
-          const dns = await net.dnsQuery(`${selector}._domainkey.${domain}`, 16)
-          if (dns.answers.some(item => item.type === 16 && /^v=DKIM1\b/i.test(item.data))) { dkimOk = true; break }
+      if (host) {
+        const stamp = date => `xp${date.getUTCFullYear()}${String(date.getUTCMonth() + 1).padStart(2, '0')}`
+        const now = new Date(), prev = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1))
+        let dkimOk = false
+        if (okJob && net?.dnsQuery) {
+          for (const selector of new Set([stamp(now), stamp(prev)])) {
+            const dns = await net.dnsQuery(`${selector}._domainkey.${domain}`, 16)
+            if (dns.answers.some(item => item.type === 16 && /^v=DKIM1\b/i.test(item.data))) { dkimOk = true; break }
+          }
         }
+        check('DKIM-SELECTOR-TXT-ADDED', okJob && (dkimOk || (zone?.records ?? []).some(item => item.type === 'TXT' && /\._domainkey(?:\.|$)/i.test(item.name))), { status: started.status, job: polled.last?.data?.job?.status ?? null, dkimOk })
       }
-      check('DKIM-SELECTOR-TXT-ADDED', okJob && (dkimOk || (zone?.records ?? []).some(item => item.type === 'TXT' && /\._domainkey(?:\.|$)/i.test(item.name))), { status: started.status, job: polled.last?.data?.job?.status ?? null, dkimOk })
     },
   }),
 
