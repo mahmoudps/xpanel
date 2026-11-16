@@ -399,10 +399,6 @@ export async function startLifecycleWriterParticipant(role, { onFence } = {}) {
   }
   const parent = await lstat(directory, { bigint: true })
   if (!parent.isDirectory() || parent.isSymbolicLink() || Number(parent.uid) !== process.geteuid() || Number(parent.mode & 0o7777n) !== 0o700) fail('LIFECYCLE_PARTICIPANT_DIRECTORY_UNSAFE')
-  const parentPin = await open(directory, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW)
-  const verifyParent = async () => { const [opened, named] = await Promise.all([parentPin.stat({ bigint: true }), lstat(directory, { bigint: true })]); if (opened.dev !== parent.dev || opened.ino !== parent.ino || named.dev !== parent.dev || named.ino !== parent.ino || named.uid !== parent.uid || named.mode !== parent.mode) fail('LIFECYCLE_PARTICIPANT_DIRECTORY_CHANGED') }
-  await verifyParent()
-  await removeStaleParticipantSocket(path, verifyParent)
   const server = createServer({ allowHalfOpen: true }, socket => {
     let bytes = ''; socket.setTimeout(2000, () => socket.destroy())
     socket.on('data', chunk => { bytes += chunk; if (Buffer.byteLength(bytes) > 4096) socket.destroy() })
@@ -415,7 +411,11 @@ export async function startLifecycleWriterParticipant(role, { onFence } = {}) {
       if (reply === null || socket.destroyed) socket.destroy(); else socket.end(reply)
     })
   })
+  const parentPin = await open(directory, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW)
+  const verifyParent = async () => { const [opened, named] = await Promise.all([parentPin.stat({ bigint: true }), lstat(directory, { bigint: true })]); if (opened.dev !== parent.dev || opened.ino !== parent.ino || named.dev !== parent.dev || named.ino !== parent.ino || named.uid !== parent.uid || named.mode !== parent.mode) fail('LIFECYCLE_PARTICIPANT_DIRECTORY_CHANGED') }
   try {
+    await verifyParent()
+    await removeStaleParticipantSocket(path, verifyParent)
     await new Promise((resolve, reject) => { server.once('error', reject); server.listen(path, resolve) })
     await chmod(path, 0o600); await verifyParent()
     const owned = await lstat(path, { bigint: true })
@@ -436,7 +436,11 @@ export async function startLifecycleWriterParticipant(role, { onFence } = {}) {
         throw changed()
       } finally { await parentPin.close() }
     } })
-  } catch (error) { server.close(); await parentPin.close(); throw error }
+  } catch (error) {
+    try { if (server.listening) server.close() }
+    finally { await parentPin.close() }
+    throw error
+  }
 }
 
 export async function readLifecyclePublicStatus() {

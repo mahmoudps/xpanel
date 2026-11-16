@@ -90,7 +90,12 @@ export async function runBrowserAcceptance({ chromium, expect }) {
       const result = await globalThis.axe.run(document, { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'] } })
       return result.violations.filter(item => item.impact === 'critical' || item.impact === 'serious').map(item => ({ id: item.id, impact: item.impact, nodes: item.nodes.length }))
     })
-    record('axe_serious_critical', { theme: await page.locator('html').getAttribute('data-theme'), violations })
+    const theme = await page.locator('html').getAttribute('data-theme')
+    record('axe_serious_critical', { theme, violations })
+    if (violations.length) {
+      const rules = violations.filter(item => /^[a-z][a-z0-9-]{0,63}$/.test(item.id))
+      process.stdout.write(`XPANEL_BROWSER_AXE=${JSON.stringify({ theme: ['light', 'dark'].includes(theme) ? theme : null, rules })}\n`)
+    }
     expect(violations, 'Visible authentication and unavailable surfaces must have no serious or critical axe violations').toEqual([])
   }
 
