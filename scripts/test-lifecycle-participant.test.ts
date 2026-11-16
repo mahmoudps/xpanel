@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm, symlink, writeFile, type FileHandle } from 'node:fs/promises'
 import { connect, createServer, type Socket } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 // The real participant on a real Unix socket, its fixed /run directory mapped onto a private
 // temporary directory. This proves the protocol and close path, not systemd or root ownership.
-const seam = vi.hoisted(() => ({ dir: '', barrier: null as Buffer | null, foreignUid: false }))
+const seam = vi.hoisted(() => ({ dir: '', barrier: null as Buffer | null, foreignUid: false, parentPins: [] as FileHandle[] }))
 const DIRECTORY = '/run/xpanel/lifecycle-agent'
 const mapped = (path: unknown) => typeof path === 'string' && path.startsWith(DIRECTORY) ? seam.dir + path.slice(DIRECTORY.length) : path
 vi.mock('node:fs/promises', async original => {
@@ -20,7 +20,11 @@ vi.mock('node:fs/promises', async original => {
       : path === '/var/lib/xpanel-lifecycle' ? Promise.resolve({}) : actual.lstat(mapped(path) as string, ...rest)
         .then(stat => seam.foreignUid && path.endsWith('/participant.sock') ? Object.assign(stat, { uid: stat.uid + 1n }) : stat),
     unlink: (path: string) => actual.unlink(mapped(path) as string),
-    open: (path: string, ...rest: [number]) => actual.open(mapped(path) as string, ...rest),
+    open: async (path: string, ...rest: [number]) => {
+      const handle = await actual.open(mapped(path) as string, ...rest)
+      if (path === DIRECTORY) seam.parentPins.push(handle)
+      return handle
+    },
     chmod: (path: string, mode: number) => actual.chmod(mapped(path) as string, mode),
   }
 })
@@ -53,7 +57,15 @@ const handshake = (path: string) => new Promise<Record<string, unknown>>((resolv
 const leaveStale = (path: string) => expect(spawnSync(process.execPath, ['-e', "require('node:net').createServer().listen(process.argv[1], () => process.kill(process.pid, 'SIGKILL'))", path]).signal).toBe('SIGKILL')
 const fixture = async () => { seam.dir = await mkdtemp(join(tmpdir(), 'xpanel-participant-')); return join(seam.dir, 'participant.sock') }
 
-afterEach(async () => { seam.barrier = null; seam.foreignUid = false; if (seam.dir) await rm(seam.dir, { recursive: true, force: true }); seam.dir = '' })
+afterEach(async () => {
+  seam.barrier = null
+  seam.foreignUid = false
+  const leakedPins = seam.parentPins.splice(0).filter(handle => handle.fd !== -1)
+  await Promise.all(leakedPins.map(handle => handle.close()))
+  if (seam.dir) await rm(seam.dir, { recursive: true, force: true })
+  seam.dir = ''
+  expect(leakedPins).toHaveLength(0)
+})
 
 describe.runIf(process.platform === 'linux')('lifecycle writer participant stop during an upgrade', () => {
   it('Node unlinks a bound Unix socket name inside server.close()', async () => {
