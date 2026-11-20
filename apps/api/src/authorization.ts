@@ -173,6 +173,7 @@ export const policyForRequest = (pathname: string, method: string): RoutePolicy 
   if (pathname.startsWith('/api/account/web-stats/webalizer/')) return { resource: 'analytics', acl: 'list-accounts', toolIds: ['web-stats-webalizer'] }
   if (pathname === '/api/server/web-stats' || pathname === '/api/server/web-stats/process') return { resource: 'server', rootOnly: true }
   if (pathname === '/api/account/site-health') return { resource: 'health', acl: 'list-accounts', toolIds: ['account-health-overview'] }
+  if (pathname === '/api/account/resources/live') return { resource: 'accounts', acl: 'list-accounts', toolIds: ['resource-usage'], scopeAccess: 'read' }
   if (pathname === '/api/account/web-disk') return { resource: 'files', acl: 'list-accounts', toolIds: ['web-disk'] }
   if (pathname === '/api/account/calendars-contacts/connection' || pathname === '/api/account/calendars-contacts/connection/apple.mobileconfig') return { resource: 'webmail', acl: 'list-accounts', toolIds: ['email-accounts', 'calendars-contacts-config'] }
   if (pathname === '/api/account/sec/waf') return { resource: 'waf', acl: read ? 'list-accounts' : 'edit-account', toolIds: ['modsecurity'] }
@@ -189,6 +190,7 @@ export const policyForRequest = (pathname: string, method: string): RoutePolicy 
   if (/^\/api\/security\/(?:workspace|ssh(?:\/keys)?)$/.test(pathname)) return { resource: 'security', rootOnly: true }
   if (pathname === '/api/search') return { resource: 'search', acl: 'list-accounts' }
   if (pathname === '/api/accounts/health') return { resource: 'accounts', acl: 'list-accounts', scopeAccess: 'read' }
+  if (pathname === '/api/accounts/preflight') return { resource: 'accounts', acl: 'create-account', scopeAccess: 'read' }
   if (pathname === '/api/accounts/repair/preview') return { resource: 'accounts', rootOnly: true, scopeAccess: 'read' }
   if (pathname === '/api/accounts/repair/run') return { resource: 'accounts', rootOnly: true }
   if (/^\/api\/jobs(?:\/|$)/.test(pathname)) return { resource: 'jobs', rootOnly: true }

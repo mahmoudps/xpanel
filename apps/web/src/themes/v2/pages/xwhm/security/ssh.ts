@@ -1,7 +1,7 @@
 import { renderV2RootIdentityCards } from '../../identity.ts'
 import { kpiCard } from '../../../components/kpi-card.ts'
 import { notice } from '../../../components/notice.ts'
-import { actions, area, button, check, context, esc, facts, field, fields, help, inputControl, page, section, select, status, table, type WhmObservationInput } from '../monitoring/common.ts'
+import { actions, area, button, check, context, esc, field, fields, help, inputControl, page, section, select, status, table, type WhmObservationInput } from '../monitoring/common.ts'
 import { whmStoredFacts } from '../stored-facts.ts'
 
 const SSH_TEMPLATES = '<template data-xp-template="whm-ssh-remove"><button type="button" class="v2-btn" data-whm-ssh-remove data-protected="true" disabled><span data-xp-slot="label"></span></button></template><template data-xp-template="whm-ssh-fact-technical"><div><dt data-xp-slot="label"></dt><dd><bdi dir="ltr" class="v2-mono v2-num" data-xp-slot="value"></bdi></dd></div></template><template data-xp-template="whm-ssh-fact-text"><div><dt data-xp-slot="label"></dt><dd><span data-xp-slot="value"></span></dd></div></template>'
@@ -12,17 +12,15 @@ export function renderV2WhmSsh(input: WhmObservationInput): string {
   const portKnown = (canRead || whmStoredFacts(input, input.observationAuthority ?? {}, ['server-settings-edit'])) && Number.isInteger(input.serverSettings?.sshPort)
   const unread = t(msgid('Not read'))
   // The policy client writes sign-in counts into the two today tiles, so they keep the numeric value size; service state stays text.
-  const tiles = `<section class="v2-kpi-row" aria-label="${esc(t(msgid('SSH service')))}">${([['active', msgid('Service')], ['enabled', msgid('Starts at boot')], ['today-accepted', msgid('Successful sign-ins today')], ['today-failed', msgid('Failed sign-ins today')]] as const).map(([key, label]) => { const tile = kpiCard({ label: t(label), value: unread, headingLevel: 2, valueHooks: { 'data-whm-ssh-fact': key } }); return key.startsWith('today-') ? tile.replace(' v2-kpi__value--text', '') : tile }).join('')}</section>`
+  const tiles = `<section class="v2-kpi-row" aria-label="${esc(t(msgid('SSH service')))}">${([['active', msgid('Service')], ['enabled', msgid('Starts at boot')], ['today-accepted', msgid('Successful sign-ins today')], ['today-failed', msgid('Failed sign-ins today')]] as const).map(([key, label]) => kpiCard({ label: t(label), value: unread, numeric: key.startsWith('today-'), headingLevel: 2, valueHooks: { 'data-whm-ssh-fact': key } })).join('')}</section>`
   const openSessionsText = canRead && input.sshOpenSessions
     ? (input.sshOpenSessions.state === 'read' ? String(input.sshOpenSessions.count) : t(msgid('Unavailable')))
     : unread
   const sessionValue = canRead && input.adminSessionIp
     ? `<bdi class="v2-mono" dir="ltr">${esc(input.adminSessionIp)}</bdi>`
     : `<bdi dir="auto">${esc(unread)}</bdi>`
-  const protection = notice(t, { tone: 'ok', lead: t(msgctxt('theme:v2', 'Current session protection.')), text: t(msgid('A change is tested with sshd before it loads, and open sessions stay connected. The new port opens in the firewall first; the old one closes only after sshd answers on the new port. A policy that would leave no way to sign in is refused.')) })
-    .replace('</p>', `</p><p class="v2-muted">${esc(t(msgctxt('theme:v2', 'Your session')))} ${sessionValue}</p>`)
-  const serviceFacts = facts(t, [['open-sessions', msgid('Open sessions')], ['total-accepted', msgid('Successful sign-ins in the journal')], ['total-failed', msgid('Failed sign-ins in the journal')]], 'data-whm-ssh-fact')
-    .replace(`data-whm-ssh-fact="open-sessions">${esc(unread)}`, `class="v2-num" data-whm-ssh-fact="open-sessions">${esc(openSessionsText)}`)
+  const protection = notice(t, { tone: 'ok', lead: t(msgctxt('theme:v2', 'Current session protection.')), text: t(msgid('A change is tested with sshd before it loads, and open sessions stay connected. The new port opens in the firewall first; the old one closes only after sshd answers on the new port. A policy that would leave no way to sign in is refused.')), extraHtml: `<p class="v2-muted">${esc(t(msgctxt('theme:v2', 'Your session')))} ${sessionValue}</p>` })
+  const serviceFacts = `<dl class="v2-observation__facts"><div><dt>${esc(t(msgid('Open sessions')))}</dt><dd><bdi dir="auto" class="v2-num" data-whm-ssh-fact="open-sessions">${esc(openSessionsText)}</bdi></dd></div><div><dt>${esc(t(msgid('Successful sign-ins in the journal')))}</dt><dd><bdi dir="auto" data-whm-ssh-fact="total-accepted">${esc(unread)}</bdi></dd></div><div><dt>${esc(t(msgid('Failed sign-ins in the journal')))}</dt><dd><bdi dir="auto" data-whm-ssh-fact="total-failed">${esc(unread)}</bdi></dd></div></dl>`
   const body = tiles + protection + '<div class="v2-observation__columns">' + section(t, 'ssh-settings', msgid('Sign-in settings'), `<div class="v2-observation__groups" data-whm-ssh-policy data-whm-ssh-can-manage="${canManage && portKnown}">${fields(field(t, 'v2-ssh-port', msgid('Port'), inputControl('v2-ssh-port', { 'data-whm-ssh-port': true }, false, ` dir="ltr" min="1" max="65535" step="1"${portKnown ? ` value="${input.serverSettings!.sshPort}"` : ''}`, 'number'))
     + field(t, 'v2-ssh-auth', msgid('Authentication'), select(t, 'v2-ssh-auth', { 'data-whm-ssh-auth': true }, [['keys', msgctxt('approved-xwhm', 'Keys only')], ['both', msgctxt('approved-xwhm', 'Keys and password')], ['password', msgid('Password only')]]))
     + field(t, 'v2-ssh-root', msgid('Root sign-in'), select(t, 'v2-ssh-root', { 'data-whm-ssh-root': true }, [['prohibit-password', msgctxt('approved-xwhm', 'Keys only')], ['no', msgid('Not allowed')], ['yes', msgctxt('approved-xwhm', 'Keys and password')], ['forced-commands-only', msgid('Forced commands only')]])))}

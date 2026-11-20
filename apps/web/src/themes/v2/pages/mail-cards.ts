@@ -15,7 +15,7 @@ export const V2_MAIL_CARD_CSS = `.v2-mail-cards{display:flex;flex-direction:colu
 .v2-mail-card__facts dd{font-size:14px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere;text-box-trim:trim-start;text-box-edge:text}
 .v2-mail-card__actions{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2)}
 .v2-mail-card__scroll{overflow-x:auto;min-inline-size:0;border:1px solid var(--line);border-radius:12px;font-variant-numeric:tabular-nums}
-.v2-mail-card__list{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(180px,100%),1fr));gap:var(--space-1);max-block-size:320px;overflow-y:auto}
+.v2-mail-card__list{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(180px,100%),1fr));gap:var(--space-1)}
 .v2-mail-card__check{display:flex;align-items:center;gap:var(--space-1);min-block-size:var(--target);font-size:14px}
 .v2-mail-card input[type=file]{block-size:auto;padding:var(--space-1);font-size:13px;color:var(--text-2)}
 .v2-mail-card input[type=file]::file-selector-button{min-inline-size:44px;min-block-size:var(--target);margin-inline-end:12px;padding:0 14px;border:1px solid var(--line-strong);border-radius:8px;background:var(--surface);color:var(--text);font:600 13px/1.2 inherit;cursor:pointer;transition:background-color 140ms ease-out,border-color 140ms ease-out}

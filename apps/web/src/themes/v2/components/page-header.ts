@@ -35,24 +35,23 @@ export function pageHeader(t: Translate, props: PageHeaderProps): string {
     : ''
   const aside = stamp || props.actionsHtml ? `<div class="v2-page-head__actions">${stamp}${props.actionsHtml ?? ''}</div>` : ''
   const title = `<h1${attr('id', props.titleId)}>${escapeHtml(props.title)}</h1>`
-  return `<header class="v2-page-head"${hookAttrs(props.hooks)}>
-<nav class="v2-crumbs" aria-label="${escapeHtml(t('Breadcrumb'))}"><ol>${props.breadcrumb.map((item, index) => crumb(item, index === props.breadcrumb.length - 1)).join('')}</ol>${props.route ? `<code dir="ltr">${escapeHtml(props.route)}</code>` : ''}</nav>
+  return `<header class="v2-page-head"${attr('data-route', props.route)}${hookAttrs(props.hooks)}>
+<nav class="v2-crumbs" aria-label="${escapeHtml(t('Breadcrumb'))}"><ol>${props.breadcrumb.map((item, index) => crumb(item, index === props.breadcrumb.length - 1)).join('')}</ol></nav>
 <div class="v2-page-head__row"><div class="v2-page-head__text">${props.status ? `<div class="v2-page-head__title">${title}${statusPill(props.status)}</div>` : title}${props.description ? `<p>${escapeHtml(props.description)}</p>` : ''}</div>${aside}</div>
 </header>`
 }
 
-export const PAGE_HEADER_CSS = `.v2-page-head{display:flex;flex-direction:column;gap:var(--space-2)}
-.v2-crumbs{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--space-1)}
-.v2-crumbs ol{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-1);font-size:13px;color:var(--muted)}
-.v2-crumbs li{display:inline-flex;align-items:center;gap:var(--space-1)}
-.v2-crumbs a{display:inline-flex;align-items:center;min-height:var(--target);min-inline-size:var(--target);color:var(--muted);text-decoration:none}
+export const PAGE_HEADER_CSS = `.v2-page-head{display:flex;flex-direction:column;gap:6px}
+.v2-crumbs{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--space-1);min-height:22px}
+.v2-crumbs ol{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
+.v2-crumbs li{display:inline-flex;align-items:center;gap:6px}
+.v2-crumbs a{display:inline-flex;align-items:center;min-height:var(--target);min-inline-size:var(--target);margin-block:-11px;color:var(--muted);text-decoration:none}
 .v2-crumbs a:hover{color:var(--text)}
 .v2-crumbs [aria-current="page"]{color:var(--text-2);font-weight:500}
-.v2-crumbs code{padding:2px 8px;border-radius:6px;border:1px solid var(--line);background:var(--subtle);font-size:12px;color:var(--muted)}
-.v2-page-head__row{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:var(--space-2) var(--space-3)}
-.v2-page-head__text{display:flex;flex-direction:column;gap:var(--space-1);min-width:0;max-width:72ch}
-.v2-page-head__title{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-1) 12px}
-.v2-page-head__text p{color:var(--muted);line-height:1.6}
-.v2-page-head__actions{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2)}
-.v2-page-head__status{display:flex;flex-direction:column;align-items:flex-end;gap:4px;font-size:12px}
+.v2-page-head__row{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px var(--space-3)}
+.v2-page-head__text{display:flex;flex-direction:column;gap:var(--space-1);min-width:0;max-width:84ch}
+.v2-page-head__title{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-1) 10px}
+.v2-page-head__text p{font-size:13px;color:var(--muted);line-height:1.5}
+.v2-page-head__actions{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.v2-page-head__status{display:flex;flex-direction:column;align-items:flex-end;gap:2px;font-size:12px}
 `

@@ -46,7 +46,7 @@ ${operationTable('v2-account-backup-diff', t(msgid('Restore differences')), [t(m
   const aside = operationCard('v2-backup-scope', t(msgctxt('theme:v2', 'Backup scope and safeguards')),
     `${operationFacts([{ label: t(msgid('Account')), valueHtml: account ? technical(account.username) : escapeHtml(unknown) }, { label: t(msgid('Home')), valueHtml: account ? technical(account.home) : escapeHtml(unknown) }])}<p>${escapeHtml(t(msgctxt('theme:v2', 'Database, mailbox and server restore points require their own qualified providers. They are not included in the home-file archive.')))}</p>`)
   const columns = (main: string, side: string): string => `<div class="v2-panel-operation-columns"><div class="v2-panel-operation-stack">${main}</div><aside class="v2-panel-operation-stack" aria-label="${escapeHtml(t(msgctxt('theme:v2', 'Backup information')))}">${side}</aside></div>`
-  const archives = `${archiveList}${columns(create, aside)}${columns(differences, restore)}`
+  const archives = `<div class="v2-panel-operation-stack" data-wizard="guided"><div data-wizard-step="1">${columns(create, aside)}</div><div data-wizard-step="2">${archiveList}</div><div data-wizard-step="3">${columns(differences, restore)}</div></div>`
   // The archive flow stays on one panel: a review started from the archive list shows its result right below it.
   const views = account ? [
     ['archives', t(msgid('Account archives')), archives],

@@ -44,6 +44,7 @@ SQLite memory belongs to the processes that use it and must be included in their
 - Use the exact versions in [.node-version](../.node-version), [package.json](../package.json) and [pnpm-lock.yaml](../pnpm-lock.yaml). Follow the [runtime policy](decisions/runtime.md).
 - TypeScript runs through Node native type stripping. Use explicit `.ts` imports and `import type`; avoid unsupported emit-dependent syntax.
 - Use English identifiers, comments, technical documentation and source strings. Translate user-facing text through shared catalogs.
+- Name files, modules, exports, classes, functions and attributes after their domain role using standard engineering terms. Never introduce versioned identifiers (`v0`, `v1`, `v2`, `v3`) during prelaunch or subjective marketing adjectives (`smart`, `hero`, `legacy`, `super`, `magic`). Avoid patch-on-patch shims; fix root causes cleanly inside the canonical layer.
 - Keep errors stable and typed. Preserve denial and failure distinctions without exposing internal paths, commands, secrets or raw backend errors.
 - Prefer small functions and existing platform features. Explain non-obvious constraints and tradeoffs in comments.
 - Ship complete behavior and remove dead or replaced paths. Do not substitute placeholder data, fake success or swallowed errors for a missing implementation.
@@ -120,6 +121,17 @@ Arabic uses additional vertical room for its glyphs; Latin and Arabic line heigh
 The primary layout rhythm uses 8px between a label and its value, 16px between fields, 24px between groups or within desktop cards, and 32px between larger sections. Phone cards use 16px padding. Utility icon spacing is separate from form/group rhythm. Generic controls retain at least 44px height; login inputs use 48px.
 
 Keep the 44px minimum interaction target independently of the text line height. Use shared field/card/section spacing roles and consistent alignment; do not compensate for inconsistent typography with isolated offsets or unrelated gaps. Verify computed font family, loaded font faces, role sizes, line heights, logical edges and clipping in the actual browser. Defined roles are a contract, not a claim that every screen has passed visual acceptance.
+
+### First-screen content density and above-the-fold budget
+
+Every workspace must bring the user's primary goal (data table, live metrics, active wizard step, file list, or mail stream) into immediate view on first paint without wasting vertical space on redundant chrome:
+
+- **Compact command header:** Desktop topbar stays compact (`64px` target height) with one unified activity/notification affordance per purpose; page headers combine compact breadcrumbs, title, count/status pill, and primary/secondary actions in one cohesive band.
+- **No duplicate card titles:** When a page has a single primary workspace (such as Accounts, Domains, Backups, Services, SSL, or Mail), do not repeat the page title inside a nested card header above the table or workspace.
+- **No static notice walls above data:** Reserve full-width banners above the primary content strictly for active warnings, errors, or live operation state. Move static explanatory hints into concise header subtitles, inline help, or secondary disclosure controls.
+- **Single-row unified toolbars and contextual bulk bars:** Combine quick status segments, search, and compact filter controls into one horizontal toolbar directly attached to the data table. Place `Select all` inside the table header column and render the bulk action bar only when at least one row is selected (`0 selected` must occupy zero vertical space above the table).
+- **Above-the-fold Y-budget (desktop `1440x900`):** On list/table pages, the table header must begin at `y <= 290px` and the first data row at `y <= 340px`. On dashboards, wizards, and focused workspaces, primary content (KPIs, active wizard step, file/mail list) must begin at `y <= 260px`.
+- **Guided disclosure over vertical dumps:** Multi-step flows use true progressive wizards (one active step visible with a live summary rail), and multi-domain configuration pages use tabs or slide-over drawers rather than stacking ten or more cards vertically.
 
 ### Account actions and table access
 

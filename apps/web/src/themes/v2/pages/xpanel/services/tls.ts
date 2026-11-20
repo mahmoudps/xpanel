@@ -55,7 +55,7 @@ export function renderV2TlsPage(props: PanelSurfaceProps, authority: PanelServic
   })
   const wildcard = card({
     title: t('About wildcard certificates'), titleId: 'v2-ssl-wildcard-heading',
-    bodyHtml: `<div class="v2-panel-service__note"><p>${escapeHtml(t('A wildcard covers one label level and requires DNS validation.'))}</p><p>${escapeHtml(t(msgctxt('theme:v2', 'The account issue action uses HTTP-01. It does not issue wildcard certificates.')))}</p><a href="/domains/zone-editor">${escapeHtml(t(msgctxt('theme:v2', 'Open the zone editor')))}</a></div>`,
+    bodyHtml: `<div class="v2-panel-service__note"><p>${escapeHtml(t('A wildcard covers one label level and requires DNS validation.'))}</p><p>${escapeHtml(t(msgctxt('theme:v2', 'The account issue action uses HTTP-01. It does not issue wildcard certificates.')))}</p><a class="v2-btn v2-btn--ghost" href="/domains/zone-editor">${escapeHtml(t(msgctxt('theme:v2', 'Open the zone editor')))}</a></div>`,
   })
   const source = card({
     title: t('Certificate wizard'), titleId: 'v2-ssl-wizard-heading',

@@ -11,7 +11,7 @@ export function activityControl(t: Translate, props: { available: boolean; unrea
   const admission = props.available
     ? ' data-action="open-activity-drawer" aria-controls="xp-activity-drawer"'
     : ` disabled aria-disabled="true" title="${escapeHtml(t('Unavailable'))}"`
-  return `<button type="button" class="v2-btn v2-btn--icon v2-top__bell" data-xp-activity-control="${props.available ? 'available' : 'unavailable'}"${admission} aria-label="${escapeHtml(label)}">${icon('bell')}${unread !== undefined && unread > 0 ? `<span class="v2-top__badge v2-num" aria-hidden="true">${unread > 99 ? '99+' : unread}</span>` : ''}</button>`
+  return `<button type="button" class="v2-btn v2-btn--icon v2-top__activity" data-xp-activity-control="${props.available ? 'available' : 'unavailable'}"${admission} aria-label="${escapeHtml(label)}">${icon('activity')}${unread !== undefined && unread > 0 ? `<span class="v2-top__badge v2-num" aria-hidden="true">${unread > 99 ? '99+' : unread}</span>` : ''}</button>`
 }
 
 export function assembleActivityControl(t: Translate, documentHtml: string, activityHtml: string): string {

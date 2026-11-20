@@ -255,7 +255,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/account-filters-client.ts",
-    "sha256": "6939e5bda12050fd992685e3d723fab41aa593b4c1f885e7d1c952acdcceacd9",
+    "sha256": "5979d40b409d45d998df61702356eca2e5ef17c5587070f3ab77eace2e28da1e",
     "sites": [
       {
         "line": 72,
@@ -278,7 +278,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 236,
+        "line": 237,
         "column": 77,
         "method": "querySelector",
         "argument": "'[data-'+key+'-field=\"'+name+'\"]'",
@@ -288,7 +288,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 287,
+        "line": 288,
         "column": 60,
         "method": "closest",
         "argument": "blockedAncestor",
@@ -298,7 +298,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 288,
+        "line": 289,
         "column": 95,
         "method": "querySelector",
         "argument": "'[name=\"'+name+'\"]'",
@@ -1698,7 +1698,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/command-palette-client.ts",
-    "sha256": "25266dcb17fe98ecaa1f7ae5f42a769265656f85413f407af0ac62acf558b21a",
+    "sha256": "1c37e5714d60d620393a2b8a337753222095da32927fa3338bb8e41114696169",
     "sites": [
       {
         "line": 32,
@@ -2754,7 +2754,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/ops-terminal-client.ts",
-    "sha256": "986051014feb1c56c329b429963729613604bc467233a502f9a1c89a43b8041d",
+    "sha256": "3b778867265d3a81efc09b0bfa7d7ca9b3101333875ad9c1225cf137dec45f91",
     "sites": [
       {
         "line": 50,
@@ -3519,10 +3519,10 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/whm-databases-client.ts",
-    "sha256": "c15e4410438223748e2086a01f5329d6d96caf28287e4b42ac677d078345af85",
+    "sha256": "00199bf919c65bfcd82232f79bd41b2558041ffd7fba31bb1cdf3e04f738f3bd",
     "sites": [
       {
-        "line": 147,
+        "line": 148,
         "column": 65,
         "method": "closest",
         "argument": "denied",
@@ -3532,7 +3532,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 149,
+        "line": 150,
         "column": 67,
         "method": "closest",
         "argument": "denied",
@@ -3542,7 +3542,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 164,
+        "line": 165,
         "column": 54,
         "method": "querySelector",
         "argument": "'[data-whm-db-fact=\"' + key + '\"]'",
@@ -3552,7 +3552,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 171,
+        "line": 172,
         "column": 81,
         "method": "querySelector",
         "argument": "'[data-whm-db-rows=\"'+name+'\"]'",
@@ -4087,7 +4087,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/whm-monitoring-client.ts",
-    "sha256": "c3f3343eb72528cdef37d00068c384f801a8dc4f682dffec7f35ab0ccbd19602",
+    "sha256": "6a2e22e8bdcba2e295110829afc6c91e8592361561c6673f07a49cc2a777910c",
     "sites": [
       {
         "line": 150,
@@ -4110,7 +4110,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 402,
+        "line": 403,
         "column": 44,
         "method": "querySelector",
         "argument": "'[data-whm-monitoring-chart=\"' + metric + '\"] figcaption'",
@@ -5043,10 +5043,10 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/ws-client.ts",
-    "sha256": "0b47f17faafe8889698d987dcd04f2fcb3c5a69e0238ad9d92a55fbe6d5db099",
+    "sha256": "e3d66fdfefafa0c5866e00dfca6283769cc38b6bd4dd4f6f61ab6a4f02b2b904",
     "sites": [
       {
-        "line": 692,
+        "line": 505,
         "column": 41,
         "method": "querySelector",
         "argument": "'[data-stage=\"' + event.data.stage + '\"]'",
@@ -5056,7 +5056,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 893,
+        "line": 709,
         "column": 51,
         "method": "getElementById",
         "argument": "routeOrId.slice(1)",
@@ -5066,7 +5066,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 954,
+        "line": 770,
         "column": 69,
         "method": "querySelectorAll",
         "argument": "'[name=\"' + name + '\"]'",
@@ -5076,7 +5076,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 1166,
+        "line": 1004,
         "column": 63,
         "method": "querySelector",
         "argument": "'[name=\"' + name + '\"]'",
@@ -5086,7 +5086,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 1412,
+        "line": 1250,
         "column": 77,
         "method": "querySelector",
         "argument": "'[name=\"' + name + '\"]'",
@@ -5096,7 +5096,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 1749,
+        "line": 1496,
         "column": 43,
         "method": "querySelector",
         "argument": "selector",
@@ -5107,7 +5107,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 1750,
+        "line": 1497,
         "column": 44,
         "method": "querySelector",
         "argument": "'[name=\"' + name + '\"]'",
@@ -5118,7 +5118,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 1790,
+        "line": 1539,
         "column": 43,
         "method": "querySelector",
         "argument": "selector",
@@ -5128,7 +5128,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 1908,
+        "line": 1657,
         "column": 86,
         "method": "querySelector",
         "argument": "'[name=\"' + key + '\"]'",
@@ -5138,7 +5138,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 1912,
+        "line": 1661,
         "column": 72,
         "method": "querySelector",
         "argument": "'[name=\"' + key + '\"]'",
@@ -5148,7 +5148,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 1967,
+        "line": 1716,
         "column": 60,
         "method": "querySelector",
         "argument": "'[name=\"' + key + '\"]'",

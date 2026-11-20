@@ -7,7 +7,7 @@ import type { PhoneRow } from '../lifecycle/shared.ts'
 /** Backups, reviewed digests and run results remain unread until the authorized core controller reads them. */
 export function renderV2WhmRestoreComponentsPage(props: WhmSurfaceProps, authority: WhmAccountToolAuthority): string {
   const { t, readable, editable } = context(props, authority)
-  const title = t(msgid('More restore tools'))
+  const title = t(msgid('Mail & partial restore'))
   const unread = t(msgid('Not read'))
   const fact = (rows: readonly (readonly [string, string])[]) => facts(rows.map(([key, label]) => ({ label: t(label), hooks: { [`data-restore-more-${key}`]: true } })), unread)
   const rows = (caption: string, headers: readonly string[], marker: string, empty: string, phone: PhoneRow = {}): string => phoneTable(table(t(caption), headers.map(label => t(label)), { [`data-restore-more-${marker}`]: true }, t(empty)), phone)
