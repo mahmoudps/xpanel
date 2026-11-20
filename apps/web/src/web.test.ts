@@ -8,6 +8,7 @@ import { describe, it } from 'vitest'
 import { defaultPlan, type Account } from '@xpanel/core'
 import { planEditorRequest } from './plan-editor.ts'
 import { parseMarkup } from './html.ts'
+import { allRouteClientChunkSources } from './route-client-chunks.ts'
 import {
   BROWSER_REALTIME_SCRIPT,
   createLiveEventStore,
@@ -285,8 +286,9 @@ describe('@xpanel/web — Login, xWHM, xPanel, and xMail Surfaces (EN/AR + Dark/
     assert.equal(patch.method, 'PATCH')
     assert.equal(patch.path, '/api/plans/' + storedPlan.id)
     assert.equal(Object.hasOwn(patch.body, 'ownerId'), false)
-    assert.match(BROWSER_REALTIME_SCRIPT, /\[data-native-plan-editor\]/)
-    assert.doesNotMatch(BROWSER_REALTIME_SCRIPT, /\[data-plan-editor-form\]/)
+    const allClientScripts = BROWSER_REALTIME_SCRIPT + '\n' + allRouteClientChunkSources()
+    assert.match(allClientScripts, /\[data-native-plan-editor\]/)
+    assert.doesNotMatch(allClientScripts, /\[data-plan-editor-form\]/)
     const unread = nativeForm(whmAt('/whm/plans', { ...metadata, featureLists: [] }))
     assert.match(unread, /data-plan-editable="false"/)
     assert.match(unread, /feature list is unavailable/)
@@ -539,20 +541,21 @@ describe('@xpanel/web — Login, xWHM, xPanel, and xMail Surfaces (EN/AR + Dark/
 
   it('preserves the active client request helpers', () => {
     // Verify interactive client script capabilities
+    const allClientScripts = BROWSER_REALTIME_SCRIPT + '\n' + allRouteClientChunkSources()
     assert.match(BROWSER_REALTIME_SCRIPT, /window\.xpanelApiCall/)
     assert.match(LOGIN_CLIENT_SCRIPT, /x-csrf-token/)
     assert.match(BROWSER_REALTIME_SCRIPT, /window\.xpanelSessionRequest/)
     assert.match(BROWSER_REALTIME_SCRIPT, /window\.xpanelShowToast/)
     assert.match(BROWSER_REALTIME_SCRIPT, /window\.xpanelSwitchView/)
-    assert.doesNotMatch(BROWSER_REALTIME_SCRIPT, /\/api\/xpanel\/terminal\/exec/)
+    assert.doesNotMatch(allClientScripts, /\/api\/xpanel\/terminal\/exec/)
     // File-manager mutations now travel through the validated account-files RPC; the dead
     // /api/xpanel/files/* handlers were removed so no button can call an unregistered route.
-    assert.match(BROWSER_REALTIME_SCRIPT, /\/api\/accounts\//)
-    assert.match(BROWSER_REALTIME_SCRIPT, /list-trash/)
-    assert.doesNotMatch(BROWSER_REALTIME_SCRIPT, /\/api\/xpanel\/files\//)
-    assert.doesNotMatch(BROWSER_REALTIME_SCRIPT, /\/api\/xpanel\/domains\/custom-config/)
-    assert.match(BROWSER_REALTIME_SCRIPT, /data-domain-custom-config/)
-    assert.match(BROWSER_REALTIME_SCRIPT, /\/custom-config/)
+    assert.match(allClientScripts, /\/api\/accounts\//)
+    assert.match(allClientScripts, /list-trash/)
+    assert.doesNotMatch(allClientScripts, /\/api\/xpanel\/files\//)
+    assert.doesNotMatch(allClientScripts, /\/api\/xpanel\/domains\/custom-config/)
+    assert.match(allClientScripts, /data-domain-custom-config/)
+    assert.match(allClientScripts, /\/custom-config/)
   })
 })
 

@@ -68,7 +68,8 @@ export const WHM_MAIL_CSS = `.v2-whm-mail,.v2-whm-mail__stack{display:flex;flex-
 .v2-whm-mail__actions,.v2-whm-mail__check{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2)}
 .v2-whm-mail .v2-btn{min-inline-size:var(--target);min-block-size:var(--target)}
 .v2-whm-mail__check{gap:10px;min-block-size:var(--target);cursor:pointer}
-.v2-whm-mail__check>input{margin:0}
+.v2-whm-mail__check-cell{display:inline-flex;align-items:center;justify-content:center;min-inline-size:var(--target);min-block-size:var(--target);cursor:pointer}
+.v2-whm-mail__check>input,.v2-whm-mail__check-cell>input{margin:0}
 .v2-whm-mail [data-whm-mail-queue-bulk-bar]{padding:12px var(--space-2);border:1px solid var(--line);border-radius:var(--radius-notice);background:var(--subtle)}
 .v2-whm-mail :is([data-whm-mail-queue-selected],[data-whm-mail-quality-selected],[data-whm-mailbox-maintenance-selected],[data-mail-log-page-label]){font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
 .v2-whm-mail .v2-card__body ul:not([class]){margin:0;padding-inline-start:var(--space-3);display:flex;flex-direction:column;gap:var(--space-1);font-size:13px;line-height:1.6;color:var(--text-2)}

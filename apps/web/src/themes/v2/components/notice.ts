@@ -13,6 +13,8 @@ export interface NoticeProps {
   urgent?: boolean
   /** Hooks of the controller that dismisses this notice; without them no dismiss button is shown. */
   dismiss?: HookAttributes
+  /** Optional sanitized HTML appended after the main notice paragraph. */
+  extraHtml?: string
   hooks?: HookAttributes
 }
 
@@ -23,10 +25,10 @@ export function notice(t: Translate, props: NoticeProps): string {
     ? `<button type="button" class="v2-notice__action"${props.action.disabled ? ' disabled' : ''}${hookAttrs(props.action.hooks)}>${escapeHtml(props.action.label)}</button>`
     : `<a class="v2-notice__action" href="${escapeHtml(props.action.href)}"${hookAttrs(props.action.hooks)}>${escapeHtml(props.action.label)}</a>`
   const dismiss = props.dismiss ? `<button type="button" class="v2-notice__dismiss" aria-label="${escapeHtml(t('Dismiss'))}"${hookAttrs(props.dismiss)}>${icon('x', 16)}</button>` : ''
-  return `<div class="v2-notice v2-notice--${props.tone}" role="${props.urgent ? 'alert' : 'status'}"${hookAttrs(props.hooks)}>${icon(NOTICE_ICONS[props.tone])}<div class="v2-notice__body"><p>${props.lead ? `<strong>${escapeHtml(props.lead)}</strong> ` : ''}${escapeHtml(props.text)}</p>${action}</div>${dismiss}</div>`
+  return `<div class="v2-notice v2-notice--${props.tone}" role="${props.urgent ? 'alert' : 'status'}"${hookAttrs(props.hooks)}>${icon(NOTICE_ICONS[props.tone])}<div class="v2-notice__body"><p>${props.lead ? `<strong>${escapeHtml(props.lead)}</strong> ` : ''}${escapeHtml(props.text)}</p>${props.extraHtml ?? ''}${action}</div>${dismiss}</div>`
 }
 
-export const NOTICE_CSS = `.v2-notice{display:flex;align-items:flex-start;gap:12px;padding:12px 16px;border-radius:var(--radius-notice);border:1px solid;font-size:13px;line-height:1.6;color:var(--text)}
+export const NOTICE_CSS = `.v2-notice{display:flex;align-items:flex-start;gap:10px;padding:10px 14px;border-radius:var(--radius-notice);border:1px solid;border-inline-start-width:3px;font-size:13px;line-height:1.5;color:var(--text)}
 .v2-notice>.v2-icon{margin-top:2px}
 .v2-notice__body{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;align-items:flex-start}
 .v2-notice__body strong{font-weight:600}

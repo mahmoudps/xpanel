@@ -75,7 +75,7 @@ describe('WHM database client binding', () => {
     expect(send).toHaveBeenCalledWith('GET', '/api/server/databases/overview')
     expect(statusOf().dataset.state).toBe('read')
     expect(document.querySelector('[data-whm-db-fact="version"]')!.textContent).toBe('10.11.6-MariaDB')
-    expect(document.querySelector('[data-whm-db-fact="Uptime"]')!.textContent).toBe('3600 seconds')
+    expect(document.querySelector('[data-whm-db-fact="Uptime"]')!.textContent).toBe('1h')
     expect(document.querySelector('[data-whm-db-fact="databases"]')!.textContent).toBe('1')
     expect(document.querySelector('[data-whm-db-rows="accounts"]')!.textContent).toContain('agency')
     const drift = document.querySelector<HTMLSelectElement>('[data-whm-db-drift-filter]')!

@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { renderWhmSurface } from './surfaces/xwhm.ts'
 import { WHM_LOCAL_ARCHIVES_CLIENT_BINDING } from './whm-local-archives-client.ts'
-import { BROWSER_REALTIME_SCRIPT } from './ws-client.ts'
+import { allRouteClientChunkSources } from './route-client-chunks.ts'
 
 const file = 'xpanel-backup-alice-20261026T100000Z.tar.gz'
 const runId = '11111111-1111-4111-8111-111111111111'
@@ -22,7 +22,7 @@ afterEach(() => { document.body.replaceChildren(); document.documentElement.lang
 
 describe('local archive review entry', () => {
   it('connects the shared browser script to the guarded listing binding', () => {
-    expect(BROWSER_REALTIME_SCRIPT).toContain('(' + WHM_LOCAL_ARCHIVES_CLIENT_BINDING + ')();')
+    expect(allRouteClientChunkSources()).toContain('(' + WHM_LOCAL_ARCHIVES_CLIENT_BINDING + ')();')
   })
   it('opens a manual file-review journey and sends no restore POST on click', async () => {
     const { root, request } = mount(); await tick()

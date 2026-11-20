@@ -44,7 +44,7 @@ export function renderV2BackupsPage(props: V2BackupsPageProps): string {
 ${group(msgid('Schedule'), fields(choice('policy-enabled', msgid('Request scheduled backups'))
     + select('frequency', msgid('Frequency'), [msgid('Daily'), msgid('Every 12 hours'), msgid('Weekly only'), msgid('Monthly')])
     + input('start-time', msgid('Start time (UTC)'), 'time')
-    + input('policy-cron', msgid('Schedule expression (UTC)'))
+    + input('policy-cron', msgid('Schedule expression (UTC)'), 'text', ' data-cron-expression')
     + select('policy-compress', msgid('Compression'), [msgctxt('theme:v2', 'Zstandard'), msgctxt('theme:v2', 'Gzip')])))}
 ${group(msgid('Retention'), fields(input('daily-copies', msgid('Daily copies'), 'number', ' min="1" max="3650" step="1"')
     + input('weekly-copies', msgid('Weekly copies'), 'number', ' min="0" max="520" step="1"')
