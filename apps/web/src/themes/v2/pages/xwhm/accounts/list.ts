@@ -10,11 +10,11 @@ import { accountFor, allowed, canCreate, principalOf, qualified, readableAccount
 import type { WhmSurfaceProps } from '../../../../contract.ts'
 import { card } from '../../../components/card.ts'
 import { formField } from '../../../components/form-field.ts'
-import { notice } from '../../../components/notice.ts'
 import { pageHeader } from '../../../components/page-header.ts'
 import { rowMenu, type RowMenuItem } from '../../../components/row-menu.ts'
 import { stateTones } from '../../../components/status-pill.ts'
 import { escapeHtml, hookAttrs } from '../../../html.ts'
+import { icon } from '../../../icons.ts'
 import { factList } from '../../../layouts/common.ts'
 import { filterBar } from '../../../components/filter-bar.ts'
 
@@ -22,7 +22,10 @@ const ltr = (value: string | number): string => `<bdi dir="ltr">${escapeHtml(val
 
 function filters(t: Translate, model: AccountListModel): string {
   const choices = (items: readonly { value: string; label: string }[], all: string) => [{ value: '', label: all, selected: true }, ...items.map(item => ({ ...item, value: item.value === '' ? 'root' : item.value }))]
-  return `<div class="v2-whm-accounts__filters" data-account-list-controls data-list-page-size="20">${formField({ id: 'account-list-search', label: t('Search loaded accounts'), control: { kind: 'input', type: 'search', autocomplete: 'off', hooks: { 'data-list-search-input': true } } })}${formField({ id: 'account-list-owner', label: t('Owner'), control: { kind: 'select', options: choices(model.owners, t('All owners')), hooks: { 'data-list-owner-filter': true } } })}${formField({ id: 'account-list-plan', label: t('Plan'), control: { kind: 'select', options: choices(model.plans, t('All plans')), hooks: { 'data-list-plan-filter': true } } })}${formField({ id: 'account-list-state', label: t('Status'), control: { kind: 'select', options: [{ value: '', label: t('All statuses'), selected: true }, { value: 'active', label: t('Active') }, { value: 'suspended', label: t('Suspended') }, { value: 'terminating', label: t('Terminating') }], hooks: { 'data-list-state-filter': true } } })}<a class="v2-btn v2-whm-accounts__clear" href="/whm/accounts">${escapeHtml(t(msgctxt('theme:v2', 'Clear filters')))}</a><p class="v2-muted" data-list-count role="status" aria-live="polite"></p><div class="v2-whm-accounts__empty" data-list-empty hidden><p>${escapeHtml(t('No accounts match these filters.'))}</p><a class="v2-btn" href="/whm/accounts">${escapeHtml(t(msgctxt('theme:v2', 'Clear filters')))}</a></div><nav class="v2-whm-accounts__pager" data-list-pages aria-label="${escapeHtml(t('Loaded account pages'))}" hidden><button type="button" class="v2-btn" data-list-previous>${escapeHtml(t('Previous'))}</button><span class="v2-num" data-list-page></span><button type="button" class="v2-btn" data-list-next>${escapeHtml(t('Next'))}</button></nav></div>`
+  const selectControl = (id: string, label: string, hook: string, options: readonly { value: string; label: string; selected?: boolean }[]) =>
+    `<div class="v2-whm-accounts__filter-control"><label class="v2-sr" for="${id}">${escapeHtml(label)}</label><span class="v2-select"><select id="${id}" ${hook}>${options.map(option => `<option value="${escapeHtml(option.value)}"${option.selected ? ' selected' : ''}>${escapeHtml(option.label)}</option>`).join('')}</select>${icon('chevDown', 16)}</span></div>`
+  const searchControl = `<div class="v2-whm-accounts__filter-control v2-whm-accounts__filter-search"><label class="v2-sr" for="account-list-search">${escapeHtml(t('Search loaded accounts'))}</label><input id="account-list-search" type="search" placeholder="${escapeHtml(t('Search loaded accounts'))}" autocomplete="off" data-list-search-input></div>`
+  return `<div class="v2-whm-accounts__filters" data-account-list-controls data-list-page-size="20">${searchControl}${selectControl('account-list-owner', t('Owner'), 'data-list-owner-filter', choices(model.owners, t('All owners')))}${selectControl('account-list-plan', t('Plan'), 'data-list-plan-filter', choices(model.plans, t('All plans')))}${selectControl('account-list-state', t('Status'), 'data-list-state-filter', [{ value: '', label: t('All statuses'), selected: true }, { value: 'active', label: t('Active') }, { value: 'suspended', label: t('Suspended') }, { value: 'terminating', label: t('Terminating') }])}<a class="v2-btn v2-whm-accounts__clear" href="/whm/accounts">${escapeHtml(t(msgctxt('theme:v2', 'Clear filters')))}</a><p class="v2-muted v2-whm-accounts__count" data-list-count role="status" aria-live="polite"></p><div class="v2-whm-accounts__empty" data-list-empty hidden><p>${escapeHtml(t('No accounts match these filters.'))}</p><a class="v2-btn" href="/whm/accounts">${escapeHtml(t(msgctxt('theme:v2', 'Clear filters')))}</a></div><nav class="v2-whm-accounts__pager" data-list-pages aria-label="${escapeHtml(t('Loaded account pages'))}" hidden><button type="button" class="v2-btn" data-list-previous>${escapeHtml(t('Previous'))}</button><span class="v2-num" data-list-page></span><button type="button" class="v2-btn" data-list-next>${escapeHtml(t('Next'))}</button></nav></div>`
 }
 
 /** A closed group of one native form; the form stays in the document with its saved values. */
@@ -111,14 +114,18 @@ function details(t: Translate, props: WhmSurfaceProps, account: Account, canMana
     { label: 'IPv4', value: account.ipv4, mono: true }, ...(account.ipv6 ? [{ label: 'IPv6', value: account.ipv6, mono: true }] : []),
     { label: t('Shell'), value: account.shell, mono: true },
   ]))
+  const capHtml = (value: number | 'unlimited' | undefined, unit = ''): string => {
+    const shown = limit(value, unit)
+    return `${escapeHtml(missing)} / ${typeof value === 'number' && Number.isFinite(value) && value >= 0 ? `<bdi dir="ltr">${escapeHtml(shown)}</bdi>` : escapeHtml(shown)}`
+  }
   const limits = group('limits', t(msgctxt('theme:v2', 'Limits and usage')),
     `<p class="v2-muted">${escapeHtml(usage ? t(msgctxt('theme:v2', 'Usage / limit in force: the package value or the account’s own limit. Only disk and bandwidth usage are read.')) : t('Usage / limit in force: the package value or the account’s own limit. Usage has not been read.'))}</p>` + `<div class="v2-whm-accounts__usage"><div class="v2-whm-accounts__quota">${quota(t, t('Disk'), usage?.disk, plan?.resources.diskMb, account.limits?.resources?.diskMb !== undefined)}</div><div class="v2-whm-accounts__quota">${quota(t, t('Bandwidth per month'), usage?.traffic, plan?.resources.bandwidthMbMonth, account.limits?.resources?.bandwidthMbMonth !== undefined)}</div></div>` + factList([
-      { label: t('Memory'), value: `${missing} / ${limit(plan?.resources.memoryMb, ' MiB')}` },
-      { label: 'CPU', value: `${missing} / ${limit(plan?.resources.cpuPercent, '%')}` },
-      { label: t('Processes'), value: `${missing} / ${limit(plan?.resources.maxProcesses)}` },
-      { label: t('PHP workers'), value: `${missing} / ${limit(plan?.caps.phpWorkers)}` },
+      { label: t('Memory'), value: `${missing} / ${limit(plan?.resources.memoryMb, ' MiB')}`, valueHtml: capHtml(plan?.resources.memoryMb, ' MiB') },
+      { label: 'CPU', value: `${missing} / ${limit(plan?.resources.cpuPercent, '%')}`, valueHtml: capHtml(plan?.resources.cpuPercent, '%') },
+      { label: t('Processes'), value: `${missing} / ${limit(plan?.resources.maxProcesses)}`, valueHtml: capHtml(plan?.resources.maxProcesses) },
+      { label: t('PHP workers'), value: `${missing} / ${limit(plan?.caps.phpWorkers)}`, valueHtml: capHtml(plan?.caps.phpWorkers) },
       { label: t('IO write cap'), value: ioWriteCap, ltr: typeof ioWrite === 'number' && Number.isFinite(ioWrite) && ioWrite >= 0 },
-    ]).replace(/\/ (\d+(?: MiB|%)?)/g, '/ <bdi dir="ltr">$1</bdi>'))
+    ]))
   const contact = group('contact', t('Contact'), factList([{ label: t('Contact email'), value: account.contactEmail, mono: true }]) + (allowed(props, 'edit-account') ? fold(t(msgctxt('theme:v2', 'Edit account')), mutation('contact'), 'modify') : ''))
   const edit = group('actions', t('Actions'), `${allowed(props, 'change-password') ? fold(t('Change password'), mutation('password'), 'password') : ''}${(!canManage || accountFor(props, account.username)) ? planOwnerForms(t, props, account, canManage) + limitsForm(t, props, account, canManage) : ''}${stateActions(t, props, account, canManage)}`)
   return `<section class="v2-whm-accounts__detail-body" data-account-detail-for="${escapeHtml(account.username)}" aria-label="${escapeHtml(account.username)}" hidden><div class="v2-whm-accounts__detail-summary"><span class="v2-whm-accounts__avatar" aria-hidden="true">${escapeHtml(account.username.charAt(0).toUpperCase())}</span><div><p class="v2-mono">${ltr(account.username)}</p><p class="v2-muted v2-mono">${ltr(account.primaryDomain)}</p></div></div>${handoff(t, props, account, canManage, 'panel')}${identity}${limits}${contact}${edit}</section>`
@@ -165,8 +172,12 @@ function actions(t: Translate, props: WhmSurfaceProps, account: Account, canMana
   // Section openers open this account's details at that part; popovertargetaction closes the menu on the way.
   const openers = sectionOpeners(t, props, account, canManage).map(([section, label]) => `<li role="none"><button type="button" role="menuitem" class="v2-menu__item" data-account-detail-open="${escapeHtml(account.username)}" data-account-detail-section="${section}" aria-controls="v2-account-detail" aria-expanded="false" popovertarget="${escapeHtml(id)}" popovertargetaction="hide">${escapeHtml(label)}</button></li>`).join('')
   if (!items.length && !login && !openers) return `<span class="v2-muted">${escapeHtml(t('Read only'))}</span>`
-  const menu = rowMenu({ id, label: t(msgctxt('theme:v2', 'Actions for {username}'), { username: account.username }), items: items.map((item, index) => index === 0 && openers ? { ...item, separatorBefore: true } : item) })
-  return menu.replace(' popover>', () => ` popover>${login ? `<li role="none">${login}</li>` : ''}${openers}`)
+  return rowMenu({
+    id,
+    label: t(msgctxt('theme:v2', 'Actions for {username}'), { username: account.username }),
+    prependItemsHtml: `${login ? `<li role="none">${login}</li>` : ''}${openers}`,
+    items: items.map((item, index) => index === 0 && openers ? { ...item, separatorBefore: true } : item),
+  })
 }
 
 function row(t: Translate, props: WhmSurfaceProps, account: Account, canManage: boolean): string {
@@ -214,30 +225,47 @@ export function renderV2WhmAccountList(t: Translate, props: WhmSurfaceProps, aut
   const quick = filterBar({ segments: { label: t('Status'), options: ([['', 'All'], ['active', 'Active'], ['suspended', 'Suspended'], ['terminating', 'Terminating']] as const).map(([value, label]) => ({ label: t(label), count: value ? list.accounts.filter(account => account.status === value).length : list.accounts.length, pressed: value === '', hooks: { 'data-list-state-chip': value } })) } })
   const columns = [t('Select'), t('Account'), t('Primary domain'), t('Usage'), t('Status'), t('Plan'), t('IO write cap'), t('Actions')]
   const table = `<div class="v2-table-scroll" role="region" aria-labelledby="v2-whm-accounts-list" tabindex="0"><table class="v2-table v2-whm-accounts__table"><caption class="v2-sr">${escapeHtml(t('Accounts'))}</caption><thead><tr>${columns.map(label => `<th scope="col">${escapeHtml(label)}</th>`).join('')}</tr></thead><tbody>${list.accounts.map(account => row(t, props, account, canManage)).join('') || `<tr><td colspan="${columns.length}"><p role="status">${escapeHtml(empty)}</p></td></tr>`}</tbody></table></div><p class="v2-muted v2-whm-accounts__note">${escapeHtml(props.accountUsage ? t(msgctxt('theme:v2', 'Usage / configured plan limit. An account the host did not report shows Not read.')) : t('Usage / configured plan limit. Usage has not been read.'))}</p>`
-  return `<div class="v2-layout v2-whm-accounts" data-accounts-workspace data-account-detail-workspace="/whm/accounts" tabindex="-1">${pageHeader(t, { breadcrumb: [{ label: t('Home'), href: '/whm' }, { label: t('Accounts') }], route: '/whm/accounts', title: t('Accounts'), description: t(msgctxt('theme:v2', 'Hosting accounts, their configured plans and authorized actions.')), ...(root || (canManage && canCreate(props)) ? { actionsHtml: `${root ? `<a href="/whm/plans" class="v2-btn">${escapeHtml(t('Plans'))}</a>` : ''}${canManage && canCreate(props) ? `<a href="/whm/accounts/new" class="v2-btn v2-btn--primary">${escapeHtml(t('Create account'))}</a>` : ''}` } : {}) })}${root && listed ? notice(t, { tone: 'info', text: t(msgctxt('theme:v2', 'Resellers see only the accounts they own.')) }) : ''}<div class="v2-whm-accounts__body">${card({ title: t(msgctxt('theme:v2', 'Account list')), titleId: 'v2-whm-accounts-list', ...(listed ? { description: `${t(msgctxt('theme:v2', '{count, plural, one {# account in total.} other {# accounts in total.}}'), { count: list.accounts.length })} ${t(msgctxt('theme:v2', 'Newest first.'))}`, actionsHtml: quick } : {}), flush: true, bodyHtml: `<div class="v2-inset">${listed ? filters(t, list) : ''}${bulk}${statsLocks}</div>${table}` })}${detailAside(t, props, list.accounts, canManage)}</div>${actionDialog(t, principal?.kind === 'root')}</div>`
+  const description = root && listed
+    ? `${t(msgctxt('theme:v2', 'Hosting accounts, their configured plans and authorized actions.'))} ${t(msgctxt('theme:v2', 'Resellers see only the accounts they own.'))}`
+    : t(msgctxt('theme:v2', 'Hosting accounts, their configured plans and authorized actions.'))
+  return `<div class="v2-layout v2-whm-accounts" data-accounts-workspace data-account-detail-workspace="/whm/accounts" tabindex="-1">${pageHeader(t, { breadcrumb: [{ label: t('Home'), href: '/whm' }, { label: t('Accounts') }], route: '/whm/accounts', title: t('Accounts'), description, ...(root || (canManage && canCreate(props)) ? { actionsHtml: `${root ? `<a href="/whm/plans" class="v2-btn">${escapeHtml(t('Plans'))}</a>` : ''}${canManage && canCreate(props) ? `<a href="/whm/accounts/new" class="v2-btn v2-btn--primary">${escapeHtml(t('Create account'))}</a>` : ''}` } : {}) })}<div class="v2-whm-accounts__body">${card({ title: t(msgctxt('theme:v2', 'Account list')), titleId: 'v2-whm-accounts-list', ...(listed ? { description: `${t(msgctxt('theme:v2', '{count, plural, one {# account in total.} other {# accounts in total.}}'), { count: list.accounts.length })} ${t(msgctxt('theme:v2', 'Newest first.'))}`, actionsHtml: quick } : {}), flush: true, bodyHtml: `<div class="v2-inset v2-whm-accounts__toolbar">${listed ? filters(t, list) : ''}${bulk}${statsLocks}</div>${table}` })}${detailAside(t, props, list.accounts, canManage)}</div>${actionDialog(t, principal?.kind === 'root')}</div>`
 }
 
 // The fold chevron is drawn from the inline-end border, the left edge in RTL, so RTL turns it the other way to keep pointing down (up when open).
 export const WHM_ACCOUNTS_CSS = `${stateTones('.v2-whm-accounts [data-account-status]', 'data-state', { active: 'ok', suspended: 'warn', terminating: 'bad', 'verification-required': 'warn' })}
+.v2-whm-accounts{gap:8px}
+.v2-whm-accounts .v2-page-head{gap:2px}
+.v2-whm-accounts .v2-card--flush>.v2-card__head{padding:5px 16px;align-items:center;border-block-end:1px solid var(--line)}
+.v2-whm-accounts .v2-card__actions .v2-filter{padding:0}
+.v2-whm-accounts .v2-card--flush>.v2-card__head .v2-card__title{flex-direction:row;flex-wrap:wrap;align-items:baseline;gap:2px 10px}
+.v2-whm-accounts .v2-card--flush>.v2-card__head h2{font-size:15px}
+.v2-whm-accounts .v2-card--flush>.v2-card__head p{font-size:12px}
+.v2-whm-accounts .v2-segmented{padding:2px}
+.v2-whm-accounts__toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;padding:4px 16px!important;border-block-end:1px solid var(--line);background:var(--subtle)}
 .v2-whm-accounts .v2-btn,.v2-whm-accounts .v2-segmented>button,.v2-whm-accounts__opener{min-inline-size:var(--target);min-block-size:var(--target)}
 .v2-whm-accounts :is(.v2-btn,.v2-segmented>button,.v2-whm-accounts__opener,.v2-whm-accounts__fold>summary){transition:background-color 140ms ease-out,border-color 140ms ease-out,color 140ms ease-out,box-shadow 140ms ease-out,opacity 140ms ease-out,transform 140ms ease-out}
 .v2-whm-accounts__table tbody tr{transition:background-color 140ms ease-out}
 .v2-whm-accounts__table tbody tr:hover{background:var(--subtle)}
 @media(prefers-reduced-motion:reduce){.v2-whm-accounts :is(.v2-btn,.v2-segmented>button,.v2-whm-accounts__opener,.v2-whm-accounts__fold>summary),.v2-whm-accounts__table tbody tr{transition:none}}
-.v2-whm-accounts__filters{display:grid;grid-template-columns:2fr repeat(3,minmax(0,1fr)) auto;align-items:end;gap:var(--space-2)}
-.v2-whm-accounts__filters>[data-list-count]{font-size:13px}
+.v2-whm-accounts__filters{display:flex;flex:1 1 560px;flex-wrap:wrap;align-items:center;gap:6px 8px;min-inline-size:0}
+.v2-whm-accounts__filter-control{flex:0.85 1 130px;min-inline-size:0}
+.v2-whm-accounts__filter-search{flex:1.5 1 200px}
+.v2-whm-accounts__filter-control :is(input,select){inline-size:100%}
+.v2-whm-accounts__filters>[data-list-count]{position:absolute;inline-size:1px;block-size:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.v2-whm-accounts__filters>[data-list-count]:empty{display:none}
 .v2-whm-accounts__filters>[data-list-count],.v2-whm-accounts [data-account-selected-count],.v2-whm-accounts__pager [data-list-page],.v2-whm-accounts [data-list-state-chip] .v2-count,.v2-whm-accounts__opener small,.v2-whm-accounts [data-account-table-value=ip],.v2-whm-accounts [data-account-table-value=io-write],.v2-whm-accounts__detail-body .v2-facts dd,.v2-whm-accounts__identity dd,.v2-whm-account-limit-grid input[type=text]{font-variant-numeric:tabular-nums}
-.v2-whm-accounts__empty{grid-column:1/-1;display:flex;flex-direction:column;align-items:center;gap:var(--space-2);padding:var(--space-4) var(--space-3);border:1px dashed var(--line-strong);border-radius:var(--radius-notice);background:var(--subtle);text-align:center}
+.v2-whm-accounts__empty{flex:1 1 100%;display:flex;flex-direction:column;align-items:center;gap:var(--space-2);padding:var(--space-4) var(--space-3);border:1px solid var(--line-strong);border-radius:var(--radius-notice);background:var(--surface);text-align:center}
 .v2-whm-accounts__empty[hidden]{display:none}
 .v2-whm-accounts__empty>p{margin:0;font-weight:600}
-.v2-whm-accounts__filters>:is(p,nav){grid-column:1/-1}
-.v2-whm-accounts__bulk,.v2-whm-accounts__pager,.v2-whm-accounts__actions{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2)}
-.v2-whm-accounts__bulk{margin-block-start:var(--space-3)}
-.v2-whm-accounts [data-approved-account-bulk]:has(:is([data-account-selection],[data-account-select-all]):checked),.v2-whm-accounts [data-web-stats-locks]{padding:var(--space-2);border:1px solid var(--line);border-radius:var(--radius-notice);background:var(--subtle)}
-.v2-whm-accounts__bulk>h2{margin:0;font-size:16px;line-height:1.4;font-weight:600}
-.v2-whm-accounts [data-account-selected-count]{font-size:13px;font-weight:600;color:var(--text)}
+.v2-whm-accounts__filters>nav{flex:1 1 100%}
+.v2-whm-accounts__bulk,.v2-whm-accounts__pager,.v2-whm-accounts__actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.v2-whm-accounts__bulk{margin-block-start:0}
+.v2-page:has(:is([data-account-selection],[data-account-select-all]):checked) .v2-whm-accounts [data-approved-account-bulk]{flex:1 1 100%;padding:10px 12px;border:1px solid var(--accent-line);border-radius:var(--radius-notice);background:var(--accent-soft)}
+.v2-whm-accounts [data-web-stats-locks]{flex:1 1 100%;margin-block-start:4px;padding:var(--space-2);border:1px solid var(--line);border-radius:var(--radius-notice);background:var(--surface)}
+.v2-whm-accounts__bulk>h2{margin:0;font-size:15px;line-height:1.4;font-weight:600}
+.v2-whm-accounts [data-account-selected-count]{font-size:12px;font-weight:600;color:var(--text-2);white-space:nowrap}
 .v2-page:not(:has(:is([data-account-selection],[data-account-select-all]):checked)) [data-approved-account-bulk]>:is([data-account-bulk-control],.v2-whm-accounts__bulk-choices,p.v2-muted){display:none}
-.v2-whm-accounts__note{margin:0;padding:var(--space-2) var(--space-3);border-block-start:1px solid var(--line);font-size:13px}
+.v2-whm-accounts__note{margin:0;padding:8px 16px;border-block-start:1px solid var(--line);font-size:12px}
 @media(min-width:601px){.v2-whm-accounts__quota>span{white-space:nowrap}.v2-whm-accounts__table td.v2-whm-accounts__actions{display:table-cell;text-align:end;white-space:nowrap}.v2-whm-accounts__table td.v2-whm-accounts__actions>*{vertical-align:middle;margin-inline-start:var(--space-1)}.v2-whm-accounts__table th:last-child{text-align:end}.v2-whm-accounts__table :is(th,td):first-child{inline-size:48px;padding-inline-end:0}}
 @media(max-width:600px){.v2-whm-accounts__table [data-phone-label]{grid-column:1/-1;display:flex;flex-wrap:wrap;justify-content:flex-end;gap:4px var(--space-2)}.v2-whm-accounts__table [data-phone-label]::before{content:attr(data-phone-label);margin-inline-end:auto;color:var(--muted)}.v2-whm-accounts__table [data-phone-label]>*{text-align:end}.v2-whm-accounts__table tr>td:first-child{grid-column:auto}.v2-whm-accounts__table tr>td:nth-child(3):not([data-phone-label]){grid-column:1/-1;grid-row:auto;justify-self:start;text-align:start;overflow-wrap:anywhere}.v2-whm-accounts__table tr>td:nth-child(4){grid-column:1/-1}.v2-whm-accounts__table td .v2-whm-accounts__quota{flex-direction:row;flex-wrap:wrap;justify-content:space-between;align-items:baseline}.v2-whm-accounts__table td .v2-whm-accounts__quota>.v2-bar{flex-basis:100%}.v2-whm-accounts__table [data-phone-label]>.v2-whm-accounts__stack{align-items:flex-end}.v2-whm-accounts__table tr>td:has([data-account-status]){grid-column:2;grid-row:1;justify-self:end;align-self:center}}
 .v2-whm-accounts__bulk>:is(h2,p,ol,.v2-whm-accounts__bulk-choices,.v2-whm-accounts__lock-choices){flex-basis:100%}
@@ -329,7 +357,6 @@ export const WHM_ACCOUNTS_CSS = `${stateTones('.v2-whm-accounts [data-account-st
 .v2-whm-accounts__identity dd,.v2-whm-accounts__detail-body .v2-facts dd{text-box-trim:trim-start;text-box-edge:text}
 .v2-whm-accounts__dialog .v2-whm-accounts__actions{justify-content:flex-end}
 .v2-whm-accounts__dialog:has([data-account-confirm-field]:not([hidden])) [data-account-action-submit]:not(:disabled){border-color:var(--bad);background:var(--bad);color:var(--surface)}
-@media(max-width:1000px){.v2-whm-accounts__filters{grid-template-columns:repeat(2,minmax(0,1fr))}.v2-whm-accounts__clear{justify-self:start}}
 @media(max-width:640px){.v2-whm-accounts .v2-inset,.v2-whm-accounts__note,.v2-whm-accounts__dialog,.v2-whm-accounts__detail-header,.v2-whm-accounts__detail-body{padding:var(--space-2)}}
-@media(max-width:600px){.v2-whm-accounts__filters,.v2-whm-accounts__identity,.v2-whm-accounts__bulk-choices{grid-template-columns:1fr}.v2-whm-account-limit-grid{grid-template-columns:1fr}}
+@media(max-width:600px){.v2-whm-accounts__filter-control,.v2-whm-accounts__filter-search{flex:1 1 100%}.v2-whm-accounts__identity,.v2-whm-accounts__bulk-choices{grid-template-columns:1fr}.v2-whm-account-limit-grid{grid-template-columns:1fr}}
 `

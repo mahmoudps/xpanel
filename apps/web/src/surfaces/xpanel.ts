@@ -120,6 +120,10 @@ export interface PanelSurfaceProps {
     bandwidthMonth?: { month: string; totalBytes: number | null; limitBytes: number | null; usedPercent: number | null; enforced: boolean; limited: boolean }
     ioEnforced?: boolean | null
   }
+  /** True when the live authenticated GET /api/account/resources/live reader is available. */
+  liveResourcesAvailable?: boolean
+  /** ISO-8601 UTC timestamp of the supplied account usage observation. */
+  usageObservedAt?: string
   actionState?: AsyncActionBannerProps
 }
 

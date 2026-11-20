@@ -34,8 +34,8 @@ export function operationContext(props: PanelSurfaceProps, authority: PanelOpera
 
 export const technical = (value: string | number): string => `<bdi dir="ltr" class="v2-mono">${escapeHtml(normalizeAsciiDigits(value))}</bdi>`
 
-export function operationButton(label: string, hooks?: HookAttributes, disabled = true, primary = false): string {
-  return `<button type="button" class="v2-btn${primary ? ' v2-btn--primary' : ''}"${hookAttrs(hooks)}${disabled ? ' disabled' : ''}>${escapeHtml(label)}</button>`
+export function operationButton(label: string, hooks?: HookAttributes, disabled = true, primary = false, hidden = false): string {
+  return `<button type="button" class="v2-btn${primary ? ' v2-btn--primary' : ''}"${hookAttrs(hooks)}${disabled ? ' disabled' : ''}${hidden ? ' hidden' : ''}>${escapeHtml(label)}</button>`
 }
 
 export function operationSelect(selectHtml: string): string {

@@ -1,6 +1,7 @@
 import type { DocumentProps, ThemeSurface } from '../contract.ts'
 import { createV2Stylesheet, type V2Stylesheet } from './stylesheet.ts'
 import { V2_PHONE_TABLE_ROWS_CSS } from './base.ts'
+import { WORKSPACE_INTERACTIONS_CSS } from './workspace-interactions.ts'
 import { FILTER_BAR_CSS } from './components/filter-bar.ts'
 import { V2_PANEL_HOME_CSS } from './pages/xpanel/home.ts'
 import { V2_PANEL_RESOURCES_CSS } from './pages/xpanel/resources.ts'
@@ -60,9 +61,9 @@ export interface V2RouteStylesheet {
   readonly dependencies: readonly Readonly<V2Stylesheet>[]
 }
 
-// A page stylesheet also carries the phone table rows, which stay out of the shared foundation every document loads.
+// A page stylesheet also carries the phone table rows and workspace interaction rules, keeping the shared 12 KB foundation lean.
 const page = (surface: ThemeSurface, name: string, routes: readonly string[], css: string | readonly string[], dependencies: readonly Readonly<V2Stylesheet>[] = [], phoneRows = true): Readonly<V2RouteStylesheet> =>
-  Object.freeze({ surface, routes: Object.freeze([...routes]), stylesheet: createV2Stylesheet(name, [...(typeof css === 'string' ? [css] : css), ...(phoneRows ? [V2_PHONE_TABLE_ROWS_CSS] : [])]), dependencies: Object.freeze([...dependencies]) })
+  Object.freeze({ surface, routes: Object.freeze([...routes]), stylesheet: createV2Stylesheet(name, [...(typeof css === 'string' ? [css] : css), ...(phoneRows ? [V2_PHONE_TABLE_ROWS_CSS, WORKSPACE_INTERACTIONS_CSS] : [])]), dependencies: Object.freeze([...dependencies]) })
 /** A supplement loads beside its page stylesheet, which already carries the phone rows. */
 const supplement = (surface: ThemeSurface, name: string, routes: readonly string[], css: string | readonly string[]): Readonly<V2RouteStylesheet> => page(surface, name, routes, css, [], false)
 

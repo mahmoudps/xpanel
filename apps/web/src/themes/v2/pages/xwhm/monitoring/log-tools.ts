@@ -21,7 +21,7 @@ export function renderV2WhmLogTools(t: Translate, canRead: boolean): string {
     + `<div data-database-log-panel="error" hidden>${table(t, msgid('Error log, newest first'), [msgid('Time'), msgid('Level'), msgid('Message')], { 'data-database-log-rows': 'error' }, msgid('The database log has not been read.'))}</div>`)
   const ranges = [['1', msgid('Last hour')], ['6', msgid('Last 6 hours')], ['24', msgid('Last 24 hours')], ['72', msgid('Last 3 days')], ['168', msgid('Last 7 days')]] as const
   const raw = section(t, 'raw-ftp-log', msgid('Raw FTP log'), help(t, msgid('A gzip of plain text with the FTP sign-ins and transfers of one domain, cut from the service journal. Connections made before a sign-in name no domain, so they are left out.'))
-    + fields(field(t, 'v2-raw-ftp-domain', msgid('Domain'), select(t, 'v2-raw-ftp-domain', { 'data-raw-ftp-domain': true }, [], canRead)) + field(t, 'v2-raw-ftp-hours', msgid('Time range'), select(t, 'v2-raw-ftp-hours', { 'data-raw-ftp-hours': true }, ranges, canRead).replace('value="24"', 'value="24" selected')))
+    + fields(field(t, 'v2-raw-ftp-domain', msgid('Domain'), select(t, 'v2-raw-ftp-domain', { 'data-raw-ftp-domain': true }, [], canRead)) + field(t, 'v2-raw-ftp-hours', msgid('Time range'), select(t, 'v2-raw-ftp-hours', { 'data-raw-ftp-hours': true }, ranges, canRead, '24')))
     + actions(button(t, msgid('Download log'), { 'data-raw-ftp-download': true }, canRead)) + line({ 'data-raw-ftp-status': true }, msgid('Nothing has been downloaded.')))
   return `<div class="v2-observation__groups" data-whm-log-tools data-log-tools-can-read="${canRead}">${analysis}${database}${raw}</div>`
 }

@@ -41,10 +41,14 @@ export interface StateSlots {
 export interface Fact {
   label: string
   value: string
+  /** Pre-escaped rich value HTML (e.g. mixed localized text and `<bdi dir="ltr">` numeric parts). */
+  valueHtml?: string
   /** Technical values (paths, users, versions) in the monospace face. */
   mono?: boolean
   /** Keep an LTR reference or date isolated within the field's normal alignment edge. */
   ltr?: boolean
+  /** Optional data hooks placed on the fact value node. */
+  hooks?: HookAttributes
 }
 
 export const kpiStrip = (props: KpiStripProps): string =>
@@ -64,7 +68,7 @@ export function stateBlock(t: Translate, state: LayoutState, slots: StateSlots =
 }
 
 export const factList = (facts: readonly Fact[], label?: string): string =>
-  `<dl class="v2-facts"${label ? ` aria-label="${escapeHtml(label)}"` : ''}>${facts.map(fact => `<div><dt>${escapeHtml(fact.label)}</dt><dd><bdi class="v2-num${fact.mono ? ' v2-mono' : ''}" dir="${fact.ltr || fact.mono ? 'ltr' : 'auto'}">${escapeHtml(fact.value)}</bdi></dd></div>`).join('')}</dl>`
+  `<dl class="v2-facts"${label ? ` aria-label="${escapeHtml(label)}"` : ''}>${facts.map(fact => `<div><dt>${escapeHtml(fact.label)}</dt><dd>${fact.valueHtml ?? `<bdi class="v2-num${fact.mono ? ' v2-mono' : ''}" dir="${fact.ltr || fact.mono ? 'ltr' : 'auto'}"${hookAttrs(fact.hooks)}>${escapeHtml(fact.value)}</bdi>`}</dd></div>`).join('')}</dl>`
 
 /** Main column beside an aside of cards; the aside stacks under the main column on narrow screens. */
 export function splitWithAside(mainHtml: string, aside: { label: string; html: string } | undefined): string {
@@ -99,7 +103,7 @@ export const commitRegion = (label: string, barHtml: string): string =>
 export const COMMON_LAYOUT_CSS = `.v2-layout{display:flex;flex-direction:column;gap:var(--space-4);min-width:0}
 .v2-stack{display:flex;flex-direction:column;gap:var(--space-3);min-width:0}
 .v2-stack--tight{gap:var(--space-2)}
-.v2-aside{flex:1 1 340px;max-width:440px;min-width:0;display:flex;flex-direction:column;gap:var(--space-3)}
+.v2-aside{flex:1 1 320px;max-width:420px;min-width:0;display:flex;flex-direction:column;gap:var(--space-3)}
 .v2-grid{display:flex;flex-wrap:wrap;align-items:stretch;gap:var(--space-3)}
 .v2-grid__cell{flex:1 1 420px;min-width:0;display:flex;flex-direction:column}
 .v2-grid__cell>*{flex:1 1 auto}
@@ -108,13 +112,13 @@ export const COMMON_LAYOUT_CSS = `.v2-layout{display:flex;flex-direction:column;
 .v2-fields>.v2-switch-row{grid-column:1/-1}
 .v2-fields--row{display:flex;flex-wrap:wrap}
 .v2-fields--row>.v2-field{flex:1 1 160px}
-.v2-fields>.v2-switch-row+.v2-switch-row{padding-top:var(--space-2);border-top:1px solid var(--line)}
-.v2-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(180px,100%),1fr));gap:var(--space-2)}
+.v2-fields>.v2-switch-row+.v2-switch-row{padding-top:12px;border-top:1px solid var(--line)}
+.v2-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(170px,100%),1fr));gap:var(--space-2)}
 .v2-facts>div{display:flex;flex-direction:column;gap:var(--space-1);min-width:0;font-size:13px}
 .v2-facts dt{color:var(--muted);text-box-trim:trim-end;text-box-edge:text}
 .v2-facts dd{text-align:start;overflow-wrap:anywhere;text-box-trim:trim-start;text-box-edge:text}
-.v2-inset{padding:var(--space-2) var(--v2-panel-padding) var(--v2-panel-padding)}
+.v2-inset{padding:14px var(--v2-panel-padding) var(--v2-panel-padding)}
 .v2-card--flush>.v2-card__body>.v2-tabs{padding-inline:var(--v2-panel-padding)}
-.v2-foot{display:flex;flex-wrap:wrap;justify-content:space-between;gap:var(--space-1) var(--space-2);padding:12px var(--v2-panel-padding);border-top:1px solid var(--line);font-size:12px;color:var(--muted)}
+.v2-foot{display:flex;flex-wrap:wrap;justify-content:space-between;gap:var(--space-1) var(--space-2);padding:10px var(--v2-panel-padding);border-top:1px solid var(--line);font-size:12px;color:var(--muted)}
 @media(max-width:959px){.v2-aside{max-width:none}}
 `
