@@ -121,6 +121,9 @@ function bindAccountFilters(askDialog?: (options: Record<string, unknown>) => Pr
       if (addCondition) addCondition.disabled ||= !canManage() || !ready() || uncertain || (conditionsRoot?.children.length ?? 0) >= 50
       if (addAction) addAction.disabled ||= !canManage() || !ready() || uncertain || (actionsRoot?.children.length ?? 0) + (stop?.checked ? 1 : 0) >= 10
       if (stop) stop.disabled ||= !canManage() || !ready() || uncertain || !stop.checked && (actionsRoot?.children.length ?? 0) >= 10
+      const sortable = !busy && !blocked && !uncertain && !dirty && ready() && canManage()
+      list.dataset.sortLocked = sortable ? 'false' : 'true'
+      Array.prototype.forEach.call(list.children, node => { if (node instanceof HTMLElement && node.dataset.sortId) node.draggable = sortable })
     }
     const endpoint = (chosen = selection) => filtersBase + '?scope=' + chosen.scope + (chosen.scope === 'mailbox' ? '&mailbox=' + encodeURIComponent(chosen.mailbox!) : '')
     const accountOf = (raw: unknown) => expectedAccountId || (filterObject(raw) && filterObject(raw.context) && typeof raw.context.accountId === 'string' ? raw.context.accountId : '')
@@ -160,6 +163,7 @@ function bindAccountFilters(askDialog?: (options: Record<string, unknown>) => Pr
       const valid = state.compilation.status === 'ready'
       state.filters.forEach((row, index) => {
         const item = clone(valid ? 'rule' : 'blocked-rule')
+        if (typeof row.id === 'string' && row.id) { item.dataset.sortId = row.id; item.draggable = valid && canManage() }
         clientTemplateSlot(item, 'title').textContent = String(index + 1) + '. ' + (typeof row.name === 'string' ? row.name : copy('Name not available'))
         if (valid) {
           clientTemplateSlot(item, 'summary').textContent = (row.enabled ? copy('Enabled configuration') : copy(msgctxt('account-filters-client', 'Disabled configuration'))) + ' · ' + (row.matchAll ? copy('All conditions') : copy('Any condition'))
@@ -250,7 +254,7 @@ function bindAccountFilters(askDialog?: (options: Record<string, unknown>) => Pr
         const next=await read(chosen,token);if(next.revision!==result.revision||!verify(next))throw new Error('filter_readback_mismatch')
         state=next;paint();if(form&&!form.hidden&&['POST','PATCH','DELETE'].includes(method)&&!path.endsWith('/reorder')){form.hidden=true;dirty=false;editing=null;draftRevision=null}
         note(copy('Saved and read back. Each rule shows whether the mail server runs it.'),'saved')
-      }catch(error){uncertain=sent&&(acknowledged||filterWriteUncertain(error));note(uncertain?copy('The saved state is uncertain. Refresh and review before another change. Your draft is kept.'):copy('The change was refused or the revision changed. Your draft is kept. Refresh, then reopen the editor from the current rule before saving.'),uncertain?'uncertain':'failed')}
+      }catch(error){uncertain=sent&&(acknowledged||filterWriteUncertain(error));if(path.endsWith('/reorder')&&state)paint();note(uncertain?copy('The saved state is uncertain. Refresh and review before another change. Your draft is kept.'):copy('The change was refused or the revision changed. Your draft is kept. Refresh, then reopen the editor from the current rule before saving.'),uncertain?'uncertain':'failed')}
       finally{busy=false;control()}
     }
     const paintTrace = (trace: FilterTraceView) => {
@@ -296,8 +300,8 @@ function bindAccountFilters(askDialog?: (options: Record<string, unknown>) => Pr
     root.querySelector('[data-filter-new]')?.addEventListener('click',()=>{if(!dirty)edit();else note(copy('Finish or cancel the current draft first.'),'failed')})
     root.querySelector('[data-filter-add-condition]')?.addEventListener('click',()=>{addCondition();dirty=true;control()})
     root.querySelector('[data-filter-add-action]')?.addEventListener('click',()=>{addAction();dirty=true;control()})
-    root.querySelector('[data-filter-cancel]')?.addEventListener('click',()=>{if(form){form.hidden=true;dirty=false;editing=null;draftRevision=null}})
-    form?.addEventListener('input',()=>{dirty=true});form?.addEventListener('change',()=>{dirty=true;control()})
+    root.querySelector('[data-filter-cancel]')?.addEventListener('click',()=>{if(form){form.hidden=true;dirty=false;editing=null;draftRevision=null;control()}})
+    form?.addEventListener('input',()=>{dirty=true;control()});form?.addEventListener('change',()=>{dirty=true;control()})
     form?.addEventListener('submit',event=>{event.preventDefault();if([...form.querySelectorAll<HTMLInputElement>('input')].some(input=>filterHasForbiddenControl(input.value))){note(copy('Remove control characters or line separators before saving. Your draft is kept.'),'failed');return}if(!form.reportValidity())return;const payload=draft();if(!payload.actions.length){note(copy('Add at least one action. Your draft is kept.'),'failed');return}const id=editing;void mutate(id?'PATCH':'POST',filtersBase+(id?'/'+encodeURIComponent(id):''),{...payload,...(!id?{scope:selection.scope,...(selection.mailbox?{mailbox:selection.mailbox}:{})}:{})},next=>id?next.filters.some(row=>row.id===id&&filterDraftMatches(row,payload)):next.filters.some(row=>filterDraftMatches(row,payload)),draftRevision??undefined)})
     select?.addEventListener('change',async()=>{
       const before=filterSelectionKey(selection),wanted=select.value;if(busy){select.value=before;return}
@@ -323,6 +327,18 @@ function bindAccountFilters(askDialog?: (options: Record<string, unknown>) => Pr
       const index=state.filters.findIndex(item=>item.id===row.id),other=action==='up'?index-1:index+1;if(other<0||other>=state.filters.length)return
       const ids=state.filters.map(item=>item.id);[ids[index],ids[other]]=[ids[other]!,ids[index]!]
       void mutate('POST',filtersBase+'/reorder',{scope:selection.scope,...(selection.mailbox?{mailbox:selection.mailbox}:{}),orderedIds:ids},next=>JSON.stringify(next.filters.map(item=>item.id))===JSON.stringify(ids))
+    })
+    list.addEventListener('xpanel:reorder',event=>{
+      if(busy||uncertain||dirty||!state||!ready()||!canManage()){
+        if(state)paint()
+        if(dirty)note(copy('Finish or cancel the current draft before changing saved rules.'),'failed')
+        return
+      }
+      const detail=(event as CustomEvent<{order?:string[]}>).detail
+      const order=Array.isArray(detail?.order)?detail.order.filter((id):id is string=>typeof id==='string'&&id.length>0):[]
+      const current=state.filters.map(item=>item.id)
+      if(order.length!==current.length||order.some(id=>!current.includes(id))||JSON.stringify(order)===JSON.stringify(current)){paint();return}
+      void mutate('POST',filtersBase+'/reorder',{scope:selection.scope,...(selection.mailbox?{mailbox:selection.mailbox}:{}),orderedIds:order},next=>JSON.stringify(next.filters.map(item=>item.id))===JSON.stringify(order))
     })
     // compose "Add filter" arrives with #new-filter; the editor opens only after a verified read
     control();void refresh().then(()=>{if(location.hash==='#new-filter')edit()})

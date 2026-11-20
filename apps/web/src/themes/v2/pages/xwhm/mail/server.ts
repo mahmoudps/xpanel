@@ -72,7 +72,7 @@ ${status(t(msgid('The saved policy has not been read.')), { 'data-whm-mail-setti
     ...(mode === 'server' ? [[ 'dovecot', msgid('Dovecot') ]] as const : []), ['desired', msgid('Rendered by xPanel')], ['observed-at', msgid('Observed at (UTC)')]], 'data-whm-mail-server-fact')
   const summary = group(`${mode}-sources`, t(msgid('Configuration sources')),
     `${status(t(msgid('The mail server configuration has not been read.')), { 'data-whm-mail-server-status': true })}${sourceFacts}
-<p>${escapeHtml(t(msgid('Passwords, keys and lookup table contents are never read.')))}</p><p><a href="/whm/monitoring/repair">${escapeHtml(t(msgid('Repair center')))}</a> · <a href="/whm/panel/data">${escapeHtml(t(msgid('Configuration history')))}</a></p>`,
+<p>${escapeHtml(t(msgid('Passwords, keys and lookup table contents are never read.')))}</p><div class="v2-whm-mail__actions"><a class="v2-btn v2-btn--ghost" href="/whm/monitoring/repair">${escapeHtml(t(msgid('Repair center')))}</a><a class="v2-btn v2-btn--ghost" href="/whm/panel/data">${escapeHtml(t(msgid('Configuration history')))}</a></div>`,
     button(t(msgid('Refresh')), { 'data-whm-mail-server-refresh': true }, !canRead))
   const observed = group(`${mode}-observed`, mode === 'outbound' ? t(msgid('Rate and size limits')) : t(msgid('Postfix and Dovecot settings')),
     (mode === 'outbound' ? `<p>${escapeHtml(t(msgid('The remote SMTP servers saved in Remote service IPs are also included in smtpd_client_event_limit_exceptions; they are changed only there.')))} <a href="/whm/server/ips">${escapeHtml(t(msgid('Remote service IPs')))}</a></p>` : '')

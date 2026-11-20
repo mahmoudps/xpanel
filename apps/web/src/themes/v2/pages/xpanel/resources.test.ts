@@ -101,4 +101,16 @@ describe('v2 account resources', () => {
     expect(buttons.every(button => /\sdisabled(?:\s|>)/.test(button))).toBe(true)
     expect(html.match(/scope="row"/g)).toHaveLength(12)
   })
+
+  it('exposes live on-demand refresh and observed timestamp when the live reader is available', () => {
+    const html = renderV2PanelResources(props({
+      liveResourcesAvailable: true,
+      usageObservedAt: '2026-11-20T12:00:00.000Z',
+      usage: { phpVersion: '8.3', diskBytes: 2097152, memoryBytes: 67108864, processCount: 3, bandwidth: 'unmeasured', ioEnforced: true },
+    }))
+    expect(html).toContain('data-panel-resources-live="true"')
+    expect(html).toContain('data-resource-refresh')
+    expect(html).toContain('datetime="2026-11-20T12:00:00.000Z"')
+    expect(html).not.toContain('An on-demand account resource reader is unavailable.')
+  })
 })

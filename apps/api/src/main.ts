@@ -1176,6 +1176,7 @@ export const createDefaultWebRenderer = async (deps: {
         ...(customConfigView ? { customConfig: customConfigView } : {}),
         certificates: accountCertificates,
         ...(resourceUsage ? { usage: resourceUsage } : {}),
+        ...(resourcesRoute && principal.kind === 'user' && account?.status === 'active' && !visibility.disabledFeatures.has('resource-usage') && deps.agent ? { liveResourcesAvailable: true, ...(resourceUsage ? { usageObservedAt: new Date().toISOString() } : {}) } : {}),
         ...(trafficRoute ? {
           websiteAnalyticsDomainSelectionAvailable: Boolean(account),
           websiteAnalyticsWindow: trafficWindow,

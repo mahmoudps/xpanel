@@ -40,5 +40,6 @@ export const WHM_PANEL_CSS = adminStyles('.v2-panel-page') + `.v2-panel-page .v2
 .v2-panel-page #v2-panel-token-scopes tbody th{grid-area:1/1;padding-block-end:0}
 .v2-panel-page #v2-panel-token-scopes tbody td:nth-child(2){grid-area:2/1;padding-block-start:0;font-size:12px;color:var(--muted)}
 .v2-panel-page #v2-panel-token-scopes input[type=checkbox]{inline-size:20px;block-size:20px;accent-color:var(--accent-fill)}}
+.v2-panel-page .v2-panel-token-scope-check{display:inline-flex;align-items:center;justify-content:center;min-inline-size:var(--target);min-block-size:var(--target);cursor:pointer}
 .v2-panel-page [data-dev-result-fields]:empty{display:none}
 `

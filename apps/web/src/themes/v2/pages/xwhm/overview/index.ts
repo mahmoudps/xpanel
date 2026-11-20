@@ -227,10 +227,10 @@ export function renderV2WhmOverview(t: Translate, props: WhmSurfaceProps): strin
       ...(open('/whm/jobs') ? { actionHtml: `<a class="v2-btn" href="/whm/jobs">${escapeHtml(t(msgctxt('theme:v2', 'View jobs')))}</a>` } : {}) })}</div>`,
   })
   const audit = open('/whm/audit') ? auditEvents(t, props) : ''
-  return `<div class="v2-layout v2-whm-overview" data-whm-overview>${pageHeader(t, { breadcrumb: [{ label: t('Home') }, { label: t('Dashboard') }], route: '/whm', title: t('Server dashboard'), description: t(msgctxt('theme:v2', 'The reconciler, accounts, resources and services.')), actionsHtml: actions })}${upgrade}${certStrip}${renderV2WhmHome(t)}${resources(t, props)}<div class="v2-whm-overview__primary">${history(t, props)}${reconciler(t, props)}</div><div class="v2-whm-overview__secondary">${open('/whm/services') ? services(t, props) : ''}<div class="v2-stack">${open('/whm/accounts') ? accountsCard(t, props) : ''}${jobs}</div></div>${hostFacts(t, props)}${audit}</div>`
+  return `<div class="v2-layout v2-whm-overview" data-whm-overview>${pageHeader(t, { breadcrumb: [{ label: t('Home') }, { label: t('Dashboard') }], route: '/whm', title: t('Server dashboard'), description: t(msgctxt('theme:v2', 'The reconciler, accounts, resources and services.')), actionsHtml: actions })}${upgrade}${certStrip}${resources(t, props)}<div class="v2-whm-overview__primary">${history(t, props)}${reconciler(t, props)}</div><div class="v2-whm-overview__secondary">${open('/whm/services') ? services(t, props) : ''}<div class="v2-stack">${open('/whm/accounts') ? accountsCard(t, props) : ''}${jobs}</div></div>${renderV2WhmHome(t)}${hostFacts(t, props)}${audit}</div>`
 }
 
-export const WHM_OVERVIEW_CSS = `.v2-whm-overview{gap:var(--space-4)}
+export const WHM_OVERVIEW_CSS = `.v2-whm-overview{gap:var(--space-3)}
 .v2-whm-overview>.v2-kpi-row{grid-template-columns:repeat(auto-fit,minmax(min(200px,100%),1fr))}
 .v2-whm-overview :is(.v2-card__actions,.v2-card__footer)>a:not(.v2-btn){display:inline-flex;align-items:center;min-inline-size:var(--target);min-block-size:var(--target);font-size:13px;font-weight:600;transition:color 140ms ease-out}
 .v2-whm-overview :is(.v2-chart__x,.v2-chart__y){font-size:12px;font-variant-numeric:tabular-nums}
@@ -243,7 +243,7 @@ export const WHM_OVERVIEW_CSS = `.v2-whm-overview{gap:var(--space-4)}
 .v2-whm-overview__secondary>.v2-stack>.v2-card:last-child{flex:1 1 auto}
 .v2-whm-overview__secondary>.v2-stack>.v2-card:last-child>.v2-card__body{flex:1 1 auto;justify-content:center}
 .v2-whm-overview__reconciler-note{margin-block-start:auto}
-.v2-whm-overview__chart{flex:1 1 auto;min-block-size:220px;display:grid;place-items:center;padding:var(--space-3);border:1px dashed var(--line);border-radius:var(--radius-notice);color:var(--muted);text-align:center}
+.v2-whm-overview__chart{flex:1 1 auto;min-block-size:210px;display:grid;place-items:center;padding:var(--space-3);border:1px solid var(--line);border-radius:var(--radius-notice);background:var(--subtle);color:var(--muted);text-align:center}
 .v2-whm-overview__tiles{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-2)}
 .v2-whm-overview__tiles--auto{grid-template-columns:repeat(auto-fit,minmax(0,1fr))}
 .v2-whm-overview__tile{display:flex;flex-direction:column;justify-content:center;gap:4px;min-inline-size:var(--target);min-block-size:var(--target);padding:12px var(--space-2);border:1px solid var(--line);border-radius:var(--radius-control);background:var(--subtle);color:var(--text);text-decoration:none;transition:background-color 140ms ease-out,border-color 140ms ease-out}
@@ -260,10 +260,23 @@ export const WHM_OVERVIEW_CSS = `.v2-whm-overview{gap:var(--space-4)}
 .v2-whm-overview__attention>li{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-1) var(--space-2);min-block-size:56px;padding-block:var(--space-1);border-block-start:1px solid var(--line);font-size:13px}
 .v2-whm-overview__attention>li>span{flex:1 1 200px;color:var(--warn)}
 .v2-whm-overview__services{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;border-block-start:1px solid var(--line)}
-.v2-whm-overview__services>li{padding:12px var(--space-3);border-block-end:1px solid var(--line)}
+.v2-whm-overview__services:empty{display:none}
+.v2-whm-overview__services>li{padding:11px var(--space-3);border-block-end:1px solid var(--line)}
 .v2-whm-overview__services>li:last-child{border-block-end:0}
-.v2-whm-overview__service{display:flex;align-items:center;justify-content:space-between;gap:var(--space-2)}
+.v2-whm-overview__service{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px var(--space-2)}
 .v2-whm-overview__service>span:first-child{display:flex;flex-direction:column;gap:2px;font-size:14px;min-inline-size:0;overflow-wrap:anywhere}
+.v2-whm-inbox__row{padding-inline:0!important}
+.v2-whm-inbox__row[data-read=true]{color:var(--muted)}
+.v2-whm-inbox__row[hidden]{display:none}
+.v2-whm-inbox__main{display:flex;flex-direction:column;gap:3px;flex:1 1 220px;min-inline-size:0}
+.v2-whm-inbox__meta{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:12px;font-variant-numeric:tabular-nums}
+.v2-whm-inbox__meta bdi{white-space:nowrap}
+.v2-whm-inbox__filter{display:inline-flex;align-items:center;gap:6px;min-block-size:var(--target);font-size:13px;font-weight:500;color:var(--text-2);cursor:pointer}
+.v2-whm-favorites__row{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;padding-inline:0!important}
+.v2-whm-favorites__link{display:flex;flex-direction:column;gap:2px;flex:1 1 180px;min-inline-size:0}
+.v2-whm-favorites__link>a{font-weight:600;color:var(--text);text-decoration:none}
+.v2-whm-favorites__link>a:hover{color:var(--accent)}
+.v2-whm-favorites__actions{display:inline-flex;flex-wrap:wrap;align-items:center;gap:6px}
 .v2-whm-overview__unread>.v2-state--empty{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;justify-items:start;gap:4px 12px;padding:var(--space-2);border-radius:var(--radius-notice);text-align:start}
 .v2-whm-overview__unread .v2-state__icon{grid-row:1/3}
 .v2-whm-overview__unread :is(h2,h3,p){grid-column:2}

@@ -42,8 +42,8 @@ ${fields(input('transfer-host', msgid('Source host or HTTPS API URL'), 'text', '
 ${actions(button('create', msgid('Save source review'), true))}
 `, { 'data-whm-detail-section': 'transfer-source' })
 
-  const inventoryTable = lifecycleTable(t, msgctxt('theme:v2', 'Source accounts'), [msgid('Select'), msgid('Account'), msgid('Plan'), msgid('Disk'), msgid('Databases'), msgid('Mailboxes'), msgid('Conflict'), msgid('Resolution')], { 'data-transfer-inventory-rows': true, 'data-transfer-accounts': true }, msgid('No observed records are available for this saved session.'), { name: 2, value: 1 })
-    .replace(`<th scope="col">${text(t, msgid('Select'))}</th>`, `<th scope="col"><label class="v2-lifecycle__choice"><input type="checkbox" data-transfer-select-all aria-label="${text(t, msgid('Select all accounts'))}" disabled><span class="v2-sr">${text(t, msgid('Select'))}</span></label></th>`)
+  const selectAllHeader = `<label class="v2-lifecycle__choice"><input type="checkbox" data-transfer-select-all aria-label="${text(t, msgid('Select all accounts'))}" disabled><span class="v2-sr">${text(t, msgid('Select'))}</span></label>`
+  const inventoryTable = lifecycleTable(t, msgctxt('theme:v2', 'Source accounts'), [{ label: msgid('Select'), headerHtml: selectAllHeader }, msgid('Account'), msgid('Plan'), msgid('Disk'), msgid('Databases'), msgid('Mailboxes'), msgid('Conflict'), msgid('Resolution')], { 'data-transfer-inventory-rows': true, 'data-transfer-accounts': true }, msgid('No observed records are available for this saved session.'), { name: 2, value: 1 })
   const selection = lifecycleCard(t, 'transfer-selection', msgctxt('theme:v2', 'Select accounts'), `
 ${scope === 'server' ? `<p>${text(t, msgid('Whole-server migration selects every source account and plan. An account with a conflict can be skipped when you resolve it.'))}</p>` : ''}
 <div class="v2-lifecycle__choices" data-transfer-plans></div>
@@ -85,6 +85,7 @@ ${actions(button('revert', msgid('Revert cutover')))}
 ${status(msgid('No parsed archive review was returned.'), 'import-observation')}
 ${fields(input('transfer-archive', msgid('Backup file'), 'file', ' accept=".tar.gz,.tgz"')
     + input('transfer-archive-target', msgid('Destination username (optional)'), 'text', ' maxlength="16"'))}
+<div class="v2-dropzone" data-file-dropzone role="button" tabindex="0" aria-label="${text(t, msgid('Drop a cPanel backup archive (.tar.gz or .tgz) here'))}"><span class="v2-dropzone__title">${text(t, msgid('Drop a cPanel backup archive (.tar.gz or .tgz) here'))}</span><span class="v2-dropzone__hint">${text(t, msgid('Or click to choose a local archive for inspection before import.'))}</span></div>
 ${status(msgid('The import limit has not been read.'), 'archive-limit')}
 ${actions(button('inspect', msgid('Upload and read')))}
 <h3>${text(t, msgid('Or fetch it from the cPanel server over SSH'))}</h3>

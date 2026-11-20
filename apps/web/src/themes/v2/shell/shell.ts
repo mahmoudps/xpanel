@@ -151,8 +151,8 @@ function contextCard(context: NavContext): string {
     : `<span class="v2-ctx__tile" aria-hidden="true">${icon('server')}</span>`
   const status = context.status ? `<span class="v2-ctx__status v2-ctx__status--${context.status.tone}"><span aria-hidden="true"></span>${escapeHtml(context.status.label)}</span>` : ''
   const meters = (context.meters ?? []).map(m => `<div class="v2-ctx__meter"><div><span>${escapeHtml(m.label)}</span><span class="v2-num">${escapeHtml(m.valueText)}</span></div><div class="v2-ctx__bar" aria-hidden="true"><span class="v2-ctx__fill v2-ctx__fill--${m.tone ?? 'info'}" style="inline-size:${Math.min(100, Math.max(0, m.percent ?? 0))}%"></span></div></div>`).join('')
-  const meta = context.meta?.length ? `<div class="v2-ctx__meta v2-num">${context.meta.map(item => `<span>${escapeHtml(item)}</span>`).join('')}</div>` : ''
-  return `<section class="v2-ctx" aria-label="${escapeHtml(context.label)}"><div class="v2-ctx__id">${mark}<div class="v2-ctx__text"><span class="v2-ctx__title"><span class="v2-mono">${escapeHtml(context.title)}</span>${context.badge ? `<span class="v2-ctx__badge">${escapeHtml(context.badge)}</span>` : ''}</span>${context.detail ? `<span class="v2-ctx__detail v2-mono">${escapeHtml(context.detail)}</span>` : ''}${status}</div></div>${meters}${meta}</section>`
+  const meta = context.meta?.length ? `<div class="v2-ctx__meta v2-num">${context.meta.map(item => `<bdi dir="ltr">${escapeHtml(item)}</bdi>`).join('')}</div>` : ''
+  return `<section class="v2-ctx" aria-label="${escapeHtml(context.label)}"><div class="v2-ctx__id">${mark}<div class="v2-ctx__text"><span class="v2-ctx__title" title="${escapeHtml(context.title)}"><bdi class="v2-mono v2-ctx__name" dir="ltr">${escapeHtml(context.title)}</bdi>${context.badge ? `<span class="v2-ctx__badge">${escapeHtml(context.badge)}</span>` : ''}</span>${context.detail ? `<bdi class="v2-ctx__detail v2-mono" dir="ltr" title="${escapeHtml(context.detail)}">${escapeHtml(context.detail)}</bdi>` : ''}${status}</div></div>${meters}${meta}</section>`
 }
 
 function sidebar(t: Translate, props: V2ShellProps): string {
@@ -161,7 +161,7 @@ function sidebar(t: Translate, props: V2ShellProps): string {
   const footer = props.footerLinks?.length
     ? `<div class="v2-side__foot">${props.footerLinks.map(link => `<a href="${escapeHtml(link.href)}">${escapeHtml(link.label)}${link.external ? icon('external', 16) : ''}</a>`).join('')}</div>` : ''
   return `<aside class="v2-side" id="xp-sidebar" data-xp-sidebar tabindex="-1" aria-label="${escapeHtml(`${product} ${t('navigation')}`)}">
-<div class="v2-side__top"><a class="v2-brand" href="${escapeHtml(props.homeHref)}"><span class="v2-brand__mark" aria-hidden="true">x</span><span class="v2-brand__text"><span class="v2-brand__name">${escapeHtml(product)}</span>${subtitle}</span></a><button type="button" class="v2-btn v2-btn--icon v2-side__close" data-action="close-mobile-nav" aria-controls="xp-sidebar" aria-label="${escapeHtml(t(msgctxt('shell', 'Close navigation')))}">${icon('x', 16)}</button></div>
+<div class="v2-side__top"><a class="v2-brand" href="${escapeHtml(props.homeHref)}"><span class="v2-brand__mark" aria-hidden="true">x</span><span class="v2-brand__text"><span class="v2-brand__name">${escapeHtml(product)}</span>${subtitle}</span></a><button type="button" class="v2-btn v2-btn--icon v2-side__collapse" data-action="toggle-sidebar-collapse" aria-controls="xp-sidebar" aria-expanded="true" aria-label="${escapeHtml(t('Toggle sidebar'))}" title="${escapeHtml(t('Toggle sidebar'))}">${icon('chevLeft', 16)}</button><button type="button" class="v2-btn v2-btn--icon v2-side__close" data-action="close-mobile-nav" aria-controls="xp-sidebar" aria-label="${escapeHtml(t(msgctxt('shell', 'Close navigation')))}">${icon('x', 16)}</button></div>
 ${props.context ? contextCard(props.context) : ''}${props.contextControlHtml ?? ''}
 ${props.sidebarHtml ?? sidebarNavigation(t, props)}
 ${footer}
@@ -185,8 +185,10 @@ function accountMenu(t: Translate, props: V2ShellProps): string {
   const session = account.signedIn
     ? `<button type="button" class="v2-menu__item v2-menu__item--danger" data-action="logout">${escapeHtml(t('Sign out'))}</button>`
     : account.signInHref ? `<a class="v2-menu__item" href="${escapeHtml(account.signInHref)}">${escapeHtml(t('Sign in'))}</a>` : ''
+  const timezoneOptions = [['UTC', t('Server time (UTC)')], ['local', t('Browser local time')], ['Africa/Cairo', 'Africa/Cairo'], ['Asia/Amman', 'Asia/Amman'], ['Asia/Gaza', 'Asia/Gaza'], ['Asia/Riyadh', 'Asia/Riyadh'], ['Asia/Dubai', 'Asia/Dubai'], ['Europe/London', 'Europe/London'], ['Europe/Berlin', 'Europe/Berlin'], ['America/New_York', 'America/New_York'], ['America/Chicago', 'America/Chicago'], ['America/Los_Angeles', 'America/Los_Angeles'], ['Asia/Tokyo', 'Asia/Tokyo'], ['Australia/Sydney', 'Australia/Sydney']] as const
+  const timezoneChoice = !account.signedIn ? '' : `<div class="v2-tz"><label for="v2-user-tz">${escapeHtml(t('Time zone'))}</label><select id="v2-user-tz" data-user-timezone-select>${timezoneOptions.map(([value, label]) => `<option value="${value}">${escapeHtml(label)}</option>`).join('')}</select></div>`
   const interfaceChoice = !account.signedIn ? '' : `<section class="v2-ui-theme" data-ui-theme-preferences data-ui-theme-can-read="true" hidden><form data-ui-theme-form hidden><label for="v2-ui-theme-choice"><span>${escapeHtml(t(msgctxt('theme:v2', 'Interface theme')))}</span><select id="v2-ui-theme-choice" name="uiTheme" data-ui-theme-choice disabled><option value="classic">${escapeHtml(t('Classic'))}</option><option value="v2">V2</option></select></label><button class="v2-btn" type="submit" data-ui-theme-save disabled>${escapeHtml(t('Save'))}</button></form><p data-ui-theme-status role="status" aria-live="polite" hidden></p><button class="v2-btn v2-btn--ghost" type="button" data-ui-theme-reload disabled hidden>${escapeHtml(t('Reload'))}</button></section>`
-  return `<details class="v2-account" data-user-menu><summary class="v2-btn v2-account__summary" aria-label="${escapeHtml(`${t('User menu for')} ${name}${account.roleLabel ? ` ${account.roleLabel}` : ''}`)}"><span class="v2-account__avatar" data-initial="${escapeHtml(initial)}" aria-hidden="true"></span><span class="v2-account__id"><span${account.username ? ' dir="ltr"' : ''}>${escapeHtml(name)}</span>${account.roleLabel ? ` <span>${escapeHtml(account.roleLabel)}</span>` : ''}</span></summary><div class="v2-account__panel">${links}${interfaceChoice}${session}</div></details>`
+  return `<details class="v2-account" data-user-menu><summary class="v2-btn v2-account__summary" aria-label="${escapeHtml(`${t('User menu for')} ${name}${account.roleLabel ? ` ${account.roleLabel}` : ''}`)}"><span class="v2-account__avatar" data-initial="${escapeHtml(initial)}" aria-hidden="true"></span><span class="v2-account__id"><span${account.username ? ' dir="ltr"' : ''}>${escapeHtml(name)}</span>${account.roleLabel ? ` <span>${escapeHtml(account.roleLabel)}</span>` : ''}</span></summary><div class="v2-account__panel">${links}${timezoneChoice}${interfaceChoice}${session}</div></details>`
 }
 
 function topbar(t: Translate, props: V2ShellProps): string {
@@ -203,7 +205,7 @@ function topbar(t: Translate, props: V2ShellProps): string {
 <a class="v2-top__brand" href="${escapeHtml(props.homeHref)}">${escapeHtml(brandingProductName(props.branding, PRODUCT[props.surface]))}</a>
 <details class="v2-tools" open data-xp-toolbar-options><summary class="v2-btn">${escapeHtml(t('Search & account'))}</summary><div class="v2-tools__content">
 ${props.searchHtml ?? `<button type="button" class="v2-search" data-action="open-cmdk" aria-keyshortcuts="Control+K Meta+K">${icon('search')}<span>${escapeHtml(searchLabel)}</span> <kbd>Ctrl K</kbd></button>`}
-<span class="v2-top__spacer"></span>${liveIndicator(t, props.realtimeEnabled)}${server}${languages}${scheme}${bell}${props.surface === 'xwhm' ? `<a class="v2-btn v2-btn--icon v2-top__bell" href="/whm#whm-inbox-heading" data-whm-bell data-unread="false" aria-label="${escapeHtml(t('Notifications'))}">${icon('inbox')}<span class="v2-top__count v2-num" data-whm-bell-count aria-hidden="true" hidden></span></a>` : ''}${accountMenu(t, props)}
+<span class="v2-top__spacer"></span>${liveIndicator(t, props.realtimeEnabled)}${server}${languages}${scheme}${bell}${props.surface === 'xwhm' ? `<a class="v2-btn v2-btn--icon v2-top__bell" href="/whm#whm-inbox-heading" data-whm-bell data-unread="false" aria-label="${escapeHtml(t('Notifications'))}">${icon('bell')}<span class="v2-top__count v2-num" data-whm-bell-count aria-hidden="true" hidden></span></a>` : ''}${accountMenu(t, props)}
 </div></details>
 </header>`
 }
@@ -220,6 +222,7 @@ ${topbar(t, props)}
 <main id="main-content" class="v2-main" tabindex="-1"><div class="v2-page">${props.reconcile ? reconcileBanner(t, props.reconcile) : ''}${props.contentHtml}</div></main>
 </div>
 ${toastRegion(t)}
+<aside id="xp-ops-dock" class="v2-ops-dock" data-xp-ops-dock role="region" aria-label="${escapeHtml(t('Activity & Jobs'))}" hidden></aside>
 ${props.commandPalette ? commandPalette(t, { surface: props.surface, entries: props.commandPalette.entries }) : ''}
 ${props.activity ? activityDrawer(t, props.activity) : ''}
 </div>`
@@ -229,68 +232,70 @@ const SIDE = '.v2-side'
 export const SHELL_CSS = `.v2-shell{display:flex;min-height:100vh;background:var(--bg)}
 .v2-skip{position:fixed;inset-inline-start:var(--space-2);top:-100px;z-index:100;display:inline-flex;align-items:center;min-height:var(--target);min-inline-size:var(--target);padding:0 var(--space-2);border-radius:var(--radius-control);background:var(--accent-fill);color:var(--on-accent);font-weight:600;text-decoration:none}
 .v2-skip:focus{top:var(--space-2);color:var(--on-accent);outline:2px solid var(--focus);outline-offset:2px}
-${SIDE}{flex:0 0 264px;position:sticky;top:0;align-self:flex-start;height:100vh;overflow-y:auto;scrollbar-color:var(--nav-line) var(--nav);display:flex;flex-direction:column;gap:var(--space-3);padding:20px var(--space-2);background:var(--nav);color:var(--nav-text);border-inline-end:1px solid var(--nav-line)}
+${SIDE}{flex:0 0 264px;position:sticky;top:0;align-self:flex-start;height:100vh;overflow-y:auto;scrollbar-color:var(--nav-line) var(--nav);display:flex;flex-direction:column;gap:16px;padding:16px 14px;background:var(--nav);color:var(--nav-text);border-inline-end:1px solid var(--nav-line)}
 ${SIDE} :focus-visible{outline-color:var(--nav-focus)}
 ${SIDE}__top{display:flex;align-items:center;justify-content:space-between;gap:var(--space-1)}
-.v2-brand{display:flex;align-items:center;gap:10px;min-height:var(--target);padding:0 var(--space-1);color:var(--nav-strong);text-decoration:none}
+.v2-brand{display:flex;align-items:center;gap:10px;min-height:var(--target);padding:0 6px;color:var(--nav-strong);text-decoration:none}
 .v2-brand:hover{color:var(--nav-strong)}
-.v2-brand__mark{flex:none;display:flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:9px;background:var(--accent-fill);color:var(--nav-strong);font-family:var(--font-mono);font-size:18px;font-weight:600}
+.v2-brand__mark{flex:none;display:flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:9px;background:var(--accent-fill);color:var(--nav-strong);font-family:var(--font-mono);font-size:17px;font-weight:700;box-shadow:0 2px 8px rgba(29,91,214,.38)}
 .v2-brand__text{display:flex;flex-direction:column;line-height:1.2}
-.v2-brand__name{font-size:18px;font-weight:700;letter-spacing:-.01em}
+.v2-brand__name{font-size:17px;font-weight:700;letter-spacing:-.01em}
 .v2-brand__sub{font-size:11px;color:var(--nav-muted)}
 ${SIDE}__close{display:none;border-color:var(--nav-line);background:transparent;color:var(--nav-text)}
-.v2-ctx{display:flex;flex-direction:column;gap:12px;padding:var(--space-2);border-radius:var(--radius-notice);background:var(--nav-2);border:1px solid var(--nav-line)}
-.v2-ctx__id{display:flex;align-items:center;gap:12px;min-width:0}
-.v2-ctx__avatar,.v2-ctx__tile{flex:none;display:flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:50%;background:var(--accent-fill);color:var(--nav-strong);font-weight:600}
+.v2-ctx{display:flex;flex-direction:column;gap:10px;padding:12px;border-radius:var(--radius-notice);background:var(--nav-2);border:1px solid var(--nav-line)}
+.v2-ctx__id{display:flex;align-items:center;gap:10px;min-width:0}
+.v2-ctx__avatar,.v2-ctx__tile{flex:none;display:flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:50%;background:var(--accent-fill);color:var(--nav-strong);font-weight:600}
 .v2-ctx__tile{border-radius:var(--radius-control);background:rgba(76,195,138,.16);color:var(--nav-ok)}
-.v2-ctx__text{display:flex;flex-direction:column;gap:2px;min-width:0}
-.v2-ctx__title{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-1);color:var(--nav-strong);font-size:13px;font-weight:600;overflow-wrap:anywhere}
-.v2-ctx__badge{padding:1px var(--space-1);border-radius:var(--radius-pill);border:1px solid var(--nav-line);color:var(--nav-text);font-family:var(--font-sans);font-size:11px;font-weight:600}
+.v2-ctx__text{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1 1 auto}
+.v2-ctx__title{display:flex;flex-wrap:wrap;align-items:center;gap:6px;color:var(--nav-strong);font-size:13px;font-weight:600;min-width:0}
+.v2-ctx__name{max-inline-size:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.v2-ctx__badge{padding:1px 7px;border-radius:var(--radius-pill);border:1px solid var(--nav-line);color:var(--nav-text);font-family:var(--font-sans);font-size:11px;font-weight:600}
 .v2-ctx__detail{font-size:12px;color:var(--nav-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .v2-ctx__status{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--nav-ok)}
 .v2-ctx__status>span{width:6px;height:6px;border-radius:50%;background:currentColor}
-.v2-ctx__status--warn{color:#F7B865}.v2-ctx__status--bad{color:#F47067}.v2-ctx__status--info,.v2-ctx__status--neutral{color:var(--nav-text)}
-.v2-ctx__meter{display:flex;flex-direction:column;gap:var(--space-1);font-size:12px}
+.v2-ctx__status--warn{color:var(--nav-warn)}.v2-ctx__status--bad{color:var(--nav-bad)}.v2-ctx__status--info,.v2-ctx__status--neutral{color:var(--nav-text)}
+.v2-ctx__meter{display:flex;flex-direction:column;gap:6px;font-size:12px}
 .v2-ctx__meter>div:first-child{display:flex;justify-content:space-between;gap:var(--space-1)}
 .v2-ctx__meter .v2-num{color:var(--nav-strong)}
-.v2-ctx__bar{height:6px;border-radius:3px;background:var(--nav-line);overflow:hidden}
-.v2-ctx__fill{display:block;height:100%;border-radius:3px;background:#5B8DF6}
-.v2-ctx__fill--warn{background:#F7B865}.v2-ctx__fill--bad{background:#F47067}.v2-ctx__fill--ok{background:var(--nav-ok)}
-.v2-ctx__meta{display:flex;justify-content:space-between;gap:var(--space-1);font-size:12px;color:var(--nav-muted)}
+.v2-ctx__bar{height:5px;border-radius:3px;background:var(--nav-line);overflow:hidden}
+.v2-ctx__fill{display:block;height:100%;border-radius:3px;background:var(--nav-accent)}
+.v2-ctx__fill--warn{background:var(--nav-warn)}.v2-ctx__fill--bad{background:var(--nav-bad)}.v2-ctx__fill--ok{background:var(--nav-ok)}
+.v2-ctx__meta{display:flex;justify-content:space-between;gap:var(--space-1);font-size:11px;color:var(--nav-muted)}
 .v2-shell summary::-webkit-details-marker{display:none}
 .v2-nav ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px}
-.v2-nav summary,.v2-nav a,${SIDE}__foot a{display:flex;align-items:center;gap:12px;min-height:var(--target);padding:0 12px;border-radius:var(--radius-control);color:var(--nav-text);text-decoration:none;cursor:pointer}
+.v2-nav summary,.v2-nav a,${SIDE}__foot a{display:flex;align-items:center;gap:10px;min-height:var(--target);padding:0 11px;border-radius:var(--radius-control);color:var(--nav-text);text-decoration:none;cursor:pointer;transition:background-color .12s ease-out,color .12s ease-out}
 .v2-nav summary{list-style:none;font-weight:500}
 .v2-nav summary>span{flex:1 1 auto}
 .v2-nav__chev{opacity:.7;transition:transform .15s}
 .v2-nav details[open]>summary{background:var(--nav-2);color:var(--nav-strong);font-weight:600}
 .v2-nav details[open]>summary .v2-nav__chev{transform:rotate(90deg)}
 .v2-nav summary:hover,.v2-nav a:hover,${SIDE}__foot a:hover{background:var(--nav-2);color:var(--nav-strong)}
-.v2-nav details>ul{margin-inline-start:20px;padding-block:4px var(--space-1);padding-inline-start:30px;border-inline-start:1px solid var(--nav-line)}
+.v2-nav details>ul{margin-inline-start:18px;padding-block:4px 6px;padding-inline-start:24px;border-inline-start:1px solid var(--nav-line)}
 .v2-nav details a{font-size:13px;border-radius:var(--radius-chip)}
-.v2-nav a[aria-current="page"]{background:var(--accent-fill);color:var(--nav-strong);font-weight:600}
+.v2-nav a[aria-current="page"]{background:var(--accent-fill);color:var(--nav-strong);font-weight:600;box-shadow:0 1px 4px rgba(29,91,214,.35)}
 .v2-nav__empty{padding:0 12px var(--space-1);font-size:12px;color:var(--nav-muted)}
-${SIDE}__foot{margin-top:auto;display:flex;flex-direction:column;gap:var(--space-1);padding-top:var(--space-2);border-top:1px solid var(--nav-line)}
+${SIDE}__foot{margin-top:auto;display:flex;flex-direction:column;gap:4px;padding-top:12px;border-top:1px solid var(--nav-line)}
 ${SIDE}__foot a{justify-content:space-between}
 .v2-backdrop{position:fixed;inset:0;z-index:60;border:0;background:var(--scrim);backdrop-filter:blur(2px)}
 .v2-work{flex:1 1 auto;min-width:0;display:flex;flex-direction:column}
-.v2-top{position:sticky;top:0;z-index:30;display:flex;align-items:center;gap:12px var(--space-2);min-height:68px;padding:12px clamp(16px,3vw,32px);background:var(--surface);border-bottom:1px solid var(--line)}
+.v2-top{position:sticky;top:0;z-index:30;display:flex;align-items:center;gap:10px 14px;min-height:64px;padding:10px clamp(16px,2.5vw,28px);background:var(--surface);border-bottom:1px solid var(--line);box-shadow:0 1px 0 rgba(14,23,38,.03)}
 .v2-top .v2-btn{border-color:var(--line)}
 .v2-top__menu,.v2-top__brand{display:none}
 .v2-top__brand{align-items:center;min-height:var(--target);color:var(--text);font-size:18px;font-weight:700;text-decoration:none}
 .v2-tools{flex:1 1 auto;min-width:0}
 .v2-tools>summary{display:none;list-style:none}
-.v2-tools__content{display:flex;flex-wrap:wrap;align-items:center;gap:12px}
+.v2-tools__content{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
 .v2-top__spacer{flex:1 1 auto}
-.v2-search{flex:1 1 280px;min-width:0;max-width:520px;display:flex;align-items:center;gap:12px;min-height:var(--target);padding-inline:14px 10px;border-radius:var(--radius-control);border:1px solid var(--line);background:var(--subtle);color:var(--muted);font-size:14px;text-align:start;cursor:pointer}
+.v2-search{flex:1 1 260px;min-width:0;max-width:480px;display:flex;align-items:center;gap:10px;min-height:var(--target);padding-inline:12px 10px;border-radius:var(--radius-control);border:1px solid var(--line);background:var(--subtle);color:var(--muted);font-size:13px;text-align:start;cursor:pointer;transition:border-color .14s ease-out,background-color .14s ease-out}
 .v2-search:hover:not(:disabled){border-color:var(--line-strong);background:var(--surface)}
 .v2-search>span{flex:1 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.v2-live{display:inline-flex;align-items:center;gap:6px;min-height:var(--target);padding:0 4px;font-size:12px;font-weight:600;color:var(--muted)}
-.v2-live__dot{width:8px;height:8px;border-radius:50%;box-shadow:inset 0 0 0 1.5px currentColor}
+.v2-live{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:0 10px;border-radius:var(--radius-pill);border:1px solid var(--line);background:var(--subtle);font-size:12px;font-weight:600;color:var(--muted)}
+.v2-live__dot{width:7px;height:7px;border-radius:50%;box-shadow:inset 0 0 0 1.5px currentColor}
 .v2-live__label{display:none}
 .v2-live[data-ws-indicator=disconnected] [data-ws-label=disconnected],.v2-live[data-ws-indicator=connected] [data-ws-label=connected],.v2-live[data-ws-indicator=unavailable] [data-ws-label=unavailable]{display:inline}
-.v2-live[data-ws-indicator=connected]{color:var(--ok)}
-.v2-live[data-ws-indicator=connected] .v2-live__dot{background:currentColor}
+.v2-live[data-ws-indicator=connected]{border-color:var(--ok-line);background:var(--ok-soft);color:var(--ok)}
+.v2-live[data-ws-indicator=connected] .v2-live__dot{background:currentColor;animation:v2-pulse 2.2s ease-in-out infinite}
+.v2-live[data-ws-indicator=disconnected]{border-color:var(--warn-line);background:var(--warn-soft);color:var(--warn)}
 .v2-server{display:inline-flex;align-items:center;gap:var(--space-1);min-height:var(--target);padding:0 12px;border-radius:var(--radius-control);border:1px solid var(--line);background:var(--subtle);font-size:13px}
 .v2-server>.v2-mono{min-inline-size:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
 .v2-server>.v2-muted{flex:none;white-space:nowrap}
@@ -298,25 +303,26 @@ ${SIDE}__foot a{justify-content:space-between}
 .v2-server__dot--warn{background:var(--warn)}.v2-server__dot--bad{background:var(--bad)}.v2-server__dot--info{background:var(--accent)}.v2-server__dot--neutral{background:var(--muted)}
 .v2-top__lang{padding:0 12px;font-size:13px}
 .v2-top__lang>.v2-icon{color:var(--muted)}
-.v2-top__bell{position:relative}
-.v2-top__badge,.v2-top__count{position:absolute;top:6px;inset-inline-end:6px;min-width:18px;height:18px;padding:0 5px;display:flex;align-items:center;justify-content:center;border-radius:var(--radius-pill);background:var(--bad);color:var(--surface);font-size:11px;font-weight:700}
+.v2-top__bell,.v2-top__activity{position:relative}
+.v2-top__activity[data-xp-activity-control="unavailable"]{display:none}
+.v2-top__badge,.v2-top__count{position:absolute;top:5px;inset-inline-end:5px;min-width:18px;height:18px;padding:0 5px;display:flex;align-items:center;justify-content:center;border-radius:var(--radius-pill);background:var(--bad);color:var(--surface);font-size:11px;font-weight:700}
 .v2-account{position:relative}
 .v2-account__summary{gap:10px;padding:0 var(--space-1);padding-inline-end:12px;list-style:none}
 .v2-account[open]>.v2-account__summary{background:var(--subtle);border-color:var(--line-strong)}
-.v2-account__avatar{display:flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:50%;background:var(--accent-soft);color:var(--accent);font-weight:600}.v2-account__avatar::before{content:attr(data-initial)}
-.v2-account__id{display:flex;flex-direction:column;align-items:flex-start;line-height:1.25}
+.v2-account__avatar{display:flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:var(--accent-soft);color:var(--accent);font-weight:600}.v2-account__avatar::before{content:attr(data-initial)}
+.v2-account__id{display:flex;flex-direction:column;align-items:flex-start;line-height:1.2}
 .v2-account__id>:first-child{font-size:13px;font-weight:600}
-.v2-account__id>:nth-child(2){font-size:12px;font-weight:400;color:var(--muted)}
+.v2-account__id>:nth-child(2){font-size:11px;font-weight:400;color:var(--muted)}
 .v2-account__panel{position:absolute;z-index:40;inset-inline-end:0;top:calc(100% + 6px);min-inline-size:220px;display:flex;flex-direction:column;gap:2px;padding:6px;border-radius:var(--radius-notice);background:var(--surface);border:1px solid var(--line-strong);box-shadow:var(--v2-elev)}
 .v2-ui-theme,.v2-ui-theme form,.v2-ui-theme label{display:flex;flex-direction:column;gap:var(--space-2)}
 .v2-ui-theme{padding:var(--v2-panel-padding);border-block:1px solid var(--line);overflow-wrap:anywhere}
 .v2-ui-theme label{gap:var(--space-1)}
-.v2-ui-theme label>span{padding-inline:13px;font-size:13px;font-weight:600}
+.v2-ui-theme label>span{padding-inline:13px;font-size:12px;font-weight:600;color:var(--muted)}
 .v2-main{flex:1 1 auto;outline:none}
-@media(min-width:960px){.v2-tools__content{flex-wrap:nowrap}.v2-tools__content>*{flex:none}.v2-tools__content>.v2-top__spacer{flex:1 1 0}.v2-tools__content>.v2-search{flex:1 1 280px;min-inline-size:160px}.v2-tools__content>.v2-server{flex:0 4 auto;min-inline-size:0}}
-@media(min-width:960px) and (max-width:1439px){.v2-live{font-size:0}}
+@media(min-width:960px){.v2-tools__content{flex-wrap:nowrap}.v2-tools__content>*{flex:none}.v2-tools__content>.v2-top__spacer{flex:1 1 0}.v2-tools__content>.v2-search{flex:1 1 260px;min-inline-size:150px}.v2-tools__content>.v2-server{flex:0 4 auto;min-inline-size:0}}
+@media(min-width:960px) and (max-width:1439px){.v2-live{font-size:0;padding:0 10px}}
 @media(min-width:960px) and (max-width:1199px){.v2-account__id,.v2-search>kbd,.v2-top__spacer{display:none}.v2-top__lang{min-inline-size:var(--target);gap:0;font-size:0}.v2-tools__content>:is(.v2-search,.v2-server){flex:1 1 0;min-inline-size:120px}}
-.v2-page{inline-size:100%;max-inline-size:1320px;margin:0 auto;padding:var(--space-3) clamp(16px,3vw,32px) 48px;display:flex;flex-direction:column;gap:var(--space-4)}
+.v2-page{inline-size:100%;max-inline-size:1360px;margin:0 auto;padding:16px clamp(16px,2.5vw,28px) 40px;display:flex;flex-direction:column;gap:18px}
 @media(max-width:959px){
 ${SIDE}{position:fixed;inset-block:0;inset-inline-start:0;z-index:70;inline-size:min(320px,88vw);height:100dvh;visibility:hidden;pointer-events:none;overscroll-behavior:contain;box-shadow:var(--v2-elev)}
 .v2-shell[data-mobile-nav="open"]>${SIDE},${SIDE}[aria-modal="true"]{visibility:visible;pointer-events:auto}
