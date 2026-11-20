@@ -142,7 +142,7 @@ export const WHM_PLANS_CSS = `.v2-plan-filter{display:flex;flex-direction:column
 .v2-plan-tabs{display:flex;flex-wrap:wrap;gap:var(--space-1)}
 .v2-plan-dialog{inline-size:min(520px,calc(100% - 32px));padding:var(--space-3);border:1px solid var(--line);border-radius:var(--radius-card);color:var(--text);background:var(--surface)}
 .v2-plan-dialog form{display:flex;flex-direction:column;gap:var(--space-3)}.v2-plan-dialog::backdrop{background:var(--scrim)}
-.v2-feature-matrix{overflow:auto;min-inline-size:0;border:1px solid var(--line);border-radius:var(--radius-notice)}
+.v2-feature-matrix{overflow-x:auto;min-inline-size:0;border:1px solid var(--line);border-radius:var(--radius-notice);container-type:inline-size}
 .v2-feature-matrix table{inline-size:100%;min-inline-size:560px;border-collapse:collapse;font-size:13px}
 .v2-feature-matrix caption:not(.v2-sr){caption-side:top;padding:12px var(--space-2);text-align:start;white-space:normal;font-size:13px;font-weight:400;color:var(--muted)}
 .v2-feature-matrix :is(th,td){padding:var(--space-1) var(--space-2);text-align:start;vertical-align:middle;white-space:normal;overflow-wrap:anywhere}
@@ -162,7 +162,6 @@ export const WHM_PLANS_CSS = `.v2-plan-filter{display:flex;flex-direction:column
 .v2-feature-groups>li>strong{flex:1 1 auto;font-weight:600;overflow-wrap:anywhere}
 .v2-feature-groups>li>span{color:var(--muted)}
 .v2-feature-group>th{padding-block:0;background:var(--subtle);font-size:13px;font-weight:600;color:var(--text-2)}
-.v2-feature-matrix{max-block-size:75vh;container-type:inline-size}
 .v2-feature-matrix caption>span{display:block;position:sticky;inset-inline-start:var(--space-2);max-inline-size:calc(100cqi - 2*var(--space-2))}
 .v2-feature-matrix th[scope=row]{min-inline-size:132px}
 .v2-feature-matrix thead th{position:sticky;inset-block-start:0;z-index:1;background:var(--surface);box-shadow:inset 0 -1px 0 var(--line-strong)}

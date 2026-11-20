@@ -24,12 +24,11 @@ export function renderV2DomainsPage(props: PanelSurfaceProps, authority: DomainP
     return kpiCard({ label: item.label, icon: item.kind === 'primary' ? 'globe' : item.kind === 'subdomain' ? 'branch' : item.kind === 'alias' ? 'link' : 'plus',
       value: used === undefined ? unread : String(used), hooks: { 'data-domain-limit-kind': item.kind }, valueHooks: { 'data-domain-limit-value': true },
       unit: knownLimit ? `/ ${limit}` : limit === 'unlimited' ? t(msgid('unlimited')) : '',
-      ...(item.kind !== 'primary' ? { meter: { percent: used !== undefined && knownLimit && limit > 0 ? Math.min(100, used / limit * 100) : 0 } } : {}),
+      unitHooks: { 'data-domain-limit-unit': true },
+      alwaysRenderUnit: true,
+      ...(item.kind !== 'primary' ? { meter: { percent: used !== undefined && knownLimit && limit > 0 ? Math.min(100, used / limit * 100) : 0, hidden: used === undefined || !knownLimit || limit <= 0, fillHooks: { 'data-domain-limit-meter': true } } } : {}),
       note: item.kind === 'primary' ? (account?.primaryDomain ?? '') : plan ? t(msgid('Plan limits')) : t(msgctxt('theme:v2', 'The plan has not been read.')),
-    }).replace('class="v2-kpi__unit"', 'class="v2-kpi__unit" data-domain-limit-unit')
-      .replace('</p>', knownLimit || limit === 'unlimited' ? '</p>' : '<span class="v2-kpi__unit" data-domain-limit-unit></span></p>')
-      .replace('class="v2-bar__fill ', 'data-domain-limit-meter class="v2-bar__fill ')
-      .replace('class="v2-bar"', `class="v2-bar"${used === undefined || !knownLimit || limit <= 0 ? ' hidden' : ''}`)
+    })
   }).join('')}</div></section>`
   // Core sends the active generation only; an absent or invalid id shows nothing.
   const generation = account && Number.isSafeInteger(props.generationId) && props.generationId! > 0

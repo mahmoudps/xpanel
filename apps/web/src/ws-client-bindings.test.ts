@@ -3,6 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Script } from 'node:vm'
 import { BROWSER_REALTIME_SCRIPT } from './ws-client.ts'
+import { allRouteClientChunkSources, routeClientScriptForHtml } from './route-client-chunks.ts'
 import { ACCOUNT_SELF_PASSWORD_MIN_LENGTH } from '@xpanel/core'
 import { renderMailAttachments } from './board-port/xmail-attachments.ts'
 import { classicMailClientTemplates } from './board-port/mail-client-templates.ts'
@@ -23,7 +24,11 @@ const inboxFixture = (content = attachment()) => '<section data-board-port="xmai
 const reading = () => document.querySelector<HTMLElement>('[data-mail-article="true"]')!
 const readSelection = (value: unknown, source: Element = reading()) => source.dispatchEvent(new CustomEvent('xpanel:mail-message-read', { detail: value, bubbles: true }))
 const runRealtimeScript = new Function('window', 'document', BROWSER_REALTIME_SCRIPT) as (w: Window & typeof globalThis, d: Document) => void
-const boot = () => runRealtimeScript(window, document)
+const boot = () => {
+  runRealtimeScript(window, document)
+  const chunks = routeClientScriptForHtml(document.body.innerHTML)
+  if (chunks) (new Function('window', 'document', chunks) as (w: Window & typeof globalThis, d: Document) => void)(window, document)
+}
 const observeWindowErrors = (): ErrorEvent[] => {
   const errors: ErrorEvent[] = []
   window.addEventListener('error', event => { errors.push(event) })
@@ -72,9 +77,12 @@ afterEach(() => {
 
 describe('integrated worker client mounts', () => {
   it('emits executable browser syntax and mounts each stable workspace without reading absent pages', () => {
+    const allChunks = allRouteClientChunkSources()
     expect(() => new Script(BROWSER_REALTIME_SCRIPT)).not.toThrow()
+    expect(() => new Script(allChunks)).not.toThrow()
     const scan = vi.spyOn(document, 'querySelectorAll')
-    boot()
+    runRealtimeScript(window, document)
+    ;(new Function('window', 'document', allChunks) as (w: Window & typeof globalThis, d: Document) => void)(window, document)
     const selectors = scan.mock.calls.map(([selector]) => selector)
     for (const selector of ['[data-account-password]', '[data-account-api-tokens]', '[data-account-backup]', '[data-account-cron]', '[data-htaccess-workspace]', '[data-account-quarantine]', '[data-mail-contact-groups]', '[data-mail-search-workspace]', '[data-mail-attachments]', '[data-mail-calendar]', '[data-compose-identities]', '[data-whm-domains-workspace]', '[data-default-site-workspace]', '[data-approved-whm-backups]', '[data-whm-ssl]', '[data-whm-security-evidence]', '[data-whm-detail-route="/whm/security/ssh"]', '[data-whm-php-workspace]', '[data-whm-web-readback]', '[data-transfer-workspace]']) expect(selectors).toContain(selector)
     expect(send).not.toHaveBeenCalled()

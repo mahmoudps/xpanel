@@ -249,7 +249,7 @@ function tools(props: PanelPageProps, t: Translate, visitors: number | undefined
   const body = groups.map((group, index) => {
     const label = t(group.label)
     const rest = t('{count, plural, one {# tool} other {# tools}}', { count: group.tools.length })
-    return `<details class="v2-home-tool-group" open data-home-accordion data-home-collapse-below="600" data-tool-group data-group-label="${escapeHtml(label)}" data-size="${group.tools.length}" aria-labelledby="v2-home-tools-${index}"><summary class="v2-home-tool-heading"><h3 id="v2-home-tools-${index}"><span class="v2-home-group-tile v2-tile v2-tile--${group.tone ?? 'info'}" aria-hidden="true">${icon(group.icon, 16)}</span><span class="v2-home-group-label">${escapeHtml(label)}</span><span class="v2-muted v2-num" data-group-count data-rest="${escapeHtml(rest)}">${escapeHtml(rest)}</span>${icon('chevDown', 16)}</h3></summary><div class="v2-home-tool-grid" data-tool-panel>${group.tools.map(item => {
+    return `<details class="v2-home-tool-group" open data-home-accordion data-home-collapse-below="600" data-tool-group data-group-label="${escapeHtml(label)}" data-size="${group.tools.length}" aria-labelledby="v2-home-tools-${index}"><summary class="v2-home-tool-heading"><span class="v2-home-tool-heading__title" id="v2-home-tools-${index}"><span class="v2-home-group-tile v2-tile v2-tile--${group.tone ?? 'info'}" aria-hidden="true">${icon(group.icon, 16)}</span><span class="v2-home-group-label">${escapeHtml(label)}</span><span class="v2-muted v2-num" data-group-count data-rest="${escapeHtml(rest)}">${escapeHtml(rest)}</span>${icon('chevDown', 16)}</span></summary><div class="v2-home-tool-grid" data-tool-panel>${group.tools.map(item => {
       const name = t(item.label)
       // Personal documents use registered session admission; host-native cards retain qualification.
       const personal = (item.capability === 'change-language' || item.route === '/security/account')
@@ -257,7 +257,8 @@ function tools(props: PanelPageProps, t: Translate, visitors: number | undefined
       const enabled = personal || (qualified.has(item.capability) && routes.has(item.route))
       const hint = !enabled ? t('Unavailable')
         : item.capability === 'change-language' ? localeInfo(t.locale).nativeName
-        : (item.hint ? hints[item.hint] : undefined) ?? t(msgctxt('resources-board', 'Not read'))
+        : item.hint ? (hints[item.hint] ?? t(msgctxt('resources-board', 'Not read')))
+        : ''
       const href = item.capability === 'change-language' ? `?lang=${alternateLocales(t.locale)[0]!.tag}` : item.route
       const technicalHint = enabled && item.hint !== undefined && hints[item.hint] !== undefined && /^[ -~]+$/.test(hint) // translated words stay in the reading direction
       const content = `<span class="v2-home-tool__tile v2-tile v2-tile--${enabled ? group.tone ?? 'info' : 'neutral'}" aria-hidden="true">${icon(item.icon, 16)}</span><span class="v2-home-tool__label">${escapeHtml(name)}</span><span class="v2-home-tool__hint v2-num">${technicalHint ? `<bdi dir="ltr" class="v2-mono">${escapeHtml(hint)}</bdi>` : escapeHtml(hint)}</span>`
@@ -318,9 +319,9 @@ export function renderV2PanelHome(props: PanelPageProps, authority?: SurfaceAuth
     ? `<span data-home-generation>${statusPill({ tone: 'ok', label: generationTime !== '—'
         ? t(msgctxt('theme:v2', 'Applied in generation #{generationId} · {at}'), { generationId: props.generationId!, at: generationTime })
         : t('Applied in generation #{generationId}', { generationId: props.generationId! }) })}</span>` : ''
-  const certStrip = (() => {
+  const certRenewal = (() => {
     const certs = account ? props.certificates?.filter(item => item.accountId === account.id) : undefined
-    if (certs === undefined && props.autoSsl === undefined) return ''
+    if (certs === undefined && props.autoSsl === undefined) return { html: '', urgent: false }
     const nowMs = Date.now()
     const windowMs = 30 * 86_400_000
     let healthy = 0
@@ -345,18 +346,21 @@ export function renderV2PanelHome(props: PanelPageProps, authority?: SurfaceAuth
       : props.autoSsl?.state === 'disabled'
         ? t(msgid('AutoSSL automatic renewal is disabled.'))
         : t(msgid('AutoSSL renewal schedule has not been verified on this host.'))
-    return `<div data-cert-renewal-strip>${notice(t, {
-      tone,
-      lead,
-      text,
-      ...(routes.has('/security/ssl') ? { action: { label: t('SSL/TLS'), href: '/security/ssl' } } : {}),
-    })}</div>`
+    return {
+      urgent: expired > 0 || expiringSoon > 0,
+      html: `<div data-cert-renewal-strip>${notice(t, {
+        tone,
+        lead,
+        text,
+        ...(routes.has('/security/ssl') ? { action: { label: t('SSL/TLS'), href: '/security/ssl' } } : {}),
+      })}</div>`,
+    }
   })()
   const traffic = !account || props.websiteAnalyticsUnavailable === true ? null
     : parseWebsiteAnalyticsSnapshot(props.websiteAnalytics, { accountId: account.id, domain })
   const summary = [
     { label: t('Domains'), value: domains === undefined ? '—' : String(domains.length), icon: 'globe' as const,
-      note: meters[5]!.valueText },
+      note: `${t('Addon domains')}: ${meters[5]!.valueText}` },
     { label: t('Disk'), value: panelCount(props.usage?.diskBytes) === undefined ? '—' : formatAsciiBytes(props.usage!.diskBytes!), icon: 'disk' as const,
       note: meters[0]!.valueText, ...(meters[0]!.percent === undefined ? {} : { meter: { percent: meters[0]!.percent!, tone: meters[0]!.tone } }) },
     { label: t('Bandwidth'), value: panelCount(props.usage?.bandwidthMonth?.totalBytes) === undefined ? '—' : formatAsciiBytes(props.usage!.bandwidthMonth!.totalBytes!), icon: 'activity' as const,
@@ -368,6 +372,9 @@ export function renderV2PanelHome(props: PanelPageProps, authority?: SurfaceAuth
   const bandwidthNotice = props.usage?.bandwidthMonth?.limited === true
     ? notice(t, { tone: 'warn', lead: t('Limit page served'), text: t(msgctxt('theme:v2', 'The account is over its enforced monthly bandwidth limit.')),
       ...(routes.has('/resources') ? { action: { label: t('Resources & quotas'), href: '/resources' } } : {}) }) : ''
+  const noticesHtml = renderV2HomeNotices(props, t, routes)
+  const hasUrgentWarning = noticesHtml.includes('data-account-warning=')
+  const announcementsHtml = props.personal?.notifications.announcements === false ? '' : renderV2AccountAnnouncementsBanner(t, canReadAnnouncements)
   const resourceCard = card({
     title: t('Resource usage'), titleId: 'v2-home-resources-title', bodyHtml: meters.map(item => meter(item)).join(''),
     ...(routes.has('/resources') ? { footerHtml: `<a href="/resources">${escapeHtml(t('Resources & quotas'))}${icon('arrow', 16)}</a>` } : {}),
@@ -376,8 +383,8 @@ export function renderV2PanelHome(props: PanelPageProps, authority?: SurfaceAuth
 ${pageHeader(t, { breadcrumb: [{ label: t('Home') }], route: '/home', title: t(msgctxt('theme:v2', 'Welcome back, {username}'), { username: account?.username ?? t('Not read') }),
     description: t(msgctxt('theme:v2', 'Your sites, tools and account resources.')),
     actionsHtml: `<div class="v2-home-page-actions">${generation}<p class="v2-home-selected-domain"><span>${escapeHtml(t('Selected domain'))}</span><bdi dir="ltr" class="v2-mono">${escapeHtml(domain)}</bdi></p>${routes.has('/domains') ? `<a class="v2-btn v2-btn--primary" href="/domains">${icon('plus', 18)}${escapeHtml(t(msgid('Add domain')))}</a>` : domainsAuthorized ? `<button type="button" class="v2-btn" disabled>${icon('plus', 18)}${escapeHtml(t(msgid('Add domain')))}</button>` : ''}</div>` })}
-${renderV2HomeNotices(props, t, routes)}${certStrip}${props.personal?.notifications.announcements === false ? '' : renderV2AccountAnnouncementsBanner(t, canReadAnnouncements)}${bandwidthNotice}<section class="v2-kpi-row" aria-label="${escapeHtml(t('Account summary'))}">${summary.map(item => kpiCard({ headingLevel: 2, ...item })).join('')}</section>
-${sites(props, t, routes)}<div class="v2-home-columns">${tools(props, t, traffic?.totals.uniqueVisitors)}<aside class="v2-stack" aria-label="${escapeHtml(t(msgctxt('theme:v2', 'Account information')))}">${resourceCard}${information(props, t)}${recentChanges(props, t)}</aside></div>
+${bandwidthNotice}${hasUrgentWarning ? noticesHtml : ''}${certRenewal.urgent ? certRenewal.html : ''}<section class="v2-kpi-row" aria-label="${escapeHtml(t('Account summary'))}">${summary.map(item => kpiCard({ headingLevel: 2, ...item })).join('')}</section>
+${sites(props, t, routes)}${hasUrgentWarning ? '' : noticesHtml}${certRenewal.urgent ? '' : certRenewal.html}${announcementsHtml}<div class="v2-home-columns">${tools(props, t, traffic?.totals.uniqueVisitors)}<aside class="v2-stack" aria-label="${escapeHtml(t(msgctxt('theme:v2', 'Account information')))}">${resourceCard}${information(props, t)}${recentChanges(props, t)}</aside></div>
 ${renderV2AccountPlugins(t, canReadAnnouncements)}
 </div>`
 }
@@ -420,10 +427,9 @@ export const V2_PANEL_HOME_CSS = V2_HOME_ANNOUNCEMENTS_CSS + V2_HOME_PLUGINS_CSS
 .v2-panel-home .v2-home-tools__title{display:flex;flex-direction:column;gap:var(--space-1)}
 .v2-panel-home .v2-home-tools__title>p{font-size:13px;font-variant-numeric:tabular-nums}
 .v2-panel-home .v2-home-tool-filter{flex:0 1 360px;min-inline-size:min(240px,100%)}
-.v2-panel-home .v2-home-tool-filter>label{padding-inline-start:43px}
 .v2-panel-home .v2-home-tool-search{display:block;position:relative}
-.v2-panel-home .v2-home-tool-search>.v2-icon{position:absolute;inset-inline-start:14px;inset-block-start:13px;color:var(--muted);pointer-events:none}
-.v2-panel-home .v2-home-tool-search>input{inline-size:100%;padding-inline-start:42px;padding-inline-end:12px;text-align:start}
+.v2-panel-home .v2-home-tool-search>.v2-icon{position:absolute;inset-inline-end:14px;inset-block-start:13px;color:var(--muted);pointer-events:none}
+.v2-panel-home .v2-home-tool-search>input{inline-size:100%;padding-inline-start:12px;padding-inline-end:42px;text-align:start}
 .v2-panel-home .v2-home-tool-group:last-child:nth-child(odd){grid-column:1/-1}
 .v2-panel-home .v2-home-tool-group:last-child:nth-child(odd)>.v2-home-tool-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:var(--space-3)}
 .v2-panel-home .v2-home-tool-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-2);align-items:stretch;min-inline-size:0}
@@ -431,35 +437,36 @@ export const V2_PANEL_HOME_CSS = V2_HOME_ANNOUNCEMENTS_CSS + V2_HOME_PLUGINS_CSS
 .v2-panel-home .v2-home-tool-group:not([open]){align-self:start}
 .v2-home-tool-heading{display:flex;align-items:center;justify-content:space-between;gap:var(--space-1)}
 .v2-home-tool-heading{list-style:none;min-block-size:var(--target);padding-inline:var(--space-1);border-radius:var(--radius-control)}.v2-home-tool-heading::-webkit-details-marker{display:none}
-.v2-home-tool-heading h3{flex:1;display:flex;align-items:center;gap:var(--space-1);font-size:14px}.v2-home-group-label{flex:1}
-.v2-home-tool-heading h3>.v2-icon{display:none;color:var(--muted);transition:transform 140ms ease-out}.v2-home-tool-group[open]>.v2-home-tool-heading>h3>.v2-icon{transform:rotate(180deg)}
+.v2-home-tool-heading__title{flex:1;display:flex;align-items:center;gap:var(--space-1);font-size:14px;font-weight:600}.v2-home-group-label{flex:1}
+.v2-home-tool-heading__title>.v2-icon{display:none;color:var(--muted);transition:transform 140ms ease-out}.v2-home-tool-group[open]>.v2-home-tool-heading>.v2-home-tool-heading__title>.v2-icon{transform:rotate(180deg)}
 .v2-home-group-tile{display:none}
-.v2-home-tool-heading h3>.v2-muted{font-size:12px;font-weight:400;font-variant-numeric:tabular-nums}
+.v2-home-tool-heading__title>.v2-muted{font-size:12px;font-weight:400;font-variant-numeric:tabular-nums}
 .v2-panel-home .v2-home-tool-grid{display:flex;flex-direction:column;margin-block-start:var(--space-1)}
 .v2-panel-home .v2-home-tool{display:flex;align-items:center;gap:12px;inline-size:100%;min-block-size:44px;padding:6px var(--space-1);border:1px solid transparent;border-radius:var(--radius-control);background:transparent;text-align:start;text-decoration:none;color:var(--text);font-size:14px;transition:background-color 140ms ease-out,border-color 140ms ease-out,color 140ms ease-out}
 .v2-home-tool:is(a):hover{background:var(--subtle);color:var(--text)}
 .v2-panel-home .v2-home-tool__tile{inline-size:30px;block-size:30px;border-radius:8px}
 .v2-panel-home .v2-home-tool__label{flex:1 1 auto;font-weight:500;overflow-wrap:break-word}
 .v2-panel-home .v2-home-tool__hint{flex:0 4 auto;min-inline-size:0;max-inline-size:55%;unicode-bidi:isolate;font-size:12px;font-weight:400;font-variant-numeric:tabular-nums;color:var(--muted);overflow-wrap:anywhere;text-align:end}
+.v2-panel-home .v2-home-tool__hint:empty{display:none}
 .v2-panel-home .v2-home-tool__hint>.v2-mono{font-size:12px}
 .v2-home-tool:disabled{cursor:not-allowed;color:var(--muted)}
 .v2-panel-home .v2-meter__row{flex-wrap:wrap;gap:2px var(--space-1)}
 .v2-panel-home .v2-meter__value{flex-wrap:wrap;min-inline-size:0;white-space:normal;overflow-wrap:anywhere}
 .v2-panel-home .v2-meter__value>span{min-inline-size:0}
 .v2-panel-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(180px,100%),1fr));gap:var(--space-2);min-inline-size:0}
-.v2-panel-home .v2-home-columns>aside .v2-panel-facts{grid-template-columns:repeat(2,minmax(0,1fr))}
+.v2-panel-home .v2-home-columns>aside .v2-panel-facts{grid-template-columns:minmax(0,1fr);gap:10px}
 .v2-panel-home .v2-home-columns>aside .v2-card__foot{justify-content:flex-start}.v2-panel-home .v2-card__foot>a{display:inline-flex;align-items:center;gap:6px;min-inline-size:var(--target);min-block-size:var(--target);font-size:13px;font-weight:600;text-decoration:none}
 .v2-panel-home:dir(rtl) .v2-card__foot>a>.v2-icon{transform:scaleX(-1)}
-.v2-panel-facts>div,.v2-home-selected-domain{display:flex;flex-direction:column;align-items:stretch;gap:var(--space-1);min-inline-size:0;text-align:start}
-.v2-panel-facts dt{font-size:12px;color:var(--muted)}.v2-panel-facts dd{font-size:13px;font-variant-numeric:tabular-nums;min-inline-size:0;overflow-wrap:anywhere;text-align:start}
+.v2-panel-facts>div,.v2-home-selected-domain{display:flex;flex-direction:column;align-items:stretch;gap:2px;min-inline-size:0;text-align:start}
+.v2-panel-facts dt{font-size:12px;color:var(--muted)}.v2-panel-facts dd{font-size:13px;font-variant-numeric:tabular-nums;min-inline-size:0;overflow-wrap:break-word;text-align:start}
 .v2-panel-facts bdi{display:inline;unicode-bidi:isolate}.v2-home-selected-domain>span{font-size:12px;color:var(--muted)}
-.v2-home-changes-state{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:var(--space-1);padding:var(--space-3);border:1px dashed var(--line);border-radius:12px;background:var(--subtle);text-align:center}
+.v2-home-changes-state{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:var(--space-1);padding:var(--space-3);border:1px solid var(--line);border-radius:12px;background:var(--subtle);text-align:center}
 .v2-home-changes-state>p{font-size:13px;line-height:1.6}
 .v2-home-changes{display:flex;flex-direction:column;gap:var(--space-3);list-style:none;margin:0;padding:0}
 .v2-home-changes>li{display:flex;align-items:flex-start;gap:12px}.v2-home-changes>li>.v2-icon{flex:none;inline-size:28px;block-size:28px;padding:6px;border-radius:50%;background:var(--accent-soft);color:var(--accent)}
 .v2-home-changes h3{font-size:14px;line-height:1.4}
 .v2-home-changes>li>div{display:flex;flex-direction:column;gap:var(--space-1);min-inline-size:0;overflow-wrap:anywhere}
-.v2-home-changes p{font-size:12px}.v2-home-filter-empty{display:flex;flex-direction:column;align-items:center;gap:12px;padding:40px var(--space-3);border:1px dashed var(--line-strong);border-radius:12px;background:var(--surface);text-align:center}
+.v2-home-changes p{font-size:12px}.v2-home-filter-empty{display:flex;flex-direction:column;align-items:center;gap:12px;padding:40px var(--space-3);border:1px solid var(--line-strong);border-radius:12px;background:var(--surface);text-align:center}
 .v2-home-filter-empty[hidden]{display:none}.v2-home-filter-empty>h3{font-size:16px}.v2-home-filter-empty>p{max-inline-size:46ch;font-size:13px;color:var(--muted);line-height:1.6}
 @media(max-width:1100px){.v2-panel-home>.v2-kpi-row{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:600px){.v2-panel-home>.v2-kpi-row{grid-template-columns:repeat(2,minmax(0,1fr))}
@@ -467,8 +474,8 @@ export const V2_PANEL_HOME_CSS = V2_HOME_ANNOUNCEMENTS_CSS + V2_HOME_PLUGINS_CSS
 .v2-panel-home [data-home-sites]>.v2-card__head{padding:0;margin-block-end:var(--space-2)}
 .v2-panel-home .v2-home-columns>aside .v2-panel-facts{grid-template-columns:minmax(0,1fr)}
 .v2-panel-home .v2-home-tool-list{grid-template-columns:minmax(0,1fr);gap:var(--space-1)}.v2-panel-home .v2-home-tool-group{padding:0;overflow:hidden}
-.v2-home-tool-heading{min-block-size:52px;padding-inline:var(--space-2);gap:12px;border-radius:0;cursor:pointer}.v2-home-tool-heading h3{gap:12px;font-size:15px}.v2-home-group-tile{display:flex;inline-size:30px;block-size:30px;border-radius:8px}
-.v2-home-tool-heading h3>.v2-icon{display:block}
+.v2-home-tool-heading{min-block-size:52px;padding-inline:var(--space-2);gap:12px;border-radius:0;cursor:pointer}.v2-home-tool-heading__title{gap:12px;font-size:15px}.v2-home-group-tile{display:flex;inline-size:30px;block-size:30px;border-radius:8px}
+.v2-home-tool-heading__title>.v2-icon{display:block}
 .v2-panel-home .v2-home-tool-group>.v2-home-tool-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-1);margin:0;padding:12px;border-block-start:1px solid var(--line)}
 .v2-panel-home .v2-home-tool{display:grid;grid-template-columns:30px minmax(0,1fr);align-content:center;column-gap:10px;row-gap:2px;min-block-size:64px;padding:10px;border-color:var(--line)}
 .v2-panel-home .v2-home-tool__tile{grid-row:1/span 2;align-self:center}
@@ -477,5 +484,5 @@ export const V2_PANEL_HOME_CSS = V2_HOME_ANNOUNCEMENTS_CSS + V2_HOME_PLUGINS_CSS
 .v2-home-columns>aside{display:flex}
 .v2-panel-home .v2-home-tool-filter{flex-basis:100%;min-inline-size:0}.v2-panel-home .v2-home-tool-search>input{font-size:16px}}
 @media(max-width:359px){.v2-panel-home .v2-home-tool-group>.v2-home-tool-grid{grid-template-columns:minmax(0,1fr)}}
-@media(prefers-reduced-motion:reduce){.v2-panel-home .v2-account-plugins__link,.v2-panel-home .v2-home-site__name>a,.v2-home-tool-heading h3>.v2-icon,.v2-panel-home .v2-home-tool{transition:none}}
+@media(prefers-reduced-motion:reduce){.v2-panel-home .v2-account-plugins__link,.v2-panel-home .v2-home-site__name>a,.v2-home-tool-heading__title>.v2-icon,.v2-panel-home .v2-home-tool{transition:none}}
 `

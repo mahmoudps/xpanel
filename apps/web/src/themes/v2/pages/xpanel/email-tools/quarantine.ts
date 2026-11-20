@@ -15,7 +15,7 @@ export function renderV2PanelQuarantine(props: PanelSurfaceProps, authority?: Pa
     + `<ul class="v2-panel-extra__list" data-quarantine-messages></ul>`)
   const review = `<div data-quarantine-detail hidden>${section('v2-quarantine-detail', t(msgid('Message review')),
     facts([value(t(msgctxt('account-quarantine', 'From')), 'from'), value(t(msgid('Subject')), 'subject'), value(t(msgid('Received (UTC)')), 'received'), value(t(msgid('Held since (UTC)')), 'held'), value(t(msgid('Spam score')), 'score')])
-    + `<div class="v2-field"><span id="quarantine-headers-label" class="v2-label">${esc(t(msgid('Header preview')))}</span><pre id="quarantine-headers" class="v2-panel-extra__raw v2-mono" aria-labelledby="quarantine-headers-label" dir="ltr" tabindex="0" data-quarantine-headers></pre></div>`
+    + `<div class="v2-field"><span id="quarantine-headers-label" class="v2-label">${esc(t(msgid('Header preview')))}</span><pre id="quarantine-headers" class="v2-panel-extra__raw v2-mono" role="region" aria-labelledby="quarantine-headers-label" dir="ltr" tabindex="0" data-quarantine-headers></pre></div>`
     + actions(button(t(msgid('Release to Inbox and correct filter')), { 'data-quarantine-release': true }, true, true) + button(t(msgid('Permanently delete held message')), { 'data-quarantine-delete': true }) + button(t(msgid('Always allow sender')), { 'data-quarantine-allow': true }))
     + `<p data-quarantine-release-limit hidden>${esc(t(msgid('This message exceeds the 1 MiB bounded learning size. Release is unavailable; deletion remains a separate confirmed action.')))}</p><p>${esc(t(msgid('Sender allow rules need an active filter-policy adapter and are unavailable here. Deletion permanently removes only the selected held message.')))}</p>`,
     )}</div>`
