@@ -316,7 +316,15 @@ export const observeUpgradeInputs = async (deps: UpgradeObservationDeps): Promis
   // The machine derives "from" from the current link; the release's own VERSION marker must agree.
   const marker = linked ? await attempt(async () => (await fs.read(join(target!, 'VERSION'), 64)).bytes.toString('utf8').trim()) : null
   const currentVersion = linked && marker === linked ? linked : null
-  const osRelease = await attempt(async () => parseOsRelease((await fs.read(deps.osReleasePath ?? '/etc/os-release', 16 * 1024)).bytes.toString('utf8')))
+  // os-release(5): /etc/os-release is often a symlink to ../usr/lib/os-release, which O_NOFOLLOW rejects with ELOOP.
+  const osRelease = await attempt(async () => {
+    if (deps.osReleasePath) return parseOsRelease((await fs.read(deps.osReleasePath, 16 * 1024)).bytes.toString('utf8'))
+    try {
+      return parseOsRelease((await fs.read('/etc/os-release', 16 * 1024)).bytes.toString('utf8'))
+    } catch {
+      return parseOsRelease((await fs.read('/usr/lib/os-release', 16 * 1024)).bytes.toString('utf8'))
+    }
+  })
   const [schemaVersion, freeBytes, activeTransfers, lockPresent, lock, retirement, maintenance, last, staged] = await Promise.all([
     attempt(() => currentSchemaVersion(deps.db)),
     attempt(() => fs.freeBytes(layout.root)),

@@ -850,7 +850,7 @@ msgstr "النطاقات"
 
 #. nav.section.xwhm.domains.name
 msgid "Domains, DNS & SSL"
-msgstr "النطاقات وDNS وSSL"
+msgstr "النطاقات و DNS و SSL"
 
 #. catalog.tool.dynamic-dns.name nav.page.xpanel.dynamic-dns.name
 msgid "Dynamic DNS"

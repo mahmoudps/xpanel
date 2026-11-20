@@ -15,6 +15,8 @@ import { type PanelSurfaceProps } from './surfaces/xpanel.ts'
 import { type WhmSurfaceProps } from './surfaces/xwhm.ts'
 import { LOGIN_CLIENT_SCRIPT } from './login-client.ts'
 import { findPageScript, pageScript, pageScriptTag } from './page-scripts.ts'
+import { routeClientChunkTags } from './route-client-chunks.ts'
+import { WORKSPACE_RUNTIME_SCRIPT } from './workspace-runtime-client.ts'
 import { documentSecurityHeaders } from './content-security-policy.ts'
 import { projectAuthPersonal } from './models/theme-surface.ts'
 import { TEAM_PASSWORD_CLIENT_BINDING } from './team-password.ts'
@@ -412,8 +414,10 @@ export function renderWebApp(state: WebAppRenderState): string {
   const clientScriptsHtml = `  ${pageScriptTag(LOGIN_PAGE_SCRIPT, 'xpanel-login-client')}
   ${state.surface === 'login' ? pageScriptTag(TEAM_PASSWORD_PAGE_SCRIPT, 'xpanel-team-password-client') : ''}
   ${handoffControls ? pageScriptTag(HANDOFF_PAGE_SCRIPT, 'xpanel-handoff-client') : ''}
-  ${realtime ? `<script id="xpanel-i18n-realtime" src="/assets/i18n-${locale}.js?v=${I18N_ASSETS().version}"></script>
-  <script id="xpanel-realtime-client" src="/assets/ws-client.js?v=${REALTIME_SCRIPT_VERSION}"></script>` : ''}
+  ${realtime ? `${pageScriptTag(WORKSPACE_RUNTIME_PAGE_SCRIPT, 'xpanel-workspace-runtime')}
+  <script id="xpanel-i18n-realtime" src="/assets/i18n-${locale}.js?v=${I18N_ASSETS().version}"></script>
+  <script id="xpanel-realtime-client" src="/assets/ws-client.js?v=${REALTIME_SCRIPT_VERSION}"></script>
+  ${routeClientChunkTags(state.surface, surfaceBodyHtml)}` : ''}
 `
   const bodyHtml = uiTheme.slots.documentBody({
     locale,
@@ -513,6 +517,7 @@ const LOGIN_FAVICONS = {
 const REALTIME_SCRIPT_BYTES = new TextEncoder().encode(browserRealtimeScript())
 const REALTIME_SCRIPT_VERSION = createHash('sha256').update(REALTIME_SCRIPT_BYTES).digest('hex').slice(0, 16)
 const LOGIN_PAGE_SCRIPT = pageScript('login-client', LOGIN_CLIENT_SCRIPT)
+const WORKSPACE_RUNTIME_PAGE_SCRIPT = pageScript('workspace-runtime', WORKSPACE_RUNTIME_SCRIPT)
 const TEAM_PASSWORD_PAGE_SCRIPT = pageScript('team-password', TEAM_PASSWORD_CLIENT_BINDING)
 const HANDOFF_PAGE_SCRIPT = pageScript('handoff', `(${HANDOFF_CLIENT_BINDING})()`)
 

@@ -160,6 +160,7 @@ function bindAccountFilters(askDialog?: (options: Record<string, unknown>) => Pr
       const valid = state.compilation.status === 'ready'
       state.filters.forEach((row, index) => {
         const item = clone(valid ? 'rule' : 'blocked-rule')
+        if (typeof row.id === 'string' && row.id) { item.dataset.sortId = row.id; item.draggable = valid && canManage() }
         clientTemplateSlot(item, 'title').textContent = String(index + 1) + '. ' + (typeof row.name === 'string' ? row.name : copy('Name not available'))
         if (valid) {
           clientTemplateSlot(item, 'summary').textContent = (row.enabled ? copy('Enabled configuration') : copy(msgctxt('account-filters-client', 'Disabled configuration'))) + ' · ' + (row.matchAll ? copy('All conditions') : copy('Any condition'))
@@ -323,6 +324,14 @@ function bindAccountFilters(askDialog?: (options: Record<string, unknown>) => Pr
       const index=state.filters.findIndex(item=>item.id===row.id),other=action==='up'?index-1:index+1;if(other<0||other>=state.filters.length)return
       const ids=state.filters.map(item=>item.id);[ids[index],ids[other]]=[ids[other]!,ids[index]!]
       void mutate('POST',filtersBase+'/reorder',{scope:selection.scope,...(selection.mailbox?{mailbox:selection.mailbox}:{}),orderedIds:ids},next=>JSON.stringify(next.filters.map(item=>item.id))===JSON.stringify(ids))
+    })
+    list.addEventListener('xpanel:reorder',event=>{
+      if(busy||uncertain||dirty||!state||!ready()||!canManage())return
+      const detail=(event as CustomEvent<{order?:string[]}>).detail
+      const order=Array.isArray(detail?.order)?detail.order.filter((id):id is string=>typeof id==='string'&&id.length>0):[]
+      const current=state.filters.map(item=>item.id)
+      if(order.length!==current.length||order.some(id=>!current.includes(id))||JSON.stringify(order)===JSON.stringify(current))return
+      void mutate('POST',filtersBase+'/reorder',{scope:selection.scope,...(selection.mailbox?{mailbox:selection.mailbox}:{}),orderedIds:order},next=>JSON.stringify(next.filters.map(item=>item.id))===JSON.stringify(order))
     })
     // compose "Add filter" arrives with #new-filter; the editor opens only after a verified read
     control();void refresh().then(()=>{if(location.hash==='#new-filter')edit()})

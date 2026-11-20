@@ -31,6 +31,8 @@ export interface AdminControl {
   readonly rows?: number
   readonly autocomplete?: string
   readonly placeholder?: string
+  readonly accept?: string
+  readonly className?: string
   readonly describedBy?: string
   readonly hooks?: HookAttributes
 }
@@ -46,7 +48,7 @@ export function adminContext(t: Translate, props: WhmSurfaceProps, authority: Wh
   const e = (value: string | number): string => escapeHtml(normalizeAsciiDigits(value))
   const text = (message: string): string => e(t(message))
   const attrs = (options: AdminControl): string => {
-    const values = { name: options.name, dir: options.dir, min: options.min, max: options.max, step: options.step, maxlength: options.maxLength, autocomplete: options.autocomplete ?? 'off', placeholder: options.placeholder, 'aria-describedby': options.describedBy }
+    const values = { name: options.name, class: options.className, accept: options.accept, dir: options.dir, min: options.min, max: options.max, step: options.step, maxlength: options.maxLength, autocomplete: options.autocomplete ?? 'off', placeholder: options.placeholder, 'aria-describedby': options.describedBy }
     return Object.entries(values).filter(([, value]) => value !== undefined).map(([name, value]) => ` ${name}="${e(value!)}"`).join('')
       + (options.disabled !== false ? ' disabled' : '') + (options.required ? ' required' : '') + (options.readOnly ? ' readonly' : '') + hookAttrs(options.hooks)
   }

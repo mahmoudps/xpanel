@@ -67856,10 +67856,6 @@ msgstr "لم يُفحص {count} من الأسماء المحفوظة."
 msgid "{count} saved rules · evaluated in order"
 msgstr "المرشحات المحفوظة: {count} · تُقيّم بالترتيب"
 
-#: apps/web/src/whm-databases-client.ts
-msgid "{count} seconds"
-msgstr "{count, plural, zero {{count} ثانية} one {ثانية واحدة} two {ثانيتان} few {{count} ثوانٍ} many {{count} ثانية} other {{count} ثانية}}"
-
 #: apps/web/src/whm-account-health-client.ts apps/web/src/whm-transfer-client.ts
 msgid "{count} selected"
 msgstr "المحدد: {count}"
@@ -68519,3 +68515,135 @@ msgstr "ألغى «WHMCS» الإيقاف المؤقت لحساب"
 #: apps/web/src/board-port/xmail-compose.ts
 msgid "· check address"
 msgstr "· راجع العنوان"
+
+#: apps/web/src/ops-terminal-client.ts
+msgid "Terminal is unavailable in this session. Sign in directly as this account to open a terminal."
+msgstr "الطرفية غير متاحة في هذه الجلسة. سجّل الدخول مباشرةً بهذا الحساب لفتح طرفية."
+
+#: apps/web/src/themes/v2/pages/xmail/compose.ts
+msgid "Drop files here to attach"
+msgstr "اسحب الملفات إلى هنا لإرفاقها"
+
+#: apps/web/src/themes/v2/pages/xmail/compose.ts
+msgid "Up to 10 files, 512 KiB combined."
+msgstr "حتى 10 ملفات بحجم إجمالي لا يتجاوز 512 KiB."
+
+#: apps/web/src/themes/v2/pages/xpanel/files/index.ts
+msgid "Drop files here to upload into this folder"
+msgstr "اسحب الملفات إلى هنا لرفعها إلى هذا المجلد"
+
+#: apps/web/src/themes/v2/pages/xwhm/accounts/admin.ts
+msgid "Unread only"
+msgstr "غير المقروءة فقط"
+
+#: apps/web/src/themes/v2/pages/xwhm/accounts/create.ts
+msgid "Step-by-step mode"
+msgstr "وضع خطوة بخطوة"
+
+#: apps/web/src/themes/v2/pages/xwhm/host/firewall.ts
+msgid "Drop a JSON ruleset file here"
+msgstr "اسحب ملف قواعد JSON إلى هنا"
+
+#: apps/web/src/themes/v2/pages/xwhm/host/firewall.ts
+msgid "Or click to choose a JSON ruleset file to stage for review."
+msgstr "أو انقر لاختيار ملف قواعد JSON لتجهيزه للمراجعة."
+
+#: apps/web/src/themes/v2/pages/xwhm/lifecycle/transfers.ts
+msgid "Drop a cPanel backup archive (.tar.gz or .tgz) here"
+msgstr "اسحب أرشيف نسخة احتياطية من cPanel (.tar.gz أو .tgz) إلى هنا"
+
+#: apps/web/src/themes/v2/pages/xwhm/lifecycle/transfers.ts
+msgid "Or click to choose a local archive for inspection before import."
+msgstr "أو انقر لاختيار أرشيف محلي لفحصه قبل الاستيراد."
+
+#: apps/web/src/themes/v2/pages/xwhm/server/setup.ts
+msgid "Host detection and PHP handler compatibility"
+msgstr "اكتشاف الخادم وتوافق معالجات PHP"
+
+#: apps/web/src/themes/v2/pages/xwhm/server/setup.ts
+msgid "Host tools"
+msgstr "أدوات الخادم"
+
+#: apps/web/src/ws-client.ts
+msgid "Provisioning account…"
+msgstr "جارٍ إنشاء الحساب…"
+
+#: apps/web/src/ws-client.ts
+msgid "Applying account resources…"
+msgstr "جارٍ تطبيق موارد الحساب…"
+
+#: apps/web/src/ws-client.ts
+msgid "Creation failed"
+msgstr "فشل الإنشاء"
+
+#: apps/web/src/workspace-runtime-client.ts
+msgid "Background job"
+msgstr "مهمة بالخلفية"
+
+#: apps/web/src/workspace-runtime-client.ts
+msgid "Queued on server"
+msgstr "في انتظار التنفيذ على الخادم"
+
+#: apps/web/src/workspace-runtime-client.ts
+msgid "Host job"
+msgstr "مهمة الخادم"
+
+#: apps/web/src/workspace-runtime-client.ts
+msgid "gen {id}"
+msgstr "الجيل {id}"
+
+#: apps/web/src/workspace-runtime-client.ts
+msgid "Show all steps"
+msgstr "عرض كل الخطوات"
+
+#: apps/web/src/workspace-runtime-client.ts
+msgid "1 unsaved change"
+msgstr "تغيير واحد غير محفوظ"
+
+#: apps/web/src/workspace-runtime-client.ts
+msgid "{count} unsaved changes"
+msgstr "{count} تغييرات غير محفوظة"
+
+#: apps/web/src/workspace-runtime-client.ts
+msgid "Good"
+msgstr "جيدة"
+
+#: apps/web/src/workspace-runtime-client.ts
+msgid "Password strength: {level}"
+msgstr "قوة كلمة المرور: {level}"
+
+#: apps/web/src/workspace-runtime-client.ts
+msgid "Every {step} minutes"
+msgstr "كل {step} دقائق"
+
+#: apps/web/src/workspace-runtime-client.ts
+msgid "Every minute"
+msgstr "كل دقيقة"
+
+#: apps/web/src/workspace-runtime-client.ts
+msgid "Every hour at :{minute}"
+msgstr "كل ساعة عند الدقيقة :{minute}"
+
+#: apps/web/src/workspace-runtime-client.ts
+msgid "Daily at {clock}"
+msgstr "يومياً الساعة {clock}"
+
+#: apps/web/src/workspace-runtime-client.ts
+msgid "Weekly on {day} at {clock}"
+msgstr "أسبوعياً يوم {day} الساعة {clock}"
+
+#: apps/web/src/workspace-runtime-client.ts
+msgid "Monthly on day {day} at {clock}"
+msgstr "شهرياً في اليوم {day} الساعة {clock}"
+
+#: apps/web/src/workspace-runtime-client.ts
+msgid "Local time: {time}"
+msgstr "التوقيت المحلي: {time}"
+
+#: apps/web/src/workspace-runtime-client.ts
+msgid "Table pagination"
+msgstr "تنقل صفحات الجدول"
+
+#: apps/web/src/workspace-runtime-client.ts
+msgid "Showing {start}–{end} of {total}"
+msgstr "عرض {start}–{end} من {total}"

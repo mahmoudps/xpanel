@@ -191,7 +191,7 @@ function bindTerminals(): void {
         if (!available) note('unavailable', t('Terminal sessions are unavailable on this server. Nothing was opened.'))
         else if (view?.session?.open === true) { phase = 'remote'; note('busy', endMessages.busy!) }
         else if (phase === 'remote') { phase = 'closed'; note('closed', kind === 'root' ? t('No terminal session is open.') : t('No terminal session has started.')) }
-      } catch { available = false; note('failed', t('The terminal state could not be read. Nothing was opened.')) }
+      } catch (error) { const code = (error as { status?: number }).status; available = false; note(code === 403 ? 'unavailable' : 'failed', code === 403 ? t('Terminal is unavailable in this session. Sign in directly as this account to open a terminal.') : t('The terminal state could not be read. Nothing was opened.')) }
       sync()
     }
 

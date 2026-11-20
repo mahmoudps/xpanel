@@ -3,6 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderWhmSurface } from './surfaces/xwhm.ts'
 import { BROWSER_REALTIME_SCRIPT } from './ws-client.ts'
+import { routeClientScriptForHtml } from './route-client-chunks.ts'
 import { readWhmServerInfo, WHM_SERVER_INFO_CLIENT_BINDING } from './whm-server-info-client.ts'
 
 const info = { load: { load1: 0.5, load5: 0.25, load15: 0.1 }, memory: { totalBytes: 2147483648, availableBytes: 1073741824 }, disk: { filesystem: '/dev/sda1', mount: '/', totalBytes: 10737418240, usedBytes: 5368709120, availableBytes: 5368709120 } }
@@ -30,7 +31,7 @@ describe('server information binding', () => {
     render()
     const send = vi.fn(async () => { throw { status: 503, details: { stateChanged: false } } })
     ;(window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest = send
-    new Function('window', 'document', BROWSER_REALTIME_SCRIPT)(window, document); await tick()
+    new Function('window', 'document', BROWSER_REALTIME_SCRIPT + '\n' + routeClientScriptForHtml(document.body.innerHTML))(window, document); await tick()
     expect(send).toHaveBeenCalledWith('GET', '/api/server/info')
     for (const key of ['load', 'memory', 'disk']) expect($(`[data-host-${key}]`).textContent).toBe('Unavailable')
     expect($('[data-host-info]').textContent).not.toContain('Reading')

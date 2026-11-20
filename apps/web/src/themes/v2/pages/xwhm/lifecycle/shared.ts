@@ -52,8 +52,12 @@ export interface PhoneRow { readonly name?: number; readonly value?: number }
 export const phoneColumns = (labels: readonly string[], phone: PhoneRow = {}): string =>
   ` style="${escapeHtml(labels.map((label, index) => `--c${index + 1}:'${label.replace(/[\\']/g, '\\$&').replace(/\s+/g, ' ')}'`).join(';'))}"${phone.value ? ` data-phone-value="${phone.value}"` : ''}${phone.name ? ` data-phone-name="${phone.name}"` : ''}`
 
-export function lifecycleTable(t: Translate, title: string, columns: readonly string[], hooks: HookAttributes, empty: string, phone: PhoneRow = {}): string {
-  return `<div class="v2-lifecycle__scroll" role="region" tabindex="0" aria-label="${text(t, title)}"><table class="v2-lifecycle__table"${phoneColumns(columns.map(column => t(column)), phone)}><caption class="v2-sr">${text(t, title)}</caption><thead><tr>${columns.map(column => `<th scope="col">${text(t, column)}</th>`).join('')}</tr></thead><tbody${hookAttrs(hooks)}><tr><td colspan="${columns.length}">${text(t, empty)}</td></tr></tbody></table></div>`
+export type LifecycleColumn = string | { readonly label: string; readonly headerHtml: string }
+
+export function lifecycleTable(t: Translate, title: string, columns: readonly LifecycleColumn[], hooks: HookAttributes, empty: string, phone: PhoneRow = {}): string {
+  const labels = columns.map(column => t(typeof column === 'string' ? column : column.label))
+  const headers = columns.map(column => typeof column === 'string' ? `<th scope="col">${text(t, column)}</th>` : `<th scope="col">${column.headerHtml}</th>`).join('')
+  return `<div class="v2-lifecycle__scroll" role="region" tabindex="0" aria-label="${text(t, title)}"><table class="v2-lifecycle__table"${phoneColumns(labels, phone)}><caption class="v2-sr">${text(t, title)}</caption><thead><tr>${headers}</tr></thead><tbody${hookAttrs(hooks)}><tr><td colspan="${columns.length}">${text(t, empty)}</td></tr></tbody></table></div>`
 }
 
 export function lifecycleFacts(t: Translate, facts: readonly { key: string; label: string; value?: string }[], hook: `data-${string}`): string {
@@ -224,7 +228,7 @@ ${phoneRows('.v2-lifecycle__grid--editor .v2-lifecycle__table:has(>[data-destina
 .v2-upgrade-log{display:flex;flex-direction:column;gap:8px;list-style:none;padding:12px 16px;border:1px solid var(--line);border-radius:var(--radius-notice);background:var(--code);color:var(--code-text);font:12px/1.6 var(--font-mono);font-variant-numeric:tabular-nums;max-block-size:280px;overflow:auto}
 .v2-upgrade-log>li{display:flex;flex-wrap:wrap;gap:8px 12px;padding-block:4px;border-block-end:1px solid var(--line)}
 .v2-upgrade-log>li:last-child{border-block-end:0}
-.v2-upgrade-log__time{color:var(--muted);flex:none}
+.v2-upgrade-log__time{color:var(--code-muted);flex:none}
 .v2-upgrade-log__phase{font-weight:600;flex:none}
 .v2-upgrade-log__msg{flex:1 1 200px;min-inline-size:0;overflow-wrap:anywhere}
 @media(prefers-reduced-motion:reduce){.v2-lifecycle__tabs>a,.v2-lifecycle fieldset .v2-lifecycle__choices>.v2-lifecycle__choice,.v2-lifecycle [data-approved-whm-backups] .v2-lifecycle__choice[role=radio]{transition:none}}

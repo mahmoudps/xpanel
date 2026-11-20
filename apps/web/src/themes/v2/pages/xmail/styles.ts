@@ -38,9 +38,9 @@ ${R} .v2-mail-storage>bdi{color:#fff;font-variant-numeric:tabular-nums}
 ${R} .v2-mail-storage__track{align-self:stretch;block-size:6px;background:var(--nav-line);border-radius:3px;overflow:hidden}
 ${R} .v2-mail-storage__track>span{display:block;block-size:100%;background:var(--accent-fill)}
 .v2-mail-inbox{display:flex;flex-direction:column;gap:var(--space-2);min-inline-size:0}
-.v2-mail-folder-feedback{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-1) var(--space-2);padding:var(--space-1) var(--space-2);border:1px solid var(--line);border-radius:12px;background:var(--surface)}
+.v2-mail-folder-feedback{display:flex;flex-wrap:wrap;align-items:center;gap:4px var(--space-2);padding:4px 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
 .v2-mail-folder-feedback:has(>[data-state=uncertain]){border-color:var(--warn-line);background:var(--warn-soft)}
-.v2-mail-folder-feedback>[data-mail-folder-status]{display:flex;align-items:center;gap:var(--space-1);min-block-size:var(--target)}
+.v2-mail-folder-feedback>[data-mail-folder-status]{display:flex;align-items:center;gap:var(--space-1);min-block-size:32px}
 .v2-mail-folder-feedback>[data-mail-folder-status]::before{content:"";flex:none;inline-size:8px;block-size:8px;border-radius:50%;background:var(--line-strong)}
 .v2-mail-folder-feedback>[data-state=read]::before,.v2-mail-folder-feedback>[data-state=saved]::before{background:var(--ok)}
 .v2-mail-folder-feedback>[data-state=reading]::before,.v2-mail-folder-feedback>[data-state=saving]::before{background:var(--accent)}
@@ -163,7 +163,7 @@ ${R} .v2-mail-storage__track>span{display:block;block-size:100%;background:var(-
 .v2-mail-attachments ul:empty{display:none}
 .v2-mail-attachments li{display:flex;min-inline-size:0;overflow-wrap:anywhere}
 .v2-mail-attachments li>.v2-btn{inline-size:100%;min-block-size:60px;justify-content:flex-start;border-color:var(--line);border-radius:12px;font-size:13px;font-weight:500}
-.v2-mail-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;margin:var(--space-3);padding:40px var(--space-3);border:1px dashed var(--line-strong);border-radius:12px;color:var(--muted);font-size:13px;line-height:1.6;text-align:center}
+.v2-mail-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;margin:var(--space-3);padding:40px var(--space-3);border:1px solid var(--line);border-radius:12px;background:var(--subtle);color:var(--muted);font-size:13px;line-height:1.6;text-align:center}
 .v2-mail-empty[data-mail-list-state=failed]{border-color:var(--bad-line);background:var(--bad-soft);color:var(--text)}
 .v2-mail-reader .v2-mail-empty{flex:1 1 auto;margin:var(--space-3);padding-block:64px}
 .v2-mail-empty h2{font-size:16px;font-weight:600;color:var(--text)}
@@ -218,7 +218,7 @@ ${R} .v2-mail-storage__track>span{display:block;block-size:100%;background:var(-
 .v2-mail-editor{display:flex;flex-direction:column;flex:1 1 auto;min-inline-size:0;border:1px solid var(--line-strong);border-radius:12px;overflow:hidden}
 .v2-mail-editor:has(>.v2-mail-editor-body:focus-visible){outline:2px solid var(--focus);outline-offset:2px}
 .v2-mail-format{display:flex;flex-wrap:wrap;align-items:center;gap:4px;padding:4px;border-block-end:1px solid var(--line);background:var(--subtle)}
-.v2-mail-format .v2-btn{border-color:transparent!important;border-radius:8px;background:transparent!important;color:var(--text-2)!important;transition:background-color 140ms ease-out,border-color 140ms ease-out,color 140ms ease-out}
+.v2-mail-format .v2-btn{min-inline-size:var(--target);min-block-size:var(--target);border-color:transparent!important;border-radius:8px;background:transparent!important;color:var(--text-2)!important;transition:background-color 140ms ease-out,border-color 140ms ease-out,color 140ms ease-out}
 .v2-mail-format .v2-btn:hover:not(:disabled){background:var(--sunken)!important;color:var(--text)!important}
 .v2-mail-format .v2-btn[aria-pressed=true]{border-color:var(--accent-line)!important;background:var(--accent-soft)!important;color:var(--accent)!important}
 @media(max-width:767px){.v2-mail-compose-aside>#filters>.v2-card__foot{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.v2-mail-compose-aside>#filters>.v2-card__foot>.v2-btn{min-inline-size:0;padding-inline:8px}}

@@ -31,8 +31,10 @@ function bindWhmHome(): void {
   const favoritesStatus = home?.querySelector<HTMLElement>('[data-whm-favorites-status]') ?? null
   const links = (routes: string[], describe: boolean): HTMLElement[] => routes.filter(route => labels.has(route)).map(route => {
     const entry = labels.get(route)!, item = document.createElement('li'), link = document.createElement('a')
-    link.href = entry.href; link.textContent = entry.label; item.dataset.favoriteRoute = route; item.append(link)
-    if (describe && entry.hint) { const hint = document.createElement('small'); hint.textContent = ' ' + entry.hint; item.append(hint) }
+    link.href = entry.href; link.textContent = entry.label; item.dataset.favoriteRoute = route; item.dataset.sortId = route; item.draggable = true
+    const wrap = document.createElement('span'); wrap.className = 'v2-whm-favorites__link'; wrap.append(link)
+    if (describe && entry.hint) { const hint = document.createElement('small'); hint.className = 'v2-muted'; hint.textContent = entry.hint; wrap.append(hint) }
+    item.append(wrap)
     return item
   })
   const paint = (): void => {
@@ -43,9 +45,11 @@ function bindWhmHome(): void {
     if (box) box.checked = saved.descriptions
     if (empty) empty.hidden = shown.length > 0
     list?.replaceChildren(...links(shown, saved.descriptions).map((item, index) => {
-      const move = (step: number, label: string): HTMLButtonElement => { const button = document.createElement('button'); button.type = 'button'; button.textContent = label; button.disabled = index + step < 0 || index + step >= shown.length; button.addEventListener('click', () => { const next = [...shown]; [next[index], next[index + step]] = [next[index + step]!, next[index]!]; void save({ ...saved, routes: next }) }); return button }
-      const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = t('Remove'); remove.addEventListener('click', () => void save({ ...saved, routes: shown.filter(route => route !== item.dataset.favoriteRoute) }))
-      item.append(' ', move(-1, t('Up')), ' ', move(1, t('Down')), ' ', remove)
+      item.className = 'v2-whm-favorites__row'
+      const move = (step: number, label: string): HTMLButtonElement => { const button = document.createElement('button'); button.type = 'button'; button.className = 'v2-btn'; button.textContent = label; button.disabled = index + step < 0 || index + step >= shown.length; button.addEventListener('click', () => { const next = [...shown]; [next[index], next[index + step]] = [next[index + step]!, next[index]!]; void save({ ...saved, routes: next }) }); return button }
+      const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'v2-btn'; remove.textContent = t('Remove'); remove.addEventListener('click', () => void save({ ...saved, routes: shown.filter(route => route !== item.dataset.favoriteRoute) }))
+      const actions = document.createElement('span'); actions.className = 'v2-whm-favorites__actions'; actions.append(move(-1, t('Up')), move(1, t('Down')), remove)
+      item.append(actions)
       return item
     }))
   }
@@ -70,9 +74,19 @@ function bindWhmHome(): void {
     request('GET', '/api/admin/favorites').then(acceptFavorites).catch(favoritesUnavailable)
     document.addEventListener('xpanel:favorites-changed', event => void save({ ...saved, routes: (event as CustomEvent<string[]>).detail }))
     home?.querySelector<HTMLInputElement>('[data-whm-favorites-descriptions]')?.addEventListener('change', event => void save({ ...saved, descriptions: (event.target as HTMLInputElement).checked }))
+    home?.querySelector<HTMLElement>('[data-whm-favorites-list]')?.addEventListener('xpanel:reorder', event => {
+      const order = (event as CustomEvent<{ order?: unknown }>).detail?.order
+      if (Array.isArray(order) && order.every(route => typeof route === 'string') && order.length) void save({ ...saved, routes: order })
+    })
   }
 
   const bell = document.querySelector<HTMLElement>('[data-whm-bell]'), inbox = document.querySelector<HTMLElement>('[data-whm-inbox]')
+  const applyInboxFilter = (): void => {
+    if (!inbox) return
+    const onlyUnread = inbox.querySelector<HTMLInputElement>('[data-whm-inbox-unread-only]')?.checked === true
+    inbox.querySelectorAll<HTMLElement>('[data-whm-inbox-list] > li').forEach(row => { row.hidden = onlyUnread && row.dataset.read === 'true' })
+  }
+  inbox?.querySelector<HTMLInputElement>('[data-whm-inbox-unread-only]')?.addEventListener('change', applyInboxFilter)
   const paintInbox = (view: Record<string, unknown>): void => {
     const unread = Number(view.unread), items = Array.isArray(view.items) ? view.items.map(object) : []
     if (bell) {
@@ -83,15 +97,30 @@ function bindWhmHome(): void {
     if (!inbox) return
     const list = inbox.querySelector<HTMLElement>('[data-whm-inbox-list]'), all = inbox.querySelector<HTMLButtonElement>('[data-whm-inbox-read]')
     list?.replaceChildren(...items.map(entry => {
-      const row = document.createElement('li'), at = document.createElement('bdi'), title = document.createElement('strong')
-      at.dir = 'ltr'; at.textContent = String(entry.at).slice(0, 16).replace('T', ' ') + ' UTC'; title.textContent = String(entry.title); row.dataset.read = String(entry.read === true); row.append(title, ' ', at)
-      if (entry.target) { const target = document.createElement('bdi'); target.dir = 'ltr'; target.textContent = ' ' + String(entry.target); row.append(target) }
+      const row = document.createElement('li'), main = document.createElement('span'), title = document.createElement('strong'), meta = document.createElement('span')
+      const time = document.createElement('time'), at = document.createElement('bdi')
+      const rawAt = String(entry.at ?? '')
+      row.className = 'v2-whm-overview__service v2-whm-inbox__row'
+      row.dataset.read = String(entry.read === true)
+      main.className = 'v2-whm-inbox__main'
+      title.textContent = t(String(entry.title ?? ''))
+      meta.className = 'v2-whm-inbox__meta v2-muted'
+      time.dateTime = rawAt
+      at.dir = 'ltr'; at.className = 'v2-mono'; at.textContent = rawAt.slice(0, 16).replace('T', ' ') + ' UTC'
+      time.append(at); meta.append(time)
+      if (entry.target) {
+        const sep = document.createElement('span'); sep.setAttribute('aria-hidden', 'true'); sep.textContent = ' · '
+        const target = document.createElement('bdi'); target.dir = 'ltr'; target.className = 'v2-mono'; target.textContent = String(entry.target)
+        meta.append(sep, target)
+      }
+      main.append(title, meta); row.append(main)
       if (entry.read !== true) {
-        const read = document.createElement('button'); read.type = 'button'; read.textContent = t('Mark as read')
-        read.addEventListener('click', () => void mark([String(entry.id)])); row.append(' ', read)
+        const read = document.createElement('button'); read.type = 'button'; read.className = 'v2-btn'; read.textContent = t('Mark as read')
+        read.addEventListener('click', () => void mark([String(entry.id)])); row.append(read)
       }
       return row
     }))
+    applyInboxFilter()
     if (all) { all.disabled = unread < 1; all.onclick = () => void mark(items.filter(entry => entry.read !== true).map(entry => String(entry.id))) }
     note(inbox.querySelector<HTMLElement>('[data-whm-inbox-status]'), 'read', items.length ? t('{count, plural, =0 {Nothing unread.} one {# unread.} other {# unread.}}', { count: unread }) : t('No failed jobs, backups or operations were found.'))
   }
