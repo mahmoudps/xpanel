@@ -34,15 +34,25 @@ export function commandPalette(t: Translate, props: CommandPaletteProps): string
   const groups: readonly [PaletteEntry['kind'], string][] = [['page', t('Tools')], ['action', t('Actions')], ['account', t('Accounts')], ['domain', t('Domains')]]
   const scopes: readonly [string, string][] = [['all', t('All')], ['action', t('> Actions')], ['account', t('@ Accounts')], ['domain', t('# Domains')]]
   let index = 0
+  const quickCommands: readonly { action: string; label: string; section: string; hint: string; iconName: IconName; keywords: string }[] = [
+    { action: 'toggle-theme', label: t('Toggle dark or light theme'), section: t('Interface'), hint: t('Theme'), iconName: 'moon', keywords: 'theme dark light color mode appearance' },
+    { action: 'toggle-locale', label: t('Switch interface language'), section: t('Interface'), hint: t('Language'), iconName: 'language', keywords: 'language locale arabic english rtl ltr' },
+    { action: 'toggle-sidebar', label: t('Toggle sidebar'), section: t('Interface'), hint: 'Ctrl B', iconName: 'menu', keywords: 'sidebar collapse expand navigation menu' },
+    { action: 'refresh-page', label: t('Refresh current page'), section: t('Interface'), hint: t('Reload'), iconName: 'refresh', keywords: 'reload refresh update page' },
+  ]
   const rows = groups.map(([kind, name]) => {
     const matches = props.entries.filter(entry => entry.kind === kind)
-    if (!matches.length) return ''
+    const commandItems = kind === 'action' ? quickCommands.map(cmd => {
+      const searchText = `${cmd.label} ${cmd.section} ${cmd.keywords}`
+      return `<li data-cmdk-row role="presentation" class="v2-cmdk__row"><button type="button" id="xp-cmdk-option-${index++}" class="v2-cmdk__item" data-cmdk-item="action:${cmd.action}" data-cmdk-action="${cmd.action}" data-cmdk-kind="action" data-cmdk-key="cmd:${cmd.action}" data-cmdk-persistable="false" data-cmdk-search-text="${escapeHtml(searchText)}" role="option" aria-selected="false" tabindex="-1"><span class="v2-cmdk__tile" aria-hidden="true">${icon(cmd.iconName, 16)}</span><span class="v2-cmdk__copy"><strong>${escapeHtml(cmd.label)}</strong><span>${escapeHtml(cmd.section)}</span></span><code dir="ltr"><bdi dir="ltr">${escapeHtml(cmd.hint)}</bdi></code></button></li>`
+    }).join('') : ''
+    if (!matches.length && !commandItems) return ''
     const items = matches.map(item => {
       const favorite = item.persistable
         ? `<button type="button" class="v2-cmdk__fav" data-cmdk-favorite="${escapeHtml(item.route)}" aria-pressed="false" aria-label="${escapeHtml(`${t('Favorite page')}: ${item.label}`)}">${icon('star', 16)}</button>`
         : ''
       return `<li data-cmdk-row role="presentation" class="v2-cmdk__row"><a id="xp-cmdk-option-${index++}" href="${escapeHtml(item.href)}" class="v2-cmdk__item" data-cmdk-item="${escapeHtml(item.route)}" data-cmdk-kind="${item.kind}" data-cmdk-key="${escapeHtml(item.key)}" data-cmdk-persistable="${item.persistable}" data-cmdk-search-text="${escapeHtml(item.search)}" role="option" aria-selected="false" tabindex="-1"><span class="v2-cmdk__tile" aria-hidden="true">${icon(KIND_ICONS[kind], 16)}</span><span class="v2-cmdk__copy"><strong>${escapeHtml(item.label)}</strong><span>${escapeHtml(item.section)}</span></span><code dir="ltr"><bdi dir="ltr">${escapeHtml(item.hint)}</bdi></code></a>${favorite}</li>`
-    }).join('')
+    }).join('') + commandItems
     return `<li data-cmdk-group="${kind}" role="presentation" class="v2-cmdk__group"><span class="v2-cmdk__group-label">${escapeHtml(name)}</span><ul role="group" aria-label="${escapeHtml(name)}">${items}</ul></li>`
   }).join('')
   return `<div id="xp-cmdk-modal" class="v2-cmdk" data-xp-cmdk="true" data-cmdk-surface="${props.surface}" hidden role="dialog" aria-modal="true" aria-labelledby="xp-cmdk-title"><div class="v2-cmdk__panel">
@@ -126,7 +136,7 @@ export const OVERLAYS_CSS = `.v2-cmdk,.v2-sheet{position:fixed;inset:0;z-index:9
 .v2-cmdk__results{padding:var(--space-1);gap:var(--space-1);max-height:min(420px,50dvh);overflow-y:auto;overscroll-behavior:contain}
 .v2-cmdk__group-label{display:block;padding:var(--space-1) 12px 4px;font-size:12px;font-weight:600;color:var(--muted)}
 .v2-cmdk__row{display:flex;align-items:center;gap:4px}
-.v2-cmdk__item{flex:1 1 auto;min-width:0;display:flex;align-items:center;gap:12px;min-height:var(--target);padding:6px 12px;border-radius:var(--radius-control);color:var(--text);text-decoration:none}
+.v2-cmdk__item{flex:1 1 auto;min-width:0;display:flex;align-items:center;gap:12px;min-height:var(--target);padding:6px 12px;border:0;background:transparent;border-radius:var(--radius-control);color:var(--text);font:inherit;text-align:start;text-decoration:none;cursor:pointer}
 .v2-cmdk__item:hover,.v2-cmdk__item[aria-selected="true"]{background:var(--accent-soft)}
 .v2-cmdk__tile{flex:none;display:flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:var(--radius-chip);background:var(--accent-soft);color:var(--accent)}
 .v2-cmdk__copy{display:flex;flex-direction:column;min-width:0}

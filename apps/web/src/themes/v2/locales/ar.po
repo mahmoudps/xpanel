@@ -1562,11 +1562,6 @@ msgctxt "theme:v2"
 msgid "DNS server"
 msgstr "خادم DNS"
 
-#: apps/web/src/themes/v2/pages/xwhm/dns/tools.ts
-msgctxt "theme:v2"
-msgid "DNS tools"
-msgstr "أدوات DNS"
-
 #: apps/web/src/themes/v2/pages/xwhm/dns/index.ts
 msgctxt "theme:v2"
 msgid "DNS verification details"

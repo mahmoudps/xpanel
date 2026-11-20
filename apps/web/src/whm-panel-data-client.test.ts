@@ -2,7 +2,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { renderWhmSurface } from './surfaces/xwhm.ts'
-import { BROWSER_REALTIME_SCRIPT } from './ws-client.ts'
+import { allRouteClientChunkSources } from './route-client-chunks.ts'
 import { WHM_PANEL_DATA_CLIENT_BINDING } from './whm-panel-data-client.ts'
 
 type Send = (method: string, path: string, body?: unknown) => Promise<unknown>
@@ -24,7 +24,7 @@ afterEach(() => { document.body.replaceChildren(); delete (window as Window & { 
 
 describe('configuration history binding', () => {
   it('is registered, reads the real history and enables only admitted rollback targets; rebuild stays disabled with a reason', async () => {
-    expect(BROWSER_REALTIME_SCRIPT).toContain(WHM_PANEL_DATA_CLIENT_BINDING)
+    expect(allRouteClientChunkSources()).toContain(WHM_PANEL_DATA_CLIENT_BINDING)
     boot(vi.fn<Send>(async () => before)); await tick()
     expect(document.querySelectorAll('[data-generation-row]')).toHaveLength(2)
     expect(rollbackButton(7).disabled).toBe(false)

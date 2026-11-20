@@ -36,14 +36,14 @@ export function netButton(label: string, hooks?: HookAttributes, options: { enab
   return `<button type="${options.submit ? 'submit' : 'button'}" class="v2-btn${options.primary ? ' v2-btn--primary' : ''}${options.danger ? ' v2-btn--danger' : ''}"${hookAttrs(hooks)}${options.enabled ? '' : ' disabled'}>${escapeHtml(label)}</button>`
 }
 
-export const netField = (id: string, label: string, control: FieldControl, help?: string): string =>
-  formField({ id: `v2-whm-network-${id}`, label, control: { ...control, disabled: control.disabled ?? true }, ...(help ? { help } : {}) })
+export const netField = (id: string, label: string, control: FieldControl, help?: string, exactId = false): string =>
+  formField({ id: exactId ? id : `v2-whm-network-${id}`, label, control: { ...control, disabled: control.disabled ?? true }, ...(help ? { help } : {}) })
 
 export const netCard = (key: string, title: string, bodyHtml: string, hooks?: HookAttributes, actionsHtml?: string): string =>
   card({ title, titleId: `v2-whm-network-${key}-heading`, bodyHtml, hooks, actionsHtml })
 
-export function netTable(t: Translate, key: string, caption: string, columns: readonly string[], rows: readonly DataTableRow[], emptyText: string, hooks?: HookAttributes): string {
-  return dataTable(t, { id: `v2-whm-network-${key}-table`, caption, columns: columns.map(label => ({ label })), rows, emptyText, bodyHooks: hooks })
+export function netTable(t: Translate, key: string, caption: string, columns: readonly string[], rows: readonly DataTableRow[], emptyText: string, hooks?: HookAttributes, tableHooks?: HookAttributes): string {
+  return dataTable(t, { id: `v2-whm-network-${key}-table`, caption, columns: columns.map(label => ({ label })), rows, emptyText, bodyHooks: hooks, ...(tableHooks ? { tableHooks } : {}) })
 }
 
 export const netFacts = (rows: readonly { label: string; valueHtml: string; hooks?: HookAttributes }[]): string =>
@@ -70,7 +70,13 @@ export const WHM_NETWORK_CSS = `.v2-whm-network,.v2-whm-network__stack{display:f
 .v2-whm-network__facts dd{font-size:14px;font-weight:500;font-variant-numeric:tabular-nums;unicode-bidi:plaintext;text-align:var(--v2-control-align,match-parent)}
 .v2-whm-network__facts bdi{unicode-bidi:isolate}
 .v2-whm-network__actions,.v2-whm-network__chips{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2)}
-.v2-whm-network:not([data-whm-detail-route^="/whm/ssl"]) .v2-btn,.v2-whm-network .v2-segmented>button{min-inline-size:var(--target);min-block-size:var(--target)}
+.v2-whm-network .v2-btn,.v2-whm-network .v2-segmented>button{min-inline-size:var(--target);min-block-size:var(--target)}
+.v2-whm-network select{min-inline-size:0;max-inline-size:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.v2-whm-network .v2-muted{font-size:13px;line-height:1.45}
+.v2-whm-network__split--stretch{align-items:stretch}
+.v2-whm-network__split--stretch>.v2-whm-network__stack>.v2-card:last-child,.v2-whm-network__pair--stretch>.v2-card{flex:1;display:flex;flex-direction:column}
+.v2-whm-network__split--stretch>.v2-whm-network__stack>.v2-card:last-child>.v2-card__body,.v2-whm-network__pair--stretch>.v2-card>.v2-card__body{flex:1}
+.v2-whm-network__pem{padding:var(--space-2);border:1px solid var(--line);border-radius:var(--radius-notice);background:var(--code);color:var(--code-text);font-size:12px;line-height:1.6;overflow-x:auto;font-variant-numeric:tabular-nums}
 .v2-whm-network [data-dns-file]>.v2-whm-network__fields{grid-template-columns:minmax(0,1fr)}
 .v2-whm-network :is([data-sec-result],[data-whm-dns-tools-result]):not([hidden]){padding:12px var(--space-2);border:1px solid var(--line);border-radius:var(--radius-notice);background:var(--subtle)}
 .v2-whm-network__split{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:var(--space-3);align-items:start}

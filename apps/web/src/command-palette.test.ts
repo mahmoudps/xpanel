@@ -149,4 +149,28 @@ describe('quick bar client without an independent overlay lifecycle', () => {
     expect(open).toHaveBeenCalledWith(expect.stringContaining('/whm/accounts?accountId='), '_blank', 'noopener')
     expect(window.localStorage.getItem('xpanel.command-pages.v1.xwhm')).toBeNull()
   })
+
+  it('executes direct quick-action buttons via click and Enter without navigating away', () => {
+    document.body.innerHTML = renderCommandPaletteModal('xwhm', 'en', root, catalog, { accounts, domains })
+    const modal = document.querySelector<HTMLElement>('[data-xp-cmdk]')!
+    modal.hidden = false
+    const list = modal.querySelector<HTMLElement>('[data-cmdk-results]')!
+    const li = document.createElement('li')
+    li.setAttribute('data-cmdk-row', '')
+    li.innerHTML = '<button type="button" id="xp-cmdk-act" data-cmdk-item="action:toggle-sidebar" data-cmdk-action="toggle-sidebar" data-cmdk-kind="action" data-cmdk-persistable="false" data-cmdk-search-text="toggle sidebar">Toggle sidebar</button>'
+    list.appendChild(li)
+    const closed = vi.fn()
+    const toggled = vi.fn()
+    ;(window as unknown as { __xpanelToggleSidebar?: () => void }).__xpanelToggleSidebar = toggled
+    const h = new Function('window', 'document', 'closeActiveOverlay', `var commandPalette=null;var activeOverlay={element:document.querySelector('[data-xp-cmdk]')};${COMMAND_PALETTE_CLIENT_FUNCTIONS};bindCommandPalette();return {palette:()=>commandPalette,filter:filterCommandPalette,key:handleCommandPaletteKey};`)(window, document, closed) as CommandHarness
+    const input = modal.querySelector<HTMLInputElement>('[data-cmdk-search]')!
+    input.value = '>toggle sidebar'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    const enter = new KeyboardEvent('keydown', { key: 'Enter', cancelable: true })
+    Object.defineProperty(enter, 'target', { value: input })
+    expect(h.key(enter)).toBe(true)
+    expect(toggled).toHaveBeenCalledOnce()
+    expect(closed).toHaveBeenCalled()
+    delete (window as unknown as { __xpanelToggleSidebar?: () => void }).__xpanelToggleSidebar
+  })
 })

@@ -167,7 +167,7 @@ export const navigation: NavSurface[] = [
           },
           {
             "id": "forwarders",
-            "name": "Forwarders & autoresponders",
+            "name": "Forwarders",
             "route": "/email/forwarders",
             "template": "list",
             "artboard": "PanelEmail",
@@ -251,7 +251,7 @@ export const navigation: NavSurface[] = [
           },
           {
             "id": "deliverability",
-            "name": "Deliverability & routing",
+            "name": "Deliverability",
             "route": "/email/deliverability",
             "template": "matrix",
             "artboard": "PanelEmail",
@@ -358,7 +358,7 @@ export const navigation: NavSurface[] = [
           },
           {
             "id": "encryption",
-            "name": "Encryption",
+            "name": "Email encryption",
             "route": "/email/encryption",
             "template": "list",
             "artboard": null,
@@ -382,7 +382,7 @@ export const navigation: NavSurface[] = [
           },
           {
             "id": "calendars-contacts",
-            "name": "Calendars & contacts",
+            "name": "Calendars and contacts",
             "route": "/email/calendars-contacts",
             "template": "list",
             "artboard": null,
@@ -553,7 +553,7 @@ export const navigation: NavSurface[] = [
           },
           {
             "id": "backup",
-            "name": "Backup",
+            "name": "Backup wizard",
             "route": "/files/backup",
             "template": "wizard",
             "artboard": "PanelBackup",
@@ -1046,7 +1046,7 @@ export const navigation: NavSurface[] = [
           },
           {
             "id": "logs",
-            "name": "Logs",
+            "name": "Site logs",
             "route": "/metrics/logs",
             "template": "log",
             "artboard": "PanelLogs",
@@ -1150,7 +1150,7 @@ export const navigation: NavSurface[] = [
           },
           {
             "id": "issue-certificate",
-            "name": "Issue certificate",
+            "name": "Certificate wizard",
             "route": "/security/ssl/issue",
             "template": "custom",
             "artboard": "PanelSsl",
@@ -1380,7 +1380,7 @@ export const navigation: NavSurface[] = [
           },
           {
             "id": "app-installer",
-            "name": "App installer",
+            "name": "App catalog",
             "route": "/software/installer",
             "template": "list",
             "artboard": "PanelApps",
@@ -1719,7 +1719,7 @@ export const navigation: NavSurface[] = [
           },
           {
             "id": "api-shell",
-            "name": "API shell",
+            "name": "API explorer",
             "route": "/advanced/api-shell",
             "template": "custom",
             "artboard": null,
@@ -1751,7 +1751,7 @@ export const navigation: NavSurface[] = [
         "pages": [
           {
             "id": "account-preferences",
-            "name": "Account preferences",
+            "name": "Preferences",
             "route": "/preferences",
             "template": "settings",
             "artboard": "PanelPreferences",
@@ -1805,7 +1805,7 @@ export const navigation: NavSurface[] = [
           },
           {
             "id": "user-manager",
-            "name": "User manager",
+            "name": "Service users",
             "route": "/preferences/users",
             "template": "list",
             "artboard": "PanelEmail",
@@ -1827,7 +1827,7 @@ export const navigation: NavSurface[] = [
           },
           {
             "id": "manage-team",
-            "name": "Manage team",
+            "name": "Account team",
             "route": "/preferences/team",
             "template": "list",
             "artboard": null,
@@ -1862,7 +1862,7 @@ export const navigation: NavSurface[] = [
         "pages": [
           {
             "id": "dashboard",
-            "name": "Dashboard",
+            "name": "Server dashboard",
             "route": "/whm",
             "template": "dashboard",
             "artboard": "WhmDashboard",
@@ -2260,7 +2260,7 @@ export const navigation: NavSurface[] = [
           },
           {
             "id": "resellers-more",
-            "name": "More reseller tools",
+            "name": "Reseller usage & mail",
             "route": "/whm/resellers/more",
             "template": "list",
             "artboard": null,
@@ -2403,7 +2403,7 @@ export const navigation: NavSurface[] = [
           },
           {
             "id": "dns-more",
-            "name": "More DNS tools",
+            "name": "DNS diagnostics & TTL",
             "route": "/whm/dns/more",
             "template": "list",
             "artboard": null,
@@ -2425,7 +2425,7 @@ export const navigation: NavSurface[] = [
           },
           {
             "id": "ssl-certificates",
-            "name": "SSL certificates",
+            "name": "SSL/TLS",
             "route": "/whm/ssl",
             "template": "list",
             "artboard": "WhmSsl",
@@ -2454,7 +2454,7 @@ export const navigation: NavSurface[] = [
           },
           {
             "id": "install-ssl",
-            "name": "Install certificate",
+            "name": "Install a certificate",
             "route": "/whm/ssl/install",
             "template": "wizard",
             "artboard": null,
@@ -2610,7 +2610,7 @@ export const navigation: NavSurface[] = [
           },
           {
             "id": "outbound-spam",
-            "name": "Outbound spam protection",
+            "name": "Outbound mail routing",
             "route": "/whm/email/outbound",
             "template": "settings",
             "artboard": "WhmOutboundSpam",
@@ -3109,7 +3109,7 @@ export const navigation: NavSurface[] = [
           },
           {
             "id": "sign-in",
-            "name": "Sign-in & 2FA",
+            "name": "Password and authenticator",
             "route": "/whm/security/sign-in",
             "template": "settings",
             "artboard": "WhmSecurity",
@@ -3425,7 +3425,7 @@ export const navigation: NavSurface[] = [
           },
           {
             "id": "performance-benchmark",
-            "name": "Performance benchmark",
+            "name": "Benchmark",
             "route": "/whm/monitoring/benchmark",
             "template": "dashboard",
             "artboard": null,
@@ -3482,7 +3482,7 @@ export const navigation: NavSurface[] = [
           },
           {
             "id": "services-more",
-            "name": "More service tools",
+            "name": "Service manager & watchdog",
             "route": "/whm/services/more",
             "template": "list",
             "artboard": null,
@@ -3720,7 +3720,7 @@ export const navigation: NavSurface[] = [
         "pages": [
           {
             "id": "backups",
-            "name": "Backups",
+            "name": "Server backups",
             "route": "/whm/backups",
             "template": "settings",
             "artboard": "WhmBackups",
@@ -3789,7 +3789,7 @@ export const navigation: NavSurface[] = [
           },
           {
             "id": "restore-more",
-            "name": "More restore tools",
+            "name": "Mail & partial restore",
             "route": "/whm/backups/restore-more",
             "template": "list",
             "artboard": null,
@@ -4122,7 +4122,7 @@ export const navigation: NavSurface[] = [
         "pages": [
           {
             "id": "php",
-            "name": "PHP",
+            "name": "PHP versions and handlers",
             "route": "/whm/software/php",
             "template": "list",
             "artboard": "WhmPhp",
@@ -4210,7 +4210,7 @@ export const navigation: NavSurface[] = [
           },
           {
             "id": "site-software",
-            "name": "Site software",
+            "name": "Catalog settings",
             "route": "/whm/software/site-software",
             "template": "list",
             "artboard": null,
@@ -4404,7 +4404,7 @@ export const navigation: NavSurface[] = [
           },
           {
             "id": "composer",
-            "name": "Composer",
+            "name": "Composer diagnostics",
             "route": "/whm/software/composer",
             "template": "list",
             "artboard": null,
@@ -4476,7 +4476,7 @@ export const navigation: NavSurface[] = [
           },
           {
             "id": "setup",
-            "name": "Setup & settings",
+            "name": "Set up this server",
             "route": "/whm/server/setup",
             "template": "settings",
             "artboard": "WhmSetup",
@@ -5058,7 +5058,7 @@ export const navigation: NavSurface[] = [
           },
           {
             "id": "mail-later",
-            "name": "More mail tools",
+            "name": "Mailbox utilities",
             "route": "/mail/later",
             "template": "list",
             "artboard": null,

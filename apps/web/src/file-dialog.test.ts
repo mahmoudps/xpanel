@@ -3,6 +3,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { defaultPlan, type Account } from '@xpanel/core'
 import { BROWSER_REALTIME_SCRIPT } from './ws-client.ts'
+import { routeClientScriptForHtml } from './route-client-chunks.ts'
 import { renderPanelSurface } from './surfaces/xpanel.ts'
 import { FILE_WORKSPACE_CLIENT_BINDING, workspaceEntry, workspaceTrash } from './file-workspace-client.ts'
 import { CLASSIC_PROMPT_TEMPLATE } from './themes/classic/prompt.ts'
@@ -55,7 +56,7 @@ describe('file manager confirmation dialog', () => {
     document.documentElement.lang = 'en'
     document.documentElement.dataset.realtimeEnabled = 'false'
     document.body.innerHTML = renderPanelSurface({ account, plan, activeRoute: '/files/manager', files: [], locale: 'en' }) + CLASSIC_PROMPT_TEMPLATE
-    new Function('window', 'document', BROWSER_REALTIME_SCRIPT)(window, document)
+    new Function('window', 'document', BROWSER_REALTIME_SCRIPT + '\n' + routeClientScriptForHtml(document.body.innerHTML))(window, document)
     await tick()
     // The file workspace controller reports 1024-based sizes with IEC units.
     expect(document.body.textContent).toContain('\u20662.00\u00a0KiB\u2069')

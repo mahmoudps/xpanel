@@ -66,4 +66,15 @@ describe('personal preferences', () => {
     expect(damaged.body.state).toBe('invalid')
     expect((await call(owner, 'PUT', body(damaged.body.revision))).body.code).toBe('PRECONDITION_FAILED')
   })
+
+  it('validates and persists an optional timezone preference without breaking existing five-key updates', async () => {
+    const first = await call(owner, 'GET')
+    expect(first.body.timeZone).toBeNull()
+    expect(first.body.choices.timeZones).toContain('UTC')
+    const saved = await call(owner, 'PUT', body(first.body.revision, { timeZone: 'Asia/Riyadh' }))
+    expect(saved.body.timeZone).toBe('Asia/Riyadh')
+    const preserved = await call(owner, 'PUT', body(saved.body.revision, { noticePosition: 'top-right' }))
+    expect(preserved.body.timeZone).toBe('Asia/Riyadh')
+    expect(() => parsePersonalPreferencesUpdate({ ...DEFAULT_PERSONAL_PREFERENCES, timeZone: 'Invalid/Zone', expectedRevision: REV }, ['en', 'ar'])).toThrow(/invalid/)
+  })
 })
