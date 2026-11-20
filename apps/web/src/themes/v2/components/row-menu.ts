@@ -17,6 +17,8 @@ export interface RowMenuProps {
   /** Names the trigger and the menu, such as "Actions for alice". */
   label: string
   items: readonly RowMenuItem[]
+  /** Optional custom `<li role="none">...</li>` menu items prepended before `items`. */
+  prependItemsHtml?: string
   /** Hooks on the trigger, such as the `menu` verb of the `row-menu` template. */
   triggerHooks?: HookAttributes
   hooks?: HookAttributes
@@ -27,14 +29,14 @@ export interface RowMenuProps {
  *  Arrow-key roving focus between items belongs to a core menu controller. */
 export function rowMenu(props: RowMenuProps): string {
   const label = escapeHtml(props.label)
-  const items = props.items.map(item => {
+  const items = `${props.prependItemsHtml ?? ''}${props.items.map(item => {
     const content = `${escapeHtml(item.label)}${item.shortcut ? `<kbd aria-hidden="true">${escapeHtml(item.shortcut)}</kbd>` : ''}`
     const cls = `v2-menu__item${item.danger ? ' v2-menu__item--danger' : ''}`
     const control = item.href
       ? `<a role="menuitem" class="${cls}" href="${escapeHtml(item.href)}"${hookAttrs(item.hooks)}>${content}</a>`
       : `<button type="button" role="menuitem" class="${cls}"${hookAttrs(item.hooks)}>${content}</button>`
     return `${item.separatorBefore ? '<li role="separator"></li>' : ''}<li role="none">${control}</li>`
-  }).join('')
+  }).join('')}`
   const id = escapeHtml(props.id)
   return `<span class="v2-menu"${hookAttrs(props.hooks)}><button type="button" class="v2-btn v2-btn--icon" popovertarget="${id}" aria-haspopup="menu" aria-controls="${id}" aria-label="${label}"${hookAttrs(props.triggerHooks)}>${icon('more')}</button><ul class="v2-menu__list" id="${id}" role="menu" aria-label="${label}" popover>${items}</ul></span>`
 }

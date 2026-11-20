@@ -44,7 +44,7 @@ export function renderV2BackupsPage(props: V2BackupsPageProps): string {
 ${group(msgid('Schedule'), fields(choice('policy-enabled', msgid('Request scheduled backups'))
     + select('frequency', msgid('Frequency'), [msgid('Daily'), msgid('Every 12 hours'), msgid('Weekly only'), msgid('Monthly')])
     + input('start-time', msgid('Start time (UTC)'), 'time')
-    + input('policy-cron', msgid('Schedule expression (UTC)'))
+    + input('policy-cron', msgid('Schedule expression (UTC)'), 'text', ' data-cron-expression')
     + select('policy-compress', msgid('Compression'), [msgctxt('theme:v2', 'Zstandard'), msgctxt('theme:v2', 'Gzip')])))}
 ${group(msgid('Retention'), fields(input('daily-copies', msgid('Daily copies'), 'number', ' min="1" max="3650" step="1"')
     + input('weekly-copies', msgid('Weekly copies'), 'number', ' min="0" max="520" step="1"')
@@ -116,8 +116,9 @@ ${status('status', msgctxt('theme:v2', 'No account archive has been read.'))}
     ['settings', msgid('Settings')], ['restore', msgid('Restore')], ['runs', msgid('Runs')],
   ].map(([key, label]) => ({ id: `v2-backup-tab-${key}`, label: t(label!), panelId: `v2-backup-panel-${key}`, selected: key === initialTab, hooks: { 'data-presentation-tab': key! } })) })
   const panel = (key: string, bodyHtml: string): string => tabPanel({ id: `v2-backup-panel-${key}`, tabId: `v2-backup-tab-${key}`, bodyHtml, hidden: key !== initialTab, sectionSpacing: true })
+  const pageTitle = route === '/whm/backups/restore' ? msgid('Restore accounts') : msgid('Server backups')
   return `<div class="v2-lifecycle" data-presentation-tabs="panels" data-whm-detail-route="${route}" lang="${props.locale}" dir="${localeDirection(props.locale)}">
-${lifecycleHeader(t, msgid('Server backups'), route, msgctxt('theme:v2', 'Configure copies, review actual run evidence and restore only the selected account and parts.'), lifecycleLink(t, msgid('Backup destinations'), `/whm/backups/destinations?lang=${props.locale}`) + lifecycleLink(t, msgid('Audit log'), `/whm/audit?lang=${props.locale}`))}
+${lifecycleHeader(t, pageTitle, route, msgctxt('theme:v2', 'Configure copies, review actual run evidence and restore only the selected account and parts.'), lifecycleLink(t, msgid('Backup destinations'), `/whm/backups/destinations?lang=${props.locale}`) + lifecycleLink(t, msgid('Audit log'), `/whm/audit?lang=${props.locale}`))}
 ${navigation}
 <section class="v2-lifecycle__column" data-approved-whm-backups data-backup-destination-editor="manager" data-backup-can-read="${props.canRead && props.canManage}" data-backup-manage="${props.canRead && props.canManage}" data-backup-read-state="${props.canRead ? 'unread' : 'denied'}" data-backup-native="unavailable" aria-label="${text(t, msgid('Server backups'))}">
 <p id="whm-backup-layout-unavailable" class="v2-lifecycle__status" role="status">${text(t, props.canRead ? msgid('Server-wide run history, restore differences, scheduling and remote destinations have not been loaded. Their controls stay unavailable; no result or saved configuration is assumed.') : msgid('This workspace requires an authorized root account.'))}</p>

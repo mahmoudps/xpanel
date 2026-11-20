@@ -8,18 +8,35 @@ import type { ExtendedRouteHelpers } from './extended-routes.ts'
 import { uiPreferenceOwner } from './ui-preferences.ts'
 import type { UiPreferenceAuthority, UiPreferenceOwner } from './ui-preferences.ts'
 
-/** Saved per user on each surface: language, notice position, notification switches and the Getting Started dismissal. */
+/** Saved per user on each surface: language, notice position, notification switches, timezone and the Getting Started dismissal. */
 export const NOTICE_POSITIONS = ['top-right', 'top-left', 'bottom-right', 'bottom-left', 'center'] as const
 export const NOTIFICATION_KEYS = ['disk', 'bandwidth', 'announcements'] as const
+export const TIMEZONE_CHOICES = [
+  'UTC',
+  'local',
+  'Africa/Cairo',
+  'Asia/Amman',
+  'Asia/Gaza',
+  'Asia/Riyadh',
+  'Asia/Dubai',
+  'Europe/London',
+  'Europe/Berlin',
+  'America/New_York',
+  'America/Chicago',
+  'America/Los_Angeles',
+  'Asia/Tokyo',
+  'Australia/Sydney',
+] as const
 export type NoticePosition = typeof NOTICE_POSITIONS[number]
 export type NotificationSwitches = Record<typeof NOTIFICATION_KEYS[number], boolean>
-export interface PersonalPreferenceFields { locale: string | null; noticePosition: NoticePosition; notifications: NotificationSwitches; onboardingDismissed: boolean }
+export interface PersonalPreferenceFields { locale: string | null; noticePosition: NoticePosition; notifications: NotificationSwitches; onboardingDismissed: boolean; timeZone?: string | null }
 export interface PersonalPreferencesRecord extends PersonalPreferenceFields { schema: 1; surface: UiPreferenceAuthority['surface']; owner: UiPreferenceOwner; updatedAt: string }
 export interface PersonalPreferencesView extends PersonalPreferenceFields {
   state: 'default' | 'saved' | 'invalid'
   /** the owner's language a team user sees until they choose one */
   inheritedLocale: string | null
-  choices: { locales: readonly string[]; positions: readonly string[] }
+  timeZone: string | null
+  choices: { locales: readonly string[]; positions: readonly string[]; timeZones: readonly string[] }
   revision: string
   updatedAt: string | null
 }
@@ -40,11 +57,30 @@ const hash = (value: unknown): string => createHash('sha256').update(JSON.string
 const json = (body: unknown): Response => new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff' } })
 const recordPath = (rootDir: string, surface: string, owner: UiPreferenceOwner): string => join(rootDir, 'extended', 'personal-preferences', surface, owner.kind, hash(owner) + '.json')
 
+function isValidTimeZone(value: unknown): value is string | null {
+  if (value === null) return true
+  if (typeof value !== 'string' || !value || value.length > 64 || /[\r\n\0\s]/.test(value)) return false
+  if (value === 'local' || value === 'UTC') return true
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: value })
+    return true
+  } catch {
+    return false
+  }
+}
+
 function fields(raw: Record<string, unknown>): PersonalPreferenceFields | null {
   const n = raw.notifications
   if (!(raw.locale === null || typeof raw.locale === 'string') || !(NOTICE_POSITIONS as readonly unknown[]).includes(raw.noticePosition) || !object(n) || keys(n) !== [...NOTIFICATION_KEYS].sort().join()
     || !NOTIFICATION_KEYS.every(key => typeof n[key] === 'boolean') || typeof raw.onboardingDismissed !== 'boolean') return null
-  return { locale: raw.locale, noticePosition: raw.noticePosition as NoticePosition, notifications: n as NotificationSwitches, onboardingDismissed: raw.onboardingDismissed }
+  if (raw.timeZone !== undefined && !isValidTimeZone(raw.timeZone)) return null
+  return {
+    locale: raw.locale,
+    noticePosition: raw.noticePosition as NoticePosition,
+    notifications: n as NotificationSwitches,
+    onboardingDismissed: raw.onboardingDismissed,
+    ...(raw.timeZone !== undefined ? { timeZone: raw.timeZone } : {}),
+  }
 }
 
 async function readSaved(path: string): Promise<unknown> {
@@ -74,7 +110,10 @@ export async function readPersonalPreferenceValues(rootDir: string, authority: U
 }
 
 export function parsePersonalPreferencesUpdate(value: unknown, locales: readonly string[]): PersonalPreferenceFields & { expectedRevision: string } {
-  if (!object(value) || keys(value) !== 'expectedRevision,locale,noticePosition,notifications,onboardingDismissed') return fail('VALIDATION', 'locale, noticePosition, notifications, onboardingDismissed and expectedRevision are required', unchanged)
+  const k = object(value) ? keys(value) : ''
+  if (!object(value) || (k !== 'expectedRevision,locale,noticePosition,notifications,onboardingDismissed' && k !== 'expectedRevision,locale,noticePosition,notifications,onboardingDismissed,timeZone')) {
+    return fail('VALIDATION', 'locale, noticePosition, notifications, onboardingDismissed and expectedRevision are required', unchanged)
+  }
   const parsed = fields(value)
   if (!parsed) return fail('VALIDATION', 'a preference value is invalid', unchanged)
   if (parsed.locale !== null && !locales.includes(parsed.locale)) return fail('VALIDATION', 'the language is not offered on this server', { ...unchanged, reason: 'unknown_locale' })
@@ -83,9 +122,9 @@ export function parsePersonalPreferencesUpdate(value: unknown, locales: readonly
 }
 
 const viewOf = (raw: unknown, record: PersonalPreferencesRecord | null, locales: readonly string[], inheritedLocale: string | null): PersonalPreferencesView => {
-  const { locale, noticePosition, notifications, onboardingDismissed } = record ?? DEFAULT_PERSONAL_PREFERENCES
-  return { state: raw === undefined ? 'default' : record ? 'saved' : 'invalid', locale, noticePosition, notifications, onboardingDismissed, inheritedLocale,
-    choices: { locales, positions: NOTICE_POSITIONS }, revision: hash({ exists: raw !== undefined, raw }), updatedAt: record?.updatedAt ?? null }
+  const { locale, noticePosition, notifications, onboardingDismissed, timeZone } = record ?? DEFAULT_PERSONAL_PREFERENCES
+  return { state: raw === undefined ? 'default' : record ? 'saved' : 'invalid', locale, noticePosition, notifications, onboardingDismissed, timeZone: timeZone ?? null, inheritedLocale,
+    choices: { locales, positions: NOTICE_POSITIONS, timeZones: TIMEZONE_CHOICES }, revision: hash({ exists: raw !== undefined, raw }), updatedAt: record?.updatedAt ?? null }
 }
 
 export async function handlePersonalPreferencesRoute(request: Request, url: URL, method: string, ports: PersonalPreferencesPorts): Promise<Response | null> {
@@ -108,7 +147,8 @@ export async function handlePersonalPreferencesRoute(request: Request, url: URL,
     if (current.state === 'invalid') return fail('PRECONDITION_FAILED', 'saved preferences require review before they can be changed', unchanged)
     if (current.revision !== expectedRevision) return fail('CONFLICT', 'preferences changed; reload before saving', unchanged)
     if (uiPreferenceOwner(await ports.open(request)).kind !== owner.kind) return fail('FORBIDDEN', 'personal preference authority changed; sign in again', unchanged)
-    next = { schema: 1, surface: authority.surface, owner, ...values, onboardingDismissed: values.onboardingDismissed || current.onboardingDismissed, updatedAt: (ports.now ?? (() => new Date()))().toISOString() }
+    const preservedTimeZone = values.timeZone !== undefined ? values.timeZone : current.timeZone
+    next = { schema: 1, surface: authority.surface, owner, ...values, ...(preservedTimeZone !== null ? { timeZone: preservedTimeZone } : {}), onboardingDismissed: values.onboardingDismissed || current.onboardingDismissed, updatedAt: (ports.now ?? (() => new Date()))().toISOString() }
     await lease.assertFencingToken()
     await atomicWriteJson(path, next, 0o640, () => lease.assertFencingToken())
   } finally { await lease.release() }

@@ -28,21 +28,17 @@ msgid "API & CLI"
 msgstr "الواجهة البرمجية وسطر الأوامر"
 
 #. catalog.tool.api-shell.name
+#. catalog.tool.xwhm-api-shell.name
 msgid "API Shell"
 msgstr "واجهة أوامر API"
-
-#. catalog.tool.xwhm-api-shell.name
-msgctxt "catalog.tool.xwhm-api-shell.name"
-msgid "API Shell"
-msgstr "واجهة تجربة API"
 
 #. catalog.tool.xwhm-api-tokens.name
 msgid "API Tokens"
 msgstr "رموز الوصول البرمجي"
 
 #. nav.page.xpanel.api-shell.name
-msgid "API shell"
-msgstr "وحدة تحكم API"
+msgid "API explorer"
+msgstr "مستكشف API"
 
 #. nav.page.xwhm.api-tokens.name
 msgid "API tokens"
@@ -109,8 +105,9 @@ msgid "Account isolation"
 msgstr "عزل الحسابات"
 
 #. nav.page.xpanel.account-preferences.name
-msgid "Account preferences"
-msgstr "تفضيلات الحساب"
+#. catalog.group.preferences.name nav.page.xmail.preferences.name nav.section.xpanel.preferences.name
+msgid "Preferences"
+msgstr "التفضيلات"
 
 #. catalog.tool.account-repair.name
 msgid "Account repair"
@@ -309,21 +306,17 @@ msgid "Backup destinations"
 msgstr "وجهات النسخ الاحتياطي"
 
 #. nav.page.xwhm.backups.name
-msgid "Backups"
-msgstr "النسخ الاحتياطية"
+msgid "Server backups"
+msgstr "النسخ الاحتياطي للخادم"
 
 #. nav.section.xwhm.backups.name
 msgid "Backups & transfers"
 msgstr "النسخ الاحتياطي والنقل"
 
 #. catalog.tool.bandwidth.name
+#. nav.page.xwhm.bandwidth.name
 msgid "Bandwidth"
 msgstr "استهلاك النطاق الترددي"
-
-#. nav.page.xwhm.bandwidth.name
-msgctxt "nav.page.xwhm.bandwidth.name"
-msgid "Bandwidth"
-msgstr "النطاق الترددي"
 
 #. catalog.tool.basic-server-setup.name
 msgid "Basic Server Setup"
@@ -358,17 +351,13 @@ msgid "Calendars & address books"
 msgstr "التقويمات ودفاتر العناوين"
 
 #. nav.page.xpanel.calendars-contacts.name
-msgid "Calendars & contacts"
+msgid "Calendars and contacts"
 msgstr "التقويمات وجهات الاتصال"
 
 #. catalog.tool.calendars-contacts-config.name
+#. catalog.tool.webmail-dav-config.name
 msgid "Calendars and Contacts Configuration"
 msgstr "إعداد التقويمات وجهات الاتصال"
-
-#. catalog.tool.webmail-dav-config.name
-msgctxt "catalog.tool.webmail-dav-config.name"
-msgid "Calendars and Contacts Configuration"
-msgstr "إعداد مزامنة التقويم وجهات الاتصال"
 
 #. catalog.tool.calendars-contacts-management.name catalog.tool.webmail-dav-collections.name
 msgid "Calendars and Contacts Management"
@@ -459,9 +448,8 @@ msgid "Composer"
 msgstr "Composer"
 
 #. nav.page.xwhm.composer.name
-msgctxt "nav.page.xwhm.composer.name"
-msgid "Composer"
-msgstr "إدارة Composer"
+msgid "Composer diagnostics"
+msgstr "تشخيص Composer"
 
 #. catalog.tool.tweak-compression.name
 msgid "Compression Settings"
@@ -756,8 +744,8 @@ msgid "Delete a Package"
 msgstr "حذف باقة"
 
 #. nav.page.xpanel.deliverability.name
-msgid "Deliverability & routing"
-msgstr "قابلية التسليم وتوجيه البريد"
+msgid "Deliverability"
+msgstr "موثوقية التسليم"
 
 #. nav.page.xwhm.delivery-reports.name
 msgid "Delivery reports"
@@ -808,13 +796,9 @@ msgid "Disk Usage"
 msgstr "استخدام القرص"
 
 #. nav.page.xmail.disk-usage.name
+#. nav.page.xwhm.disk-usage.name
 msgid "Disk usage"
 msgstr "مساحة البريد"
-
-#. nav.page.xwhm.disk-usage.name
-msgctxt "nav.page.xwhm.disk-usage.name"
-msgid "Disk usage"
-msgstr "استخدام القرص"
 
 #. catalog.tool.tweak-display.name
 msgid "Display Settings"
@@ -850,7 +834,7 @@ msgstr "النطاقات"
 
 #. nav.section.xwhm.domains.name
 msgid "Domains, DNS & SSL"
-msgstr "النطاقات وDNS وSSL"
+msgstr "النطاقات و DNS و SSL"
 
 #. catalog.tool.dynamic-dns.name nav.page.xpanel.dynamic-dns.name
 msgid "Dynamic DNS"
@@ -929,8 +913,8 @@ msgid "Enable DKIM and SPF for All"
 msgstr "تفعيل DKIM وSPF لجميع النطاقات"
 
 #. nav.page.xpanel.encryption.name
-msgid "Encryption"
-msgstr "التشفير (GnuPG)"
+msgid "Email encryption"
+msgstr "تشفير البريد الإلكتروني"
 
 #. catalog.tool.email-encryption.name
 msgid "Encryption (GnuPG Keys)"
@@ -1105,17 +1089,10 @@ msgid "Force Password Change"
 msgstr "فرض تغيير كلمة المرور"
 
 #. catalog.tool.forwarders.name
+#. nav.page.xmail.forwarders.name
+#. nav.page.xpanel.forwarders.name
 msgid "Forwarders"
 msgstr "إعادة توجيه البريد"
-
-#. nav.page.xmail.forwarders.name
-msgctxt "nav.page.xmail.forwarders.name"
-msgid "Forwarders"
-msgstr "تحويل البريد"
-
-#. nav.page.xpanel.forwarders.name
-msgid "Forwarders & autoresponders"
-msgstr "التحويل والردود التلقائية"
 
 #. nav.section.xpanel.general.name
 msgid "General"
@@ -1322,17 +1299,13 @@ msgid "Install and Manage SSL for Sites"
 msgstr "تثبيت SSL للمواقع"
 
 #. nav.page.xwhm.install-ssl.name
-msgid "Install certificate"
+msgid "Install a certificate"
 msgstr "تثبيت شهادة"
 
 #. catalog.tool.installatron.name
+#. catalog.tool.xwhm-installatron.name
 msgid "Installatron"
 msgstr "مثبّت Installatron"
-
-#. catalog.tool.xwhm-installatron.name
-msgctxt "catalog.tool.xwhm-installatron.name"
-msgid "Installatron"
-msgstr "Installatron"
 
 #. catalog.tool.site-software-instances.name
 msgid "Installed Site Software"
@@ -1355,8 +1328,8 @@ msgid "Intrusion detection"
 msgstr "كشف التسلل"
 
 #. nav.page.xpanel.issue-certificate.name
-msgid "Issue certificate"
-msgstr "إصدار شهادة"
+msgid "Certificate wizard"
+msgstr "معالج الشهادات"
 
 #. catalog.tool.aapanel-java-project.name
 msgid "Java Projects"
@@ -1635,8 +1608,8 @@ msgid "Manage Team"
 msgstr "إدارة الفريق"
 
 #. nav.page.xpanel.manage-team.name
-msgid "Manage team"
-msgstr "إدارة الفريق"
+msgid "Account team"
+msgstr "فريق الحساب"
 
 #. catalog.tool.manage-domain.name
 msgid "Manage the Domain"
@@ -1723,24 +1696,24 @@ msgid "Monitoring"
 msgstr "المراقبة"
 
 #. nav.page.xwhm.dns-more.name
-msgid "More DNS tools"
-msgstr "أدوات DNS إضافية"
+msgid "DNS diagnostics & TTL"
+msgstr "تشخيص DNS ومدة التخزين TTL"
 
 #. nav.page.xmail.mail-later.name
-msgid "More mail tools"
-msgstr "أدوات بريد إضافية"
+msgid "Mailbox utilities"
+msgstr "أدوات صندوق البريد"
 
 #. nav.page.xwhm.resellers-more.name
-msgid "More reseller tools"
-msgstr "أدوات الموزعين الإضافية"
+msgid "Reseller usage & mail"
+msgstr "استهلاك ومراسلة الموزعين"
 
 #. nav.page.xwhm.restore-more.name
-msgid "More restore tools"
-msgstr "أدوات استعادة إضافية"
+msgid "Mail & partial restore"
+msgstr "استعادة البريد والاستعادة الجزئية"
 
 #. nav.page.xwhm.services-more.name
-msgid "More service tools"
-msgstr "خدمات إضافية"
+msgid "Service manager & watchdog"
+msgstr "إدارة الخدمات والمراقب التلقائي"
 
 #. catalog.group.whm-multi-account-functions.name
 msgid "Multi Account Functions"
@@ -1879,8 +1852,8 @@ msgid "Overview"
 msgstr "نظرة عامة"
 
 #. nav.page.xpanel.php.name nav.page.xwhm.php.name
-msgid "PHP"
-msgstr "PHP"
+msgid "PHP versions and handlers"
+msgstr "إصدارات PHP والمعالجات"
 
 #. catalog.tool.php-ini-editor.name
 msgid "PHP INI Editor"
@@ -2023,7 +1996,7 @@ msgid "Performance Benchmark"
 msgstr "اختبار الأداء"
 
 #. nav.page.xwhm.performance-benchmark.name
-msgid "Performance benchmark"
+msgid "Benchmark"
 msgstr "اختبار الأداء"
 
 #. nav.page.xwhm.performance-history.name
@@ -2081,10 +2054,6 @@ msgstr "إعداد PostgreSQL"
 #. nav.page.xpanel.postgresql.name
 msgid "PostgreSQL databases"
 msgstr "قواعد بيانات PostgreSQL"
-
-#. catalog.group.preferences.name nav.page.xmail.preferences.name nav.section.xpanel.preferences.name
-msgid "Preferences"
-msgstr "التفضيلات"
 
 #. catalog.tool.process-manager.name
 msgid "Process Manager"
@@ -2463,17 +2432,10 @@ msgid "SSL Storage"
 msgstr "مخزن SSL"
 
 #. nav.page.xwhm.ssl-certificates.name
-msgid "SSL certificates"
-msgstr "شهادات SSL"
-
 #. catalog.group.whm-ssl-tls.name
+#. nav.page.xpanel.ssl.name
 msgid "SSL/TLS"
 msgstr "شهادات SSL/TLS"
-
-#. nav.page.xpanel.ssl.name
-msgctxt "nav.page.xpanel.ssl.name"
-msgid "SSL/TLS"
-msgstr "SSL/TLS"
 
 #. catalog.tool.ssl-tls-status.name
 msgid "SSL/TLS Status"
@@ -2652,8 +2614,8 @@ msgid "Set Zone TTL"
 msgstr "ضبط مدة بقاء المناطق"
 
 #. nav.page.xwhm.setup.name
-msgid "Setup & settings"
-msgstr "التهيئة والإعدادات"
+msgid "Set up this server"
+msgstr "إعداد هذا الخادم"
 
 #. catalog.tool.fork-bomb-protection.name
 msgid "Shell Fork Bomb Protection"
@@ -2668,8 +2630,8 @@ msgid "Show Reseller Accounts"
 msgstr "عرض حسابات الموزعين"
 
 #. nav.page.xwhm.sign-in.name
-msgid "Sign-in & 2FA"
-msgstr "تسجيل الدخول والتحقق بخطوتين"
+msgid "Password and authenticator"
+msgstr "كلمة المرور والمصادقة الثنائية"
 
 #. catalog.tool.aapanel-site-config-editor.name
 msgid "Site Config File"
@@ -2716,13 +2678,9 @@ msgid "Site WAF"
 msgstr "جدار حماية تطبيقات الويب"
 
 #. catalog.tool.account-health-overview.name
+#. nav.page.xpanel.site-health.name
 msgid "Site health"
 msgstr "صحة الموقع"
-
-#. nav.page.xpanel.site-health.name
-msgctxt "nav.page.xpanel.site-health.name"
-msgid "Site health"
-msgstr "صحة المواقع"
 
 #. nav.page.xpanel.site-publisher.name
 msgid "Site publisher"
@@ -2733,8 +2691,8 @@ msgid "Site settings"
 msgstr "إعدادات الموقع"
 
 #. nav.page.xwhm.site-software.name
-msgid "Site software"
-msgstr "برمجيات المواقع"
+msgid "Catalog settings"
+msgstr "إعدادات الدليل"
 
 #. catalog.tool.sitejet-builder.name
 msgid "Sitejet Builder"
@@ -3057,8 +3015,8 @@ msgid "User Panel Plugin Generator"
 msgstr "مولد إضافات لوحة المستخدم"
 
 #. nav.page.xpanel.user-manager.name
-msgid "User manager"
-msgstr "مدير المستخدمين"
+msgid "Service users"
+msgstr "مستخدمو الخدمات"
 
 #. catalog.tool.aapanel-bind-account.name
 msgid "Vendor Account Binding"
@@ -3113,13 +3071,9 @@ msgid "WHMCS"
 msgstr "WHMCS"
 
 #. catalog.tool.aapanel-wp-toolkit.name catalog.tool.wp-toolkit.name
+#. catalog.tool.xwhm-wp-toolkit.name
 msgid "WP Toolkit"
 msgstr "أدوات ووردبريس"
-
-#. catalog.tool.xwhm-wp-toolkit.name
-msgctxt "catalog.tool.xwhm-wp-toolkit.name"
-msgid "WP Toolkit"
-msgstr "أداة ووردبريس"
 
 #. catalog.tool.waf-settings.name
 msgid "Web Application Firewall Settings"
@@ -3270,41 +3224,31 @@ msgctxt "nav.page.xpanel.home.keywords"
 msgid "keywords"
 msgstr "الرئيسية, لوحة المعلومات"
 
-#. Extra search keywords for this page in the target language, comma separated
-msgctxt "nav.page.xpanel.resources.keywords"
-msgid "keywords"
-msgstr "استهلاك الموارد"
-
-#. Extra search keywords for this page in the target language, comma separated
-msgctxt "nav.page.xpanel.site-health.keywords"
-msgid "keywords"
-msgstr "فحص الصحة"
-
-#. Extra search keywords for this page in the target language, comma separated
-msgctxt "nav.page.xpanel.spam-quarantine.keywords"
-msgid "keywords"
-msgstr "حجر"
-
-#. Extra search keywords for this page in the target language, comma separated
-msgctxt "nav.page.xpanel.file-manager.keywords"
-msgid "keywords"
-msgstr "إدارة الملفات"
-
-#. Extra search keywords for this page in the target language, comma separated
-msgctxt "nav.page.xpanel.trash.keywords"
-msgid "keywords"
-msgstr "سلة"
-
-#. Extra search keywords for this page in the target language, comma separated
-msgctxt "nav.page.xpanel.language.keywords"
-msgid "keywords"
-msgstr "العربية, اللغة"
-
-#. Extra search keywords for this page in the target language, comma separated
-msgctxt "nav.page.xwhm.file-sharing.keywords"
-msgid "keywords"
-msgstr "مشاركة الملفات"
-
 msgctxt "catalog.tool.domain-htaccess.summary"
 msgid "Read, validate, save and restore the .htaccess file of an owned Apache site through confined account file I/O and protected candidate validation."
 msgstr "قراءة ملف .htaccess لموقع Apache مملوك والتحقق منه وحفظه واستعادة إصداراته، عبر عمليات ملفات محصورة بهوية الحساب والتحقق المحمي من النسخة المقترحة."
+
+#. nav.page.xpanel.app-installer.name
+msgid "App catalog"
+msgstr "دليل التطبيقات"
+
+#. nav.page.xpanel.backup.name
+msgid "Backup wizard"
+msgstr "معالج النسخ الاحتياطي"
+
+#. nav.page.xwhm.outbound-spam.name
+msgid "Outbound mail routing"
+msgstr "توجيه البريد الصادر"
+
+#. nav.page.xpanel.php.name
+msgid "PHP"
+msgstr "PHP"
+
+#. nav.page.xwhm.dashboard.name
+msgid "Server dashboard"
+msgstr "لوحة تحكم الخادم"
+
+#. nav.page.xpanel.logs.name
+msgid "Site logs"
+msgstr "سجلات الموقع"
+

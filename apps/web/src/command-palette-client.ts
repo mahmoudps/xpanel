@@ -131,7 +131,7 @@ export const COMMAND_PALETTE_CLIENT_FUNCTIONS = String.raw`
     var empty = modal.querySelector('[data-cmdk-empty]');
     var status = modal.querySelector('[data-cmdk-status]');
     if (!input || !results || !empty || !status) return;
-    var items = Array.prototype.map.call(results.querySelectorAll('a[data-cmdk-item]'), function (link) {
+    var items = Array.prototype.map.call(results.querySelectorAll('[data-cmdk-item]'), function (link) {
       return { link: link, row: link.closest('[data-cmdk-row]'), kind: link.getAttribute('data-cmdk-kind') || 'page', search: normalizeCommandSearch(link.getAttribute('data-cmdk-search-text') || link.textContent) };
     }).filter(function (item) { return item.row; });
     var surface = modal.getAttribute('data-cmdk-surface') || 'workspace';
@@ -144,10 +144,23 @@ export const COMMAND_PALETTE_CLIENT_FUNCTIONS = String.raw`
     });
     input.addEventListener('input', filterCommandPalette);
     results.addEventListener('pointermove', function (event) {
-      var link = event.target.closest ? event.target.closest('a[data-cmdk-item]') : null;
+      var link = event.target.closest ? event.target.closest('[data-cmdk-item]') : null;
       var index = commandPalette.matches.findIndex(function (item) { return item.link === link; });
       if (index >= 0 && index !== commandPalette.activeIndex) selectCommandResult(index, false);
     });
+    function runQuickAction(actionName) {
+      if (actionName === 'toggle-theme') {
+        var themeLink = document.querySelector('[data-theme-toggle]');
+        if (themeLink) themeLink.click();
+      } else if (actionName === 'toggle-locale') {
+        var langLink = document.querySelector('[data-lang-switch]');
+        if (langLink) langLink.click();
+      } else if (actionName === 'toggle-sidebar') {
+        if (typeof window.__xpanelToggleSidebar === 'function') window.__xpanelToggleSidebar();
+      } else if (actionName === 'refresh-page') {
+        window.location.reload();
+      }
+    }
     modal.addEventListener('click', function (event) {
       var scope = event.target.closest ? event.target.closest('[data-cmdk-scope]') : null;
       if (scope) {
@@ -165,6 +178,14 @@ export const COMMAND_PALETTE_CLIENT_FUNCTIONS = String.raw`
         else commandPalette.history.favorites = commandPalette.history.favorites.concat(path).slice(-12);
         saveCommandHistory(commandPalette); renderCommandHistory(commandPalette);
         document.dispatchEvent(new CustomEvent('xpanel:favorites-changed', { detail: commandPalette.history.favorites.slice() }));
+        return;
+      }
+      var actionBtn = event.target.closest ? event.target.closest('button[data-cmdk-action]') : null;
+      if (actionBtn && modal.contains(actionBtn)) {
+        event.preventDefault();
+        var actionName = actionBtn.getAttribute('data-cmdk-action') || '';
+        if (activeOverlay && activeOverlay.element === modal) closeActiveOverlay(true, false, true);
+        runQuickAction(actionName);
         return;
       }
       var link = event.target.closest ? event.target.closest('a[data-cmdk-item], a[data-cmdk-history-page]') : null;
@@ -188,6 +209,10 @@ export const COMMAND_PALETTE_CLIENT_FUNCTIONS = String.raw`
       event.preventDefault();
       var selected = palette.matches[palette.activeIndex];
       if (selected) {
+        if (selected.link.hasAttribute('data-cmdk-action')) {
+          selected.link.click();
+          return true;
+        }
         var page = commandPagePath(selected);
         if (page) rememberCommandPage(palette, page);
         if (event.ctrlKey || event.metaKey) {
