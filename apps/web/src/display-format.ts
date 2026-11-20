@@ -159,3 +159,29 @@ export function formatBytes(bytes: number): string {
   return formatAsciiBytes(bytes)
 }
 
+/**
+ * Formats an elapsed duration in seconds uniformly across all surfaces (`13d 23h`, `4h 12m`, `18m`, `45s`),
+ * using ASCII digits and never dumping raw large second counts like `522233 seconds`.
+ */
+export function formatDuration(totalSeconds: number): string {
+  if (!Number.isFinite(totalSeconds) || totalSeconds < 0) return '—'
+  const secs = Math.floor(totalSeconds)
+  const days = Math.floor(secs / 86400)
+  const hours = Math.floor((secs % 86400) / 3600)
+  const mins = Math.floor((secs % 3600) / 60)
+  const rem = secs % 60
+  if (days > 0) return hours > 0 ? `${days}d ${hours}h` : `${days}d`
+  if (hours > 0) return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`
+  if (mins > 0) return rem > 0 ? `${mins}m ${rem}s` : `${mins}m`
+  return `${rem}s`
+}
+
+/** Formats a MiB quota uniformly via binary IEC units (`10240 MiB` -> `10.0 GiB`). */
+export function formatQuotaMib(mib: number): string {
+  if (!Number.isFinite(mib) || mib < 0) return '—'
+  return formatAsciiBytes(mib * 1024 * 1024)
+}
+
+export const DURATION_FORMAT_BINDING = formatDuration.toString()
+
+

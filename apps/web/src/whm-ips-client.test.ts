@@ -3,7 +3,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ServerIpEntry } from '@xpanel/core'
 import { renderWhmSurface } from './surfaces/xwhm.ts'
-import { BROWSER_REALTIME_SCRIPT } from './ws-client.ts'
+import { allRouteClientChunkSources } from './route-client-chunks.ts'
 import { readWhmIpPool, WHM_IPS_CLIENT_BINDING, whmIpDraft } from './whm-ips-client.ts'
 import { renderV2WhmServerIps } from './themes/v2/pages/xwhm/server/ips.ts'
 import { translator } from './i18n.ts'
@@ -60,7 +60,7 @@ describe('IP pool binding', () => {
     expect($<HTMLButtonElement>('[data-add-ip-form] button[type="submit"]').disabled).toBe(true)
   })
   it('is registered with the page client and keeps controls disabled without root', async () => {
-    expect(BROWSER_REALTIME_SCRIPT).toContain(WHM_IPS_CLIENT_BINDING)
+    expect(allRouteClientChunkSources()).toContain(WHM_IPS_CLIENT_BINDING)
     boot(vi.fn<Send>(async () => ({ ips: [] })), undefined, false); await tick()
     expect($<HTMLButtonElement>('[data-add-ip-form] button[type="submit"]').disabled).toBe(true)
     expect($('[data-add-ip-status]').dataset.state).toBe('unavailable')

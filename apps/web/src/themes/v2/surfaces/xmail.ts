@@ -29,7 +29,7 @@ export function createV2MailSurface(project: V2MailProjector, unavailable: UiThe
       const values = new URLSearchParams({ lang: locale, theme: scheme, ...(view.kind === 'inbox' ? { folder: view.folder } : view.kind === 'workspace' && view.route === '/mail/search' ? { folder: view.activeFolder } : {}), ...changes })
       return view.route + '?' + values.toString()
     }
-    const breadcrumb = view.kind === 'workspace' ? '' : `<nav class="v2-crumbs" aria-label="${escapeHtml(t('Breadcrumb'))}"><ol><li><a href="/mail/inbox">xMail</a></li><li><span aria-current="page">${escapeHtml(view.title)}</span></li></ol><code dir="ltr">${escapeHtml(view.route)}</code></nav>`
+    const breadcrumb = view.kind === 'workspace' ? '' : `<nav class="v2-crumbs" aria-label="${escapeHtml(t('Breadcrumb'))}"><ol><li><a href="/mail/inbox">xMail</a></li><li><span aria-current="page">${escapeHtml(view.title)}</span></li></ol></nav>`
     const content = view.kind === 'inbox' ? renderV2MailInbox(t, view) : view.kind === 'compose' ? renderV2MailCompose(t, view)
       : renderV2MailWorkspace({ ...view, locale, ...(view.route === '/mail/settings/security' ? { securityHtml: V2_SECURITY_SLOT } : {}) })
     if (content === undefined) throw new Error('v2_mail_workspace_renderer_missing')

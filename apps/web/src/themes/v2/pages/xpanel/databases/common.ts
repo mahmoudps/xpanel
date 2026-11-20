@@ -51,8 +51,8 @@ export function databaseContext(props: DatabasePageProps, authority: DatabasePag
 export const technical = (value: string | number): string =>
   `<bdi dir="ltr" class="v2-mono">${escapeHtml(normalizeAsciiDigits(value))}</bdi>`
 
-export const dbButton = (label: string, hooks?: HookAttributes, options: { disabled?: boolean; primary?: boolean; submit?: boolean } = {}): string =>
-  `<button type="${options.submit ? 'submit' : 'button'}" class="v2-btn${options.primary ? ' v2-btn--primary' : ''}"${hookAttrs(hooks)}${options.disabled ? ' disabled' : ''}>${escapeHtml(label)}</button>`
+export const dbButton = (label: string, hooks?: HookAttributes, options: { disabled?: boolean; primary?: boolean; submit?: boolean; ariaControls?: string; ariaExpanded?: boolean } = {}): string =>
+  `<button type="${options.submit ? 'submit' : 'button'}" class="v2-btn${options.primary ? ' v2-btn--primary' : ''}"${options.ariaControls ? ` aria-controls="${escapeHtml(options.ariaControls)}"` : ''}${options.ariaExpanded !== undefined ? ` aria-expanded="${options.ariaExpanded}"` : ''}${hookAttrs(hooks)}${options.disabled ? ' disabled' : ''}>${escapeHtml(label)}</button>`
 
 export const dbSelect = (selectHtml: string): string =>
   `<span class="v2-select">${selectHtml}${icon('chevDown', 16)}</span>`

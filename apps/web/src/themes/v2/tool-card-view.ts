@@ -45,7 +45,7 @@ const block = (t: Translate, cardId: string, item: ToolBlock, index: number): st
     case 'table': { const caption = `v2-${cardId}-table-${index}`; return `<div class="v2-tool-card__table" role="region" tabindex="0" aria-labelledby="${caption}"><table><caption id="${caption}" class="v2-sr">${escapeHtml(t(item.label))}</caption><thead><tr>${item.columns.map(name => `<th scope="col">${escapeHtml(t(name))}</th>`).join('')}</tr></thead><tbody${hooks(item.hooks)}><tr><td colspan="${item.columns.length}">${escapeHtml(t(item.empty))}</td></tr></tbody></table></div>` }
     case 'actions': return `<div class="v2-tool-card__actions">${item.buttons.map(button => `<button type="button" class="v2-btn${button.primary ? ' v2-btn--primary' : ''}${button.danger ? ' v2-btn--danger' : ''}"${hooks(button.hooks)} disabled>${escapeHtml(t(button.label))}</button>`).join('')}</div>`
     case 'status': return `<p role="status" data-state="unread"${hooks(item.hooks)}>${escapeHtml(t(item.text))}</p>`
-    case 'output': return `<pre class="v2-tool-card__output" tabindex="0" dir="ltr" aria-label="${escapeHtml(t(item.label))}"${hooks(item.hooks)}${item.hidden ? ' hidden' : ''}></pre>`
+    case 'output': return `<pre class="v2-tool-card__output" role="region" tabindex="0" dir="ltr" aria-label="${escapeHtml(t(item.label))}"${hooks(item.hooks)}${item.hidden ? ' hidden' : ''}></pre>`
     case 'tree': return `<div${hooks(item.hooks)} dir="ltr"></div>`
   }
 }

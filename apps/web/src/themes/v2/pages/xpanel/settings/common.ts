@@ -48,8 +48,8 @@ export const groups = (body: string): string => `<div class="v2-panel-settings__
 export const pair = (...columns: string[]): string => `<div class="v2-panel-settings__pair">${columns.join('')}</div>`
 export const split = (main: string, aside: string): string => `<div class="v2-panel-settings__split"><div class="v2-panel-settings__groups">${main}</div><aside class="v2-panel-settings__groups">${aside}</aside></div>`
 
-export const button = (label: string, hooks?: HookAttributes, disabled = true, primary = false): string =>
-  `<button type="button" class="v2-btn${primary ? ' v2-btn--primary' : ''}"${hookAttrs(hooks)}${disabled ? ' disabled' : ''}>${esc(label)}</button>`
+export const button = (label: string, hooks?: HookAttributes, disabled = true, primary = false, hidden = false): string =>
+  `<button type="button" class="v2-btn${primary ? ' v2-btn--primary' : ''}"${hookAttrs(hooks)}${disabled ? ' disabled' : ''}${hidden ? ' hidden' : ''}>${esc(label)}</button>`
 export const link = (label: string, href: string, hooks?: HookAttributes): string =>
   `<a class="v2-btn" href="${esc(href)}"${hookAttrs(hooks)}>${esc(label)}</a>`
 export const input = (id: string, name: string, type = 'text', extra = '', disabled = true): string =>

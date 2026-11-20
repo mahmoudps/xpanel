@@ -58,6 +58,8 @@ import { createLifecycleAccount } from './lifecycle-account-create.ts'
 import { createTransferExecution } from './lifecycle-transfer-execution.ts'
 import { handleConvertAddonRoute } from './acct-convert-addon.ts'
 import { handleComponentRestoreWorkspaceRoute } from './acct-restore-workspace.ts'
+import { evaluateAccountPreflight } from './account-preflight.ts'
+import { fetchAccountUsageObservation, readLiveAccountResources } from './account-resources-live.ts'
 import { handleStagingWorkspaceRoute } from './acct-staging-workspace.ts'
 import { handleTeamRoute, readSavedTeam, teamMemberPhase } from './acct-team-workspace.ts'
 import { handleTeamPasswordRoute, signInTeamMember, teamFileReader, teamMemberResolver, TEAM_PASSWORD_ROUTE } from './team-session.ts'
@@ -4229,6 +4231,32 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         const accountId = caller.principal.accountId
         const acc = await readRecoveredAccountProjection(() => deps.store.getAccount(accountId))
         return jsonResponse({ accounts: acc ? [acc] : [] })
+      }
+
+      if (method === 'GET' && pathname === '/api/accounts/preflight') {
+        const caller = await requireCaller(req)
+        const result = await evaluateAccountPreflight(caller, new URL(req.url).searchParams, {
+          store: deps.store,
+          findPrincipalByUsername: username => findPrincipalByUsername(deps.db, username),
+          resolveReseller: resolveResellerForCaller,
+        })
+        return jsonResponse(result)
+      }
+
+      if (method === 'GET' && pathname === '/api/account/resources/live') {
+        const caller = await requireCaller(req)
+        const snapshot = await readLiveAccountResources(caller, new URL(req.url), {
+          getAccount: accountId => readRecoveredAccountProjection(() => deps.store.getAccount(accountId)),
+          getPlan: planId => deps.store.getPlan(planId),
+          listDomains: filter => deps.store.listDomains(filter),
+          listServiceUsers: accountId => deps.store.listServiceUsers(accountId),
+          listDatabases: accountId => deps.store.listDatabases(accountId),
+          readUsage: (principalId, username) =>
+            fetchAccountUsageObservation(deps.agentApp && deps.agentToken ? { fetch: deps.agentApp.fetch, token: deps.agentToken } : null, principalId, username),
+          assertCanAccessAccount: (c, t, action) => assertCanAccessAccount(c, t, action),
+          assertAccountFeatures: (c, t, features) => assertAccountFeatures(deps.store, c, t, features),
+        })
+        return jsonResponse(snapshot)
       }
 
       if (pathname === '/api/account/preferences') {
