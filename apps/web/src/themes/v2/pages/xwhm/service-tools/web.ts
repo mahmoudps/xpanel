@@ -39,7 +39,7 @@ export function renderV2WhmWebServer(input: WhmDataPageInput): string {
     proxy_set_header Proxy "";
 }` : t(msgctxt('theme:v2', 'Saved settings have not been read.'))
   const proxy = section('web-proxy', t(msgctxt('theme:v2', 'Proxy configuration reference')), note(t(msgctxt('theme:v2', 'Illustrative proxy block using the page-load saved HTTP port. This is not a read of a generated file or a verified listener.')))
-    + `<pre class="v2-whm-web__code v2-mono" tabindex="0" aria-labelledby="v2-whm-data-web-proxy" dir="ltr" data-whm-web-proxy-reference data-state="${saved ? 'saved' : 'unread'}"><code>${esc(proxyCode)}</code></pre>`
+    + `<pre class="v2-whm-web__code v2-mono" role="region" tabindex="0" aria-labelledby="v2-whm-data-web-proxy" dir="ltr" data-whm-web-proxy-reference data-state="${saved ? 'saved' : 'unread'}"><code>${esc(proxyCode)}</code></pre>`
     + note(t(msgctxt('theme:v2', 'Forwarded client headers are overwritten at the edge. The complete generated configuration includes additional guarded directives.'))), { 'data-whm-detail-section': 'web-proxy', 'data-whm-web-snapshot': 'page-load' })
   const snapshotRows: readonly (readonly [string, string | number | boolean | undefined])[] = [
     ['engine', saved?.engine], ['apacheMpm', saved?.apacheMpm], ['backendPort', saved?.backendPort], ['backendTlsPort', saved?.backendTlsPort],

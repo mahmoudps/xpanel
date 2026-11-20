@@ -96,11 +96,11 @@ export function renderV2PanelResources(props: PanelPageProps, authority?: Surfac
   const meters = panelHomeMeters(props, t)
   const unavailable = t('Unavailable')
   const kpis = [
-    { label: t('CPU'), value: '—', unit: panelLimit(plan?.resources.cpuPercent, t, '%'), icon: 'cpu' as const, note: t('Not reported by the agent') },
+    { label: t('CPU'), value: '—', unit: `/ ${panelLimit(plan?.resources.cpuPercent, t, '%')}`, icon: 'cpu' as const, note: t('Not reported by the agent') },
     { label: t('Memory'), value: panelCount(props.usage?.memoryBytes) === undefined ? '—' : formatAsciiBytes(props.usage!.memoryBytes!), icon: 'memory' as const, note: meters[3]!.valueText },
     { label: t('Disk'), value: panelCount(props.usage?.diskBytes) === undefined ? '—' : formatAsciiBytes(props.usage!.diskBytes!), icon: 'disk' as const, note: meters[0]!.valueText },
     { label: t('Processes'), value: panelCount(props.usage?.processCount) === undefined ? '—' : String(props.usage!.processCount), icon: 'activity' as const, note: meters[4]!.valueText },
-    { label: t('Disk write rate'), value: '—', unit: panelRate(plan?.resources.ioWriteBps, t), icon: 'activity' as const, note: t('Not reported by the agent') },
+    { label: t('Disk write rate'), value: '—', unit: `/ ${panelRate(plan?.resources.ioWriteBps, t)}`, icon: 'activity' as const, note: t('Not reported by the agent') },
   ]
   const rows = limitRows(props, t)
   const limitTable = card({ title: t(msgctxt('theme:v2', 'Plan, applied limit and usage')), titleId: 'v2-resource-limits-title', flush: true,
@@ -153,7 +153,7 @@ export const V2_PANEL_RESOURCES_CSS = `.v2-panel-resources{gap:var(--space-4)}
 .v2-panel-resources .v2-resource-service>.v2-card{flex:1 1 auto}
 .v2-panel-resources .v2-resource-ranges{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-1)}
 .v2-panel-resources :is(.v2-btn,button,summary){min-inline-size:44px;min-block-size:44px;transition-property:background-color,border-color,color,box-shadow,opacity,transform;transition-duration:140ms;transition-timing-function:ease-out}
-.v2-panel-resources .v2-resource-plot{display:grid;align-content:center;justify-items:center;gap:var(--space-2);min-block-size:140px;padding:var(--space-3);border:1px dashed var(--line-strong);border-radius:12px;background:var(--subtle);color:var(--muted);font-size:13px;line-height:1.6;text-align:center}
+.v2-panel-resources .v2-resource-plot{display:grid;align-content:center;justify-items:center;gap:var(--space-2);min-block-size:140px;padding:var(--space-3);border:1px solid var(--line);border-radius:12px;background:var(--subtle);color:var(--muted);font-size:13px;line-height:1.6;text-align:center}
 .v2-panel-resources .v2-resource-plot>p{max-inline-size:52ch}
 .v2-panel-resources .v2-resource-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-2);margin:0}
 .v2-panel-resources .v2-resource-stats>div{display:flex;flex-direction:column;gap:var(--space-1);min-inline-size:0;text-align:start;overflow-wrap:anywhere}
