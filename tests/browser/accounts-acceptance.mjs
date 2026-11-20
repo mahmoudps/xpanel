@@ -56,8 +56,28 @@ async function fixture() {
     if (url.pathname.startsWith('/api/')) {
       res.setHeader('content-type', 'application/json')
       if (url.pathname === '/api/auth/me') { res.end(JSON.stringify({ csrfToken: 'synthetic-ui-fixture-csrf' })); return }
-      // The shell's personal reads are not part of the account request ledger.
+      // The shell's personal reads and read-only preflight are not part of the mutating account request ledger.
       if (['/api/auth/ui-preferences', '/api/admin/favorites', '/api/admin/notifications'].includes(url.pathname)) { res.statusCode = 404; res.end(JSON.stringify({ code: 'NOT_FOUND' })); return }
+      if (url.pathname === '/api/accounts/preflight' && req.method === 'GET') {
+        const user = (url.searchParams.get('username') ?? '').trim()
+        const domain = (url.searchParams.get('primaryDomain') ?? '').trim()
+        res.end(JSON.stringify({
+          checkedAt: '2026-10-23T00:00:00.000Z',
+          username: user ? { status: 'available', value: user, reason: null } : { status: 'empty', value: '', reason: null },
+          primaryDomain: domain ? { status: 'available', value: domain, reason: null } : { status: 'empty', value: '', reason: null },
+          capacity: { status: 'fits', ownerUsername: 'root', accountsAfter: 3, assignedDiskMbAfter: plan.resources.diskMb, limitsSummary: 'No reseller allocation cap', reason: null },
+          preview: {
+            linuxUser: user || null,
+            home: user ? '/home/' + user : null,
+            apacheVhost: domain ? domain + ' (Apache vhost)' : null,
+            nginxServer: domain ? domain + ' (Nginx server)' : null,
+            phpPool: user ? 'xpanel-php-fpm-' + user : null,
+            dnsZone: domain || null,
+            mailDomain: domain || null,
+          },
+        }))
+        return
+      }
       if (url.pathname === '/api/ips' && req.method === 'GET') {
         assert.equal(url.searchParams.get('view'), 'allocation')
         assert.equal(url.searchParams.get('planId'), plan.id)

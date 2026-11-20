@@ -106,6 +106,7 @@ export const entryPointAllowsApiRoute = (entryPoint: EntryPoint, pathname: strin
   if (pathname === '/api/account/web-stats') return method === 'GET' || method === 'PUT'
   if (/^\/api\/account\/web-stats\/webalizer\/https?\/[a-z0-9.-]{1,253}\/[a-z_0-9.]{1,40}$/.test(pathname)) return method === 'GET'
   if (pathname === '/api/account/site-health') return method === 'GET'
+  if (pathname === '/api/account/resources/live') return method === 'GET'
   if (pathname === '/api/account/web-disk' || pathname === '/api/account/calendars-contacts/connection' || pathname === '/api/account/calendars-contacts/connection/apple.mobileconfig') return method === 'GET'
   if (pathname === '/api/account/sec/waf') return method === 'GET' || method === 'PUT'
   if (pathname === '/api/account/ip-blocker' || pathname === '/api/account/edge-cache' || pathname === '/api/account/leech-protection') return method === 'GET' || method === 'POST'

@@ -122,7 +122,7 @@ describe('v2 page layouts', () => {
 
   it('build the page top and root hooks of every layout', () => {
     for (const html of [list(), settings({ kind: 'revision', bar: { pendingCount: 1, revision: 'r1', discard: {}, save: {} } }), custom('ready'), dashboard(), wizard(), log(), editor(true), matrix()]) {
-      expect(html).toMatch(/^<div class="v2-layout" data-[a-z-]+-workspace><header class="v2-page-head">/)
+      expect(html).toMatch(/^<div class="v2-layout" data-[a-z-]+-workspace><header class="v2-page-head"(?: data-route="[^"]+")?>/)
       expect(count(html, /<h1>/)).toBe(1)
       expect(html).toContain('<nav class="v2-crumbs" aria-label="Breadcrumb">')
     }

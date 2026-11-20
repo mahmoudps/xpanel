@@ -18,7 +18,7 @@ export function renderV2WhmResellerRecords(t: Translate, props: WhmSurfaceProps,
   const readable = ((authority.presentation !== 'read-only' && authority.canRead && props.capabilityUnavailable !== true) || whmStoredFacts(props, authority, ['reseller-center'], route)) && !!principal
     && canOpenRegisteredRoute(route, { ...props.visibility, principal, reseller: props.visibility?.reseller ?? props.activeReseller ?? undefined })
   const resellers = readable ? props.resellers?.filter(reseller => principal.kind === 'root' || reseller.id === principal.id) : undefined
-  const title = route === '/whm/resellers/more' ? t('More reseller tools') : t('IPs & nameservers')
+  const title = route === '/whm/resellers/more' ? t('Reseller usage & mail') : t('IPs & nameservers')
   const rows = (resellers ?? []).map(reseller => {
     const created = reseller.createdAt ? formatDisplayDateTime(reseller.createdAt) : '—'
     const lastSignIn = reseller.lastSignInAt === undefined ? escapeHtml(t('Not read'))

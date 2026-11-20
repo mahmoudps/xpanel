@@ -6,13 +6,17 @@ export interface KpiCardProps {
   label: string
   headingLevel?: 2 | 3
   value: string
+  /** Keeps the numeric display scale when a client will populate digits later. */
+  numeric?: boolean
   /** Unit or capacity after the value, such as "%" or "/ 10 GB". */
   unit?: string
+  unitHooks?: HookAttributes
+  alwaysRenderUnit?: boolean
   icon?: IconName
   /** Icon tile tone; status tones also color the meter bar. */
   tone?: Tone
   /** Quota bar, 0-100. The caller picks the tone from the product thresholds; the note says the state in words. */
-  meter?: { percent: number; tone?: Tone }
+  meter?: { percent: number; tone?: Tone; hidden?: boolean; fillHooks?: HookAttributes }
   /** Trend sparkline; `label` is its text summary for assistive technology. */
   spark?: { values: readonly number[]; label: string }
   note?: string
@@ -28,30 +32,33 @@ export function kpiCard(props: KpiCardProps): string {
   const h = `h${props.headingLevel ?? 3}`
   const tone = props.tone ?? 'info'
   const meter = props.meter
-    ? `<div class="v2-bar" aria-hidden="true"><span class="v2-bar__fill v2-bar--${props.meter.tone ?? 'info'}" style="inline-size:${clampPercent(props.meter.percent)}%"></span></div>` : ''
+    ? `<div class="v2-bar" aria-hidden="true"${props.meter.hidden ? ' hidden' : ''}><span class="v2-bar__fill v2-bar--${props.meter.tone ?? 'info'}"${hookAttrs(props.meter.fillHooks)} style="inline-size:${clampPercent(props.meter.percent)}%"></span></div>` : ''
   const spark = props.spark && props.spark.values.length > 1 ? (() => {
     const { area, line } = sparklinePaths(props.spark.values, 120, 28)
     return `<svg class="v2-kpi__spark" role="img" aria-label="${escapeHtml(props.spark.label)}" viewBox="0 0 120 28" preserveAspectRatio="none"><path d="${area}" fill="currentColor" opacity="0.12"/><path d="${line}" fill="none" stroke="currentColor" stroke-width="1.75" vector-effect="non-scaling-stroke" stroke-linejoin="round"/></svg>`
   })() : ''
+  const unit = props.unit || props.alwaysRenderUnit ? `<span class="v2-kpi__unit"${hookAttrs(props.unitHooks)}>${escapeHtml(props.unit ?? '')}</span>` : ''
+  const textValue = !props.numeric && !/\d/.test(props.value)
   return `<article class="v2-kpi"${hookAttrs(props.hooks)}>
 <div class="v2-kpi__head"><${h}>${escapeHtml(props.label)}</${h}>${props.icon ? `<span class="v2-tile v2-tile--${tone}" aria-hidden="true">${icon(props.icon)}</span>` : ''}</div>
-<p class="v2-kpi__value${/\d/.test(props.value) ? '' : ' v2-kpi__value--text'} v2-num"><span${hookAttrs(props.valueHooks)}>${escapeHtml(props.value)}</span>${props.unit ? `<span class="v2-kpi__unit">${escapeHtml(props.unit)}</span>` : ''}</p>
+<p class="v2-kpi__value${textValue ? ' v2-kpi__value--text' : ''} v2-num"><span${hookAttrs(props.valueHooks)}>${escapeHtml(props.value)}</span>${unit}</p>
 ${meter}${spark}${props.note ? `<p class="v2-kpi__note v2-num${props.noteTone ? ` v2-text--${props.noteTone}` : ''}">${escapeHtml(props.note)}</p>` : ''}
 </article>`
 }
 
-export const KPI_CARD_CSS = `.v2-kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(200px,100%),1fr));align-items:stretch;gap:var(--space-2)}
-.v2-kpi{height:100%;display:flex;flex-direction:column;gap:12px;padding:min(20px,var(--v2-panel-padding));border-radius:var(--radius-card);background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow);min-width:0}
+export const KPI_CARD_CSS = `.v2-kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(190px,100%),1fr));align-items:stretch;gap:14px}
+.v2-kpi{height:100%;display:flex;flex-direction:column;gap:8px;padding:14px 16px;border-radius:var(--radius-card);background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow);min-width:0;transition:border-color .15s}
+.v2-kpi:hover{border-color:var(--accent-line)}
 .v2-kpi__head{display:flex;align-items:center;justify-content:space-between;gap:var(--space-1)}
-.v2-kpi__head>:is(h2,h3){font-size:13px;color:var(--muted)}
+.v2-kpi__head>:is(h2,h3){font-size:12px;font-weight:600;color:var(--muted)}
 .v2-kpi__value{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px;margin-block-end:auto}
 .v2-kpi__value>span{unicode-bidi:plaintext}
-.v2-kpi__value>:first-child{font-size:30px;line-height:1;font-weight:600;letter-spacing:-.02em}
-.v2-kpi__value--text>:first-child{font-size:20px;line-height:30px;font-weight:500;letter-spacing:0;color:var(--text-2)}
-.v2-kpi__unit{font-size:14px;color:var(--muted)}
-.v2-kpi__spark{display:block;width:100%;height:28px;color:var(--accent)}
-.v2-kpi__note{font-size:12px;line-height:1.45;color:var(--muted)}
-.v2-tile{flex:none;display:flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:var(--radius-control)}
+.v2-kpi__value>:first-child{font-size:26px;line-height:1.05;font-weight:700;letter-spacing:-.02em}
+.v2-kpi__value--text>:first-child{font-size:18px;line-height:26px;font-weight:600;letter-spacing:0;color:var(--text-2)}
+.v2-kpi__unit{font-size:13px;color:var(--muted)}
+.v2-kpi__spark{display:block;width:100%;height:26px;color:var(--accent)}
+.v2-kpi__note{font-size:12px;line-height:1.4;color:var(--muted)}
+.v2-tile{flex:none;display:flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:var(--radius-control)}
 .v2-tile--info{background:var(--accent-soft);color:var(--accent)}
 .v2-tile--ok{background:var(--ok-soft);color:var(--ok)}
 .v2-tile--warn{background:var(--warn-soft);color:var(--warn)}
@@ -59,6 +66,6 @@ export const KPI_CARD_CSS = `.v2-kpi-row{display:grid;grid-template-columns:repe
 .v2-tile--neutral{background:var(--sunken);color:var(--muted)}
 .v2-text--ok{color:var(--ok)}.v2-text--warn{color:var(--warn)}.v2-text--bad{color:var(--bad)}.v2-text--info{color:var(--accent)}.v2-text--neutral{color:var(--muted)}
 .v2-bar{height:6px;border-radius:3px;background:var(--sunken);overflow:hidden}
-.v2-bar__fill{display:block;height:100%;border-radius:3px}
+.v2-bar__fill{display:block;height:100%;border-radius:3px;transition:inline-size .25s ease-out}
 .v2-bar--info{background:var(--accent-fill)}.v2-bar--ok{background:var(--ok)}.v2-bar--warn{background:var(--warn)}.v2-bar--bad{background:var(--bad)}.v2-bar--neutral{background:var(--line-strong)}
 `

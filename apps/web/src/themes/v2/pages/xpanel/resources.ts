@@ -3,11 +3,12 @@ import type { Limit } from '@xpanel/core'
 import type { Translate } from '../../../../i18n.ts'
 import { card, kpiCard, notice, pageHeader, statusPill } from '../../components/index.ts'
 import { escapeHtml } from '../../html.ts'
-import { formatAsciiBytes } from '../../../../display-format.ts'
+import { formatAsciiBytes, formatDisplayDateTime } from '../../../../display-format.ts'
 import { v2Messages } from '../../messages.ts'
 import { panelCount, panelFact, panelHomeMeters, panelLimit, panelMib, panelRate, selectedPanelPlan, scopePrimaryPanelFacts, type PanelPageProps } from './home.ts'
 
 interface LimitRow {
+  key?: string
   group: 'slice' | 'account'
   name: string
   stored: string
@@ -25,38 +26,38 @@ function limitRows(props: PanelPageProps, t: Translate): LimitRow[] {
     return reading === undefined ? unknown : bytes ? formatAsciiBytes(reading) : String(reading)
   }
   const state = (value: unknown): LimitRow['state'] => panelCount(value) !== undefined ? 'measured' : props.usage === undefined ? 'unread' : 'unavailable'
-  const row = (name: string, limit: Limit | undefined, unit: string, value?: unknown, bytes = false): LimitRow => ({
-    group: 'slice', name: t(name), stored: unit === 'MiB' ? panelMib(limit, t) : unit === 'B/s' ? panelRate(limit, t) : panelLimit(limit, t, unit), applied: unread, used: measured(value, bytes), state: state(value),
+  const row = (name: string, limit: Limit | undefined, unit: string, value?: unknown, bytes = false, key?: string): LimitRow => ({
+    ...(key ? { key } : {}), group: 'slice', name: t(name), stored: unit === 'MiB' ? panelMib(limit, t) : unit === 'B/s' ? panelRate(limit, t) : panelLimit(limit, t, unit), applied: unread, used: measured(value, bytes), state: state(value),
   })
-  const bandwidth = row(msgid('Monthly bandwidth'), plan?.resources.bandwidthMbMonth, 'MiB', props.usage?.bandwidthMonth?.totalBytes, true)
+  const bandwidth = row(msgid('Monthly bandwidth'), plan?.resources.bandwidthMbMonth, 'MiB', props.usage?.bandwidthMonth?.totalBytes, true, 'bandwidth')
   if (panelCount(props.usage?.bandwidthMonth?.totalBytes) === undefined) {
     bandwidth.used = t('Not measured')
     bandwidth.state = 'unmeasured'
   }
   const rows = [
-    row(msgid('Disk space'), plan?.resources.diskMb, 'MiB', props.usage?.diskBytes, true),
+    row(msgid('Disk space'), plan?.resources.diskMb, 'MiB', props.usage?.diskBytes, true, 'disk'),
     bandwidth,
     row(msgid('Disk read rate'), plan?.resources.ioReadBps, 'B/s'),
     row(msgid('Disk write rate'), plan?.resources.ioWriteBps, 'B/s'),
     row(msgctxt('theme:v2', 'Read IOPS'), plan?.resources.ioReadIops, 'IOPS'),
     row(msgctxt('theme:v2', 'Write IOPS'), plan?.resources.ioWriteIops, 'IOPS'),
-    row(msgid('Memory'), plan?.resources.memoryMb, 'MiB', props.usage?.memoryBytes, true),
-    row(msgid('Processes'), plan?.resources.maxProcesses, '', props.usage?.processCount),
+    row(msgid('Memory'), plan?.resources.memoryMb, 'MiB', props.usage?.memoryBytes, true, 'memory'),
+    row(msgid('Processes'), plan?.resources.maxProcesses, '', props.usage?.processCount, false, 'processes'),
     row(msgid('CPU'), plan?.resources.cpuPercent, '%'),
   ]
   const account = props.account
   const domains = account ? props.domains?.filter(domain => domain.accountId === account.id && domain.kind === 'addon') : undefined
   const mailboxes = account ? props.serviceUsers?.filter(user => user.accountId === account.id && user.services.email) : undefined
   const databases = account ? props.databases?.filter(database => database.accountId === account.id && database.trashedAt === null) : undefined
-  const accountRows = [row(msgid('Addon domains'), plan?.caps.addonDomains, '', domains?.length),
-    row(msgid('Mailboxes'), plan?.caps.mailboxes, '', mailboxes?.length),
-    row(msgid('MariaDB databases'), plan?.caps.databases, '', databases?.filter(database => database.engine === 'mariadb').length)]
+  const accountRows = [row(msgid('Addon domains'), plan?.caps.addonDomains, '', domains?.length, false, 'addonDomains'),
+    row(msgid('Mailboxes'), plan?.caps.mailboxes, '', mailboxes?.length, false, 'mailboxes'),
+    row(msgid('MariaDB databases'), plan?.caps.databases, '', databases?.filter(database => database.engine === 'mariadb').length, false, 'mariadbDatabases')]
   return [...rows, ...accountRows.map(item => ({ ...item, group: 'account' as const }))]
 }
 
 function limitsTable(rows: readonly LimitRow[], t: Translate): string {
   const headings = [t('Resource'), t('Stored plan limit'), t(msgctxt('theme:v2', 'Applied limit')), t('State'), t('Current reading')]
-  const rowHtml = (row: LimitRow): string => `<tr data-resource-state="${row.state}"><th scope="row">${escapeHtml(row.name)}</th><td data-label="${escapeHtml(headings[1]!)}"><bdi dir="ltr">${escapeHtml(row.stored)}</bdi></td><td data-label="${escapeHtml(headings[2]!)}">${escapeHtml(row.applied)}</td><td>${statusPill({
+  const rowHtml = (row: LimitRow): string => `<tr data-resource-state="${row.state}"${row.key ? ` data-resource-row="${row.key}"` : ''}><th scope="row">${escapeHtml(row.name)}</th><td data-label="${escapeHtml(headings[1]!)}"><bdi dir="ltr">${escapeHtml(row.stored)}</bdi></td><td data-label="${escapeHtml(headings[2]!)}">${escapeHtml(row.applied)}</td><td>${statusPill({
     tone: row.state === 'measured' ? 'info' : 'neutral',
     label: t(row.state === 'measured' ? msgid('Measured') : row.state === 'unread' ? msgctxt('resources-board', 'Not read') : row.state === 'unmeasured' ? msgid('Not measured') : msgid('Unavailable')),
   })}</td><td><bdi dir="ltr" data-resource-value>${escapeHtml(row.used)}</bdi></td></tr>`
@@ -80,9 +81,12 @@ function historyPanel(t: Translate, title: string, titleId: string, message: str
 function observations(props: PanelPageProps, t: Translate): string {
   const verification = t(props.usage?.ioEnforced === true ? msgid('Verified for this sample')
     : props.usage?.ioEnforced === false ? msgid('Observed mismatch') : msgctxt('resources-board', 'Not read'))
+  const observedHtml = props.usageObservedAt
+    ? `<bdi dir="ltr" data-resource-observed-at><time datetime="${escapeHtml(props.usageObservedAt)}">${escapeHtml(formatDisplayDateTime(props.usageObservedAt))}</time></bdi>`
+    : `<span data-resource-observed-at>${escapeHtml(t('Not reported by the agent'))}</span>`
   return card({ title: t('Resource readings'), titleId: 'v2-resource-reading-title',
     description: t('Stored plan limits are desired configuration. Readings and IO verification are separate observations; no process or service readings are invented.'),
-    bodyHtml: `<dl class="v2-panel-facts">${panelFact(t('Plan'), selectedPanelPlan(props)?.name ?? t(msgctxt('resources-board', 'Not read')))}${panelFact(t('Reading state'), t(props.usage === undefined ? msgctxt('resources-board', 'Not read') : msgid('Account usage sample')))}${panelFact(t('Observed at'), t('Not reported by the agent'))}${panelFact(t('IO cap verification'), verification)}</dl>`,
+    bodyHtml: `<dl class="v2-panel-facts">${panelFact(t('Plan'), selectedPanelPlan(props)?.name ?? t(msgctxt('resources-board', 'Not read')))}<div><dt>${escapeHtml(t('Reading state'))}</dt><dd data-resource-reading-state>${escapeHtml(t(props.usage === undefined ? msgctxt('resources-board', 'Not read') : msgid('Account usage sample')))}</dd></div><div><dt>${escapeHtml(t('Observed at'))}</dt><dd>${observedHtml}</dd></div><div><dt>${escapeHtml(t('IO cap verification'))}</dt><dd data-resource-io-verification>${escapeHtml(verification)}</dd></div></dl>`,
   })
 }
 
@@ -95,12 +99,13 @@ export function renderV2PanelResources(props: PanelPageProps, authority?: Surfac
   const plan = selectedPanelPlan(props)
   const meters = panelHomeMeters(props, t)
   const unavailable = t('Unavailable')
+  const liveReader = Boolean(account && props.liveResourcesAvailable === true && authority?.presentation !== 'read-only')
   const kpis = [
-    { label: t('CPU'), value: '—', unit: panelLimit(plan?.resources.cpuPercent, t, '%'), icon: 'cpu' as const, note: t('Not reported by the agent') },
-    { label: t('Memory'), value: panelCount(props.usage?.memoryBytes) === undefined ? '—' : formatAsciiBytes(props.usage!.memoryBytes!), icon: 'memory' as const, note: meters[3]!.valueText },
-    { label: t('Disk'), value: panelCount(props.usage?.diskBytes) === undefined ? '—' : formatAsciiBytes(props.usage!.diskBytes!), icon: 'disk' as const, note: meters[0]!.valueText },
-    { label: t('Processes'), value: panelCount(props.usage?.processCount) === undefined ? '—' : String(props.usage!.processCount), icon: 'activity' as const, note: meters[4]!.valueText },
-    { label: t('Disk write rate'), value: '—', unit: panelRate(plan?.resources.ioWriteBps, t), icon: 'activity' as const, note: t('Not reported by the agent') },
+    { label: t('CPU'), value: '—', unit: `/ ${panelLimit(plan?.resources.cpuPercent, t, '%')}`, icon: 'cpu' as const, note: t('Not reported by the agent') },
+    { label: t('Memory'), value: panelCount(props.usage?.memoryBytes) === undefined ? '—' : formatAsciiBytes(props.usage!.memoryBytes!), icon: 'memory' as const, note: meters[3]!.valueText, valueHooks: { 'data-resource-kpi': 'memory' } },
+    { label: t('Disk'), value: panelCount(props.usage?.diskBytes) === undefined ? '—' : formatAsciiBytes(props.usage!.diskBytes!), icon: 'disk' as const, note: meters[0]!.valueText, valueHooks: { 'data-resource-kpi': 'disk' } },
+    { label: t('Processes'), value: panelCount(props.usage?.processCount) === undefined ? '—' : String(props.usage!.processCount), icon: 'activity' as const, note: meters[4]!.valueText, valueHooks: { 'data-resource-kpi': 'processes' } },
+    { label: t('Disk write rate'), value: '—', unit: `/ ${panelRate(plan?.resources.ioWriteBps, t)}`, icon: 'activity' as const, note: t('Not reported by the agent') },
   ]
   const rows = limitRows(props, t)
   const limitTable = card({ title: t(msgctxt('theme:v2', 'Plan, applied limit and usage')), titleId: 'v2-resource-limits-title', flush: true,
@@ -117,12 +122,15 @@ export function renderV2PanelResources(props: PanelPageProps, authority?: Surfac
   const service = card({ title: t(msgctxt('theme:v2', 'Site service configuration')), titleId: 'v2-resource-service-title', bodyHtml: `<dl class="v2-panel-facts">${panelFact(t('Primary domain'), account?.primaryDomain ?? t('Not read'), true)}${panelFact(t(msgctxt('resources-board', 'Configured isolation slice')), configuredSlice ?? t('Not read'), true)}${panelFact(t('Default PHP'), props.usage?.phpVersion ?? t('Not reported by the agent'), !!props.usage?.phpVersion)}${panelFact(t('State'), unavailable)}</dl><p class="v2-muted">${escapeHtml(t(msgctxt('theme:v2', 'A service-unit readback was not supplied. The saved configuration does not establish a running worker or its unit file.')))}</p><ol class="v2-resource-list" aria-label="${escapeHtml(t(msgctxt('resources-board', 'Request path')))}" data-resource-observation="unread">${[msgctxt('resources-board', 'Web proxy'), msgctxt('resources-board', 'Account web worker'), msgctxt('resources-board', 'PHP worker')].map(label => `<li><strong>${escapeHtml(t(label))}</strong><span>${escapeHtml(unread)}</span></li>`).join('')}</ol><h3>${escapeHtml(t(msgctxt('resources-board', 'Virtual host')))}</h3><pre class="v2-resource-code-unread">${escapeHtml(t(msgctxt('resources-board', 'Virtual-host configuration has not been read.')))}</pre>` + resourceFacts([[t(msgctxt('resources-board', 'Runtime identity')), unread], [t(msgctxt('resources-board', 'Home permissions')), unread], [t(msgctxt('resources-board', 'Private temporary directory')), unread], [t(msgctxt('resources-board', 'Database access')), unread]]) })
   const processes = card({ title: t(msgctxt('theme:v2', 'Processes in your slice')), titleId: 'v2-resource-processes-title', bodyHtml: `<p class="v2-muted">${escapeHtml(missingProcesses)}</p>` + unreadTable('v2-resource-processes-title', [t(msgctxt('resources-board', 'Command and unit')), 'PID', t('User'), t('CPU'), t('Memory'), t('Started (UTC)')], unread) })
   const folders = card({ title: t(msgctxt('theme:v2', 'Disk usage by folder')), titleId: 'v2-resource-folders-title', actionsHtml: `<a class="v2-btn" href="/files/manager">${escapeHtml(t('File manager'))}</a>`, bodyHtml: `<p class="v2-muted" id="v2-resource-folder-navigation-note">${escapeHtml(t(msgctxt('resources-board', 'Use the authorized workspace navigation to open the file manager.')))}</p>` + unreadTable('v2-resource-folders-title', [t('Path'), t('Size'), t('Share')], t(msgctxt('theme:v2', 'No directory-size observation was supplied. A file listing is not a recursive quota measurement.'))) })
-  return `<div class="v2-layout v2-panel-resources" ${account ? `data-account="${escapeHtml(account.id)}" data-uid="${account.uid}"` : ''} data-resource-reading="${props.usage === undefined ? 'unread' : 'read'}">
+  const refreshAction = liveReader ? `<button type="button" class="v2-btn" data-resource-refresh>${escapeHtml(t('Refresh'))}</button>` : undefined
+  const refreshNotice = liveReader
+    ? '<p class="v2-muted" data-resource-live-status role="status" aria-live="polite" hidden></p>'
+    : `${notice(t, { tone: 'info', text: t(msgctxt('theme:v2', 'This is the supplied account sample. Refresh and detailed host observations require an available reader.')), hooks: { 'data-resource-refresh-note': true } })}<p class="v2-sr" id="v2-resource-refresh-note">${escapeHtml(t(msgctxt('theme:v2', 'An on-demand account resource reader is unavailable.')))}</p>`
+  return `<div class="v2-layout v2-panel-resources" ${account ? `data-account="${escapeHtml(account.id)}" data-uid="${account.uid}"` : ''} data-resource-reading="${props.usage === undefined ? 'unread' : 'read'}"${liveReader ? ' data-panel-resources-live="true"' : ''}>
 ${pageHeader(t, { breadcrumb: [{ label: t('Home'), href: '/home' }, { label: t('Resources & quotas') }], route: '/resources', title: t('Resources & quotas'),
-    description: t('What this plan allows, what this host applies to the slice, and what is in use right now.') })}
-${notice(t, { tone: 'info', text: t(msgctxt('theme:v2', 'This is the supplied account sample. Refresh and detailed host observations require an available reader.')), hooks: { 'data-resource-refresh-note': true } })}
+    description: t('What this plan allows, what this host applies to the slice, and what is in use right now.'), ...(refreshAction ? { actionsHtml: refreshAction } : {}) })}
+${refreshNotice}
 ${props.usage?.bandwidthMonth?.limited === true ? notice(t, { tone: 'warn', lead: t('Limit page served'), text: t(msgctxt('theme:v2', 'The account is over its enforced monthly bandwidth limit.')) }) : ''}
-<p class="v2-sr" id="v2-resource-refresh-note">${escapeHtml(t(msgctxt('theme:v2', 'An on-demand account resource reader is unavailable.')))}</p>
 <section class="v2-kpi-row" aria-label="${escapeHtml(t('Resource usage'))}">${kpis.map(kpi => kpiCard({ headingLevel: 2, ...kpi })).join('')}</section>
 <div class="v2-resource-pair">${observations(props, t)}${slice}</div>
 ${history}${limitTable}
@@ -153,7 +161,7 @@ export const V2_PANEL_RESOURCES_CSS = `.v2-panel-resources{gap:var(--space-4)}
 .v2-panel-resources .v2-resource-service>.v2-card{flex:1 1 auto}
 .v2-panel-resources .v2-resource-ranges{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-1)}
 .v2-panel-resources :is(.v2-btn,button,summary){min-inline-size:44px;min-block-size:44px;transition-property:background-color,border-color,color,box-shadow,opacity,transform;transition-duration:140ms;transition-timing-function:ease-out}
-.v2-panel-resources .v2-resource-plot{display:grid;align-content:center;justify-items:center;gap:var(--space-2);min-block-size:140px;padding:var(--space-3);border:1px dashed var(--line-strong);border-radius:12px;background:var(--subtle);color:var(--muted);font-size:13px;line-height:1.6;text-align:center}
+.v2-panel-resources .v2-resource-plot{display:grid;align-content:center;justify-items:center;gap:var(--space-2);min-block-size:140px;padding:var(--space-3);border:1px solid var(--line);border-radius:12px;background:var(--subtle);color:var(--muted);font-size:13px;line-height:1.6;text-align:center}
 .v2-panel-resources .v2-resource-plot>p{max-inline-size:52ch}
 .v2-panel-resources .v2-resource-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-2);margin:0}
 .v2-panel-resources .v2-resource-stats>div{display:flex;flex-direction:column;gap:var(--space-1);min-inline-size:0;text-align:start;overflow-wrap:anywhere}

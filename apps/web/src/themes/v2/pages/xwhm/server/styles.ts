@@ -3,8 +3,14 @@ export const WHM_SERVER_CSS = adminStyles('.v2-server-page') + `.v2-server-page 
 .v2-server-page :is(.v2-server-setup-steps a,.v2-server-setup-choice,.v2-server-setup-review a,[data-tweak-settings] td a){transition:background-color 140ms ease-out,border-color 140ms ease-out,color 140ms ease-out,box-shadow 140ms ease-out,opacity 140ms ease-out,transform 140ms ease-out}
 @media(prefers-reduced-motion:reduce){.v2-server-page :is(.v2-server-setup-steps a,.v2-server-setup-choice,.v2-server-setup-review a,[data-tweak-settings] td a){transition:none}}
 .v2-server-page [data-setup-wizard-form]{gap:var(--space-4)}
-.v2-server-page [data-tweak-settings] .v2-admin-table{max-block-size:min(640px,80vh);border:1px solid var(--line);border-radius:var(--radius-notice)}
-.v2-server-page [data-tweak-settings] thead th{position:sticky;inset-block-start:0;z-index:1}
+.v2-server-page [data-tweak-settings] .v2-admin-table{border:1px solid var(--line);border-radius:var(--radius-notice)}
+.v2-server-page .v2-setup-aside,.v2-server-page #v2-setup-detected bdi{overflow-wrap:break-word;word-break:normal}
+.v2-server-page .v2-setup-handler-name,.v2-server-page .v2-setup-handler-name bdi{white-space:nowrap;overflow-wrap:normal;word-break:normal}
+.v2-server-page .v2-setup-drawer{border:1px solid var(--line);border-radius:var(--radius-card);background:var(--surface);box-shadow:var(--shadow)}
+.v2-server-page .v2-setup-drawer>summary{display:flex;align-items:center;justify-content:space-between;min-block-size:var(--target);padding:10px var(--v2-panel-padding);font-size:15px;font-weight:600;cursor:pointer;list-style:none}
+.v2-server-page .v2-setup-drawer>summary::-webkit-details-marker{display:none}
+.v2-server-page .v2-setup-drawer[open]>summary{border-block-end:1px solid var(--line)}
+.v2-server-page .v2-setup-drawer>:not(summary){padding:var(--space-2)}
 .v2-server-page [data-tweak-settings] td a{display:inline-flex;align-items:center;min-inline-size:var(--target);min-block-size:var(--target)}
 .v2-server-page .v2-server-setup-steps ol{display:flex;gap:var(--space-2);list-style:none;padding:0;min-inline-size:760px}
 .v2-server-page .v2-server-setup-steps li{flex:1;min-inline-size:0}
@@ -65,7 +71,10 @@ export const WHM_SERVER_CSS = adminStyles('.v2-server-page') + `.v2-server-page 
 .v2-server-page [data-tweak-settings] td :is(input:not([type=checkbox]),select){inline-size:100%;min-inline-size:0;box-sizing:border-box}
 .v2-server-page [data-tweak-settings] th[scope=row]>span{display:block;font-weight:500}
 .v2-server-page [data-setting-value]{font-variant-numeric:tabular-nums}
-.v2-server-page [data-ip-pool-table] td:first-child bdi{white-space:nowrap}
+.v2-server-page [data-ip-pool-table]{min-inline-size:760px}
+.v2-server-page [data-ip-pool-table] td:first-child bdi,.v2-server-page .v2-ip-nowrap{white-space:nowrap}
+.v2-server-page .v2-ip-wrap,.v2-server-page .v2-ip-wrap bdi,.v2-server-page .v2-ip-aside{overflow-wrap:break-word;word-break:normal}
+.v2-server-page .v2-ip-flex-input{flex:1 1 200px;min-inline-size:140px}
 .v2-server-page :is([data-node-cluster-members],[data-node-cluster-sections]):empty{display:none}
 @media(max-width:600px){.v2-server-page .v2-server-setup-steps ol{min-inline-size:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}.v2-server-page .v2-server-setup-foot>*{flex:1 1 auto;justify-content:center;text-align:center}}
 `
