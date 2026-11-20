@@ -2,6 +2,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { BROWSER_REALTIME_SCRIPT } from './ws-client.ts'
+import { routeClientScriptForHtml } from './route-client-chunks.ts'
 import { translator } from './i18n.ts'
 import { dnsEditorTemplates } from './board-port/data-client-templates.ts'
 type Request = (method: string, path: string, body?: unknown) => Promise<unknown>
@@ -22,7 +23,7 @@ const boot = (send: Request, attributes = '') => {
   if (!editor) throw new Error('missing_dns_fixture')
   editor.insertAdjacentHTML('beforeend', dnsEditorTemplates(translator('en'), true))
   ;(window as Window & { xpanelSessionRequest?: Request }).xpanelSessionRequest = send
-  new Function('window', 'document', BROWSER_REALTIME_SCRIPT)(window, document)
+  new Function('window', 'document', BROWSER_REALTIME_SCRIPT + '\n' + routeClientScriptForHtml(document.body.innerHTML))(window, document)
 }
 describe('authorized DNS read-only summary', () => {
   it('projects only returned zones using public account labels and serials without provider claims', async () => {

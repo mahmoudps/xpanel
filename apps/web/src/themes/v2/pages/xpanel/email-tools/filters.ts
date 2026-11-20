@@ -17,7 +17,7 @@ export function renderV2PanelEmailFilters(props: PanelSurfaceProps, authority?: 
     `<p>${esc(t(msgid('Filters run on delivery as Sieve rules, account-wide rules first. Each rule shows whether the mail server runs it.')))}</p>${scope}`
     + actions(button(t(msgid('Refresh configuration')), { 'data-filter-refresh': true }, false) + button(t(msgid('Create filter')), { 'data-filter-new': true, 'data-filter-write': true }, !canManage))
     + state(t(msgid('Configuration has not been read.')), { 'data-filter-status': true })
-    + `<p data-filter-count></p><ol data-filter-list class="v2-panel-extra__list"></ol><p data-filter-empty>${esc(t(msgid('Not read')))}</p>${editor}`)
+    + `<p data-filter-count></p><ol data-filter-list data-sortable-list class="v2-panel-extra__list"></ol><p data-filter-empty>${esc(t(msgid('Not read')))}</p>${editor}`)
   const test = section('v2-filter-test', t(msgid('Test a message')),
     `<p>${esc(t(msgid('Runs a sample message through the saved rules in the order the mail server runs them. Nothing is delivered or sent.')))}</p><div data-filter-test-section><div data-filter-test role="group" aria-label="${esc(t(msgid('Test a message')))}" class="v2-panel-extra__groups"${!authority?.canRead || authority.presentation === 'read-only' || !account ? ' data-readonly="true"' : ''}>`
     + fields(field('filter-test-from', t(msgctxt('theme:v2', 'From address')), input('filter-test-from', undefined, ' type="text" name="from" maxlength="998" autocomplete="off" dir="ltr"', false))

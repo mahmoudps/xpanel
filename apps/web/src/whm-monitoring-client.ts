@@ -302,7 +302,8 @@ function bindWhmMonitoring(askDialog: MonitoringAsk): void {
               cell(row, item.mount, { technical: true }); cell(row, item.filesystem, { technical: true }); cell(row, item.type, { technical: true })
               for (const size of [item.totalBytes, item.usedBytes, item.availableBytes]) cell(row, bytes(size), { technical: true, numeric: true })
               cell(row, percent(item.usedBytes, item.usedBytes + item.availableBytes), { technical: true, numeric: true })
-              cell(row, item.inodes ? String(item.inodes.used) + ' / ' + String(item.inodes.total) : t(msgctxt('whm-monitoring-client', 'Not reported')), { technical: !!item.inodes, numeric: true })
+              const formatCount = (n: number): string => new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(n)
+              cell(row, item.inodes ? formatCount(item.inodes.used) + ' / ' + formatCount(item.inodes.total) : t(msgctxt('whm-monitoring-client', 'Not reported')), { technical: !!item.inodes, numeric: true })
               cell(row, item.inodes ? percent(item.inodes.used, item.inodes.total) : '-', { technical: true, numeric: true })
               rows.append(row)
             }

@@ -20,7 +20,7 @@ export interface CommandPaletteEntry {
   search: string
   persistable: boolean
 }
-const actionRoutes = new Set(['/whm/accounts/new', '/mail/compose', '/security/ssl/issue', '/whm/ssl/install'])
+const actionRoutes = new Set(['/whm/accounts/new', '/mail/compose', '/security/ssl/issue', '/whm/ssl/install', '/whm/backups', '/whm/security/firewall'])
 const text = (locale: Locale, message: string, values?: MessageValues): string => translator(locale)(message, values)
 
 /** Record results use only the supplied authorized read models and an available destination. */

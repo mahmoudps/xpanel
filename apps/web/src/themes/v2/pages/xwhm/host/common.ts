@@ -25,8 +25,8 @@ export function hostButton(label: string, hooks?: HookAttributes, options: { dis
   return `<button type="${options.type ?? 'button'}" class="v2-btn${options.primary ? ' v2-btn--primary' : ''}${options.danger ? ' v2-btn--danger' : ''}"${hookAttrs(hooks)}${options.disabled ? ' disabled' : ''}>${escapeHtml(label)}</button>`
 }
 
-export function hostCard(key: string, title: string, bodyHtml: string, hooks?: HookAttributes, actionsHtml?: string): string {
-  return card({ title, titleId: `v2-host-${key}-heading`, bodyHtml, hooks, ...(actionsHtml ? { actionsHtml } : {}) })
+export function hostCard(key: string, title: string, bodyHtml: string, hooks?: HookAttributes, actionsHtml?: string, headingLevel?: 2 | 3): string {
+  return card({ title, titleId: `v2-host-${key}-heading`, ...(headingLevel ? { headingLevel } : {}), bodyHtml, hooks, ...(actionsHtml ? { actionsHtml } : {}) })
 }
 
 export function hostTable(t: Translate, id: string, caption: string, headings: readonly string[], rows: readonly DataTableRow[], emptyText: string, hooks?: HookAttributes, phoneValueColumn?: 3): string {
@@ -68,7 +68,7 @@ export const HOST_PAGES_CSS = `.v2-host,.v2-host__stack{display:flex;flex-direct
 .v2-host__split>:is(.v2-host__stack,.v2-card),.v2-host__split>.v2-host__stack>.v2-card:last-child{flex:1 1 auto}
 .v2-host[data-whm-detail-route="/whm/security/firewall"] .v2-host__split{grid-template-columns:minmax(0,1.25fr) minmax(320px,1fr)}
 .v2-host__pair{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr);gap:var(--space-3);align-items:stretch}
-.v2-host .v2-tabs{flex-wrap:nowrap;overflow:auto hidden}
+.v2-host .v2-tabs{flex-wrap:nowrap;overflow:auto hidden;scroll-padding-inline:12px;scrollbar-width:thin}
 .v2-host .v2-tabs>[role=tab]{flex:none;white-space:nowrap;margin-block-end:0}
 .v2-host .v2-tabs>[role=tab]:disabled{opacity:.6;cursor:not-allowed}
 .v2-host :is(h2,h3)[id]{scroll-margin-block-start:96px}
@@ -81,7 +81,8 @@ export const HOST_PAGES_CSS = `.v2-host,.v2-host__stack{display:flex;flex-direct
 .v2-host__tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:var(--space-2)}
 .v2-host__tile{display:flex;flex-direction:column;gap:var(--space-1);min-inline-size:0;padding:var(--space-2);border:1px solid var(--line);border-radius:var(--radius-notice);background:var(--subtle)}
 .v2-host__tile>dt{font-weight:600}
-.v2-host__tile>dd{font-size:18px;font-weight:600;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.v2-host__tile>dd{font-size:clamp(14px,3.6vw,17px);font-weight:600;font-variant-numeric:tabular-nums;overflow-wrap:break-word}
+.v2-host__tile>dd bdi.v2-mono{white-space:nowrap;font-size:clamp(13px,3.3vw,15px)}
 .v2-host__tile>dd.v2-host__tile-note{font-size:12px;font-weight:400;color:var(--muted)}
 .v2-host td,.v2-host .v2-mono{font-variant-numeric:tabular-nums}
 .v2-host [data-firewall-apply-steps]{padding:12px var(--space-2);border:1px solid var(--line);border-radius:var(--radius-notice);background:var(--subtle)}

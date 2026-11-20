@@ -7,9 +7,10 @@ import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
 import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
-import { ASCII_BYTES_BINDING, formatIsolatedBytes as canonicalFormatClientBytes } from './display-format.ts'
+import { ASCII_BYTES_BINDING, DURATION_FORMAT_BINDING, formatDuration as canonicalFormatDuration, formatIsolatedBytes as canonicalFormatClientBytes } from './display-format.ts'
 // Module-local alias: the binding source defines it again from ASCII_BYTES_BINDING.
 const formatClientBytes = canonicalFormatClientBytes
+const formatClientDuration = canonicalFormatDuration
 const frameRequest = canonicalFrameRequest
 const displayDateTime = formatDisplayDateTime
 export type WhmDatabaseDrift = 'in-sync' | 'saved-only' | 'server-only' | 'system' | 'unverified'
@@ -213,7 +214,7 @@ function bindWhmDatabases(askDialog: ((options: Record<string, unknown>) => Prom
         fact('version', o.version, true); fact('observedAt', o.observedAt === null ? null : displayDateTime(o.observedAt), true); fact('schemaCount', o.schemaCount === null ? null : String(o.schemaCount)); fact('totalSizeBytes', o.totalSizeBytes === null ? null : bytes(o.totalSizeBytes))
         for (const name of ['Uptime', 'Threads_connected', 'Threads_running', 'Connections', 'Max_used_connections', 'Aborted_connects', 'Questions', 'Slow_queries']) {
           const value = o.status ? o.status[name] ?? null : null
-          fact(name, value === null ? null : name === 'Uptime' ? t('{count} seconds', { count: value }) : String(value))
+          fact(name, value === null ? null : name === 'Uptime' ? formatClientDuration(value) : String(value), name === 'Uptime')
         }
         for (const [key, value] of Object.entries(view.saved.totals)) fact(key, String(value))
         fact('savedOnly', view.drift ? String(view.drift.savedOnly) : null); fact('serverOnly', view.drift ? String(view.drift.serverOnly) : null)
@@ -332,4 +333,4 @@ function bindWhmDatabases(askDialog: ((options: Record<string, unknown>) => Prom
   })
 }
 
-export const WHM_DATABASES_CLIENT_BINDING = withFrameRequest(`(()=>{const formatClientBytes=${ASCII_BYTES_BINDING};${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const displayDateTime=${DISPLAY_DATETIME_BINDING};const readWhmDatabasesView=${readWhmDatabasesView.toString()};const readWhmDatabaseKillOutcome=${readWhmDatabaseKillOutcome.toString()};const readWhmDatabaseMaintenance=${readWhmDatabaseMaintenance.toString()};return ${bindWhmDatabases.toString()};})()`)
+export const WHM_DATABASES_CLIENT_BINDING = withFrameRequest(`(()=>{const formatClientBytes=${ASCII_BYTES_BINDING};const formatClientDuration=${DURATION_FORMAT_BINDING};${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const displayDateTime=${DISPLAY_DATETIME_BINDING};const readWhmDatabasesView=${readWhmDatabasesView.toString()};const readWhmDatabaseKillOutcome=${readWhmDatabaseKillOutcome.toString()};const readWhmDatabaseMaintenance=${readWhmDatabaseMaintenance.toString()};return ${bindWhmDatabases.toString()};})()`)

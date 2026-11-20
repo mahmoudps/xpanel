@@ -18,7 +18,7 @@ export function renderV2PanelMailingLists(props: PanelSurfaceProps, authority?: 
     + fields(field('mailing-list-name', t(msgid('List name')), input('mailing-list-name', { 'data-ml-name': true }, ' type="text" dir="ltr" maxlength="64" autocomplete="off"', !createAllowed))
       + field('mailing-list-domain', t(msgid('Domain')), select('mailing-list-domain', domainOptions, { 'data-ml-domain': true }, !createAllowed, ' dir="ltr"'))
       + field('mailing-list-moderation', t(msgid('Moderation')), select('mailing-list-moderation', [['members', t(msgid('Members'))], ['open', t(msgid('Open'))], ['moderated', t(msgid('Moderated'))]], { 'data-ml-moderation': true }, !createAllowed))
-      + field('mailing-list-archive', t(msgid('Archive messages')), check('mailing-list-archive', t(msgid('Keep an archive')), { 'data-ml-archive': true }, !createAllowed, true)))
+      + `<div class="v2-field"><span class="v2-field__label">${esc(t(msgid('Archive messages')))}</span>${check('mailing-list-archive', t(msgid('Keep an archive')), { 'data-ml-archive': true }, !createAllowed, true)}</div>`)
     + field('mailing-list-members', t(msgid('Members (one address per line, optional)')), area('mailing-list-members', { 'data-ml-members': true }, ' rows="4" dir="ltr"', !createAllowed))
     + `<p>${esc(t(msgid('Saved lists reach delivery when the mail routing applies; the delivery state on this page is read from the host.')))}</p>`
     + actions(button(t(msgctxt('account-mailing-lists', 'Create list')), { 'data-ml-create': true }, !createAllowed, true)) + '</div>' + accountMailingListClientTemplates(),
