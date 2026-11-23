@@ -48,10 +48,12 @@ describe('v2 theme architecture and cleanliness gates', () => {
   })
 
   it('enforces prelaunch standard naming with no marketing adjectives or version suffixes on new modules', () => {
+    const designSystemFiles = walkSourceFiles(join(HERE, '../../design-system'))
     const newModules = [
       join(HERE, '../../workspace-runtime-client.ts'),
       join(HERE, '../../route-client-chunks.ts'),
       join(HERE, 'workspace-interactions.ts'),
+      ...designSystemFiles,
     ]
     const forbiddenName = /(?:^|[_-])(smart|legacy|hero|magic|super|v[0-9]+)(?:$|[_-])/i
     const violations: string[] = []
@@ -59,6 +61,9 @@ describe('v2 theme architecture and cleanliness gates', () => {
       const base = file.split(/[\\/]/).pop()!.replace(/\.ts$/, '')
       if (forbiddenName.test(base)) violations.push(`filename:${base}`)
       const source = readFileSync(file, 'utf8')
+      if (file.includes('design-system') && /\bstyle="/.test(source)) {
+        violations.push(`inlineStyle:${base}`)
+      }
       for (const match of source.matchAll(/\bexport\s+(?:const|function|class|type|interface)\s+([A-Za-z0-9_]+)/g)) {
         const symbol = match[1]!
         if (forbiddenName.test(symbol) || /smart|legacy|hero|magic|super/i.test(symbol)) {
