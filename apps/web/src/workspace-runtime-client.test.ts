@@ -1,6 +1,14 @@
 /// <reference lib="dom" />
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from 'vitest'
+import {
+  renderActionMenu,
+  renderCombobox,
+  renderCronBuilder,
+  renderDrawer,
+  renderTabs,
+  renderToastRegion,
+} from './design-system/components/index.ts'
 import { WORKSPACE_RUNTIME_SCRIPT } from './workspace-runtime-client.ts'
 
 function bootRuntime(): void {
@@ -13,6 +21,7 @@ function bootRuntime(): void {
 }
 
 afterEach(() => {
+  document.documentElement.dir = ''
   document.body.replaceChildren()
   window.sessionStorage.clear()
 })
@@ -329,5 +338,141 @@ describe('workspace runtime client', () => {
     dropzone.dispatchEvent(dropEvent)
     expect(droppedNames).toEqual(['notes.txt'])
     expect(dropzone.querySelector('[data-dropzone-queue]')!.textContent).toBe('')
+  })
+
+  it('synchronizes cron builder expression, summary, and frequency fields on user input and binds menus, tabs, comboboxes, and toasts', () => {
+    document.body.innerHTML = [
+      renderCronBuilder({ id: 'cron-1', namePrefix: 'schedule', state: { frequency: 'daily', hour: 2, minute: 0 } }),
+      renderActionMenu({ id: 'menu-1', items: [{ id: 'edit', label: 'Edit', action: 'edit' }] }),
+      renderTabs({
+        id: 'tabs-1',
+        ariaLabel: 'Sections',
+        items: [
+          { id: 'one', label: 'First', active: true, panelHtml: '<p>One</p>' },
+          { id: 'two', label: 'Second', panelHtml: '<p>Two</p>' },
+        ],
+      }),
+      renderCombobox({
+        id: 'combo-1',
+        name: 'domain',
+        options: [
+          { value: 'alpha.test', label: 'alpha.test' },
+          { value: 'beta.test', label: 'beta.test' },
+        ],
+      }),
+      renderToastRegion([{ id: 'toast-1', title: 'Saved', tone: 'ok' }]),
+    ].join('\n')
+
+    bootRuntime()
+
+    const hiddenExpr = document.querySelector<HTMLInputElement>('[data-ds-cron-expression]')!
+    const summaryText = document.querySelector<HTMLElement>('[data-ds-cron-summary-text]')!
+    const codeText = document.querySelector<HTMLElement>('[data-ds-cron-code]')!
+    const freqSelect = document.querySelector<HTMLSelectElement>('[name="schedule[frequency]"]')!
+    const hourInput = document.querySelector<HTMLInputElement>('[name="schedule[hour]"]')!
+    const dowWrap = document.querySelector<HTMLElement>('[data-cron-field="dow"]')!
+    const domWrap = document.querySelector<HTMLElement>('[data-cron-field="dom"]')!
+    const customWrap = document.querySelector<HTMLElement>('[data-cron-field="custom"]')!
+    const dowSelect = document.querySelector<HTMLSelectElement>('[name="schedule[dayOfWeek]"]')!
+    const domInput = document.querySelector<HTMLInputElement>('[name="schedule[dayOfMonth]"]')!
+    const customInput = document.querySelector<HTMLInputElement>('[name="schedule[customExpression]"]')!
+
+    expect(hiddenExpr.value).toBe('0 2 * * *')
+    expect(dowWrap.hidden).toBe(true)
+    expect(dowSelect.disabled).toBe(true)
+
+    hourInput.value = '3'
+    hourInput.dispatchEvent(new Event('input', { bubbles: true }))
+    expect(hiddenExpr.value).toBe('0 3 * * *')
+    expect(summaryText.textContent).toBe('Every day at 03:00')
+    expect(codeText.textContent).toBe('0 3 * * *')
+
+    freqSelect.value = 'weekly'
+    freqSelect.dispatchEvent(new Event('change', { bubbles: true }))
+    expect(dowWrap.hidden).toBe(false)
+    expect(dowSelect.disabled).toBe(false)
+    dowSelect.value = '5'
+    dowSelect.dispatchEvent(new Event('change', { bubbles: true }))
+    expect(hiddenExpr.value).toBe('0 3 * * 5')
+    expect(summaryText.textContent).toBe('Every Friday at 03:00')
+
+    freqSelect.value = 'monthly'
+    freqSelect.dispatchEvent(new Event('change', { bubbles: true }))
+    expect(dowWrap.hidden).toBe(true)
+    expect(domWrap.hidden).toBe(false)
+    domInput.value = '15'
+    domInput.dispatchEvent(new Event('input', { bubbles: true }))
+    expect(hiddenExpr.value).toBe('0 3 15 * *')
+
+    freqSelect.value = 'custom'
+    freqSelect.dispatchEvent(new Event('change', { bubbles: true }))
+    expect(customWrap.hidden).toBe(false)
+    customInput.value = '*/15 * * * *'
+    customInput.dispatchEvent(new Event('input', { bubbles: true }))
+    expect(hiddenExpr.value).toBe('*/15 * * * *')
+
+    // Action menu toggle, item click close, & Escape close
+    const menuTrigger = document.querySelector<HTMLButtonElement>('#menu-1 [aria-haspopup="menu"]')!
+    const menuPanel = document.querySelector<HTMLElement>('#menu-1-panel')!
+    const menuItem = document.querySelector<HTMLButtonElement>('#menu-1 [role="menuitem"]')!
+    expect(menuPanel.hidden).toBe(true)
+    menuTrigger.click()
+    expect(menuPanel.hidden).toBe(false)
+    expect(menuTrigger.getAttribute('aria-expanded')).toBe('true')
+    menuItem.click()
+    expect(menuPanel.hidden).toBe(true)
+    expect(menuTrigger.getAttribute('aria-expanded')).toBe('false')
+    menuTrigger.click()
+    expect(menuPanel.hidden).toBe(false)
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    expect(menuPanel.hidden).toBe(true)
+
+    // Tabs switching + keyboard RTL + Home/End
+    const tabOne = document.querySelector<HTMLButtonElement>('[data-ds-tab="one"]')!
+    const tabTwo = document.querySelector<HTMLButtonElement>('[data-ds-tab="two"]')!
+    const panelOne = document.querySelector<HTMLElement>('[data-ds-tabpanel="one"]')!
+    const panelTwo = document.querySelector<HTMLElement>('[data-ds-tabpanel="two"]')!
+    tabTwo.click()
+    expect(panelOne.hidden).toBe(true)
+    expect(panelTwo.hidden).toBe(false)
+    expect(tabTwo.getAttribute('aria-selected')).toBe('true')
+    tabTwo.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }))
+    expect(tabOne.getAttribute('aria-selected')).toBe('true')
+    document.documentElement.dir = 'rtl'
+    tabOne.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }))
+    expect(tabTwo.getAttribute('aria-selected')).toBe('true')
+    tabOne.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }))
+    expect(tabTwo.getAttribute('aria-selected')).toBe('true')
+    document.documentElement.dir = ''
+
+    // Combobox filter, outside click close, & select
+    const comboInput = document.querySelector<HTMLInputElement>('#combo-1')!
+    const comboList = document.querySelector<HTMLElement>('#combo-1-listbox')!
+    const comboHidden = document.querySelector<HTMLInputElement>('[data-ds-combobox-hidden]')!
+    comboInput.dispatchEvent(new FocusEvent('focus', { bubbles: true }))
+    expect(comboList.hidden).toBe(false)
+    document.body.click()
+    expect(comboList.hidden).toBe(true)
+    expect(comboInput.getAttribute('aria-expanded')).toBe('false')
+    comboInput.value = 'beta'
+    comboInput.dispatchEvent(new Event('input', { bubbles: true }))
+    expect(document.querySelector<HTMLElement>('[data-ds-combobox-value="alpha.test"]')!.hidden).toBe(true)
+    document.querySelector<HTMLElement>('[data-ds-combobox-value="beta.test"]')!.click()
+    expect(comboHidden.value).toBe('beta.test')
+
+    // Drawer Escape close
+    document.body.insertAdjacentHTML('beforeend', renderDrawer({ id: 'drw-1', title: 'Edit', bodyHtml: '<p>Body</p>', open: true }))
+    const drawer = document.querySelector<HTMLElement>('#drw-1')!
+    const backdrop = document.querySelector<HTMLElement>('#drw-1-backdrop')!
+    expect(drawer.hidden).toBe(false)
+    expect(backdrop.hidden).toBe(false)
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    expect(drawer.hidden).toBe(true)
+    expect(backdrop.hidden).toBe(true)
+
+    // Toast dismissal
+    expect(document.querySelector('[data-ds-toast="toast-1"]')).not.toBeNull()
+    document.querySelector<HTMLButtonElement>('[data-ds-toast-dismiss="toast-1"]')!.click()
+    expect(document.querySelector('[data-ds-toast="toast-1"]')).toBeNull()
   })
 })
