@@ -68716,3 +68716,81 @@ msgstr "ضمن سعة المالك المتاحة"
 
 msgid "Exceeds owner capacity"
 msgstr "يتجاوز سعة المالك المتاحة"
+
+msgid "0s"
+msgstr "0 ثانية"
+
+msgid "{n}d"
+msgstr "{n} يوم"
+
+msgid "{n}h"
+msgstr "{n} ساعة"
+
+msgid "{n}m"
+msgstr "{n} دقيقة"
+
+msgid "{n}s"
+msgstr "{n} ثانية"
+
+msgid "Every hour at minute {m}"
+msgstr "كل ساعة عند الدقيقة {m}"
+
+msgid "Every day at {time}"
+msgstr "يومياً عند الساعة {time}"
+
+msgid "Every {day} at {time}"
+msgstr "أسبوعياً يوم {day} عند الساعة {time}"
+
+msgid "Monthly on day {dom} at {time}"
+msgstr "شهرياً في اليوم {dom} عند الساعة {time}"
+
+msgid "Custom schedule ({expr})"
+msgstr "جدولة مخصصة ({expr})"
+
+msgid "Schedule frequency"
+msgstr "تكرار الجدولة"
+
+msgid "Day of week"
+msgstr "يوم الأسبوع"
+
+msgid "Schedule summary"
+msgstr "ملخص الجدولة"
+
+msgid "Technical cron expression"
+msgstr "تعبير الجدولة التقني"
+
+msgid "Loading..."
+msgstr "جاري القراءة..."
+
+msgid "Enable service"
+msgstr "تفعيل الخدمة"
+
+msgid "Last updated"
+msgstr "آخر قراءة"
+
+msgid "No items yet"
+msgstr "لا توجد عناصر بعد"
+
+msgid "What will change"
+msgstr "هذا ما سيتغير"
+
+msgid "Execution progress"
+msgstr "سير التنفيذ"
+
+msgid "of"
+msgstr "من"
+
+msgid "No matches found"
+msgstr "لم يتم العثور على نتائج"
+
+msgid "Toggle navigation"
+msgstr "تبديل القائمة الجانبية"
+
+msgid "Collapse sidebar"
+msgstr "طي القائمة الجانبية"
+
+msgid "Expand sidebar"
+msgstr "توسيع القائمة الجانبية"
+
+msgid "Validation failed"
+msgstr "تعذر التحقق"
