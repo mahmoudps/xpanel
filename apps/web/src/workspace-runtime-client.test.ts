@@ -1,6 +1,19 @@
 /// <reference lib="dom" />
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from 'vitest'
+import {
+  renderActionMenu,
+  renderAppShell,
+  renderCombobox,
+  renderConfirmDialog,
+  renderCronBuilder,
+  renderDataTable,
+  renderDrawer,
+  renderInput,
+  renderTabs,
+  renderToastRegion,
+  renderWizard,
+} from './design-system/components/index.ts'
 import { WORKSPACE_RUNTIME_SCRIPT } from './workspace-runtime-client.ts'
 
 function bootRuntime(): void {
@@ -13,8 +26,10 @@ function bootRuntime(): void {
 }
 
 afterEach(() => {
+  document.documentElement.dir = ''
   document.body.replaceChildren()
   window.sessionStorage.clear()
+  window.localStorage.clear()
 })
 
 describe('workspace runtime client', () => {
@@ -329,5 +344,811 @@ describe('workspace runtime client', () => {
     dropzone.dispatchEvent(dropEvent)
     expect(droppedNames).toEqual(['notes.txt'])
     expect(dropzone.querySelector('[data-dropzone-queue]')!.textContent).toBe('')
+  })
+
+  it('synchronizes cron builder expression, summary, and frequency fields on user input and binds menus, tabs, comboboxes, and toasts', () => {
+    document.body.innerHTML = [
+      renderCronBuilder({ id: 'cron-1', namePrefix: 'schedule', state: { frequency: 'daily', hour: 2, minute: 0 } }),
+      renderActionMenu({ id: 'menu-1', items: [{ id: 'edit', label: 'Edit', action: 'edit' }] }),
+      renderTabs({
+        id: 'tabs-1',
+        ariaLabel: 'Sections',
+        items: [
+          { id: 'one', label: 'First', active: true, panelHtml: '<p>One</p>' },
+          { id: 'two', label: 'Second', panelHtml: '<p>Two</p>' },
+        ],
+      }),
+      renderCombobox({
+        id: 'combo-1',
+        name: 'domain',
+        options: [
+          { value: 'alpha.test', label: 'alpha.test' },
+          { value: 'beta.test', label: 'beta.test' },
+        ],
+      }),
+      renderToastRegion([{ id: 'toast-1', title: 'Saved', tone: 'ok' }]),
+    ].join('\n')
+
+    bootRuntime()
+
+    const hiddenExpr = document.querySelector<HTMLInputElement>('[data-ds-cron-expression]')!
+    const summaryText = document.querySelector<HTMLElement>('[data-ds-cron-summary-text]')!
+    const codeText = document.querySelector<HTMLElement>('[data-ds-cron-code]')!
+    const freqSelect = document.querySelector<HTMLSelectElement>('[name="schedule[frequency]"]')!
+    const hourInput = document.querySelector<HTMLInputElement>('[name="schedule[hour]"]')!
+    const dowWrap = document.querySelector<HTMLElement>('[data-cron-field="dow"]')!
+    const domWrap = document.querySelector<HTMLElement>('[data-cron-field="dom"]')!
+    const customWrap = document.querySelector<HTMLElement>('[data-cron-field="custom"]')!
+    const dowSelect = document.querySelector<HTMLSelectElement>('[name="schedule[dayOfWeek]"]')!
+    const domInput = document.querySelector<HTMLInputElement>('[name="schedule[dayOfMonth]"]')!
+    const customInput = document.querySelector<HTMLInputElement>('[name="schedule[customExpression]"]')!
+
+    expect(hiddenExpr.value).toBe('0 2 * * *')
+    expect(dowWrap.hidden).toBe(true)
+    expect(dowSelect.disabled).toBe(true)
+
+    hourInput.value = '3'
+    hourInput.dispatchEvent(new Event('input', { bubbles: true }))
+    expect(hiddenExpr.value).toBe('0 3 * * *')
+    expect(summaryText.textContent).toBe('Every day at 03:00')
+    expect(codeText.textContent).toBe('0 3 * * *')
+
+    freqSelect.value = 'weekly'
+    freqSelect.dispatchEvent(new Event('change', { bubbles: true }))
+    expect(dowWrap.hidden).toBe(false)
+    expect(dowSelect.disabled).toBe(false)
+    dowSelect.value = '5'
+    dowSelect.dispatchEvent(new Event('change', { bubbles: true }))
+    expect(hiddenExpr.value).toBe('0 3 * * 5')
+    expect(summaryText.textContent).toBe('Every Friday at 03:00')
+
+    freqSelect.value = 'monthly'
+    freqSelect.dispatchEvent(new Event('change', { bubbles: true }))
+    expect(dowWrap.hidden).toBe(true)
+    expect(domWrap.hidden).toBe(false)
+    domInput.value = '15'
+    domInput.dispatchEvent(new Event('input', { bubbles: true }))
+    expect(hiddenExpr.value).toBe('0 3 15 * *')
+
+    freqSelect.value = 'custom'
+    freqSelect.dispatchEvent(new Event('change', { bubbles: true }))
+    expect(customWrap.hidden).toBe(false)
+    expect(customInput.required).toBe(true)
+    customInput.value = '*/15 * * * *'
+    customInput.dispatchEvent(new Event('input', { bubbles: true }))
+    expect(hiddenExpr.value).toBe('*/15 * * * *')
+    expect(customInput.checkValidity()).toBe(true)
+
+    customInput.value = '@daily'
+    customInput.dispatchEvent(new Event('input', { bubbles: true }))
+    expect(hiddenExpr.value).toBe('@daily')
+    expect(customInput.checkValidity()).toBe(true)
+
+    customInput.value = ''
+    customInput.dispatchEvent(new Event('input', { bubbles: true }))
+    expect(hiddenExpr.value).toBe('')
+    expect(codeText.textContent).toBe('')
+    expect(summaryText.textContent).toBe('Custom schedule (—)')
+    expect(customInput.checkValidity()).toBe(false)
+
+    customInput.value = '   '
+    customInput.dispatchEvent(new Event('input', { bubbles: true }))
+    expect(hiddenExpr.value).toBe('')
+    expect(customInput.checkValidity()).toBe(false)
+
+    customInput.value = 'not-a-cron'
+    customInput.dispatchEvent(new Event('input', { bubbles: true }))
+    expect(hiddenExpr.value).toBe('not-a-cron')
+    expect(customInput.checkValidity()).toBe(false)
+
+    freqSelect.value = 'daily'
+    freqSelect.dispatchEvent(new Event('change', { bubbles: true }))
+    expect(customWrap.hidden).toBe(true)
+    expect(customInput.disabled).toBe(true)
+    expect(customInput.required).toBe(false)
+    expect(customInput.validationMessage).toBe('')
+    expect(hiddenExpr.value).toBe('0 3 * * *')
+
+    // Action menu toggle, item click close, & Escape close
+    const menuTrigger = document.querySelector<HTMLButtonElement>('#menu-1 [aria-haspopup="menu"]')!
+    const menuPanel = document.querySelector<HTMLElement>('#menu-1-panel')!
+    const menuItem = document.querySelector<HTMLButtonElement>('#menu-1 [role="menuitem"]')!
+    expect(menuPanel.hidden).toBe(true)
+    menuTrigger.click()
+    expect(menuPanel.hidden).toBe(false)
+    expect(menuTrigger.getAttribute('aria-expanded')).toBe('true')
+    menuItem.click()
+    expect(menuPanel.hidden).toBe(true)
+    expect(menuTrigger.getAttribute('aria-expanded')).toBe('false')
+    menuTrigger.click()
+    expect(menuPanel.hidden).toBe(false)
+    menuItem.focus()
+    expect(document.activeElement).toBe(menuItem)
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    expect(menuPanel.hidden).toBe(true)
+    expect(document.activeElement).toBe(menuTrigger)
+
+    // Tabs switching + keyboard RTL + Home/End
+    const tabOne = document.querySelector<HTMLButtonElement>('[data-ds-tab="one"]')!
+    const tabTwo = document.querySelector<HTMLButtonElement>('[data-ds-tab="two"]')!
+    const panelOne = document.querySelector<HTMLElement>('[data-ds-tabpanel="one"]')!
+    const panelTwo = document.querySelector<HTMLElement>('[data-ds-tabpanel="two"]')!
+    tabTwo.click()
+    expect(panelOne.hidden).toBe(true)
+    expect(panelTwo.hidden).toBe(false)
+    expect(tabTwo.getAttribute('aria-selected')).toBe('true')
+    tabTwo.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }))
+    expect(tabOne.getAttribute('aria-selected')).toBe('true')
+    document.documentElement.dir = 'rtl'
+    tabOne.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }))
+    expect(tabTwo.getAttribute('aria-selected')).toBe('true')
+    tabOne.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }))
+    expect(tabTwo.getAttribute('aria-selected')).toBe('true')
+    document.documentElement.dir = ''
+
+    // Combobox filter, outside click close, & select
+    const comboInput = document.querySelector<HTMLInputElement>('#combo-1')!
+    const comboList = document.querySelector<HTMLElement>('#combo-1-listbox')!
+    const comboHidden = document.querySelector<HTMLInputElement>('[data-ds-combobox-hidden]')!
+    comboInput.dispatchEvent(new FocusEvent('focus', { bubbles: true }))
+    expect(comboList.hidden).toBe(false)
+    document.body.click()
+    expect(comboList.hidden).toBe(true)
+    expect(comboInput.getAttribute('aria-expanded')).toBe('false')
+    comboInput.value = 'beta'
+    comboInput.dispatchEvent(new Event('input', { bubbles: true }))
+    expect(document.querySelector<HTMLElement>('[data-ds-combobox-value="alpha.test"]')!.hidden).toBe(true)
+    document.querySelector<HTMLElement>('[data-ds-combobox-value="beta.test"]')!.click()
+    expect(comboHidden.value).toBe('beta.test')
+
+    // Drawer Escape close
+    document.body.insertAdjacentHTML('beforeend', renderDrawer({ id: 'drw-1', title: 'Edit', bodyHtml: '<p>Body</p>', open: true }))
+    bootRuntime()
+    const drawer = document.querySelector<HTMLDialogElement>('#drw-1')!
+    expect(drawer.hasAttribute('open')).toBe(true)
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    expect(drawer.hasAttribute('open')).toBe(false)
+
+    // Toast dismissal
+    expect(document.querySelector('[data-ds-toast="toast-1"]')).not.toBeNull()
+    document.querySelector<HTMLButtonElement>('[data-ds-toast-dismiss="toast-1"]')!.click()
+    expect(document.querySelector('[data-ds-toast="toast-1"]')).toBeNull()
+  })
+
+  it('handles combobox keyboard selection, .ds-shell collapse, wizard navigation, table bulk selection, and dialog Escape', () => {
+    window.localStorage.setItem('xpanel.sidebar.collapsed', '0')
+    document.body.innerHTML = renderAppShell({
+      surface: 'xpanel',
+      collapsed: true,
+      brandHtml: '<span>xPanel</span>',
+      navGroups: [{ id: 'g1', title: 'Main', items: [{ id: 'home', label: 'Home', href: '/home', current: true }] }],
+      topbarHtml: '',
+      contentHtml: [
+        renderCombobox({
+          id: 'kb-combo',
+          name: 'zone',
+          options: [
+            { value: 'one.test', label: 'one.test' },
+            { value: 'two.test', label: 'two.test' },
+            { value: 'three.test', label: 'three.test' },
+          ],
+        }),
+        renderWizard({
+          id: 'kb-wiz',
+          activeStepIndex: 0,
+          steps: [
+            { id: 's1', label: 'Step 1', bodyHtml: '<p>Step one</p>' },
+            { id: 's2', label: 'Step 2', bodyHtml: '<p>Step two</p>' },
+          ],
+        }),
+        renderDataTable({
+          id: 'kb-tbl',
+          caption: 'Domains',
+          selectable: true,
+          columns: [{ key: 'domain', label: 'Domain' }],
+          rows: [
+            { id: 'd1', cells: { domain: 'one.test' } },
+            { id: 'd2', cells: { domain: 'two.test' } },
+          ],
+        }),
+      ].join('\n'),
+      overlaysHtml: renderConfirmDialog({ id: 'kb-dlg', title: 'Confirm', message: 'Proceed?', open: true }),
+    })
+
+    const origShowModal = HTMLDialogElement.prototype.showModal
+    const origClose = HTMLDialogElement.prototype.close
+    let showModalCalls = 0
+    HTMLDialogElement.prototype.showModal = function (this: HTMLDialogElement) {
+      showModalCalls++
+      this.setAttribute('open', '')
+    }
+    HTMLDialogElement.prototype.close = function (this: HTMLDialogElement) {
+      this.removeAttribute('open')
+    }
+    try {
+      bootRuntime()
+
+      expect(showModalCalls).toBe(1)
+
+      // 1. .ds-shell initially collapsed was expanded by stored '0', then toggles on button & Ctrl+B
+      const shell = document.querySelector<HTMLElement>('.ds-shell')!
+      const collapseBtn = document.querySelector<HTMLButtonElement>('[data-action="toggle-sidebar-collapse"]')!
+      expect(shell.getAttribute('data-sidebar-collapsed')).toBeNull()
+      expect(collapseBtn.getAttribute('aria-expanded')).toBe('true')
+      collapseBtn.click()
+      expect(shell.getAttribute('data-sidebar-collapsed')).toBe('true')
+      expect(collapseBtn.getAttribute('aria-expanded')).toBe('false')
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', ctrlKey: true, bubbles: true }))
+      expect(shell.getAttribute('data-sidebar-collapsed')).toBeNull()
+
+      // 2. Combobox keyboard selection
+      const input = document.querySelector<HTMLInputElement>('#kb-combo')!
+      const hidden = document.querySelector<HTMLInputElement>('#kb-combo ~ [data-ds-combobox-hidden], .ds-combobox [data-ds-combobox-hidden]')!
+      const list = document.querySelector<HTMLElement>('#kb-combo-listbox')!
+      let changes = 0
+      hidden.addEventListener('change', () => { changes++ })
+      input.dispatchEvent(new FocusEvent('focus', { bubbles: true }))
+      expect(list.hidden).toBe(false)
+      expect(input.getAttribute('aria-activedescendant')).toBe('kb-combo-opt-0')
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+      expect(input.getAttribute('aria-activedescendant')).toBe('kb-combo-opt-1')
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }))
+      expect(input.getAttribute('aria-activedescendant')).toBe('kb-combo-opt-2')
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }))
+      expect(input.getAttribute('aria-activedescendant')).toBe('kb-combo-opt-1')
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+      expect(hidden.value).toBe('two.test')
+      expect(input.value).toBe('two.test')
+      expect(changes).toBe(1)
+      expect(list.hidden).toBe(true)
+      expect(input.getAttribute('aria-activedescendant')).toBeNull()
+
+      // Editing or clearing the visible input invalidates the stale hidden selection
+      input.value = ''
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+      expect(hidden.value).toBe('')
+      expect(changes).toBe(2)
+      expect(document.querySelector('#kb-combo-opt-1')!.getAttribute('aria-selected')).toBe('false')
+      document.body.click()
+      expect(list.hidden).toBe(true)
+      expect(hidden.value).toBe('')
+
+      // 3. Wizard Next & Prev navigation
+      const wiz = document.querySelector<HTMLElement>('#kb-wiz')!
+      const s1 = wiz.querySelector<HTMLElement>('[data-ds-wizard-step="s1"]')!
+      const s2 = wiz.querySelector<HTMLElement>('[data-ds-wizard-step="s2"]')!
+      const prevBtn = wiz.querySelector<HTMLButtonElement>('[data-ds-wizard-prev]')!
+      const nextBtn = wiz.querySelector<HTMLButtonElement>('[data-ds-wizard-next]')!
+      const submitBtn = wiz.querySelector<HTMLButtonElement>('[data-ds-wizard-submit]')!
+      expect(s1.hidden).toBe(false)
+      expect(s2.hidden).toBe(true)
+      expect(prevBtn.disabled).toBe(true)
+      nextBtn.click()
+      expect(s1.hidden).toBe(true)
+      expect(s2.hidden).toBe(false)
+      expect(prevBtn.disabled).toBe(false)
+      expect(nextBtn.hidden).toBe(true)
+      expect(submitBtn.hidden).toBe(false)
+      prevBtn.click()
+      expect(s1.hidden).toBe(false)
+      expect(s2.hidden).toBe(true)
+
+      // 4. Table select-all & row selection
+      const selectAll = document.querySelector<HTMLInputElement>('#kb-tbl [data-ds-select-all]')!
+      const rowChecks = document.querySelectorAll<HTMLInputElement>('#kb-tbl [data-ds-row-select]')
+      const bulkBar = document.querySelector<HTMLElement>('#kb-tbl [data-ds-bulk-bar]')!
+      const selectedCount = document.querySelector<HTMLElement>('#kb-tbl [data-ds-selected-count]')!
+      expect(bulkBar.hidden).toBe(true)
+      selectAll.checked = true
+      selectAll.dispatchEvent(new Event('change', { bubbles: true }))
+      expect(bulkBar.hidden).toBe(false)
+      expect(selectedCount.textContent).toBe('2')
+      rowChecks[0]!.checked = false
+      rowChecks[0]!.dispatchEvent(new Event('change', { bubbles: true }))
+      expect(selectAll.indeterminate).toBe(true)
+      expect(selectedCount.textContent).toBe('1')
+
+      // 5. Escape closes modal dialog mounted via showModal()
+      const dlg = document.querySelector<HTMLDialogElement>('#kb-dlg')!
+      expect(dlg.hasAttribute('open')).toBe(true)
+      expect(dlg.hasAttribute('data-ds-dialog-open')).toBe(false)
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+      expect(dlg.hasAttribute('open')).toBe(false)
+
+      // 6. DataTable client pagination (30 rows), visible-page select-all, and column sorting
+      const pageWrap = document.createElement('div')
+      pageWrap.innerHTML = renderDataTable({
+        id: 'pg-tbl',
+        caption: 'Paged accounts',
+        selectable: true,
+        pageSize: 25,
+        columns: [{ key: 'domain', label: 'Domain', sortable: true }],
+        rows: Array.from({ length: 30 }, (_, i) => ({
+          id: `r-${i + 1}`,
+          cells: { domain: `site-${String(30 - i).padStart(2, '0')}.test` },
+        })),
+      })
+      document.body.appendChild(pageWrap)
+      bootRuntime()
+
+      const pgTbl = document.querySelector<HTMLElement>('#pg-tbl')!
+      const pgCur = pgTbl.querySelector<HTMLElement>('[data-ds-page-current]')!
+      const pgPrev = pgTbl.querySelector<HTMLButtonElement>('[data-ds-page-prev]')!
+      const pgNext = pgTbl.querySelector<HTMLButtonElement>('[data-ds-page-next]')!
+      const pgSelectAll = pgTbl.querySelector<HTMLInputElement>('[data-ds-select-all]')!
+      const pgCount = pgTbl.querySelector<HTMLElement>('[data-ds-selected-count]')!
+      const row1 = pgTbl.querySelector<HTMLTableRowElement>('[data-ds-row="r-1"]')!
+      const row26 = pgTbl.querySelector<HTMLTableRowElement>('[data-ds-row="r-26"]')!
+
+      expect(pgCur.textContent).toBe('1')
+      expect(row1.hidden).toBe(false)
+      expect(row26.hidden).toBe(true)
+      expect(pgPrev.disabled).toBe(true)
+      expect(pgNext.disabled).toBe(false)
+
+      pgNext.click()
+      expect(pgCur.textContent).toBe('2')
+      expect(row1.hidden).toBe(true)
+      expect(row26.hidden).toBe(false)
+      expect(pgPrev.disabled).toBe(false)
+      expect(pgNext.disabled).toBe(true)
+
+      pgSelectAll.checked = true
+      pgSelectAll.dispatchEvent(new Event('change', { bubbles: true }))
+      expect(pgCount.textContent).toBe('5')
+      expect(row1.querySelector<HTMLInputElement>('[data-ds-row-select]')!.checked).toBe(false)
+      expect(row26.querySelector<HTMLInputElement>('[data-ds-row-select]')!.checked).toBe(true)
+
+      pgPrev.click()
+      expect(pgCur.textContent).toBe('1')
+      expect(row1.hidden).toBe(false)
+      expect(row26.hidden).toBe(true)
+      expect(pgCount.textContent).toBe('5')
+
+      const sortBtn = pgTbl.querySelector<HTMLButtonElement>('[data-ds-sort="domain"]')!
+      sortBtn.click()
+      const firstSortedRow = pgTbl.querySelector<HTMLTableRowElement>('tbody tr[data-ds-row]')!
+      expect(firstSortedRow.getAttribute('data-ds-row')).toBe('r-30')
+      expect(firstSortedRow.hidden).toBe(false)
+      expect(sortBtn.closest('th')!.getAttribute('aria-sort')).toBe('ascending')
+
+      // 7. Nested tab groups isolate activation to their owning group & disabled combobox stays closed
+      const extraWrap = document.createElement('div')
+      extraWrap.innerHTML = [
+        renderTabs({
+          id: 'outer-tabs',
+          ariaLabel: 'Outer',
+          items: [
+            {
+              id: 'o1',
+              label: 'Outer 1',
+              active: true,
+              panelHtml: renderTabs({
+                id: 'inner-tabs',
+                ariaLabel: 'Inner',
+                items: [
+                  { id: 'i1', label: 'Inner 1', active: true, panelHtml: '<p>Inner 1 body</p>' },
+                  { id: 'i2', label: 'Inner 2', panelHtml: '<p>Inner 2 body</p>' },
+                ],
+              }),
+            },
+            { id: 'o2', label: 'Outer 2', panelHtml: '<p>Outer 2 body</p>' },
+          ],
+        }),
+        renderCombobox({
+          id: 'dis-combo',
+          name: 'disabledZone',
+          disabled: true,
+          options: [{ value: 'a.test', label: 'a.test' }],
+        }),
+      ].join('\n')
+      document.body.appendChild(extraWrap)
+      bootRuntime()
+
+      const outerBtn1 = document.querySelector<HTMLButtonElement>('[data-ds-tab="o1"]')!
+      const outerBtn2 = document.querySelector<HTMLButtonElement>('[data-ds-tab="o2"]')!
+      const outerPanel1 = document.querySelector<HTMLElement>('[data-ds-tabpanel="o1"]')!
+      const innerBtn1 = document.querySelector<HTMLButtonElement>('[data-ds-tab="i1"]')!
+      const innerBtn2 = document.querySelector<HTMLButtonElement>('[data-ds-tab="i2"]')!
+      const innerPanel1 = document.querySelector<HTMLElement>('[data-ds-tabpanel="i1"]')!
+      const innerPanel2 = document.querySelector<HTMLElement>('[data-ds-tabpanel="i2"]')!
+
+      outerBtn2.click()
+      expect(outerPanel1.hidden).toBe(true)
+      expect(innerBtn1.getAttribute('aria-selected')).toBe('true')
+      expect(innerPanel1.hidden).toBe(false)
+
+      outerBtn1.click()
+      innerBtn2.click()
+      expect(outerBtn1.getAttribute('aria-selected')).toBe('true')
+      expect(outerPanel1.hidden).toBe(false)
+      expect(innerPanel1.hidden).toBe(true)
+      expect(innerPanel2.hidden).toBe(false)
+
+      const disInput = document.querySelector<HTMLInputElement>('#dis-combo')!
+      const disList = document.querySelector<HTMLElement>('#dis-combo-listbox')!
+      disInput.dispatchEvent(new FocusEvent('focus', { bubbles: true }))
+      disInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+      expect(disList.hidden).toBe(true)
+
+      // 8. Wizard guards implicit submission and Enter before the final step
+      const wizWrap = document.createElement('div')
+      wizWrap.innerHTML = `<form id="wiz-form">${renderWizard({
+        id: 'form-wiz',
+        activeStepIndex: 0,
+        steps: [
+          { id: 'ws1', label: 'Step 1', bodyHtml: renderInput({ id: 'wiz-domain', name: 'domain', required: true }) },
+          { id: 'ws2', label: 'Step 2', bodyHtml: renderInput({ id: 'wiz-plan', name: 'plan', value: 'basic' }) },
+        ],
+      })}</form>`
+      document.body.appendChild(wizWrap)
+      bootRuntime()
+
+      const wizForm = document.querySelector<HTMLFormElement>('#wiz-form')!
+      const formWiz = document.querySelector<HTMLElement>('#form-wiz')!
+      const ws1 = formWiz.querySelector<HTMLElement>('[data-ds-wizard-step="ws1"]')!
+      const ws2 = formWiz.querySelector<HTMLElement>('[data-ds-wizard-step="ws2"]')!
+      const wPrev = formWiz.querySelector<HTMLButtonElement>('[data-ds-wizard-prev]')!
+      const wNext = formWiz.querySelector<HTMLButtonElement>('[data-ds-wizard-next]')!
+      const wSubmit = formWiz.querySelector<HTMLButtonElement>('[data-ds-wizard-submit]')!
+      const domainInput = formWiz.querySelector<HTMLInputElement>('#wiz-domain')!
+      let allowedSubmits = 0
+      wizForm.addEventListener('submit', e => {
+        if (!e.defaultPrevented) allowedSubmits++
+      })
+
+      expect(wSubmit.hidden).toBe(true)
+      expect(wSubmit.disabled).toBe(true)
+      expect(wNext.hidden).toBe(false)
+      expect(wNext.disabled).toBe(false)
+
+      const invalidSubmit = new Event('submit', { bubbles: true, cancelable: true })
+      wizForm.dispatchEvent(invalidSubmit)
+      expect(invalidSubmit.defaultPrevented).toBe(true)
+      expect(allowedSubmits).toBe(0)
+      expect(ws1.hidden).toBe(false)
+
+      domainInput.value = 'example.com'
+      const enterEv = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+      domainInput.dispatchEvent(enterEv)
+      expect(enterEv.defaultPrevented).toBe(true)
+      expect(allowedSubmits).toBe(0)
+      expect(ws1.hidden).toBe(true)
+      expect(ws2.hidden).toBe(false)
+      expect(wNext.hidden).toBe(true)
+      expect(wNext.disabled).toBe(true)
+      expect(wSubmit.hidden).toBe(false)
+      expect(wSubmit.disabled).toBe(false)
+
+      wPrev.click()
+      expect(wSubmit.disabled).toBe(true)
+      const earlySubmit = new Event('submit', { bubbles: true, cancelable: true })
+      wizForm.dispatchEvent(earlySubmit)
+      expect(earlySubmit.defaultPrevented).toBe(true)
+      expect(allowedSubmits).toBe(0)
+      expect(ws2.hidden).toBe(false)
+      expect(wSubmit.disabled).toBe(false)
+
+      domainInput.value = ''
+      const brokenFinalSubmit = new Event('submit', { bubbles: true, cancelable: true })
+      wizForm.dispatchEvent(brokenFinalSubmit)
+      expect(brokenFinalSubmit.defaultPrevented).toBe(true)
+      expect(allowedSubmits).toBe(0)
+      expect(ws1.hidden).toBe(false)
+
+      domainInput.value = 'example.com'
+      wNext.click()
+      const validSubmit = new Event('submit', { bubbles: true, cancelable: true })
+      wizForm.dispatchEvent(validSubmit)
+      expect(validSubmit.defaultPrevented).toBe(false)
+      expect(allowedSubmits).toBe(1)
+
+      // 9. Modal drawer enters focus, traps Tab, marks siblings inert, and restores focus on close
+      const bgWrap = document.createElement('div')
+      bgWrap.id = 'bg-wrap'
+      bgWrap.innerHTML = '<button id="bg-btn" type="button">Open details</button>'
+      document.body.appendChild(bgWrap)
+      const bgBtn = document.querySelector<HTMLButtonElement>('#bg-btn')!
+      bgBtn.focus()
+      expect(document.activeElement).toBe(bgBtn)
+
+      document.body.insertAdjacentHTML(
+        'beforeend',
+        renderDrawer({
+          id: 'modal-drw',
+          title: 'Account details',
+          bodyHtml: '<input id="drw-note" name="note" type="text">',
+          footerHtml: '<button id="drw-save" type="button">Save</button>',
+          open: true,
+        }),
+      )
+      bootRuntime()
+
+      const mDrw = document.querySelector<HTMLDialogElement>('#modal-drw')!
+      const drwClose = mDrw.querySelector<HTMLButtonElement>('[data-ds-drawer-close="modal-drw"]')!
+      const drwSave = mDrw.querySelector<HTMLButtonElement>('#drw-save')!
+      expect(mDrw.hasAttribute('open')).toBe(true)
+      expect(bgWrap.hasAttribute('inert')).toBe(true)
+      expect(mDrw.contains(document.activeElement)).toBe(true)
+      expect(document.activeElement).toBe(drwClose)
+
+      drwSave.focus()
+      const tabForward = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true })
+      document.dispatchEvent(tabForward)
+      expect(tabForward.defaultPrevented).toBe(true)
+      expect(document.activeElement).toBe(drwClose)
+
+      const tabBackward = new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true })
+      document.dispatchEvent(tabBackward)
+      expect(tabBackward.defaultPrevented).toBe(true)
+      expect(document.activeElement).toBe(drwSave)
+
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+      expect(mDrw.hasAttribute('open')).toBe(false)
+      expect(bgWrap.hasAttribute('inert')).toBe(false)
+      expect(document.activeElement).toBe(bgBtn)
+
+      mDrw.setAttribute('data-ds-drawer-open', 'true')
+      bootRuntime()
+      expect(mDrw.hasAttribute('open')).toBe(true)
+      expect(bgWrap.hasAttribute('inert')).toBe(true)
+      mDrw.click()
+      expect(mDrw.hasAttribute('open')).toBe(false)
+      expect(bgWrap.hasAttribute('inert')).toBe(false)
+      expect(document.activeElement).toBe(bgBtn)
+
+      // 10. Table sorting handles formatted numbers, IEC byte units, missing placeholders, and explicit sortValues
+      const numWrap = document.createElement('div')
+      numWrap.innerHTML = renderDataTable({
+        id: 'num-tbl',
+        caption: 'Resource usage',
+        columns: [
+          { key: 'count', label: 'Count', sortable: true },
+          { key: 'size', label: 'Size', sortable: true },
+          { key: 'prio', label: 'Priority', sortable: true },
+        ],
+        rows: [
+          { id: 'a', cells: { count: '1,000', size: '1.00 GiB', prio: 'High' }, sortValues: { prio: 10 } },
+          { id: 'b', cells: { count: '900', size: '512 B', prio: 'Low' }, sortValues: { prio: 2 } },
+          { id: 'c', cells: { count: '25', size: '2.00 MiB', prio: 'Med' }, sortValues: { prio: 5 } },
+          { id: 'd', cells: { count: '—', size: '—', prio: '—' } },
+        ],
+      })
+      document.body.appendChild(numWrap)
+      bootRuntime()
+
+      const numTbl = document.querySelector<HTMLElement>('#num-tbl')!
+      const rowOrder = () => Array.from(numTbl.querySelectorAll('tbody tr[data-ds-row]')).map(r => r.getAttribute('data-ds-row'))
+
+      const countSort = numTbl.querySelector<HTMLButtonElement>('[data-ds-sort="count"]')!
+      countSort.click()
+      expect(rowOrder()).toEqual(['c', 'b', 'a', 'd'])
+      countSort.click()
+      expect(rowOrder()).toEqual(['a', 'b', 'c', 'd'])
+
+      numTbl.querySelector<HTMLButtonElement>('[data-ds-sort="size"]')!.click()
+      expect(rowOrder()).toEqual(['b', 'c', 'a', 'd'])
+
+      numTbl.querySelector<HTMLButtonElement>('[data-ds-sort="prio"]')!.click()
+      expect(rowOrder()).toEqual(['b', 'c', 'a', 'd'])
+
+      // 11. Scoped Escape closes inner popup first, then top stacked modal only, then underlying drawer
+      const stackBg = document.createElement('div')
+      stackBg.id = 'stack-bg'
+      stackBg.innerHTML = '<button id="stack-bg-btn" type="button">Launch drawer</button>'
+      document.body.appendChild(stackBg)
+      const stackBgBtn = document.querySelector<HTMLButtonElement>('#stack-bg-btn')!
+      stackBgBtn.focus()
+      expect(document.activeElement).toBe(stackBgBtn)
+
+      document.body.insertAdjacentHTML(
+        'beforeend',
+        [
+          renderDrawer({
+            id: 'stack-drw',
+            title: 'Layered editor',
+            bodyHtml: [
+              renderActionMenu({ id: 'drw-menu', items: [{ id: 'act', label: 'Duplicate', action: 'dup' }] }),
+              renderCombobox({
+                id: 'drw-combo',
+                name: 'target',
+                options: [{ value: 'alpha.test', label: 'alpha.test' }],
+              }),
+              '<button id="open-confirm" type="button">Delete item</button>',
+            ].join('\n'),
+            open: true,
+          }),
+          renderConfirmDialog({
+            id: 'stack-dlg',
+            title: 'Confirm deletion',
+            message: 'Are you sure?',
+            destructive: true,
+            open: false,
+          }),
+        ].join('\n'),
+      )
+      bootRuntime()
+
+      const stackDrw = document.querySelector<HTMLDialogElement>('#stack-drw')!
+      const stackDlg = document.querySelector<HTMLDialogElement>('#stack-dlg')!
+      const drwMenuTrigger = stackDrw.querySelector<HTMLButtonElement>('#drw-menu [aria-haspopup="menu"]')!
+      const drwMenuPanel = stackDrw.querySelector<HTMLElement>('#drw-menu-panel')!
+      const drwComboInput = stackDrw.querySelector<HTMLInputElement>('#drw-combo')!
+      const drwComboList = stackDrw.querySelector<HTMLElement>('#drw-combo-listbox')!
+      const openConfirmBtn = stackDrw.querySelector<HTMLButtonElement>('#open-confirm')!
+
+      expect(stackDrw.hasAttribute('open')).toBe(true)
+      expect(stackBg.hasAttribute('inert')).toBe(true)
+      expect(stackDlg.hasAttribute('open')).toBe(false)
+      expect(stackDlg.hasAttribute('inert')).toBe(false)
+
+      drwComboInput.focus()
+      drwComboInput.dispatchEvent(new FocusEvent('focus', { bubbles: true }))
+      expect(drwComboList.hidden).toBe(false)
+      const escCombo = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+      drwComboInput.dispatchEvent(escCombo)
+      expect(escCombo.defaultPrevented).toBe(true)
+      expect(drwComboList.hidden).toBe(true)
+      expect(stackDrw.hasAttribute('open')).toBe(true)
+
+      drwMenuTrigger.click()
+      expect(drwMenuPanel.hidden).toBe(false)
+      const drwMenuItem = drwMenuPanel.querySelector<HTMLButtonElement>('[role="menuitem"]')!
+      drwMenuItem.focus()
+      expect(document.activeElement).toBe(drwMenuItem)
+      const escMenu = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+      document.dispatchEvent(escMenu)
+      expect(escMenu.defaultPrevented).toBe(true)
+      expect(drwMenuPanel.hidden).toBe(true)
+      expect(stackDrw.hasAttribute('open')).toBe(true)
+      expect(document.activeElement).toBe(drwMenuTrigger)
+
+      drwMenuTrigger.click()
+      expect(drwMenuPanel.hidden).toBe(false)
+      const cancelWithPopup = new Event('cancel', { cancelable: true })
+      stackDrw.dispatchEvent(cancelWithPopup)
+      expect(cancelWithPopup.defaultPrevented).toBe(true)
+      expect(drwMenuPanel.hidden).toBe(true)
+      expect(stackDrw.hasAttribute('open')).toBe(true)
+
+      openConfirmBtn.focus()
+      expect(document.activeElement).toBe(openConfirmBtn)
+      stackDlg.setAttribute('data-ds-dialog-open', 'true')
+      bootRuntime()
+
+      expect(stackDlg.hasAttribute('open')).toBe(true)
+      expect(stackDrw.hasAttribute('open')).toBe(true)
+      expect(stackDrw.hasAttribute('inert')).toBe(true)
+      expect(stackBg.hasAttribute('inert')).toBe(true)
+      expect(stackDlg.contains(document.activeElement)).toBe(true)
+
+      const cancelUnderModal = new Event('cancel', { cancelable: true })
+      stackDrw.dispatchEvent(cancelUnderModal)
+      expect(cancelUnderModal.defaultPrevented).toBe(true)
+
+      const escTopModal = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+      document.dispatchEvent(escTopModal)
+      expect(escTopModal.defaultPrevented).toBe(true)
+      expect(stackDlg.hasAttribute('open')).toBe(false)
+      expect(stackDrw.hasAttribute('open')).toBe(true)
+      expect(stackDrw.hasAttribute('inert')).toBe(false)
+      expect(stackBg.hasAttribute('inert')).toBe(true)
+      expect(document.activeElement).toBe(openConfirmBtn)
+
+      const escDrawer = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+      document.dispatchEvent(escDrawer)
+      expect(escDrawer.defaultPrevented).toBe(true)
+      expect(stackDrw.hasAttribute('open')).toBe(false)
+      expect(stackBg.hasAttribute('inert')).toBe(false)
+      expect(document.activeElement).toBe(stackBgBtn)
+
+      // 12. Modal Tab trap includes <details> <summary> and skips closed <details> contents and tabindex="-1" controls
+      document.body.insertAdjacentHTML(
+        'beforeend',
+        renderDrawer({
+          id: 'tab-drw',
+          title: 'Schedule drawer',
+          bodyHtml: [
+            renderTabs({
+              id: 'drw-tabs',
+              ariaLabel: 'Schedule sections',
+              items: [
+                { id: 'dt1', label: 'Tab 1', active: true, panelHtml: '<p>Primary</p>' },
+                { id: 'dt2', label: 'Tab 2', panelHtml: '<button id="dt2-hidden-btn" type="button">Hidden action</button>' },
+              ],
+            }),
+            renderCronBuilder({ id: 'drw-cron', namePrefix: 'drwcron', state: { frequency: 'daily', hour: 2, minute: 0 } }),
+          ].join('\n'),
+          open: true,
+        }),
+      )
+      bootRuntime()
+
+      const tabDrw = document.querySelector<HTMLDialogElement>('#tab-drw')!
+      const tabDrwClose = tabDrw.querySelector<HTMLButtonElement>('[data-ds-drawer-close="tab-drw"]')!
+      const drwMinuteInput = tabDrw.querySelector<HTMLInputElement>('[name="drwcron[minute]"]')!
+      const cronSummary = tabDrw.querySelector<HTMLElement>('details > summary')!
+
+      drwMinuteInput.focus()
+      const tabFromInput = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true })
+      document.dispatchEvent(tabFromInput)
+      expect(tabFromInput.defaultPrevented).toBe(false)
+
+      cronSummary.focus()
+      expect(document.activeElement).toBe(cronSummary)
+      const tabFromSummary = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true })
+      document.dispatchEvent(tabFromSummary)
+      expect(tabFromSummary.defaultPrevented).toBe(true)
+      expect(document.activeElement).toBe(tabDrwClose)
+
+      const shiftTabFromFirst = new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true })
+      document.dispatchEvent(shiftTabFromFirst)
+      expect(shiftTabFromFirst.defaultPrevented).toBe(true)
+      expect(document.activeElement).toBe(cronSummary)
+
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+      expect(tabDrw.hasAttribute('open')).toBe(false)
+
+      // 13. Row action menus open as top-layer popovers with viewport-clamped fixed positioning and RTL/scroll support
+      const menuTblWrap = document.createElement('div')
+      menuTblWrap.innerHTML = renderDataTable({
+        id: 'menu-tbl',
+        caption: 'Accounts',
+        columns: [{ key: 'domain', label: 'Domain' }],
+        rows: [
+          {
+            id: 'r1',
+            cells: { domain: 'bottom.example' },
+            actionsHtml: renderActionMenu({
+              id: 'row-act-menu',
+              items: [{ id: 'edit', label: 'Edit', action: 'edit-row' }],
+            }),
+          },
+        ],
+      })
+      document.body.appendChild(menuTblWrap)
+      bootRuntime()
+
+      const rowTrigger = document.querySelector<HTMLButtonElement>('#row-act-menu [aria-haspopup="menu"]')!
+      const rowPanel = document.querySelector<HTMLElement & { showPopover?: () => void; hidePopover?: () => void }>('#row-act-menu-panel')!
+      let showPopoverCalls = 0
+      let hidePopoverCalls = 0
+      rowPanel.showPopover = () => { showPopoverCalls++ }
+      rowPanel.hidePopover = () => { hidePopoverCalls++ }
+      const origInnerWidth = window.innerWidth
+      const origInnerHeight = window.innerHeight
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1024 })
+      Object.defineProperty(window, 'innerHeight', { configurable: true, value: 768 })
+      rowTrigger.getBoundingClientRect = () => ({ left: 800, right: 900, top: 700, bottom: 744, width: 100, height: 44, x: 800, y: 700, toJSON: () => ({}) } as DOMRect)
+      rowPanel.getBoundingClientRect = () => ({ left: 0, right: 220, top: 0, bottom: 140, width: 220, height: 140, x: 0, y: 0, toJSON: () => ({}) } as DOMRect)
+
+      try {
+        rowTrigger.click()
+        expect(showPopoverCalls).toBe(1)
+        expect(rowPanel.hidden).toBe(false)
+        expect(rowPanel.getAttribute('data-ds-menu-floating')).toBe('true')
+        expect(rowPanel.style.getPropertyValue('--ds-menu-y')).toBe('556px')
+        expect(rowPanel.style.getPropertyValue('--ds-menu-x')).toBe('680px')
+
+        document.documentElement.dir = 'rtl'
+        document.dispatchEvent(new Event('scroll'))
+        expect(rowPanel.style.getPropertyValue('--ds-menu-x')).toBe('8px')
+        document.documentElement.dir = ''
+
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+        expect(hidePopoverCalls).toBe(1)
+        expect(rowPanel.hidden).toBe(true)
+        expect(rowPanel.getAttribute('data-ds-menu-floating')).toBeNull()
+        expect(rowPanel.style.getPropertyValue('--ds-menu-x')).toBe('')
+        expect(rowPanel.style.getPropertyValue('--ds-menu-y')).toBe('')
+      } finally {
+        Object.defineProperty(window, 'innerWidth', { configurable: true, value: origInnerWidth })
+        Object.defineProperty(window, 'innerHeight', { configurable: true, value: origInnerHeight })
+        document.documentElement.dir = ''
+      }
+    } finally {
+      HTMLDialogElement.prototype.showModal = origShowModal
+      HTMLDialogElement.prototype.close = origClose
+    }
   })
 })

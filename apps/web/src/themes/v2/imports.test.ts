@@ -35,7 +35,7 @@ function violation(file: string, specifier: string, typeOnly = false): string | 
     if (target.startsWith(THEME + sep)) return undefined
     const fromWeb = relative(WEB_SRC, target)
     const module = fromWeb.split(sep).join('/')
-    return CORE_MODULES.has(module) || (typeOnly && TYPE_ONLY_CORE_MODULES.has(module)) || (test && TEST_CORE_MODULES.has(module)) ? undefined : `imports ${fromWeb} outside the theme and core`
+    return CORE_MODULES.has(module) || module.startsWith('design-system/') || (typeOnly && TYPE_ONLY_CORE_MODULES.has(module)) || (test && TEST_CORE_MODULES.has(module)) ? undefined : `imports ${fromWeb} outside the theme and core`
   }
   if (PACKAGES.test(specifier) || RUNTIME_BUILTINS.has(specifier) || (test && TEST_ONLY.test(specifier))) return undefined
   return `imports ${specifier}`
@@ -58,6 +58,7 @@ describe('v2 theme import boundary', () => {
     expect(violation(file, '../../../i18n.ts')).toBeUndefined()
     expect(violation(file, '../../../theme-messages.ts')).toBeUndefined()
     expect(violation(file, '../../../branding.ts')).toBeUndefined()
+    expect(violation(file, '../../../design-system/tokens.ts')).toBeUndefined()
     expect(violation(file, '../../contract.ts', true)).toBeUndefined()
     expect(violation(file, '../../contract.ts')).toBeDefined()
     expect(violation(file, '../../../models/mail.ts')).toBeUndefined()
