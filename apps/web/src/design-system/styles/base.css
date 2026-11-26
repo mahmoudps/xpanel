@@ -1,0 +1,80 @@
+:where([data-ui-theme="v2"]) {
+  font-family: var(--font-sans);
+  font-size: var(--ds-text-14);
+  line-height: var(--ds-lh-14);
+  color: var(--text);
+  background: var(--bg);
+  scroll-behavior: smooth;
+  scroll-padding-block-start: calc(var(--ds-topbar-h) + var(--ds-space-24));
+}
+
+:where([data-ui-theme="v2"]) :is(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+:where([data-ui-theme="v2"]) a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+:where([data-ui-theme="v2"]) a:hover {
+  color: var(--accent-fill-hover);
+  text-decoration: underline;
+}
+
+:where([data-ui-theme="v2"]) .ds-sr-only {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+:where([data-ui-theme="v2"]) .ds-prose {
+  font-size: var(--ds-text-16);
+  line-height: var(--ds-lh-16);
+  color: var(--text-2);
+  margin: 0;
+}
+
+:where([data-ui-theme="v2"]) .ds-caption {
+  font-size: var(--ds-text-13);
+  line-height: var(--ds-lh-13);
+  color: var(--muted);
+  margin: 0;
+}
+
+:where([data-ui-theme="v2"]) .ds-mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+:where([data-ui-theme="v2"]) .ds-num {
+  font-variant-numeric: tabular-nums;
+}
+
+[data-ui-theme="v2"][dir="rtl"] .ds-icon--dir {
+  transform: scaleX(-1);
+}
+
+[data-ui-theme="v2"] [hidden] {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-ui-theme="v2"] {
+    scroll-behavior: auto;
+    --dur-press: 0ms;
+    --dur-menu: 0ms;
+    --dur-overlay: 0ms;
+  }
+
+  [data-ui-theme="v2"] .ds-skeleton::after {
+    animation-duration: 0ms;
+  }
+}
