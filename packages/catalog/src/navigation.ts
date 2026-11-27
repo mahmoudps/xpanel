@@ -12,6 +12,10 @@ export const registeredDocumentAliases = Object.freeze([
   // Search retains Inbox document authority; its own tool/feature gate stays independent.
   ...['/mail/sent', '/mail/drafts', '/mail/trash', '/mail/search']
     .map(route => Object.freeze({ route, parentRoute: '/mail/inbox' })),
+  Object.freeze({ route: '/whm/resellers/more', parentRoute: '/whm/resellers' }),
+  Object.freeze({ route: '/whm/dns/more', parentRoute: '/whm/dns' }),
+  Object.freeze({ route: '/whm/services/more', parentRoute: '/whm/services' }),
+  Object.freeze({ route: '/whm/backups/restore-more', parentRoute: '/whm/backups/restore' }),
 ])
 const canonicalParents = new Map(registeredDocumentAliases.map(row => [row.route, row.parentRoute]))
 export const canonicalNavigationRoute = (route: string): string => canonicalParents.get(route) ?? route
@@ -52,8 +56,10 @@ export const visibleRegisteredNavigation = (
  * individually unqualified and the workspace keeps their controls disabled.
  */
 const WORKSPACE_CORE_TOOLS: Readonly<Record<string, string>> = {
-  // This manager's selected service jobs do not implement the other tools on the page.
-  '/whm/services/more': 'service-manager',
+  // Primary host/reseller/recovery tabs open on their core tool; folded subtabs stay behind registered aliases.
+  '/whm/resellers': 'reseller-center',
+  '/whm/services': 'restart-web',
+  '/whm/backups/restore': 'backup-restoration',
   '/whm/services/health': 'service-config-health',
   '/whm/panel/developer': 'api-explorer',
   '/whm/panel/integrations': 'integrations-hub',
@@ -84,8 +90,8 @@ const WORKSPACE_CORE_TOOLS: Readonly<Record<string, string>> = {
   '/whm/accounts/announcements': 'panel-news',
   // Root-only facts and redacted bundle; tweak-support stays unqualified.
   '/whm/support': 'support-center',
-  // Root-only zone checks and bulk TTL, with the hostname A record and the DNS cleanup.
-  '/whm/dns/more': 'zone-ttl-bulk',
+  // Zone editor opens on core zone management; bulk TTL and diagnostics sit on the folded tab.
+  '/whm/dns': 'dns-zone-manager',
   '/whm/monitoring/processes': 'process-manager',
   '/whm/monitoring/logs': 'aapanel-os-log-audit',
   '/whm/security/sign-in': 'security-policies',
@@ -117,6 +123,21 @@ const WORKSPACE_CORE_TOOLS: Readonly<Record<string, string>> = {
   '/metrics/traffic': 'bandwidth',
   '/mail/settings/calendars': 'webmail-dav-config',
 }
+
+export type CatalogPageDisposition = 'host-gated' | 'unavailable'
+
+/** Explicit G1 dispositions for separated optional xWHM catalog entries. */
+export const CATALOG_PAGE_DISPOSITIONS: Readonly<Record<string, CatalogPageDisposition>> = Object.freeze({
+  '/whm/email/bcc': 'unavailable',
+  '/whm/email/marketing': 'unavailable',
+  '/whm/services/ftp-log-analysis': 'unavailable',
+  '/whm/services/default-index': 'host-gated',
+  '/whm/services/nginx-proxy': 'unavailable',
+  '/whm/software/deployments': 'unavailable',
+  '/whm/software/application-projects': 'unavailable',
+  '/whm/software/composer': 'host-gated',
+  '/whm/server/file-sharing': 'host-gated',
+})
 
 const navCache = new WeakMap<readonly CatalogTool[], Map<string, NavSurface[]>>()
 

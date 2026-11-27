@@ -12,6 +12,8 @@ import { v2Messages } from '../messages.ts'
 type Family = 'v2-observation' | 'v2-panel-settings'
 /** On a phone a row stays two columns: its name and details, opposite its action. */
 export const IDENTITY_ROWS_CSS = `.v2-card[data-sec-workspace] :is(dd,td){font-variant-numeric:tabular-nums}
+.v2-sec-redirect-uris{white-space:pre-line}
+.v2-sec-readonly{display:contents}
 .v2-card[data-sec-workspace] .v2-btn{min-inline-size:var(--target);min-block-size:var(--target)}
 .v2-card[data-sec-workspace] .v2-identity-pair{grid-template-columns:repeat(2,minmax(0,1fr))}
 .v2-card[data-sec-workspace] [data-sec-status]{font-size:13px;color:var(--muted)}
@@ -33,10 +35,10 @@ const button = (ui: Ui, label: string, action: string, primary = false, enabled 
 const help = (ui: Ui, text: string, hooks?: HookAttributes): string => `<p class="v2-muted"${hookAttrs(hooks)}>${esc(ui.t(text))}</p>`
 const check = (ui: Ui, label: string, key: string): string => `<label class="${ui.p}__check"><input type="checkbox" data-sec-input="${esc(key)}" disabled><span>${esc(ui.t(label))}</span></label>`
 const facts = (ui: Ui, items: readonly (readonly [string, string])[]): string =>
-  `<dl class="${ui.p}__facts">${items.map(([key, label]) => `<div><dt>${esc(ui.t(label))}</dt><dd><bdi${LTR_FACTS.has(key) ? ' dir="ltr"' : ''} data-sec-field="${esc(key)}">${esc(ui.t(msgid('Not read')))}</bdi></dd></div>`).join('')}</dl>`
+  `<dl class="${ui.p}__facts">${items.map(([key, label]) => `<div><dt>${esc(ui.t(label))}</dt><dd><bdi${LTR_FACTS.has(key) ? ' dir="ltr"' : ''} data-sec-field="${esc(key)}">${esc(ui.t(msgid('Loading...')))}</bdi></dd></div>`).join('')}</dl>`
 const select = (ui: Ui, id: string, key: string, placeholder: string): string => `<span class="v2-select"><select id="${esc(id)}" data-sec-input="${esc(key)}" disabled><option value="">${esc(ui.t(placeholder))}</option></select></span>`
 const table = (ui: Ui, title: string, columns: readonly string[], rows: string): string =>
-  `<div class="${ui.p === 'v2-observation' ? 'v2-observation__scroll' : 'v2-panel-settings__table'}${columns.length > 2 ? ' v2-identity-rows' : ''}" role="region" tabindex="0" aria-label="${esc(ui.t(title))}"><table><caption class="v2-sr">${esc(ui.t(title))}</caption><thead><tr>${columns.map(label => `<th scope="col">${esc(ui.t(label))}</th>`).join('')}</tr></thead><tbody data-sec-rows="${esc(rows)}"><tr><td colspan="${columns.length}">${esc(ui.t(msgid('Not read')))}</td></tr></tbody></table></div>`
+  `<div class="${ui.p === 'v2-observation' ? 'v2-observation__scroll' : 'v2-panel-settings__table'}${columns.length > 2 ? ' v2-identity-rows' : ''}" role="region" tabindex="0" aria-label="${esc(ui.t(title))}"><table><caption class="v2-sr">${esc(ui.t(title))}</caption><thead><tr>${columns.map(label => `<th scope="col">${esc(ui.t(label))}</th>`).join('')}</tr></thead><tbody data-sec-rows="${esc(rows)}"><tr><td colspan="${columns.length}">${esc(ui.t(msgid('Loading...')))}</td></tr></tbody></table></div>`
 const workspace = (ui: Ui, page: string, title: string, body: string): string => card({
   title: ui.t(title), titleId: `v2-identity-${page}`,
   actionsHtml: button(ui, msgid('Refresh'), 'refresh', false, ui.read),
@@ -106,7 +108,7 @@ export function renderV2IdentityCards(props: IdentityCardsProps): string {
     + actions(ui, button(ui, msgid('Add address'), 'add-address') + button(ui, msgid('Add this address'), 'add-current')))
   const providers = root ? workspace(ui, 'external-providers', msgid('Identity providers'),
     help(ui, msgid('OpenID Connect providers for sign-in to xPanel and xWHM. A provider is saved only after its discovery document passes; register the redirect addresses below with it. The client secret is never shown again.'))
-    + `<dl class="${ui.p}__facts"><div><dt>${esc(t(msgid('Redirect addresses')))}</dt><dd><bdi dir="ltr" style="white-space:pre-line" data-sec-field="redirect-uris">${esc(t(msgid('Not read')))}</bdi></dd></div></dl>`
+    + `<dl class="${ui.p}__facts"><div><dt>${esc(t(msgid('Redirect addresses')))}</dt><dd><bdi dir="ltr" class="v2-sec-redirect-uris" data-sec-field="redirect-uris">${esc(t(msgid('Loading...')))}</bdi></dd></div></dl>`
     + table(ui, msgid('Identity providers'), [msgid('Name'), msgid('Issuer'), msgid('Client ID'), msgid('Panels'), msgid('Action')], 'providers')
     + fields(ui, field(ui, 'v2-identity-provider-id', msgid('Provider ID'), control('v2-identity-provider-id', 'provider-id', 'text', ' dir="ltr" maxlength="32" spellcheck="false"'))
       + field(ui, 'v2-identity-provider-label', msgid('Button name'), control('v2-identity-provider-label', 'provider-label', 'text', ' dir="auto" maxlength="64"'))
@@ -124,5 +126,5 @@ export function renderV2IdentityCards(props: IdentityCardsProps): string {
       + field(ui, 'v2-identity-link-password', msgid('Current password'), password('v2-identity-link-password', 'current-password', 'current-password')))
     + actions(ui, button(ui, msgid('Link identity'), 'link', true)))
   const cards = policy + (props.securityPolicyDisabled ? '' : own) + providers + linked
-  return open ? cards : '<div data-readonly="true" style="display:contents">' + cards + '</div>'
+  return open ? cards : '<div class="v2-sec-readonly" data-readonly="true">' + cards + '</div>'
 }

@@ -34,7 +34,7 @@ export function renderV2PanelTraffic(props: PanelSurfaceProps, authority?: Panel
     : domainField
   const scope = section('v2-traffic-selection', t(msgid('Traffic selection')),
     `<div class="v2-panel-obs-select">${domainForm}<div class="v2-field"><span class="v2-label">${esc(t(msgid('Range')))}</span>${windowLinks}</div></div>`)
-  const meta = `<ul class="v2-panel-obs-meta"><li>${esc(t(msgid('Observed at')))} ${snapshot ? technical(formatDisplayDateTime(snapshot.at)) : esc(t(msgid('Not read')))}</li><li>${esc(readState === 'empty' ? t(msgid('Empty observation')) : readState === 'loaded' ? t(msgctxt('theme:v2', 'Account-scoped log observation')) : t(msgid('Not read')))}</li></ul>`
+  const meta = `<ul class="v2-panel-obs-meta"><li>${esc(t(msgid('Observed at')))} ${snapshot ? technical(formatDisplayDateTime(snapshot.at)) : esc(t(msgid('Loading...')))}</li><li>${esc(readState === 'empty' ? t(msgid('Empty observation')) : readState === 'loaded' ? t(msgctxt('theme:v2', 'Account-scoped log observation')) : t(msgid('Loading...')))}</li></ul>`
   const statusCopy = readState === 'empty'
     ? t(msgid('The account-scoped analytics read returned no hourly rows for this range. Request, bandwidth and visitor totals are not shown because a missing row is not a measured zero.'))
     : readState === 'unavailable'
@@ -43,7 +43,7 @@ export function renderV2PanelTraffic(props: PanelSurfaceProps, authority?: Panel
         : t(msgid('Derived incrementally from Nginx edge access logs without external tracking scripts.'))
   const status = notice(t, { tone: readState === 'loaded' ? 'info' : 'warn', lead: readState === 'empty' ? t(msgid('No traffic rows were observed')) : readState === 'loaded' ? t(msgctxt('theme:v2', 'Observed traffic')) : t(msgid('Traffic analytics unavailable')), text: statusCopy })
   const totals = observed?.totals
-  const value = (number: number | undefined, unit?: 'bytes' | 'percent' | 'ms'): string => number === undefined ? t(msgid('Not read')) : unit === 'bytes' ? formatAsciiBytes(number) : unit === 'percent' ? `${formatAsciiNumber(number, { decimals: 1 })}%` : unit === 'ms' ? `${formatAsciiNumber(number, { decimals: 1 })} ms` : formatAsciiNumber(number)
+  const value = (number: number | undefined, unit?: 'bytes' | 'percent' | 'ms'): string => number === undefined ? t(msgid('Loading...')) : unit === 'bytes' ? formatAsciiBytes(number) : unit === 'percent' ? `${formatAsciiNumber(number, { decimals: 1 })}%` : unit === 'ms' ? `${formatAsciiNumber(number, { decimals: 1 })} ms` : formatAsciiNumber(number)
   const summary = `<section class="v2-kpi-row" aria-label="${esc(t(msgctxt('theme:v2', 'Totals for the selection')))}">${[
     { label: t(msgid('Unique Visitors')), count: totals?.uniqueVisitors, icon: 'users' as const },
     { label: t(msgid('Total Requests')), count: totals?.requests, icon: 'activity' as const },
@@ -56,7 +56,7 @@ export function renderV2PanelTraffic(props: PanelSurfaceProps, authority?: Panel
     const caption = kind === 'requests' ? t(msgid('Requests')) : t(msgid('Transferred'))
     return lineChart({ label: caption, series: [{ label: caption, values: series }], max: Math.max(1, ...series), xTicks: observed.series.length ? [formatDisplayDateTime(observed.series[0]!.at), formatDisplayDateTime(observed.series[observed.series.length - 1]!.at)] : [], yTicks: [value(Math.max(0, ...series), kind === 'bytes' ? 'bytes' : undefined), '0'], height: kind === 'bytes' ? 150 : 230 })
   }
-  const notRead = esc(t(msgid('Not read')))
+  const notRead = esc(t(msgid('Loading...')))
   const requests = section('v2-traffic-requests', t(msgid('Requests')), chartBody('requests'))
   const bandwidthChart = section('v2-traffic-bandwidth-chart', t(msgid('Bandwidth')), chartBody('bytes'))
   const bandwidth = tableCard('v2-traffic-bandwidth', t(msgid('Bandwidth by domain')), [t(msgid('Domain')), t(msgid('Transferred'))],
@@ -69,7 +69,8 @@ export function renderV2PanelTraffic(props: PanelSurfaceProps, authority?: Panel
   const codes = (['2xx', '3xx', '4xx', '5xx'] as const).map((code, index) => ({ code, tone: (['ok', 'info', 'warn', 'bad'] as const)[index]!, count: totals?.[`status${code}`] }))
   const responsesTotal = codes.reduce((sum, row) => sum + (row.count ?? 0), 0)
   const statusRows = codes.map(row => `<tr><td><span class="v2-panel-obs-tone" data-tone="${row.tone}">${technical(row.code)}</span></td><td>${row.count === undefined ? notRead : technical(formatAsciiNumber(row.count))}</td><td>${row.count === undefined ? notRead : responsesTotal > 0 ? technical(`${formatAsciiNumber(row.count / responsesTotal * 100, { decimals: 1 })}%`) : '—'}</td></tr>`).join('')
-  const statusBar = totals && responsesTotal > 0 ? `<div class="v2-panel-obs-bar" aria-hidden="true">${codes.filter(row => row.count).map(row => `<span data-tone="${row.tone}" style="flex-grow:${row.count}"></span>`).join('')}</div>` : ''
+  let offset = 0
+  const statusBar = totals && responsesTotal > 0 ? `<svg class="v2-panel-obs-bar" viewBox="0 0 1000 12" preserveAspectRatio="none" aria-hidden="true">${codes.filter(row => row.count).map(row => { const w = Math.max(2, Math.round(((row.count ?? 0) / responsesTotal) * 1000)); const x = offset; offset += w; return `<rect data-tone="${row.tone}" x="${x}" y="0" width="${w}" height="12"/>` }).join('')}</svg>` : ''
   const responses = tableCard('v2-traffic-status', t(msgid('Responses by status')), [t(msgid('Status')), t(msgid('Requests')), t(msgid('Share'))], statusRows, statusBar ? { beforeHtml: statusBar } : {})
   const errors = tableCard('v2-traffic-error', t(msgid('Errors by path')), [t(msgid('Path')), t(msgid('Status')), t(msgid('Errors'))], entries(report?.topPaths.filter(row => (row.errors5xx ?? 0) > 0), 3, true))
   const referrers = tableCard('v2-traffic-referrer', t(msgid('Top Referrers')), [t(msgid('Referrer')), t(msgid('Requests')), t(msgid('Transferred'))], entries(report?.topReferrers, 3))
@@ -88,7 +89,7 @@ export function renderV2PanelTraffic(props: PanelSurfaceProps, authority?: Panel
 }
 
 export const ftpReport = (props: PanelSurfaceProps, authority: PanelObservationAuthority | undefined): string => {
-  const { t } = emailContext(props, authority), fact = (key: string, label: string): { label: string; valueHtml: string } => ({ label, valueHtml: `<bdi dir="ltr" data-ftp-report-fact="${key}">${esc(t(msgid('Not read')))}</bdi>` })
+  const { t } = emailContext(props, authority), fact = (key: string, label: string): { label: string; valueHtml: string } => ({ label, valueHtml: `<bdi dir="ltr" data-ftp-report-fact="${key}">${esc(t(msgid('Loading...')))}</bdi>` })
   const rows = (id: string, label: string, heads: readonly string[], hook: string): string => table(id, label, heads, '', { [hook]: true })
   return `<div data-ftp-report${authority?.canRead && authority.presentation !== 'read-only' ? '' : ' data-readonly="true"'}>` + section('v2-ftp-report', t(msgid('FTP statistics')),
     `<div class="v2-panel-obs-select">${field('v2-ftp-report-month', t(msgid('Month')), '<input id="v2-ftp-report-month" type="month" dir="ltr" data-ftp-report-month>')}${actions(button(t(msgid('Read FTP report')), { 'data-ftp-report-read': true }, false))}</div>`
