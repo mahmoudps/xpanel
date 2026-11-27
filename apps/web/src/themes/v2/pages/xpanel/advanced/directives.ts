@@ -32,7 +32,7 @@ export function renderV2WebDirectivePage(props: PanelSurfaceProps, kind: Directi
   const c = settingsContext(props, authority), { t } = c, spec = SPECS[kind], id = `v2-wd-${kind}`
   const title = t(spec.title), description = t(spec.description)
   const current = section(`${id}-context`, t(msgctxt('theme:v2', 'Domain and file')), '<div class="v2-panel-settings__lead">' + fields(field(`${id}-domain`, t(msgid('Domain')), select(`${id}-domain`, '', (c.domains ?? []).map(domain => [domain.id, domain.name]), ' data-wd-domain', true, c.selected?.id)))
-    + facts([{ label: t(msgid('Account-relative file')), valueHtml: `<bdi class="v2-mono" dir="ltr" data-wd-path>${esc(t(msgid('Not read')))}</bdi>` }, { label: t(msgid('Blocks managed by xPanel')), valueHtml: `<bdi dir="ltr" data-wd-managed>${esc(t(msgid('Not read')))}</bdi>` }, { label: t(msgid('Local site check')), valueHtml: `<bdi dir="ltr" data-wd-http>${esc(t(msgid('Not checked')))}</bdi>` }], { 'data-cols': '3' }) + '</div>'
+    + facts([{ label: t(msgid('Account-relative file')), valueHtml: `<bdi class="v2-mono" dir="ltr" data-wd-path>${esc(t(msgid('Loading...')))}</bdi>` }, { label: t(msgid('Blocks managed by xPanel')), valueHtml: `<bdi dir="ltr" data-wd-managed>${esc(t(msgid('Loading...')))}</bdi>` }, { label: t(msgid('Local site check')), valueHtml: `<bdi dir="ltr" data-wd-http>${esc(t(msgid('Not checked')))}</bdi>` }], { 'data-cols': '3' }) + '</div>'
     + status(t(msgid('The current rules have not been read.')), { 'data-wd-status': true })
     + '<div class="v2-panel-settings__preview" data-wd-notice role="note" hidden></div>', actions(button(t(msgid('Read saved rules')), { 'data-wd-refresh': true })))
   const controls = spec.fields.map(item => {

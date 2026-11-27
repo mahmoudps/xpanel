@@ -173,4 +173,24 @@ describe('quick bar client without an independent overlay lifecycle', () => {
     expect(closed).toHaveBeenCalled()
     delete (window as unknown as { __xpanelToggleSidebar?: () => void }).__xpanelToggleSidebar
   })
+
+  it('dispatches gated executable server actions via window.__xpanelExecuteCommandAction', () => {
+    const entries = commandPaletteEntries('xwhm', 'en', root, catalog)
+    expect(entries.some(e => e.commandAction?.id === 'restart-service')).toBe(true)
+    expect(entries.some(e => e.commandAction?.id === 'check-config-health')).toBe(true)
+    expect(entries.some(e => e.commandAction?.id === 'create-database')).toBe(false)
+
+    const panelOwner: VisibilityContext = { principal: { kind: 'user', id: 'u1', accountId: 'a1', username: 'alice' }, disabledFeatures: new Set() }
+    const panelEntries = commandPaletteEntries('xpanel', 'en', panelOwner, catalog)
+    expect(panelEntries.some(e => e.commandAction?.id === 'run-backup')).toBe(true)
+    expect(panelEntries.some(e => e.commandAction?.id === 'restart-service')).toBe(false)
+    expect(panelEntries.find(e => e.commandAction?.id === 'create-database')?.commandAction?.namePrefix).toBe('alice_')
+    expect(panelEntries.find(e => e.commandAction?.id === 'create-database')?.commandAction?.accountId).toBeUndefined()
+
+    const adminUnscoped = commandPaletteEntries('xpanel', 'en', root, catalog)
+    expect(adminUnscoped.some(e => e.commandAction?.id === 'create-database')).toBe(false)
+
+    const adminScoped = commandPaletteEntries('xpanel', 'en', root, catalog, { accounts: [accounts[0]!] })
+    expect(adminScoped.some(e => e.commandAction?.id === 'create-database')).toBe(false)
+  })
 })

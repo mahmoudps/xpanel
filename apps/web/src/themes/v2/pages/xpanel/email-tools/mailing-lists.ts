@@ -11,7 +11,7 @@ export function renderV2PanelMailingLists(props: PanelSurfaceProps, authority?: 
   const createAllowed = canManage && domains !== undefined && domains.length > 0
   const domainOptions = domains?.length ? domains.map(row => [row.name, row.name] as const) : [['', t(msgid('No account domain is available'))] as const]
   const saved = section('v2-mailing-lists', title,
-    facts([{ label: t(msgid('Plan limit')), valueHtml: plan?.caps.mailingLists === undefined ? esc(t(msgid('Not read'))) : technical(plan.caps.mailingLists) }])
+    facts([{ label: t(msgid('Plan limit')), valueHtml: plan?.caps.mailingLists === undefined ? esc(t(msgid('Loading...'))) : technical(plan.caps.mailingLists) }])
     + table('v2-mailing-list-records', title, [t(msgid('Address')), t(msgid('Members')), t(msgid('Moderation')), t(msgid('Archive')), t(msgid('Action'))], unread(t, 5), { 'data-mailing-lists-rows': true })
     + state(t(msgctxt('theme:v2', 'Saved mailing lists have not been read.')), { 'data-mailing-list-status': true })
     + `<div class="v2-panel-extra__editor" data-mailing-list-form role="group" aria-labelledby="v2-mailing-list-create-heading"><h3 id="v2-mailing-list-create-heading">${esc(t(msgid('Create mailing list')))}</h3>`
@@ -27,7 +27,7 @@ export function renderV2PanelMailingLists(props: PanelSurfaceProps, authority?: 
     `<p>${esc(t(msgid('A list without posting rules is delivered by expanding its address to its members in the Postfix alias table. A list with posting rules reaches its members after the moderation check at delivery.')))}</p>`
     + actions(button(t(msgid('Refresh')), { 'data-mailx-lists-refresh': true }, !canManage))
     + state(t(msgid('List delivery has not been read.')), { 'data-mailx-lists-status': true })
-    + facts([{ label: t(msgid('Delivery to members')), valueHtml: esc(t(msgid('Not read'))), hooks: { 'data-mailx-tools-fact': 'delivery' } }, { label: t(msgid('Observed at (UTC)')), valueHtml: esc(t(msgid('Not read'))), hooks: { 'data-mailx-tools-fact': 'observed-at' } }])
+    + facts([{ label: t(msgid('Delivery to members')), valueHtml: esc(t(msgid('Loading...'))), hooks: { 'data-mailx-tools-fact': 'delivery' } }, { label: t(msgid('Observed at (UTC)')), valueHtml: esc(t(msgid('Loading...'))), hooks: { 'data-mailx-tools-fact': 'observed-at' } }])
     + table('v2-list-delivery-records', title, [t(msgid('Address')), t(msgid('Members')), t(msgid('Delivery state'))], unread(t, 3), { 'data-mailx-lists-rows': true })
     + `<p data-mailx-lists-action-status role="status"></p>` + actions(button(t(msgid('Apply saved lists')), { 'data-mailx-lists-apply': true }, true, true)) + v2MailToolsClientTemplates('lists'),
     { 'data-mailx-tools': true, 'data-mailx-tools-section': 'lists', 'data-mailx-can-manage': String(canManage) })

@@ -35,7 +35,7 @@ function violation(file: string, specifier: string, typeOnly = false): string | 
     if (target.startsWith(THEME + sep)) return undefined
     const fromWeb = relative(WEB_SRC, target)
     const module = fromWeb.split(sep).join('/')
-    return CORE_MODULES.has(module) || module.startsWith('design-system/') || (typeOnly && TYPE_ONLY_CORE_MODULES.has(module)) || (test && TEST_CORE_MODULES.has(module)) ? undefined : `imports ${fromWeb} outside the theme and core`
+    return CORE_MODULES.has(module) || module.startsWith('design-system/') || module.startsWith('features/') || (typeOnly && TYPE_ONLY_CORE_MODULES.has(module)) || (test && TEST_CORE_MODULES.has(module)) ? undefined : `imports ${fromWeb} outside the theme and core`
   }
   if (PACKAGES.test(specifier) || RUNTIME_BUILTINS.has(specifier) || (test && TEST_ONLY.test(specifier))) return undefined
   return `imports ${specifier}`

@@ -6,7 +6,7 @@ import { domainButton, domainCard, domainContext, domainFacts, domainHeader, dom
 /** The account owner inspects linked zones and purges cache; provider credentials remain administrative. */
 export function renderV2CloudflarePage(props: PanelSurfaceProps, authority: DomainPageAuthority = NO_DOMAIN_AUTHORITY): string {
   const { t, account, canManage } = domainContext(props, authority)
-  const unread = t(msgid('Not read'))
+  const unread = t(msgid('Loading...'))
   const domains = domainCard('cf-domains', t(msgid('Your domains on Cloudflare')), `<p data-sec-status data-state="unread" role="status">${escapeHtml(t(msgid('Nothing has been read yet.')))}</p>${domainTable(t(msgid('Your domains on Cloudflare')), [t(msgid('Domain')), t(msgid('Cloudflare')), t(msgid('Actions'))], `<tr><td colspan="3">${escapeHtml(t(msgid('No domains have been read.')))}</td></tr>`, { 'data-sec-rows': 'domains' })}<p>${escapeHtml(t(msgid('Your hosting provider connects domains to Cloudflare. For a connected domain you can inspect the zone and purge its cache.')))}</p><p data-sec-result role="status" hidden></p>`, domainButton(t(msgid('Refresh')), { 'data-sec-action': 'refresh' }, false))
   const zone = domainCard('cf-zone', t(msgid('Zone details')), `${domainFacts([
     { label: t(msgid('Domain')), key: 'zone-domain' }, { label: t(msgid('Zone status')), key: 'zone-status' },

@@ -1,8 +1,10 @@
 import type { DocumentProps, ThemeSurface } from '../contract.ts'
+import { DESIGN_SYSTEM_INTERACTIVE_CSS } from '../../design-system/stylesheet.ts'
 import { createV2Stylesheet, type V2Stylesheet } from './stylesheet.ts'
 import { V2_PHONE_TABLE_ROWS_CSS } from './base.ts'
 import { WORKSPACE_INTERACTIONS_CSS } from './workspace-interactions.ts'
 import { FILTER_BAR_CSS } from './components/filter-bar.ts'
+import { SUBTABS_CSS } from './components/page-header.ts'
 import { V2_PANEL_HOME_CSS } from './pages/xpanel/home.ts'
 import { V2_PANEL_RESOURCES_CSS } from './pages/xpanel/resources.ts'
 import { EMAIL_ACCOUNTS_CSS } from './pages/xpanel/email/accounts.ts'
@@ -111,6 +113,19 @@ export const v2SupplementalStylesheets: readonly Readonly<V2RouteStylesheet>[] =
   supplement('xwhm', 'whm-account-admin', ['/whm', '/whm/plans/enhancements', '/whm/security/isolation', '/whm/panel/languages'], WHM_ACCOUNT_TOOLS_CSS),
   supplement('xwhm', 'whm-activity', ['/whm/jobs', '/whm/audit', '/whm/support'], WHM_ACTIVITY_CSS),
   supplement('xwhm', 'whm-service-tools', V2_WHM_SERVICE_TOOL_ROUTES, WHM_SERVICE_TOOLS_PAGE_CSS),
+  supplement('xwhm', 'whm-subtabs', [
+    '/whm/resellers', '/whm/resellers/more', '/whm/dns', '/whm/dns/more',
+    '/whm/services', '/whm/services/more', '/whm/backups/restore', '/whm/backups/restore-more',
+  ], SUBTABS_CSS),
+  supplement('xwhm', 'whm-ds-interactive', [
+    '/whm', '/whm/monitoring/server-info', '/whm/accounts/new', '/whm/ssl/install',
+    '/whm/backups', '/whm/backups/restore', '/whm/backups/files', '/whm/backups/restore-more',
+    '/whm/transfers', '/whm/transfers/server', '/whm/transfers/convert-addon',
+    '/whm/databases/upgrade', '/whm/server/role', '/whm/server/setup',
+  ], DESIGN_SYSTEM_INTERACTIVE_CSS),
+  supplement('xpanel', 'panel-ds-interactive', [
+    '/home', '/resources', '/files/backup', '/security/ssl/issue', '/domains/site-publisher',
+  ], DESIGN_SYSTEM_INTERACTIVE_CSS),
 ])
 
 /** Explicit renderer coverage. A catalog alias alone does not establish an implemented page. */

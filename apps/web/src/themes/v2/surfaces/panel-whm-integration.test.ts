@@ -109,6 +109,9 @@ describe('complete v2 operator surface dispatch', () => {
 
   it('forwards genuine denied inputs and throws for qualified missing implementations', () => {
     expect(renderWhm({ ...whm, capabilityUnavailable: true })).toBe('<section data-core-whm-denied></section>')
+    const withoutServiceManager = catalog.filter(tool => tool.id !== 'service-manager')
+    expect(renderWhm({ ...whm, activeRoute: '/whm/services', catalog: withoutServiceManager })).not.toBe('<section data-core-whm-denied></section>')
+    expect(renderWhm({ ...whm, activeRoute: '/whm/services/more', catalog: withoutServiceManager })).toBe('<section data-core-whm-denied></section>')
     const view = projectWhmSurface(whm)!
     const missing = { ...view, route: '/missing-qualified-whm', props: { ...view.props, activeRoute: '/missing-qualified-whm' } }
     expect(() => createV2WhmSurface(() => missing, () => '<p>Unavailable</p>')(whm)).toThrow('v2_whm_implementation_gap:/missing-qualified-whm')

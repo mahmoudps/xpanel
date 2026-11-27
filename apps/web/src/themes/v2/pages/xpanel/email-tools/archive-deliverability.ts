@@ -12,7 +12,7 @@ export function renderV2PanelEmailArchive(props: PanelSurfaceProps, authority?: 
     + facts([
       { label: t(msgid('Saved policy')), key: 'saved' }, { label: t(msgid('Host agent')), key: 'host' }, { label: t(msgid('Applied on this server')), key: 'state' },
       { label: t(msgid('Observed at (UTC)')), key: 'observed-at' }, { label: t(msgid('Last saved')), key: 'updated' },
-    ].map(row => ({ label: row.label, valueHtml: esc(t(msgid('Not read'))), hooks: { 'data-mailx-archive-fact': row.key } })))
+    ].map(row => ({ label: row.label, valueHtml: esc(t(msgid('Loading...'))), hooks: { 'data-mailx-archive-fact': row.key } })))
     + `<p>${esc(t(msgid('Retention removes archived messages older than the number of days you set; 0 keeps them until you delete them. Retention runs only when you start it.')))}</p>`)
   const tag = canManage ? 'form' : 'div'
   const domains = section('v2-email-archive-domains', t(msgid('Archived domains')),
