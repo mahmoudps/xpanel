@@ -1,10 +1,23 @@
 import { catalogKeys, visibleNavigation, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
 import { canSeeAccount, type Account, type Domain } from '@xpanel/core'
+import { visibleCoreActions, type ActionFieldSpec, type ActionMode } from './features/actions/catalog.ts'
 import { getSurfaceNavigationLabel } from './shell.ts'
 import { escapeHtml, normalizeAsciiDigits } from './tokens.ts'
 import { catalogKeywords, translator, type Locale, type MessageValues } from './i18n.ts'
 export type CommandPaletteSurface = 'login' | 'xpanel' | 'xwhm' | 'xmail'
 export type CommandPaletteKind = 'page' | 'action' | 'account' | 'domain'
+export interface CommandPaletteActionSpec {
+  readonly id: string
+  readonly mode: ActionMode
+  readonly method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+  readonly endpoint?: string
+  readonly confirm?: boolean
+  readonly destructive?: boolean
+  readonly undoEndpoint?: string
+  readonly namePrefix?: string
+  readonly accountId?: string
+  readonly fields?: readonly ActionFieldSpec[]
+}
 export interface CommandPaletteRecords {
   accounts?: readonly Pick<Account, 'id' | 'ownerId' | 'username' | 'primaryDomain'>[]
   domains?: readonly Pick<Domain, 'id' | 'accountId' | 'name'>[]
@@ -19,6 +32,7 @@ export interface CommandPaletteEntry {
   hint: string
   search: string
   persistable: boolean
+  commandAction?: CommandPaletteActionSpec
 }
 const actionRoutes = new Set(['/whm/accounts/new', '/mail/compose', '/security/ssl/issue', '/whm/ssl/install', '/whm/backups', '/whm/security/firewall'])
 const text = (locale: Locale, message: string, values?: MessageValues): string => translator(locale)(message, values)
@@ -34,8 +48,44 @@ export function commandPaletteEntries(surface: CommandPaletteSurface, locale: Lo
       label, section: group, route: page.route, href: page.route, hint: page.route,
       search: [label, group, page.route, ...page.keywords, ...catalogKeywords(locale, catalogKeys.pageKeywords(surface, page.id))].join(' '), persistable: true }
   }))
-  if (surface === 'xmail') return entries
   const paths = new Set(entries.map(item => item.route))
+  const userPrincipal = visibility.principal.kind === 'user' ? visibility.principal : null
+  const selectedAccount = userPrincipal
+    ? records.accounts?.find(a => a.id === userPrincipal.accountId || a.username === userPrincipal.username)
+    : (records.accounts?.length === 1 && canSeeAccount(visibility.principal, records.accounts[0]!) ? records.accounts[0] : undefined)
+  const ownerAccountName = userPrincipal
+    ? (selectedAccount?.username ?? userPrincipal.username)
+    : selectedAccount?.username
+  for (const act of visibleCoreActions(surface, visibility, catalog, paths)) {
+    if (act.id === 'create-database' && !userPrincipal && !selectedAccount) continue
+    const translatedLabel = text(locale, act.label)
+    const translatedSection = text(locale, act.section)
+    const translatedHint = text(locale, act.hint)
+    entries.push({
+      key: `cmd:${act.id}`,
+      kind: 'action',
+      label: translatedLabel,
+      section: translatedSection,
+      route: act.route,
+      href: act.route,
+      hint: translatedHint,
+      search: `${translatedLabel} ${translatedSection} ${act.keywords}`,
+      persistable: false,
+      commandAction: {
+        id: act.id,
+        mode: act.mode,
+        ...(act.method ? { method: act.method } : {}),
+        ...(act.endpoint ? { endpoint: act.endpoint } : {}),
+        ...(act.confirm !== undefined ? { confirm: act.confirm } : {}),
+        ...(act.destructive !== undefined ? { destructive: act.destructive } : {}),
+        ...(act.undoEndpoint ? { undoEndpoint: act.undoEndpoint } : {}),
+        ...(act.id === 'create-database' && ownerAccountName ? { namePrefix: `${ownerAccountName}_` } : {}),
+        ...(act.id === 'create-database' && !userPrincipal && selectedAccount ? { accountId: selectedAccount.id } : {}),
+        ...(act.fields ? { fields: act.fields } : {}),
+      },
+    })
+  }
+  if (surface === 'xmail') return entries
   const principal = visibility.principal
   const mayReadAccounts = principal.kind === 'root' || principal.kind === 'user'
     || (principal.kind === 'reseller' && visibility.reseller?.acl.includes('list-accounts') === true)

@@ -244,7 +244,7 @@ describe.each(['classic', 'v2'] as const)('%s intrusion finite button contract',
     expect(send).not.toHaveBeenCalled(); expect(ask).not.toHaveBeenCalled()
     expect($('[data-whm-security-tools-status]').dataset.state).toBe('unavailable')
     expect([...document.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button')].every(control => control.disabled)).toBe(true)
-    expect($('[data-whm-security-tools-fact="service"]').textContent).toBe('Not read')
+    expect($('[data-whm-security-tools-fact="service"]').textContent).toBe(theme === 'v2' ? 'Loading...' : 'Not read')
   })
   it('retains read authority while denying every unban without mutation authority', async () => {
     mountSecurityTheme(theme, 'intrusion', true, false)
@@ -262,7 +262,7 @@ describe.each(['classic', 'v2'] as const)('%s intrusion finite button contract',
     if (settlement === 'resolved') resolve(intrusion()); else reject(new Error('unavailable'))
     await tick()
     expect($('[data-whm-security-tools-status]').dataset.state).toBe('unavailable')
-    expect($('[data-whm-security-tools-fact="service"]').textContent).toBe('Not read')
+    expect($('[data-whm-security-tools-fact="service"]').textContent).toBe(theme === 'v2' ? 'Loading...' : 'Not read')
     expect(document.querySelector('[data-whm-security-tools-unban]')).toBeNull()
     const refresh = $<HTMLButtonElement>('[data-whm-security-tools-refresh]')
     expect(refresh.disabled).toBe(true); refresh.disabled = false; refresh.click(); await tick(); expect(send).toHaveBeenCalledOnce()

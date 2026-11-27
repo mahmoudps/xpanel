@@ -100,11 +100,11 @@ export const PANEL_OBSERVATIONS_CSS = `.v2-panel-extra{display:flex;flex-directi
 .v2-panel-obs-bar>span{min-inline-size:2px}
 .v2-panel-obs-tone{display:inline-flex;align-items:center;gap:var(--space-1)}
 .v2-panel-obs-tone::before{content:"";inline-size:10px;block-size:10px;border-radius:3px;background:var(--muted);flex:none}
-.v2-panel-obs-bar>span[data-tone=ok],.v2-panel-obs-tone[data-tone=ok]{--obs-tone:var(--ok)}
-.v2-panel-obs-bar>span[data-tone=info],.v2-panel-obs-tone[data-tone=info]{--obs-tone:var(--accent-fill)}
-.v2-panel-obs-bar>span[data-tone=warn],.v2-panel-obs-tone[data-tone=warn]{--obs-tone:var(--warn)}
-.v2-panel-obs-bar>span[data-tone=bad],.v2-panel-obs-tone[data-tone=bad]{--obs-tone:var(--bad)}
-.v2-panel-obs-bar>span{background:var(--obs-tone,var(--muted))}
+.v2-panel-obs-bar>rect[data-tone=ok],.v2-panel-obs-tone[data-tone=ok]{--obs-tone:var(--ok)}
+.v2-panel-obs-bar>rect[data-tone=info],.v2-panel-obs-tone[data-tone=info]{--obs-tone:var(--accent-fill)}
+.v2-panel-obs-bar>rect[data-tone=warn],.v2-panel-obs-tone[data-tone=warn]{--obs-tone:var(--warn)}
+.v2-panel-obs-bar>rect[data-tone=bad],.v2-panel-obs-tone[data-tone=bad]{--obs-tone:var(--bad)}
+.v2-panel-obs-bar>rect{fill:var(--obs-tone,var(--muted))}
 .v2-panel-obs-tone::before{background:var(--obs-tone,var(--muted))}
 .v2-panel-obs-kpis--five{grid-template-columns:repeat(auto-fit,minmax(min(100%,160px),1fr))}
 .v2-panel-extra [data-state-chip]{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border:1px solid var(--line);border-radius:var(--radius-pill);background:var(--sunken);color:var(--text-2);font-size:12px;font-weight:600;white-space:nowrap}

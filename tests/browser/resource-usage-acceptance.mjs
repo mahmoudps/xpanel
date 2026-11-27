@@ -165,7 +165,7 @@ try {
         })
         check('actual-surface-document-contained-without-concealment', outcome.geometry.documentWidth <= width + 1 && !['hidden', 'clip'].includes(outcome.geometry.bodyOverflow) && !['hidden', 'clip'].includes(outcome.geometry.rootOverflow), outcome.geometry)
         if (surface === 'v2-resellers') {
-          const notRead = locale === 'ar' ? 'غير مقروء' : 'Not read', unlimited = locale === 'ar' ? 'غير محدود' : 'Unlimited'
+          const notRead = locale === 'ar' ? 'جاري القراءة...' : 'Loading...', unlimited = locale === 'ar' ? 'غير محدود' : 'Unlimited'
           const honestV2Unknown = meter => meter && meter.used === notRead && !meter.hasRoleMeter && meter.fillStyle.includes('0%') && !/Healthy|Within limit|ضمن الحد/.test(meter.text)
           check('unknown-values-have-no-meter-or-healthy-state', outcome.geometry.meters.length === 6 && outcome.geometry.meters.every(honestV2Unknown), outcome.geometry.meters)
           const capacityContracts = [

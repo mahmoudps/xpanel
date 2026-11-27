@@ -9,11 +9,11 @@ const ROLES = [
 
 export function renderV2AccountTeamPage(props: PanelSurfaceProps, authority: PanelSettingsAuthority = NO_SETTINGS_AUTHORITY): string {
   const c = settingsContext(props, authority), { t } = c, title = t(msgid('Account team')), description = t(msgid('Record who works on this account and which tools their roles cover.'))
-  const signin = section('v2-team-signin', t(msgid('Team sign-in')), `<p data-state-chip="unread" data-acct-team-signin-state>${esc(t(msgid('Not read')))}</p><p class="v2-muted" data-acct-team-signin>${esc(t(msgid('The team sign-in state has not been read.')))}</p>`)
+  const signin = section('v2-team-signin', t(msgid('Team sign-in')), `<p data-state-chip="unread" data-acct-team-signin-state>${esc(t(msgid('Loading...')))}</p><p class="v2-muted" data-acct-team-signin>${esc(t(msgid('The team sign-in state has not been read.')))}</p>`)
   const list = section('v2-team-list', t(msgid('Team members')), status(t(msgid('The team has not been read.')), { 'data-acct-team-status': true })
     + `<div class="v2-panel-settings__loading" data-acct-team-loading aria-busy="true" aria-label="${esc(t(msgid('Loading team members')))}" hidden><span>${esc(t(msgid('Loading')))}</span></div>`
     + facts([{ label: t(msgid('Members holding a role')), valueHtml: `<bdi dir="ltr" data-acct-team-usage>—</bdi>` }])
-    + table('v2-team-members', t(msgid('Team members and their roles')), [t(msgid('Username')), t(msgid('Roles')), t(msgid('State')), t(msgid('Sign-in')), t(msgid('Expires (UTC)')), t(msgid('Actions'))], unreadRow(6, t(msgid('Not read'))), { 'data-acct-team-rows': true })
+    + table('v2-team-members', t(msgid('Team members and their roles')), [t(msgid('Username')), t(msgid('Roles')), t(msgid('State')), t(msgid('Sign-in')), t(msgid('Expires (UTC)')), t(msgid('Actions'))], unreadRow(6, t(msgid('Loading...'))), { 'data-acct-team-rows': true })
     + `<div class="v2-panel-settings__groups" data-acct-team-empty hidden><h3>${esc(t(msgid('No team members yet')))}</h3><p>${esc(t(msgid('Add one below to record who works on this account and with which roles.')))}</p></div>`
     + note(t(msgid('Up to 7 members can hold a role. Members without a role are not limited and can sign in but reach no account tools. A suspended member still counts toward the limit.')))
     + actions(button(t(msgid('Refresh')), { 'data-acct-team-refresh': true }, !c.editable))

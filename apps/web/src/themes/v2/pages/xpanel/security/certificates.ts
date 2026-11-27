@@ -1,5 +1,6 @@
 import type { PanelSurfaceProps } from '../../../../contract.ts'
 import { formatAsciiDate } from '../../../../../display-format.ts'
+import { renderGuidedWizard } from '../../../../../features/wizards/flow.ts'
 import { actions, area, button, check, deniedPage, esc, facts, field, fields, input, note, page, pair, section, select, settingsContext, status, table, technical, unreadRow, NO_SETTINGS_AUTHORITY, type PanelSettingsAuthority } from '../settings/common.ts'
 
 export function renderV2CertificateIssuePage(props: PanelSurfaceProps, authority: PanelSettingsAuthority = NO_SETTINGS_AUTHORITY): string {
@@ -10,13 +11,30 @@ export function renderV2CertificateIssuePage(props: PanelSurfaceProps, authority
   const domain = section('v2-issue-names', t(msgid('Domain')), fields(field('v2-issue-domain', t(msgid('Domain')), select('v2-issue-domain', 'domain', (c.domains ?? []).map(item => [item.name, item.name]), ' required', !c.editable || !c.domains?.length, c.selected?.name)))
     + note(t(msgctxt('theme:v2', 'The certificate names are chosen by the server from the owned domain. Arbitrary names and wildcard requests are not submitted by this form.'))))
   const validation = section('v2-issue-validation', t(msgid('Validation')), `<fieldset class="v2-panel-settings__plain" disabled><legend>${esc(t(msgctxt('theme:v2', 'How should the authority check the names?')))}</legend><div class="v2-panel-settings__choices"><label class="v2-panel-settings__choice"><input type="radio" name="v2-certificate-validation" value="http-01" checked disabled><span><strong><bdi dir="ltr" class="v2-mono">HTTP-01</bdi></strong></span></label><label class="v2-panel-settings__choice"><input type="radio" name="v2-certificate-validation" value="dns-01" disabled><span><strong><bdi dir="ltr" class="v2-mono">DNS-01</bdi></strong></span></label></div></fieldset>`)
-  const review = section('v2-issue-install', t(msgid('Install on')), facts([{ label: t(msgid('Account')), valueHtml: technical((c.account?.username ?? '')) }, { label: t(msgid('Domain')), valueHtml: `<bdi dir="ltr" class="v2-mono" data-form-review-field="domain">${c.selected ? esc(c.selected.name) : esc(t(msgid('Not read')))}</bdi>` }, { label: t(msgid('Result')), valueHtml: esc(t(msgctxt('theme:v2', 'No certificate request has run.'))) }])
+  const review = section('v2-issue-install', t(msgid('Install on')), facts([{ label: t(msgid('Account')), valueHtml: technical((c.account?.username ?? '')) }, { label: t(msgid('Domain')), valueHtml: `<bdi dir="ltr" class="v2-mono" data-form-review-field="domain">${c.selected ? esc(c.selected.name) : esc(t(msgid('Loading...')))}</bdi>` }, { label: t(msgid('Result')), valueHtml: esc(t(msgctxt('theme:v2', 'No certificate request has run.'))) }])
     + '<p data-certificate-status role="status" hidden></p>'
     + `<div class="v2-panel-settings__foot"><span class="v2-muted">${esc(t(msgid('The server answers the HTTP-01 check on port 80. Application to the web server remains unverified until host reconciliation reports it.')))}</span><button type="submit" class="v2-btn v2-btn--primary"${!c.editable || !c.domains?.length ? ' disabled' : ''}>${esc(t(msgid('Issue or renew')))}</button></div>`)
-  const choices = section('v2-issue-choices', t(msgctxt('theme:v2', 'Your choices')), facts([{ label: t(msgid('Certificate source')), valueHtml: esc(t(msgid('ACME (Let’s Encrypt)'))) }, { label: t(msgid('Validation')), valueHtml: technical('HTTP-01') }, { label: t(msgid('Domain')), valueHtml: `<bdi dir="ltr" class="v2-mono" data-form-review-field="domain">${c.selected ? esc(c.selected.name) : esc(t(msgid('Not read')))}</bdi>` }], { 'data-rows': true }))
+  const choices = section('v2-issue-choices', t(msgctxt('theme:v2', 'Your choices')), facts([{ label: t(msgid('Certificate source')), valueHtml: esc(t(msgid('ACME (Let’s Encrypt)'))) }, { label: t(msgid('Validation')), valueHtml: technical('HTTP-01') }, { label: t(msgid('Domain')), valueHtml: `<bdi dir="ltr" class="v2-mono" data-form-review-field="domain">${c.selected ? esc(c.selected.name) : esc(t(msgid('Loading...')))}</bdi>` }], { 'data-rows': true }))
   const wildcards = section('v2-issue-wildcards', t(msgctxt('theme:v2', 'About wildcard certificates')), note(t(msgctxt('theme:v2', 'Wildcard names require DNS validation. This form does not submit DNS-provider credentials or claim that DNS validation is available.'))))
-  // Each step sits beside a card of its height: the wildcard note beside validation, the choices beside the install review.
-  const form = `<form class="v2-panel-settings__groups" data-certificate-form data-form-review data-account-username="${esc((c.account?.username ?? ''))}">${pair(sources, domain)}${pair(validation, wildcards)}${pair(review, choices)}</form>`
+  const wizard = renderGuidedWizard({
+    id: 'panel-cert-issue-wizard',
+    activeStepIndex: 0,
+    disabled: !c.editable,
+    locale: props.locale,
+    copy: t,
+    hideSubmit: true,
+    preflightState: { tone: c.editable && c.domains?.length ? 'ok' : 'neutral', message: c.editable && c.domains?.length ? t(msgid('Domain selected for ACME validation')) : t(msgid('Select an owned domain')) },
+    changePlan: [
+      { label: t(msgid('Certificate source')), before: t(msgid('Existing certificate')), after: t(msgid('ACME (Let’s Encrypt)')) },
+      { label: t(msgid('Validation')), before: '—', after: 'HTTP-01' },
+    ],
+    steps: [
+      { id: 'source', label: t(msgid('Certificate source')), bodyHtml: pair(sources, domain) },
+      { id: 'validation', label: t(msgid('Validation')), bodyHtml: pair(validation, wildcards) },
+      { id: 'install', label: t(msgid('Install')), bodyHtml: pair(review, choices) },
+    ],
+  })
+  const form = `<form class="v2-panel-settings__groups" data-certificate-form data-form-review data-account-username="${esc((c.account?.username ?? ''))}">${wizard}</form>`
   return page(props, authority, '/security/ssl/issue', title, description, steps + form)
 }
 

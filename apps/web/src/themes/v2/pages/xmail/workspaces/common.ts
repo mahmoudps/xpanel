@@ -59,10 +59,9 @@ export const facts = (rows: readonly { label: string; valueHtml: string }[], hoo
   `<dl class="v2-mail-workspace__facts"${hookAttrs(hooks)}>${rows.map(row => `<div><dt>${esc(row.label)}</dt><dd>${row.valueHtml}</dd></div>`).join('')}</dl>`
 export const section = (id: string, title: string, bodyHtml: string, actionsHtml?: string, hooks?: HookAttributes): string =>
   card({ id, title, titleId: `${id}-heading`, bodyHtml: v2MailClientTemplatesForHooks(hooks) + bodyHtml, actionsHtml, hooks })
-// phone rows print each value's column name from these custom properties; the header cells stay in the document
-const columnNames = (columns: readonly string[]): string => columns.map((label, index) => `--h${index + 1}:'${label.replace(/[\\']/g, '\\$&')}'`).join(';')
+// phone rows label each value via table-phone-labels-client without inline style attributes
 export const table = (id: string, title: string, columns: readonly string[], bodyHtml: string, hooks?: HookAttributes): string =>
-  `<div class="v2-mail-workspace__table" role="region" tabindex="0" aria-label="${esc(title)}" style="${esc(columnNames(columns))}"><table id="${esc(id)}"><caption class="v2-sr">${esc(title)}</caption><thead><tr>${columns.map(label => `<th scope="col">${esc(label)}</th>`).join('')}</tr></thead><tbody${hookAttrs(hooks)}>${bodyHtml}</tbody></table></div>`
+  `<div class="v2-mail-workspace__table" role="region" tabindex="0" aria-label="${esc(title)}"><table id="${esc(id)}" data-phone-labels><caption class="v2-sr">${esc(title)}</caption><thead><tr>${columns.map(label => `<th scope="col">${esc(label)}</th>`).join('')}</tr></thead><tbody${hookAttrs(hooks)}>${bodyHtml}</tbody></table></div>`
 export const unreadRow = (text: string, columns: number): string => `<tr><td colspan="${columns}">${esc(text)}</td></tr>`
 export function page(input: MailWorkspaceInput, title: string, description: string, bodyHtml: string, hooks?: HookAttributes): string {
   const { t, readable } = ctx(input)
@@ -187,7 +186,7 @@ export const MAIL_WORKSPACES_CSS = `.v2-mail-workspace{display:flex;flex-directi
 .v2-mail-workspace__table td:first-child{font-size:14px;font-weight:600;color:var(--text)}
 .v2-mail-workspace__table td:last-child:not(:first-child):has(button,a,input){grid-column:2;grid-row:1/span 8;align-self:center;padding:0;text-align:end}
 .v2-mail-workspace__table td:not(:first-child,[colspan]):not(:last-child:has(button,a,input))::before{color:var(--muted)}
-.v2-mail-workspace__table td:nth-child(2)::before{content:var(--h2) ": "}.v2-mail-workspace__table td:nth-child(3)::before{content:var(--h3) ": "}.v2-mail-workspace__table td:nth-child(4)::before{content:var(--h4) ": "}.v2-mail-workspace__table td:nth-child(5)::before{content:var(--h5) ": "}.v2-mail-workspace__table td:nth-child(6)::before{content:var(--h6) ": "}.v2-mail-workspace__table td:nth-child(7)::before{content:var(--h7) ": "}
+.v2-mail-workspace__table td[data-phone-label]:not(:first-child,[colspan]):not(:last-child:has(button,a,input))::before{content:attr(data-phone-label) ": "}
 .v2-mail-workspace__table td:last-child:not(:first-child):has(button,a,input)::before{content:none}
 .v2-mail-workspace__table td:last-child .v2-btn{padding-inline:12px;font-size:13px}
 .v2-mail-workspace:is([data-mail-mailing-lists],[data-mail-connect-devices]) .v2-mail-workspace__table td:nth-child(2),.v2-mail-workspace__table [data-contact-table] td:nth-child(2){grid-column:1;grid-row:auto;justify-self:stretch;text-align:start}
