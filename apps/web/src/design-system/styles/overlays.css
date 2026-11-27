@@ -1,0 +1,200 @@
+.ds-drawer {
+  position: fixed;
+  inset-block: 0;
+  inset-inline-start: auto;
+  inset-inline-end: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-inline-start: 1px solid var(--line);
+  inline-size: min(100vw, 480px);
+  max-inline-size: 100vw;
+  block-size: 100dvh;
+  max-block-size: 100dvh;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow);
+  transition: transform var(--dur-overlay) var(--ease-out);
+}
+
+.ds-drawer[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+.ds-drawer:not([open]) {
+  display: none;
+}
+
+.ds-drawer::backdrop {
+  background: var(--scrim);
+}
+
+.ds-drawer__panel {
+  display: flex;
+  flex-direction: column;
+  inline-size: 100%;
+  block-size: 100%;
+  min-block-size: 0;
+}
+
+.ds-drawer__head,
+.ds-dialog__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ds-space-16);
+  padding: var(--ds-space-24);
+  border-block-end: 1px solid var(--line);
+}
+
+.ds-drawer__body,
+.ds-dialog__body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: var(--ds-space-24);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-16);
+}
+
+.ds-drawer__foot,
+.ds-dialog__foot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--ds-space-12);
+  padding: var(--ds-space-16) var(--ds-space-24);
+  border-block-start: 1px solid var(--line);
+  background: var(--subtle);
+}
+
+.ds-dialog {
+  inline-size: min(calc(100vw - 32px), 520px);
+  max-block-size: calc(100dvh - 32px);
+  padding: 0;
+  margin: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow);
+  transition: opacity var(--dur-overlay) var(--ease-out), transform var(--dur-overlay) var(--ease-out);
+}
+
+.ds-dialog::backdrop {
+  background: var(--scrim);
+}
+
+.ds-menu {
+  position: relative;
+  display: inline-flex;
+}
+
+.ds-menu__panel {
+  position: absolute;
+  inset-block-start: calc(100% + var(--ds-space-4));
+  inset-inline-end: 0;
+  margin: 0;
+  z-index: 40;
+  min-inline-size: 220px;
+  max-inline-size: calc(100vw - 16px);
+  max-block-size: calc(100dvh - 16px);
+  overflow-y: auto;
+  padding: var(--ds-space-8);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-4);
+  transition: opacity var(--dur-menu) var(--ease-out), transform var(--dur-menu) var(--ease-out);
+}
+
+.ds-menu__panel[data-ds-menu-floating="true"],
+.ds-menu__panel:popover-open {
+  position: fixed;
+  inset-block-start: var(--ds-menu-y, 0px);
+  inset-inline-start: var(--ds-menu-x, 0px);
+  inset-inline-end: auto;
+  margin: 0;
+  z-index: 80;
+}
+
+.ds-menu__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ds-space-12);
+  inline-size: 100%;
+  min-block-size: var(--target);
+  padding: var(--ds-space-8) var(--ds-space-12);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.ds-menu__item:hover,
+.ds-menu__item[data-ds-active="true"] {
+  background: var(--subtle);
+}
+
+.ds-menu__item[aria-disabled="true"],
+.ds-menu__item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.ds-drawer[hidden],
+.ds-menu__panel[hidden] {
+  display: none;
+}
+
+.ds-menu__item--danger {
+  color: var(--bad);
+}
+
+.ds-toast-region {
+  position: fixed;
+  inset-block-end: var(--ds-space-24);
+  inset-inline-end: var(--ds-space-24);
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-12);
+  max-inline-size: min(420px, calc(100vw - 32px));
+}
+
+.ds-toast {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--ds-space-16);
+  padding: var(--ds-space-16);
+  border: 1px solid var(--line);
+  border-inline-start: 4px solid var(--accent);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow);
+  transition: opacity var(--dur-overlay) var(--ease-out), transform var(--dur-overlay) var(--ease-out);
+}
+
+.ds-toast--ok {
+  border-inline-start-color: var(--ok);
+}
+
+.ds-toast--warn {
+  border-inline-start-color: var(--warn);
+}
+
+.ds-toast--bad {
+  border-inline-start-color: var(--bad);
+}

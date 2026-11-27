@@ -66,7 +66,6 @@ ${W} .v2-btn--icon{width:var(--target);padding:0;border-color:var(--line);color:
 ${W} .v2-btn:is(:disabled,[aria-disabled="true"]){border-color:var(--line);background:var(--sunken);color:var(--muted);box-shadow:none;filter:none;transition:none;cursor:not-allowed}
 ${W} :is(${CONTROL},select,textarea){min-height:var(--target);max-width:100%;padding:0 12px;border-radius:var(--radius-control);border:1px solid var(--line-strong);background:var(--surface);font-size:14px;text-align:match-parent;text-align:-webkit-match-parent;transition:border-color .14s ease-out,box-shadow .14s ease-out,background-color .14s ease-out}
 ${W} :is(${CONTROL},textarea)[readonly]:not(:disabled){background-color:var(--subtle)}
-${W} :is(${CONTROL},select,textarea):focus-visible{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
 ${W} textarea{min-height:92px;padding:12px;line-height:1.5;resize:vertical}
 ${W} :is(${CONTROL},select,textarea)[aria-invalid="true"]{border:1.5px solid var(--bad)}
 ${W} :is(${CONTROL},select,textarea):disabled{border-color:var(--line);background-color:var(--sunken);color:var(--muted);cursor:not-allowed}
