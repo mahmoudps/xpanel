@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { navigation, tools } from '@xpanel/catalog'
+import { canonicalNavigationRoute, navigation, tools } from '@xpanel/catalog'
 import { resolveSurfaceSection } from '../../../shell.ts'
 import { composedRouteSpecs, nativeComposedRoutePaths } from '../all.ts'
 import { renderComposedRoutes } from '../render.ts'
@@ -31,7 +31,7 @@ describe('xWHM administration route contracts', () => {
     expect(routes).toHaveLength(48)
     expect(new Set(routes.map(spec => spec.route)).size).toBe(48)
     for (const spec of routes) {
-      const page = pages.find(page => page.route === spec.route)
+      const page = pages.find(page => page.route === canonicalNavigationRoute(spec.route))
       expect(page, spec.route).toBeDefined()
       for (const toolId of page!.tools) expect(knownTools.has(toolId), toolId).toBe(true)
       expect(spec.surface).toBe('xwhm')

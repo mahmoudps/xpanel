@@ -3,6 +3,7 @@ import { renderV2BackupDestinationManager } from './destination-manager.ts'
 import { localeDirection } from '../../../../../i18n.ts'
 import { v2Messages } from '../../../messages.ts'
 import { escapeHtml } from '../../../html.ts'
+import { subtabs } from '../../../components/page-header.ts'
 import { tabs, tabPanel } from '../../../components/tabs.ts'
 import { icon } from '../../../icons.ts'
 import { lifecycleButton, lifecycleCard, lifecycleField, lifecycleHeader, lifecycleLink, lifecycleRules, lifecycleStatus, lifecycleTable, text, type LifecycleAccess } from './shared.ts'
@@ -117,9 +118,13 @@ ${status('status', msgctxt('theme:v2', 'No account archive has been read.'))}
   ].map(([key, label]) => ({ id: `v2-backup-tab-${key}`, label: t(label!), panelId: `v2-backup-panel-${key}`, selected: key === initialTab, hooks: { 'data-presentation-tab': key! } })) })
   const panel = (key: string, bodyHtml: string): string => tabPanel({ id: `v2-backup-panel-${key}`, tabId: `v2-backup-tab-${key}`, bodyHtml, hidden: key !== initialTab, sectionSpacing: true })
   const pageTitle = route === '/whm/backups/restore' ? msgid('Restore accounts') : msgid('Server backups')
+  const restoreTabs = route === '/whm/backups/restore' ? subtabs(text(t, msgid('Restore views')), [
+    { label: text(t, msgid('Restore accounts')), href: '/whm/backups/restore', active: true },
+    { label: text(t, msgid('Mail & partial restore')), href: '/whm/backups/restore-more' },
+  ]) : ''
   return `<div class="v2-lifecycle" data-presentation-tabs="panels" data-whm-detail-route="${route}" lang="${props.locale}" dir="${localeDirection(props.locale)}">
 ${lifecycleHeader(t, pageTitle, route, msgctxt('theme:v2', 'Configure copies, review actual run evidence and restore only the selected account and parts.'), lifecycleLink(t, msgid('Backup destinations'), `/whm/backups/destinations?lang=${props.locale}`) + lifecycleLink(t, msgid('Audit log'), `/whm/audit?lang=${props.locale}`))}
-${navigation}
+${restoreTabs}${navigation}
 <section class="v2-lifecycle__column" data-approved-whm-backups data-backup-destination-editor="manager" data-backup-can-read="${props.canRead && props.canManage}" data-backup-manage="${props.canRead && props.canManage}" data-backup-read-state="${props.canRead ? 'unread' : 'denied'}" data-backup-native="unavailable" aria-label="${text(t, msgid('Server backups'))}">
 <p id="whm-backup-layout-unavailable" class="v2-lifecycle__status" role="status">${text(t, props.canRead ? msgid('Server-wide run history, restore differences, scheduling and remote destinations have not been loaded. Their controls stay unavailable; no result or saved configuration is assumed.') : msgid('This workspace requires an authorized root account.'))}</p>
 ${v2WhmBackupClientTemplates()}${summary}
