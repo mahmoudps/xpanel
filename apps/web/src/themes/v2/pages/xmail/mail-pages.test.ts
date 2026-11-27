@@ -218,4 +218,22 @@ describe('v2 mailbox pages', () => {
     expect(tighter).toContain('data-size-limit-bytes="262144"')
     expect(tighter).toContain('Server limit: 256.00 KiB')
   })
+
+  it('gives collapsed-rail mail folders distinct icons, accessible names, and tooltip titles', () => {
+    const html = renderV2MailSidebar(t, {
+      ...common,
+      folders: [
+        { id: 'INBOX', label: 'Inbox', href: '/mail/inbox', current: true },
+        { id: 'Sent', label: 'Sent', href: '/mail/sent', current: false },
+        { id: 'Drafts', label: 'Drafts', href: '/mail/drafts', current: false },
+        { id: 'Trash', label: 'Trash', href: '/mail/trash', current: false },
+      ],
+    }, {})
+    expect(html).toContain('aria-label="Inbox" data-mail-folder="INBOX" title="Inbox"')
+    expect(html).toContain('aria-label="Sent" data-mail-folder="Sent" title="Sent"')
+    expect(html).toContain('aria-label="Compose" title="Compose"')
+    expect(html).toContain('<span class="v2-mail-folder__label">Inbox</span>')
+    const icons = [...html.matchAll(/data-mail-folder="(?:INBOX|Sent|Drafts|Trash)"[^>]*><svg[^>]*><path d="([^"]+)"/g)].map(m => m[1])
+    expect(new Set(icons).size).toBe(4)
+  })
 })
