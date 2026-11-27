@@ -40,7 +40,7 @@ const messages = {
 }
 const chip = {
   on: { en: 'On · saved, not applied yet', ar: 'يعمل · محفوظ، لم يُطبّق بعد' },
-  notRead: { en: 'Not read', ar: 'غير مقروء' },
+  notRead: { en: 'Loading...', ar: 'جارٍ التحميل...' },
 }
 const dialog = {
   title: { en: 'Discard responder draft?', ar: 'تجاهل مسودة الرد التلقائي؟' },

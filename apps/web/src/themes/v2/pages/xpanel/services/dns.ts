@@ -39,16 +39,16 @@ export function renderV2DnsPage(props: PanelSurfaceProps, authority: PanelServic
     title: selected?.name ?? t('Zone'), titleId: 'v2-dns-summary-heading',
     actionsHtml: statusPill({ tone: 'neutral', label: t(msgctxt('theme:v2', 'Serving state not read')) }),
     bodyHtml: serviceFacts([
-      { label: t('Zone'), valueHtml: selected ? technical(selected.name) : escapeHtml(t('Not read')) },
-      { label: t(msgctxt('theme:v2', 'Name servers')), valueHtml: escapeHtml(t('Not read')) },
-      { label: t('Serial'), valueHtml: escapeHtml(t('Not read')) },
-      { label: t(msgctxt('theme:v2', 'Last update')), valueHtml: escapeHtml(t('Not read')) },
+      { label: t('Zone'), valueHtml: selected ? technical(selected.name) : escapeHtml(t('Loading...')) },
+      { label: t(msgctxt('theme:v2', 'Name servers')), valueHtml: escapeHtml(t('Loading...')) },
+      { label: t('Serial'), valueHtml: escapeHtml(t('Loading...')) },
+      { label: t(msgctxt('theme:v2', 'Last update')), valueHtml: escapeHtml(t('Loading...')) },
     ]),
   })
   const delivery = card({
     title: t('Email deliverability'), titleId: 'v2-dns-delivery-heading',
     description: t(msgctxt('theme:v2', 'Public SPF, DKIM, DMARC and reverse DNS have not been checked by this page.')),
-    bodyHtml: `<div class="v2-panel-service__fields">${['SPF', 'DKIM', 'DMARC'].map(label => `<div class="v2-panel-service__note"><h3>${label}</h3>${statusPill({ tone: 'neutral', label: t('Not observed') })}</div>`).join('')}</div>`,
+    bodyHtml: `<div class="v2-panel-service__fields">${['SPF', 'DKIM', 'DMARC'].map(label => `<div class="v2-panel-service__note"><h3>${label}</h3>${statusPill({ tone: 'neutral', label: t('Loading...') })}</div>`).join('')}</div>`,
   })
   const process = card({
     title: t('How a change is applied'), titleId: 'v2-dns-how-heading',

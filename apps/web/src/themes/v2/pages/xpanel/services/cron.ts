@@ -17,7 +17,7 @@ export function renderV2CronPage(props: PanelSurfaceProps, authority: PanelServi
     const id = `v2-cron-${key}`
     return serviceField(id, label, `<input id="${id}" class="v2-mono" data-cron-field="${key}" dir="${options.auto ? 'auto' : 'ltr'}" type="${options.type ?? 'text'}" value="${escapeHtml(options.value ?? '')}"${options.maxLength ? ` maxlength="${options.maxLength}"` : ''} disabled>`)
   }
-  const unread = t('Not observed')
+  const unread = t('Loading...')
   const summaries = `<section class="v2-kpi-row" aria-label="${escapeHtml(t(msgctxt('theme:v2', 'Scheduled job summary')))}">${[t('Scheduled jobs'), t(msgctxt('theme:v2', 'Last run results')), t('Next run'), t(msgctxt('theme:v2', 'Longest last run'))].map((label, index) => kpiCard({ label, headingLevel: 2, value: unread, tone: 'neutral', ...(index === 0 ? { valueHooks: { 'data-cron-kpi': 'jobs' } } : {}), icon: (['calendar', 'check', 'clock', 'activity'] as readonly IconName[])[index], hooks: { 'data-unread': true }, note: t(msgctxt('theme:v2', 'Read saved jobs and host status before interpreting these values.')) })).join('')}</section>`
   const heads = [t('Job'), t('Schedule'), t('Command'), t('Last run'), t('Duration'), t('Next run'), t('Actions')]
   const listed = !!account && !readOnly && authority.canManage
@@ -57,8 +57,8 @@ export function renderV2CronPage(props: PanelSurfaceProps, authority: PanelServi
   const preview = card({
     title: t('Unit preview'), titleId: 'v2-cron-preview-heading',
     bodyHtml: `<p data-cron-preview-state>${escapeHtml(t('No job is selected.'))}</p><pre class="v2-panel-service__technical v2-mono" dir="ltr" data-cron-preview></pre>${serviceFacts([
-      { label: t('Execution user'), valueHtml: `<bdi dir="ltr" data-cron-username>${escapeHtml(t('Not read'))}</bdi>` },
-      { label: t('Working directory'), valueHtml: `<bdi dir="ltr" data-cron-home>${escapeHtml(t('Not read'))}</bdi>` },
+      { label: t('Execution user'), valueHtml: `<bdi dir="ltr" data-cron-username>${escapeHtml(t('Loading...'))}</bdi>` },
+      { label: t('Working directory'), valueHtml: `<bdi dir="ltr" data-cron-home>${escapeHtml(t('Loading...'))}</bdi>` },
     ])}<section class="v2-panel-service__note" aria-labelledby="v2-cron-next-heading"><h3 id="v2-cron-next-heading">${escapeHtml(t('Next runs (UTC)'))}</h3><div class="v2-panel-service__table" tabindex="0" role="region" aria-label="${escapeHtml(t('Next runs (UTC)'))}"><table class="v2-table"><thead><tr><th scope="col">${escapeHtml(t('Run'))}</th><th scope="col">${escapeHtml(t('Scheduled time'))}</th></tr></thead><tbody><tr><td colspan="2">${escapeHtml(t('Upcoming run times are not read from the host here. The next observed run of each job appears in the job list.'))}</td></tr></tbody></table></div></section>`,
   })
   const how = card({
