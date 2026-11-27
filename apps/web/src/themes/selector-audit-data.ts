@@ -1698,7 +1698,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/command-palette-client.ts",
-    "sha256": "1c37e5714d60d620393a2b8a337753222095da32927fa3338bb8e41114696169",
+    "sha256": "32d89c96219d5d923d4f10fe2f126983b7b9dcf2663bcca92c55669071db47d3",
     "sites": [
       {
         "line": 32,
@@ -3395,7 +3395,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/whm-backups-client.ts",
-    "sha256": "507272184e9e8105267fc1259e697165b57fa21fbd099a15137f7c2da5f13135",
+    "sha256": "d8093d0c609a809d1b983776d9784ce03270bdd113afee30daa02a03c7006918",
     "sites": [
       {
         "line": 178,
@@ -3428,7 +3428,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 712,
+        "line": 823,
         "column": 90,
         "method": "querySelector",
         "argument": "selector",
@@ -3438,7 +3438,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 713,
+        "line": 824,
         "column": 104,
         "method": "querySelectorAll",
         "argument": "'[data-backup-action=\"' + key + '\"]'",

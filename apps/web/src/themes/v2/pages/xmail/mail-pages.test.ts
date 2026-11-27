@@ -74,11 +74,11 @@ describe('v2 mailbox pages', () => {
     expect(unknown).toMatch(/<header class="v2-mail-compose-head"><div><h1 id="compose-title">New message<\/h1><p id="mail-send-status" role="status">/)
     expect(unknown).toMatch(/<a class="v2-btn" href="\/mail\/inbox">.*Back to Inbox<\/a>/)
     expect(unknown.match(/id="compose-title"/g)).toHaveLength(1)
-    expect(unknown).toMatch(/data-mail-storage-card>.*<p role="status">Not read<\/p>/)
+    expect(unknown).toMatch(/data-mail-storage-card>.*<p role="status">Loading...<\/p>/)
     expect(unknown).not.toMatch(/data-mail-storage-card>[^]*?role="meter"[^]*?id="vacation"/)
     const known = renderV2MailCompose(t, compose({ quota: { text: '160 / 1024 MiB', percent: 16 } }))
     expect(known).toMatch(/<bdi class="v2-num" dir="ltr">160 \/ 1024 MiB<\/bdi>/)
-    expect(known).toMatch(/role="meter" aria-labelledby="v2-mail-storage-card-title" aria-valuemin="0" aria-valuemax="100" aria-valuenow="16"><span class="v2-bar__fill v2-bar--info" style="inline-size:16%">/)
+    expect(known).toMatch(/<progress class="v2-bar v2-bar--info" role="meter" aria-labelledby="v2-mail-storage-card-title" aria-valuemin="0" aria-valuemax="100" aria-valuenow="16" value="16" max="100">/)
   })
 
   it('never grants a folder link or compose action from a bare observed label', () => {
@@ -140,7 +140,7 @@ describe('v2 mailbox pages', () => {
     expect(html).toContain('&lt;b&gt;stored&lt;/b&gt;')
     expect(html).not.toContain('<b>stored</b>')
     expect(html).toContain('data-compose-reply-to')
-    expect(html).toContain('Not read')
+    expect(html).toContain('Loading...')
   })
 
   it('renders Arabic core labels while preserving ASCII digits and isolated mailbox addresses', () => {
@@ -217,5 +217,23 @@ describe('v2 mailbox pages', () => {
     const tighter = renderV2MailCompose(t, compose({ identity: { size: '256.00 KiB', sizeBytes: 262_144 } }))
     expect(tighter).toContain('data-size-limit-bytes="262144"')
     expect(tighter).toContain('Server limit: 256.00 KiB')
+  })
+
+  it('gives collapsed-rail mail folders distinct icons, accessible names, and tooltip titles', () => {
+    const html = renderV2MailSidebar(t, {
+      ...common,
+      folders: [
+        { id: 'INBOX', label: 'Inbox', href: '/mail/inbox', current: true },
+        { id: 'Sent', label: 'Sent', href: '/mail/sent', current: false },
+        { id: 'Drafts', label: 'Drafts', href: '/mail/drafts', current: false },
+        { id: 'Trash', label: 'Trash', href: '/mail/trash', current: false },
+      ],
+    }, {})
+    expect(html).toContain('aria-label="Inbox" data-mail-folder="INBOX" title="Inbox"')
+    expect(html).toContain('aria-label="Sent" data-mail-folder="Sent" title="Sent"')
+    expect(html).toContain('aria-label="Compose" title="Compose"')
+    expect(html).toContain('<span class="v2-mail-folder__label">Inbox</span>')
+    const icons = [...html.matchAll(/data-mail-folder="(?:INBOX|Sent|Drafts|Trash)"[^>]*><svg[^>]*><path d="([^"]+)"/g)].map(m => m[1])
+    expect(new Set(icons).size).toBe(4)
   })
 })

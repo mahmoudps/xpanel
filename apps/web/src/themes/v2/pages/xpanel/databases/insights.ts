@@ -7,7 +7,7 @@ import {
 
 export function renderV2DatabaseInsightsPage(props: DatabasePageProps, authority: DatabasePageAuthority = NO_DATABASE_AUTHORITY): string {
   const { account, canRead, direction, locale, t } = databaseContext(props, authority)
-  const unread = t('Not read')
+  const unread = t('Loading...')
   const facts = dbFacts([
     { label: t('Databases'), valueHtml: `<bdi dir="ltr" data-insights-fact="databases">${escapeHtml(unread)}</bdi>` },
     { label: t('Total size'), valueHtml: `<bdi dir="ltr" data-insights-fact="size">${escapeHtml(unread)}</bdi>` },

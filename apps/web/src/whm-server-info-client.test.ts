@@ -2,6 +2,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderWhmSurface } from './surfaces/xwhm.ts'
+import { renderV2WhmServerInfo } from './themes/v2/pages/xwhm/monitoring/resources.ts'
 import { BROWSER_REALTIME_SCRIPT } from './ws-client.ts'
 import { routeClientScriptForHtml } from './route-client-chunks.ts'
 import { readWhmServerInfo, WHM_SERVER_INFO_CLIENT_BINDING } from './whm-server-info-client.ts'
@@ -46,6 +47,30 @@ describe('server information binding', () => {
     expect($('[data-host-load]').textContent).toBe('0.5 0.25 0.1')
     expect($('[data-host-memory]').textContent).toBe('\u20661.00\u00a0GiB\u2069 / \u20662.00\u00a0GiB\u2069')
     expect($('[data-host-disk]').dir).toBe('ltr')
+    expect($('[data-host-info-status]').dataset.state).toBe('read')
+  })
+  it('re-reads host measurements when the Refresh button is clicked', async () => {
+    document.body.innerHTML = renderV2WhmServerInfo({
+      locale: 'en',
+      activeRoute: '/whm/monitoring/server-info',
+      principal: { kind: 'root', id: 'fixture-root', username: 'operator' },
+      observationAuthority: { canRead: true, canManage: true },
+    })
+    let infoCalls = 0
+    const send = vi.fn(async (_method: string, path: string) => {
+      if (path !== '/api/server/info') return { items: [], unreadCount: 0 }
+      infoCalls += 1
+      if (infoCalls === 1) throw { status: 503 }
+      return info
+    })
+    ;(window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest = send
+    new Function('window', 'document', BROWSER_REALTIME_SCRIPT + '\n' + routeClientScriptForHtml(document.body.innerHTML))(window, document)
+    await tick()
+    expect($('[data-host-info-status]').dataset.state).toBe('failed')
+    $('[data-host-info-refresh]').click()
+    await tick()
+    expect(infoCalls).toBe(2)
+    expect($('[data-host-load]').textContent).toBe('0.5 0.25 0.1')
     expect($('[data-host-info-status]').dataset.state).toBe('read')
   })
 })

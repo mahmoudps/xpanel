@@ -5,7 +5,7 @@ import { netButton, netCard, netFacts, netField, netTable } from '../domains/com
 
 /** V2 body of the authenticated cluster: members, inbound tokens, conflicts and record synchronisation. */
 export function renderV2DnsClusterMembers(t: Translate, canRead: boolean, canManage: boolean): string {
-  const unread = t(msgid('Not read')), manage = canRead && canManage
+  const unread = t(msgid('Loading...')), manage = canRead && canManage
   const table = (key: string, title: string, labels: string[], empty: string): string => netTable(t, `dns-cluster-${key}`, title, labels, [], empty, { 'data-sec-rows': key })
   const fact = (keys: [string, string][]) => netFacts(keys.map(([key, label]) => ({ label: t(label), valueHtml: escapeHtml(unread), hooks: { 'data-sec-field': key } })))
   const text = (key: string, label: string, maxlength: number, help?: string, password = false) => netField(`dns-cluster-${key}`, t(label), { kind: 'input', ...(password ? { type: 'password' as const } : {}), maxlength, dir: 'ltr', autocomplete: 'off', spellcheck: false, hooks: { 'data-sec-input': key } }, help ? t(help) : undefined)

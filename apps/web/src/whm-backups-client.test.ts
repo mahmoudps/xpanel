@@ -291,4 +291,37 @@ describe('inline destination ownership for V2 backup schedules', () => {
     expect(document.querySelector<HTMLElement>('[data-approved-whm-backups]')!.dataset.backupManage).toBe('false')
     expect([...document.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('[data-approved-whm-backups] input,[data-approved-whm-backups] select,[data-approved-whm-backups] button')].every(node => node.disabled)).toBe(true)
   })
+  it('synchronizes the cron builder with loaded backup policy schedules and marks builder edits dirty for save', async () => {
+    document.body.replaceChildren(v2BackupsTemplate.content.cloneNode(true))
+    const f = model()
+    const weekly = initial()
+    weekly.schedule = { ...weekly.schedule, enabled: true, frequency: 'weekly', cron: '30 4 * * 5' }
+    const shared = vi.fn(async (method: string, path: string, body?: unknown) => path === '/api/backups/workspace/destination-lifecycle'
+      ? { revision: f.getCurrent().revision, destinations: [], capabilities: { canTest: false, profiles: [] }, application: { nativeApplied: false, schedulerVerified: false } }
+      : method === 'GET' ? clone(weekly) : f.send(method, path, body))
+    f.boot(shared); bindWhmBackupDestinations(f.ask); await tick()
+
+    const freq = document.querySelector<HTMLSelectElement>('#whm-backup-cron-freq')!
+    const hour = document.querySelector<HTMLInputElement>('#whm-backup-cron-hour')!
+    const minute = document.querySelector<HTMLInputElement>('#whm-backup-cron-minute')!
+    const dow = document.querySelector<HTMLSelectElement>('#whm-backup-cron-dow')!
+    const dom = document.querySelector<HTMLInputElement>('#whm-backup-cron-dom')!
+    expect(freq.value).toBe('weekly')
+    expect(hour.value).toBe('4')
+    expect(minute.value).toBe('30')
+    expect(dow.value).toBe('5')
+    expect(action('save-schedule').disabled).toBe(true)
+
+    freq.value = 'monthly'; freq.dispatchEvent(new Event('change', { bubbles: true }))
+    dom.value = '12'; dom.dispatchEvent(new Event('input', { bubbles: true }))
+    hour.value = '3'; hour.dispatchEvent(new Event('input', { bubbles: true }))
+    minute.value = '15'; minute.dispatchEvent(new Event('input', { bubbles: true }))
+
+    expect(input('policy-cron').value).toBe('15 3 12 * *')
+    expect(action('save-schedule').disabled).toBe(false)
+    action('save-schedule').click(); await tick(); await tick()
+    expect(f.writes()).toHaveLength(1)
+    expect(f.writes()[0]![1]).toBe('/api/backups/workspace/schedule')
+    expect(f.writes()[0]![2]).toMatchObject({ frequency: 'monthly', cron: '15 3 12 * *' })
+  })
 })
