@@ -33,7 +33,7 @@ export function renderV2ResellerEmail(t: Translate, props: WhmSurfaceProps, edit
 export function renderV2ResellerUsage(t: Translate, props: WhmSurfaceProps): string {
   const rows = (props.resellers ?? []).map(reseller => {
     const usage = props.resellerUsage?.[reseller.id]
-    return { cellsHtml: [technical(reseller.username), usage ? technical(usage.accounts) : escapeHtml(t('Not read')), phoneCell(t('Disk use'), escapeHtml(measuredTotalText(t, usage?.disk))), phoneCell(t('Traffic this month'), escapeHtml(measuredTotalText(t, usage?.traffic)))] }
+    return { cellsHtml: [technical(reseller.username), usage ? technical(usage.accounts) : escapeHtml(t('Loading...')), phoneCell(t('Disk use'), escapeHtml(measuredTotalText(t, usage?.disk))), phoneCell(t('Traffic this month'), escapeHtml(measuredTotalText(t, usage?.traffic)))] }
   })
   return card({ title: t('Reseller usage'), titleId: 'v2-reseller-usage-heading', bodyHtml: dataTable(t, { id: 'v2-reseller-usage', caption: t('Reseller usage'), columns: [t('Reseller'), t('Accounts'), t('Disk use'), t('Traffic this month')].map(label => ({ label })), rows, emptyText: t('No resellers were returned.') }) + `<p>${escapeHtml(t('Disk use is the user quota report of the home filesystem; traffic is the bandwidth meter of this UTC month.'))}</p>` })
 }

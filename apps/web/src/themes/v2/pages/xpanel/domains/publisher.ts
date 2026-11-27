@@ -1,13 +1,14 @@
 import { alternateLocales, localeInfo } from '../../../../../i18n.ts'
 import type { PanelSurfaceProps } from '../../../../contract.ts'
 import { escapeHtml } from '../../../html.ts'
+import { renderGuidedWizard } from '../../../../../features/wizards/flow.ts'
 import { publisherClientTemplates } from './client-templates.ts'
 import { domainButton, domainCard, domainContext, domainFacts, domainField, domainHeader, domainSelect, domainTable, missingDomainAccount, NO_DOMAIN_AUTHORITY, type DomainPageAuthority } from './common.ts'
 
 export function renderV2SitePublisherPage(props: PanelSurfaceProps, authority: DomainPageAuthority = NO_DOMAIN_AUTHORITY): string {
   const { locale, t, account, domains, canManage } = domainContext(props, authority)
   const off = canManage && domains.length > 0 ? '' : ' disabled'
-  const unread = t(msgid('Not read'))
+  const unread = t(msgid('Loading...'))
   const target = domainCard('sitepub-target', t(msgid('Choose a site')), `${domainField('v2-sitepub-domain', t(msgid('Domain')), domainSelect(`<select id="v2-sitepub-domain" dir="ltr" data-sitepub-domain${off}>${domains.length ? domains.map(domain => `<option value="${escapeHtml(domain.id)}">${escapeHtml(domain.name)}</option>`).join('') : `<option value="">${escapeHtml(t(msgid('No domains available')))}</option>`}</select>`))}${domainFacts([
     { label: t(msgid('Document root')), valueHtml: `<bdi dir="ltr" data-sitepub-path>${escapeHtml(unread)}</bdi>` },
     { label: t(msgid('Recovery state')), valueHtml: escapeHtml(unread), hooks: { 'data-sitepub-recovery': true } },
@@ -20,5 +21,22 @@ ${domainField('v2-sitepub-template', t(msgid('Template')), domainSelect(`<select
 ${domainField('v2-sitepub-lang', t(msgid('Page language')), domainSelect(`<select id="v2-sitepub-lang" data-sitepub-lang${off}>${languages.map(info => `<option value="${info.tag}" lang="${info.tag}"${info.tag === locale ? ' selected' : ''}>${escapeHtml(info.nativeName)}</option>`).join('')}</select>`))}
 ${field('title', t(msgid('Title')), 120)}<div class="v2-domain-field v2-domain-wide"><label for="v2-sitepub-message">${escapeHtml(t(msgid('Message')))}</label><textarea id="v2-sitepub-message" rows="5" maxlength="2000" data-sitepub-message${off}></textarea></div>${field('email', t(msgid('Contact email (optional)')), 254, true)}${field('phone', t(msgid('Phone (optional)')), 40, true)}</div><div class="v2-domain-actions">${domainButton(t(msgid('Preview page')), { 'data-sitepub-preview': true }, !!off)}${domainButton(t(msgid('Publish previewed page')), { 'data-sitepub-publish': true }, true, true)}</div>`)
   const preview = domainCard('sitepub-preview', t(msgid('Page preview')), `<p data-sitepub-preview-note>${escapeHtml(t(msgid('Create a preview to see the generated page here.')))}</p><iframe class="v2-domain-preview" title="${escapeHtml(t(msgid('Static page preview')))}" sandbox="" referrerpolicy="no-referrer" data-sitepub-frame hidden></iframe>`)
-  return `<section class="v2-domain-page"${authority.presentation === 'read-only' || !account ? ' data-readonly="true"' : ''} data-account-site-publisher data-account="${escapeHtml((account?.id ?? ''))}" data-sitepub-can-read="${canManage}" data-sitepub-manage="${canManage}">${domainHeader(t, '/domains/site-publisher', t(msgid('Site publisher')), t(msgid('Create a simple page')))}<div class="v2-domain-split"><div class="v2-domain-stack">${target}${preview}</div><aside>${draft}</aside></div>${publisherClientTemplates()}</section>`
+  const wizard = renderGuidedWizard({
+    id: 'site-publisher-wizard',
+    activeStepIndex: 0,
+    disabled: !!off,
+    locale: props.locale,
+    copy: t,
+    submitLabel: t(msgid('Publish previewed page')),
+    changePlan: [
+      { label: t(msgid('Recovery archive')), before: t(msgid('Current files')), after: t(msgid('30-day home backup before overwrite')) },
+      { label: t(msgid('Static index')), before: '—', after: t(msgid('Previewed template HTML')) },
+    ],
+    steps: [
+      { id: 'site', label: t(msgid('Choose a site')), bodyHtml: target },
+      { id: 'content', label: t(msgid('Template and content')), bodyHtml: draft },
+      { id: 'preview', label: t(msgid('Page preview')), bodyHtml: preview },
+    ],
+  })
+  return `<section class="v2-domain-page"${authority.presentation === 'read-only' || !account ? ' data-readonly="true"' : ''} data-account-site-publisher data-account="${escapeHtml((account?.id ?? ''))}" data-sitepub-can-read="${canManage}" data-sitepub-manage="${canManage}">${domainHeader(t, '/domains/site-publisher', t(msgid('Site publisher')), t(msgid('Create a simple page')))}${wizard}${publisherClientTemplates()}</section>`
 }

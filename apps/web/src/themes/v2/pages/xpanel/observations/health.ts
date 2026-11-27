@@ -24,7 +24,7 @@ export function renderV2PanelSiteHealth(props: PanelSurfaceProps, authority?: Pa
 export function renderV2PanelServerInformation(props: PanelSurfaceProps, authority?: PanelEmailAuthority): string {
   const { locale, t, account, plan } = emailContext(props, authority)
   const route = '/server-information', title = t(msgid('Server information'))
-  const notRead = esc(t(msgid('Not read')))
+  const notRead = esc(t(msgid('Loading...')))
   const value = (number: number | null | undefined, unit = ''): string => number !== null && number !== undefined && Number.isFinite(number) && number >= 0 ? technical(`${number}${unit}`) : notRead
   // Sizes read like Home and Resources: MiB with two decimals, bytes only below one MiB.
   const size = (bytes: number | null | undefined): string => { const count = panelCount(bytes); return count === undefined ? notRead : technical(formatAsciiBytes(count)) }

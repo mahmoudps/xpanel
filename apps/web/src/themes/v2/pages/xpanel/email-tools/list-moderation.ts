@@ -37,6 +37,6 @@ export function v2ListModerationSection(t: Translate, connected: boolean): strin
     + `<p>${escapeHtml(t(msgid('Sender rules take one address per line, where * and ? match any text, and apply to non-members. A moderator mailbox of this account opens the queue from webmail with its own sign-in.')))}</p>`
     + `<div class="v2-list-moderation__grid">${check('v2-list-moderation-notify-moderators', 'data-moderation-notify-moderators', t(msgid('Tell moderators about each held message')))}${check('v2-list-moderation-notify-sender', 'data-moderation-notify-sender', t(msgid('Tell senders their message is held')))}</div>`
     + `<div class="v2-actions"><button type="button" class="v2-btn v2-btn--primary" data-moderation-save${off}>${escapeHtml(t(msgid('Save posting policy')))}</button></div>`
-    + `<dl class="v2-list-moderation__grid"><div><dt>${escapeHtml(t(msgid('Moderation queue')))}</dt><dd data-moderation-state>${escapeHtml(t(msgid('Not read')))}</dd></div><div><dt>${escapeHtml(t(msgid('Held messages')))}</dt><dd data-moderation-held>${escapeHtml(t(msgid('Not read')))}</dd></div></dl>`
+    + `<dl class="v2-list-moderation__grid"><div><dt>${escapeHtml(t(msgid('Moderation queue')))}</dt><dd data-moderation-state>${escapeHtml(t(msgid('Loading...')))}</dd></div><div><dt>${escapeHtml(t(msgid('Held messages')))}</dt><dd data-moderation-held>${escapeHtml(t(msgid('Loading...')))}</dd></div></dl>`
     + `${v2ModerationQueue(t)}</div></section>`
 }

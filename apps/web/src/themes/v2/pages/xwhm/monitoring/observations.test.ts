@@ -216,7 +216,7 @@ describe('v2 WHM diagnostic, security and activity bodies', () => {
   it('shows SSH status tiles through the service fact hooks and the session address only to an admitted reader', () => {
     const html = render('/whm/security/ssh', { ...admitted, adminSessionIp: '192.0.2.9' })
     for (const key of ['active', 'enabled', 'today-accepted', 'today-failed', 'total-accepted', 'total-failed']) expect(html.match(new RegExp(`data-whm-ssh-fact="${key}"`, 'g'))).toHaveLength(1)
-    expect(html).toMatch(/<p class="v2-kpi__value v2-kpi__value--text v2-num"><span data-whm-ssh-fact="active">Not read<\/span>/)
+    expect(html).toMatch(/<p class="v2-kpi__value v2-kpi__value--text v2-num"><span data-whm-ssh-fact="active">Loading...<\/span>/)
     expect(html).toMatch(/v2-notice--ok[^>]*>.*Current session protection\..*<bdi class="v2-mono" dir="ltr">192\.0\.2\.9<\/bdi>/)
     expect(render('/whm/security/ssh', { adminSessionIp: '192.0.2.9' })).not.toContain('192.0.2.9')
   })

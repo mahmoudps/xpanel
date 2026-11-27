@@ -5,7 +5,7 @@ import { domainButton, domainCard, domainContext, domainFacts, domainField, doma
 
 export function renderV2ReverseProxyPage(props: PanelSurfaceProps, authority: DomainPageAuthority = NO_DOMAIN_AUTHORITY): string {
   const { t, account, canManage } = domainContext(props, authority)
-  const unread = t(msgid('Not read'))
+  const unread = t(msgid('Loading...'))
   const rows = domainTable(t(msgid('Domains and serving modes')), [t(msgid('Domain')), t(msgid('Kind')), t(msgid('Serving mode')), t(msgid('Upstream')), t(msgid('Actions'))],
     `<tr><td colspan="5">${escapeHtml(t(msgid('Domains have not been read.')))}</td></tr>`, { 'data-rp-rows': true })
   const sites = domainCard('rp-sites', t(msgid('Your sites')), `<p>${escapeHtml(t(msgid('Choose a domain to forward its requests to an application running on this server, or to serve its files again.')))}</p>${rows}<p data-rp-status role="status" data-state="unread">${escapeHtml(t(msgid('Saved domain configuration has not been read.')))}</p><p data-rp-application>${escapeHtml(t(msgid('Whether a site answers through its upstream has not been checked.')))}</p>`, domainButton(t(msgid('Read domains')), { 'data-rp-refresh': true }))

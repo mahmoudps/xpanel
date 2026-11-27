@@ -119,7 +119,7 @@ describe('v2 panel administration family', () => {
   })
 
   it('lays the token scope matrix out as phone rows: area with its key under it, read and write opposite', () => {
-    expect(render('/whm/panel/api-tokens')).toContain('<table id="v2-panel-token-scopes" style="')
+    expect(render('/whm/panel/api-tokens')).toContain('<table id="v2-panel-token-scopes" data-phone-labels>')
     expect(WHM_PANEL_CSS).toMatch(/@media\(max-width:640px\)\{[^@]*#v2-panel-token-scopes tr\{display:grid;grid-template-columns:minmax\(0,1fr\) 56px 56px/)
   })
 })

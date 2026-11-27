@@ -91,6 +91,10 @@ ${W} ::-webkit-progress-value,${W} ::-webkit-meter-optimum-value{background:var(
 ${W} ::-webkit-meter-suboptimum-value{background:var(--warn)}
 ${W} ::-webkit-meter-even-less-good-value{background:var(--bad)}
 ${W} ::-moz-meter-bar,${W} ::-moz-progress-bar{background:var(--accent-fill)}
+${W} progress.v2-bar--warn::-webkit-progress-value{background:var(--warn)}
+${W} progress.v2-bar--warn::-moz-progress-bar{background:var(--warn)}
+${W} progress.v2-bar--bad::-webkit-progress-value{background:var(--bad)}
+${W} progress.v2-bar--bad::-moz-progress-bar{background:var(--bad)}
 ${W} input[type=file]{max-inline-size:100%;font-size:13px;color:var(--text-2)}
 ${W} ::file-selector-button{min-height:var(--target);margin-inline-end:12px;padding:0 16px;border-radius:var(--radius-control);border:1px solid var(--line-strong);background:var(--surface);color:var(--text);font:inherit;font-weight:600;cursor:pointer}
 ${W} ::file-selector-button:hover{background:var(--subtle);border-color:var(--muted)}

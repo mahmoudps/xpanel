@@ -1,6 +1,8 @@
 import { backupFilesClientTemplates } from './backup-files-client-templates.ts'
 import type { WhmSurfaceProps } from '../../../../contract.ts'
+import { renderGuidedWizard } from '../../../../../features/wizards/flow.ts'
 import { actions, button, context, esc, facts, field, page, status, table, toolCard, type WhmAccountToolAuthority } from '../account-tools/common.ts'
+import { subtabs } from '../../../components/page-header.ts'
 import { phoneTable, recoveryRules, recoverySteps, restoreMoreTemplates } from './common.ts'
 import type { PhoneRow } from '../lifecycle/shared.ts'
 
@@ -8,7 +10,7 @@ import type { PhoneRow } from '../lifecycle/shared.ts'
 export function renderV2WhmRestoreComponentsPage(props: WhmSurfaceProps, authority: WhmAccountToolAuthority): string {
   const { t, readable, editable } = context(props, authority)
   const title = t(msgid('Mail & partial restore'))
-  const unread = t(msgid('Not read'))
+  const unread = t(msgid('Loading...'))
   const fact = (rows: readonly (readonly [string, string])[]) => facts(rows.map(([key, label]) => ({ label: t(label), hooks: { [`data-restore-more-${key}`]: true } })), unread)
   const rows = (caption: string, headers: readonly string[], marker: string, empty: string, phone: PhoneRow = {}): string => phoneTable(table(t(caption), headers.map(label => t(label)), { [`data-restore-more-${marker}`]: true }, t(empty)), phone)
   const steps = recoverySteps(t, 'restore-more', [['account', msgid('Account')], ['backup', msgid('Backup')], ['components', msgid('Components')], ['review', msgid('Review')], ['result', msgid('Result')]])
@@ -32,14 +34,35 @@ export function renderV2WhmRestoreComponentsPage(props: WhmSurfaceProps, authori
   const rules = [msgid('The selected account and parts must be checked before applying a restore.'), msgid('Mail restores only message files into mailboxes that exist now. A message that is already present is never replaced.'), msgid('Each restored message is written as the account by the confined file writer, read back and compared with the archive.'), msgid('One run restores at most 500 messages within a 20 second budget; review again to restore the next messages.'), msgid('Account mail settings are rendered from saved configuration and are not restored from a backup.')]
   const aside = toolCard('restore-more-rules', t(msgid('What these restores do')), recoveryRules(t, rules))
   const initial = readable ? msgid('Accounts have not been read.') : msgid('Restoring backup components requires an authorized root administrator or a reseller with the list-accounts privilege for its own accounts. Nothing was read or changed.')
+  const restoreTabs = subtabs(t(msgid('Restore views')), [
+    { label: t(msgid('Restore accounts')), href: '/whm/backups/restore' },
+    { label: t(msgid('Mail & partial restore')), href: '/whm/backups/restore-more', active: true },
+  ])
+  const rmWizard = renderGuidedWizard({
+    id: 'whm-restore-more-wizard',
+    activeStepIndex: 0,
+    disabled: !readable,
+    locale: props.locale,
+    copy: t,
+    submitLabel: t(msgid('Restore mail')),
+    changePlan: [
+      { label: t(msgid('Target mailboxes')), before: t(msgid('Current mailbox contents')), after: t(msgid('Missing messages appended (no overwrites)')) },
+    ],
+    steps: [
+      { id: 'source', label: t(msgid('Account and backup')), bodyHtml: `<div class="v2-recovery__grid">${source}<aside class="v2-recovery__column">${aside}</aside></div>` },
+      { id: 'components', label: t(msgid('Components')), bodyHtml: components },
+      { id: 'review', label: t(msgid('Review')), bodyHtml: review },
+      { id: 'result', label: t(msgid('Result')), bodyHtml: result },
+    ],
+  })
   return page(props, '/whm/backups/restore-more', title, t(msgid('Restore mail from an account server backup into mailboxes that exist now, and see what each backup can and cannot restore.')),
-    `<div class="v2-recovery-tools v2-recovery__column" data-whm-restore-more-workspace data-restore-more-can-read="${readable}" data-restore-more-can-restore="${editable}">${restoreMoreTemplates(t)}${steps}${status(t(initial), { 'data-restore-more-status': true }, readable ? 'unread' : 'unavailable')}<div class="v2-recovery__grid">${source}<aside class="v2-recovery__column">${aside}</aside></div>${components}${review}${result}</div>`, { 'data-capability-state': readable ? 'authorized' : 'unavailable' })
+    `${restoreTabs}<div class="v2-recovery-tools v2-recovery__column" data-whm-restore-more-workspace data-restore-more-can-read="${readable}" data-restore-more-can-restore="${editable}">${restoreMoreTemplates(t)}${steps}${status(t(initial), { 'data-restore-more-status': true }, readable ? 'unread' : 'unavailable')}${rmWizard}</div>`, { 'data-capability-state': readable ? 'authorized' : 'unavailable' })
 }
 
 export function renderV2WhmRestoreFilesPage(props: WhmSurfaceProps, authority: WhmAccountToolAuthority): string {
   const { t, readable, editable } = context(props, authority)
   const title = t(msgid('Restore files'))
-  const unread = t(msgid('Not read'))
+  const unread = t(msgid('Loading...'))
   const fact = (rows: readonly (readonly [string, string])[]) => facts(rows.map(([key, label]) => ({ label: t(label), hooks: { [`data-backup-files-${key}`]: true } })), unread)
   const rows = (caption: string, headers: readonly string[], marker: string, empty: string, phone: PhoneRow = {}): string => phoneTable(table(t(caption), headers.map(label => t(label)), { [`data-backup-files-${marker}`]: true }, t(empty)), phone)
   const steps = recoverySteps(t, 'backup-files', [['account', msgid('Account')], ['backup', msgid('Backup')], ['files', msgid('Files')], ['review', msgid('Review')], ['result', msgid('Result')]])
@@ -62,6 +85,23 @@ export function renderV2WhmRestoreFilesPage(props: WhmSurfaceProps, authority: W
   const rules = [msgid('The archive is inspected again and its reviewed SHA-256 must still match before anything is written.'), msgid('Files are written as the account by the confined file writer, which refuses links and honours the disk quota.'), msgid('An existing file is never replaced; it is reported as skipped.'), msgid('Each restored file is read back and compared with the archive. Files larger than 2 MiB are not restored here; use the account restore.'), msgid('One request restores at most 500 files within a 20 second budget; continue to restore the rest.')]
   const aside = toolCard('backup-files-rules', t(msgid('What a file restore does')), recoveryRules(t, rules))
   const initial = readable ? msgid('Accounts have not been read.') : msgid('Restoring files requires an authorized root administrator or a reseller with the list-accounts privilege for its own accounts. Nothing was read or changed.')
+  const rfWizard = renderGuidedWizard({
+    id: 'whm-restore-files-wizard',
+    activeStepIndex: 0,
+    disabled: !readable,
+    locale: props.locale,
+    copy: t,
+    submitLabel: t(msgid('Restore files')),
+    changePlan: [
+      { label: t(msgid('Destination')), before: t(msgid('Archive snapshot')), after: t(msgid('Selected files written without overwriting')) },
+    ],
+    steps: [
+      { id: 'source', label: t(msgid('Account and backup')), bodyHtml: `<div class="v2-recovery__grid">${source}<aside class="v2-recovery__column">${aside}</aside></div>` },
+      { id: 'files', label: t(msgid('Files')), bodyHtml: files },
+      { id: 'review', label: t(msgid('Review')), bodyHtml: review },
+      { id: 'result', label: t(msgid('Result')), bodyHtml: result },
+    ],
+  })
   return page(props, '/whm/backups/files', title, t(msgctxt('theme:v2', 'Inspect an account archive, select files, and review the exact destination before restoring anything.')),
-    `<div class="v2-recovery-tools v2-recovery__column" data-whm-backup-files-workspace data-backup-files-can-read="${readable}" data-backup-files-can-restore="${editable}">${steps}${status(t(initial), { 'data-backup-files-status': true }, readable ? 'unread' : 'unavailable')}<div class="v2-recovery__grid">${source}<aside class="v2-recovery__column">${aside}</aside></div>${files}${review}${result}${backupFilesClientTemplates(t)}</div>`, { 'data-capability-state': readable ? 'authorized' : 'unavailable' })
+    `<div class="v2-recovery-tools v2-recovery__column" data-whm-backup-files-workspace data-backup-files-can-read="${readable}" data-backup-files-can-restore="${editable}">${steps}${status(t(initial), { 'data-backup-files-status': true }, readable ? 'unread' : 'unavailable')}${rfWizard}${backupFilesClientTemplates(t)}</div>`, { 'data-capability-state': readable ? 'authorized' : 'unavailable' })
 }

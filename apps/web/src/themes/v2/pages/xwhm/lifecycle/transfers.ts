@@ -1,4 +1,5 @@
 import { localeDirection } from '../../../../../i18n.ts'
+import { renderGuidedWizard } from '../../../../../features/wizards/flow.ts'
 import { v2Messages } from '../../../messages.ts'
 import { escapeHtml } from '../../../html.ts'
 import { icon } from '../../../icons.ts'
@@ -27,7 +28,7 @@ export function renderV2TransferPage(props: V2TransferPageProps): string {
   const source = lifecycleCard(t, 'transfer-source', msgctxt('theme:v2', 'Connect source'), `
 ${status(msgid('No authenticated source inventory has been read.'), 'source-observation')}
 ${fields(select('transfer-session', msgid('Saved session'), 'session'))}
-<dl class="v2-lifecycle__fields"><div class="v2-lifecycle__field"><dt>${text(t, msgid('Source'))}</dt><dd data-transfer-source>${text(t, msgid('Not read'))}</dd></div><div class="v2-lifecycle__field"><dt>${text(t, msgid('State'))}</dt><dd data-transfer-state>${text(t, msgid('Not read'))}</dd></div></dl>
+<dl class="v2-lifecycle__fields"><div class="v2-lifecycle__field"><dt>${text(t, msgid('Source'))}</dt><dd data-transfer-source>${text(t, msgid('Loading...'))}</dd></div><div class="v2-lifecycle__field"><dt>${text(t, msgid('State'))}</dt><dd data-transfer-state>${text(t, msgid('Loading...'))}</dd></div></dl>
 ${actions(button('refresh', msgid('Read saved sessions')) + button('discover', msgid('Connect and discover')) + button('cancel', msgid('Cancel pending session')))}
 <h3>${text(t, msgid('Create a source review'))}</h3>
 ${fields(input('transfer-host', msgid('Source host or HTTPS API URL'), 'text', ' maxlength="1024"')
@@ -107,15 +108,32 @@ ${actions(button('import-discard', msgid('Discard archive')) + button('import-ru
     msgid('Resume a saved review, inspect actual source inventory and resolve conflicts. Connection and execution results are accepted only from the trusted server adapter.'),
     msgctxt('theme:v2', 'No destination account is created until the current review is confirmed. Source identity, resource limits and proposed changes must be checked before running.'),
   ]))
-  const summary = `<dl class="v2-lifecycle__summary">${([['source', msgid('Source server'), 'server'], ['accounts', msgid('Selected accounts'), 'users'], ['conflicts', msgid('Conflicts'), 'shield'], ['ready', msgid('Ready to build'), 'check']] as const).map(([key, label, glyph]) => `<div class="v2-lifecycle__field"><dt><span>${text(t, label)}</span><span class="v2-tile v2-tile--neutral" aria-hidden="true">${icon(glyph)}</span></dt><dd data-transfer-kpi="${key}">${text(t, msgid('Not read'))}</dd></div>`).join('')}</dl>`
+  const summary = `<dl class="v2-lifecycle__summary">${([['source', msgid('Source server'), 'server'], ['accounts', msgid('Selected accounts'), 'users'], ['conflicts', msgid('Conflicts'), 'shield'], ['ready', msgid('Ready to build'), 'check']] as const).map(([key, label, glyph]) => `<div class="v2-lifecycle__field"><dt><span>${text(t, label)}</span><span class="v2-tile v2-tile--neutral" aria-hidden="true">${icon(glyph)}</span></dt><dd data-transfer-kpi="${key}">${text(t, msgid('Loading...'))}</dd></div>`).join('')}</dl>`
   const steps = `<ol class="v2-lifecycle__steps" aria-label="${text(t, msgid('Steps'))}">${([['transfer-source', msgctxt('theme:v2', 'Connect source')], ['transfer-selection', msgctxt('theme:v2', 'Select accounts')], ['transfer-plans', msgctxt('theme:v2', 'Plans and conflicts')], ['transfer-run', msgctxt('theme:v2', 'Run transfer')]] as const).map(([key, label], index) => `<li><span aria-hidden="true">${index + 1}</span><a href="#v2-lifecycle-${key}">${text(t, label)}</a></li>`).join('')}</ol>`
+  const wizard = renderGuidedWizard({
+    id: 'whm-transfers-wizard',
+    activeStepIndex: 0,
+    disabled: !(props.canRead && props.canManage),
+    locale: props.locale,
+    copy: t,
+    submitLabel: text(t, msgid('Run reviewed transfer')),
+    changePlan: [
+      { label: text(t, msgid('Source accounts')), before: text(t, msgid('Source server')), after: text(t, msgid('New local UID, slice, vhost, zones, mail')) },
+    ],
+    steps: [
+      { id: 'source', label: text(t, msgctxt('theme:v2', 'Connect source')), bodyHtml: note + source },
+      { id: 'selection', label: text(t, msgctxt('theme:v2', 'Select accounts')), bodyHtml: selection },
+      { id: 'plans', label: text(t, msgctxt('theme:v2', 'Plans and conflicts')), bodyHtml: mapping },
+      { id: 'run', label: text(t, msgctxt('theme:v2', 'Run transfer')), bodyHtml: execution },
+    ],
+  })
   const headerActions = lifecycleLink(t, msgid('Audit log'), `/whm/audit?lang=${props.locale}`) + (scope === 'server' ? '' : lifecycleLink(t, msgid('Import a cPanel backup'), '#v2-lifecycle-transfer-import'))
   return `<div class="v2-lifecycle" data-whm-detail-route="${route}" data-capability-state="${props.canRead ? 'authorized' : 'unavailable'}" lang="${props.locale}" dir="${localeDirection(props.locale)}">
 ${lifecycleHeader(t, scope === 'server' ? msgid('Server migration') : msgid('Transfer tool'), route, msgctxt('theme:v2', 'Move accounts from a verified source or inspect a cPanel archive before importing.'), headerActions)}
 ${scope === 'server' ? renderV2TransferCredentials(t, props.canRead && props.canManage) : ''}
 <section class="v2-lifecycle__column" data-transfer-workspace data-transfer-inventory-layout="comparison" data-transfer-can-read="${props.canRead && props.canManage}" data-transfer-manage="${props.canRead && props.canManage}" data-transfer-scope="${scope}"${props.canRead ? ' data-transfer-credentials="read"' : ''} aria-label="${text(t, msgid('Saved transfer sessions and archive review'))}">
 ${summary}${steps}
-${note}${source}${selection}${mapping}${execution}
+${wizard}
 ${scope === 'server' ? `<div hidden>${archive}</div>` : archive}
 <p class="v2-lifecycle__status" role="status" data-transfer-status data-state="unread">${text(t, props.canRead ? msgid('Saved transfer state has not been read.') : msgid('Transfer review is unavailable here. Nothing was read or changed.'))}</p>
 ${v2TransferClientTemplates(t)}

@@ -16,7 +16,7 @@ export { formField, switchRow, type FieldControl, type FormFieldProps, type Swit
 export { kpiCard, type KpiCardProps } from './kpi-card.ts'
 export { meter, type MeterProps, type MeterScale } from './meter.ts'
 export { notice, type NoticeProps } from './notice.ts'
-export { pageHeader, type Crumb, type PageHeaderProps } from './page-header.ts'
+export { pageHeader, subtabs, type Crumb, type PageHeaderProps } from './page-header.ts'
 export { pagination, type PageLink, type PaginationProps } from './pagination.ts'
 export { rowMenu, type RowMenuItem, type RowMenuProps } from './row-menu.ts'
 export { emptyState, errorState, loadingState, type EmptyStateProps, type ErrorStateProps, type LoadingStateProps } from './state-block.ts'

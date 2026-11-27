@@ -2,7 +2,7 @@ import { actions, button, context, esc, field, fields, link, note, page, section
 import { renderV2CtrEngine, renderV2CtrList } from './ctr-sections.ts'
 
 function engineFacts(t: ReturnType<typeof context>['t']): string {
-  return `<dl class="v2-whm-data__facts">${['podman', 'docker'].map(engine => `<div><dt>${engine === 'podman' ? 'Podman' : 'Docker'}</dt><dd data-sw-engine-state="${engine}">${esc(t(msgid('Not read')))}</dd></div>`).join('')}<div><dt>${esc(t(msgctxt('theme:v2', 'Observed at (UTC)')))}</dt><dd data-sw-observed>${esc(t(msgid('Not read')))}</dd></div></dl>`
+  return `<dl class="v2-whm-data__facts">${['podman', 'docker'].map(engine => `<div><dt>${engine === 'podman' ? 'Podman' : 'Docker'}</dt><dd data-sw-engine-state="${engine}">${esc(t(msgid('Loading...')))}</dd></div>`).join('')}<div><dt>${esc(t(msgctxt('theme:v2', 'Observed at (UTC)')))}</dt><dd data-sw-observed>${esc(t(msgid('Loading...')))}</dd></div></dl>`
 }
 export function renderV2WhmContainers(input: WhmDataPageInput, engine = false): string {
   const { t, canRead, canManage } = context(input)
