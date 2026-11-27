@@ -257,7 +257,7 @@ function tools(props: PanelPageProps, t: Translate, visitors: number | undefined
       const enabled = personal || (qualified.has(item.capability) && routes.has(item.route))
       const hint = !enabled ? t('Unavailable')
         : item.capability === 'change-language' ? localeInfo(t.locale).nativeName
-        : item.hint ? (hints[item.hint] ?? t(msgctxt('resources-board', 'Not read')))
+        : item.hint ? (hints[item.hint] ?? '')
         : ''
       const href = item.capability === 'change-language' ? `?lang=${alternateLocales(t.locale)[0]!.tag}` : item.route
       const technicalHint = enabled && item.hint !== undefined && hints[item.hint] !== undefined && /^[ -~]+$/.test(hint) // translated words stay in the reading direction
@@ -379,12 +379,22 @@ export function renderV2PanelHome(props: PanelPageProps, authority?: SurfaceAuth
     title: t('Resource usage'), titleId: 'v2-home-resources-title', bodyHtml: meters.map(item => meter(item)).join(''),
     ...(routes.has('/resources') ? { footerHtml: `<a href="/resources">${escapeHtml(t('Resources & quotas'))}${icon('arrow', 16)}</a>` } : {}),
   })
+  const quickLinks = [
+    ['/files/manager', 'folder', msgid('File manager')],
+    ['/email/accounts', 'mail', msgid('Email accounts')],
+    ['/databases/mariadb', 'database', msgid('Databases')],
+    ['/domains', 'globe', msgid('Domains')],
+    ['/security/ssl', 'shield', msgid('SSL/TLS')],
+  ].filter(([route]) => routes.has(route!))
+  const quickStrip = quickLinks.length
+    ? `<nav class="v2-home-quick-actions" data-home-quick-actions aria-label="${escapeHtml(t('Quick actions'))}">${quickLinks.map(([route, glyph, label]) => `<a href="${escapeHtml(route!)}">${icon(glyph as Parameters<typeof icon>[0], 16)}<span>${escapeHtml(t(label!))}</span></a>`).join('')}</nav>`
+    : ''
   return `<div class="v2-layout v2-panel-home" data-panel-home ${account ? `${authority?.presentation === 'read-only' ? '' : `data-account="${escapeHtml(account.id)}" `}data-uid="${account.uid}"` : ''}>
-${pageHeader(t, { breadcrumb: [{ label: t('Home') }], route: '/home', title: t(msgctxt('theme:v2', 'Welcome back, {username}'), { username: account?.username ?? t('Not read') }),
+${pageHeader(t, { breadcrumb: [{ label: t('Home') }], route: '/home', title: t('Home'),
     description: t(msgctxt('theme:v2', 'Your sites, tools and account resources.')),
     actionsHtml: `<div class="v2-home-page-actions">${generation}<p class="v2-home-selected-domain"><span>${escapeHtml(t('Selected domain'))}</span><bdi dir="ltr" class="v2-mono">${escapeHtml(domain)}</bdi></p>${routes.has('/domains') ? `<a class="v2-btn v2-btn--primary" href="/domains">${icon('plus', 18)}${escapeHtml(t(msgid('Add domain')))}</a>` : domainsAuthorized ? `<button type="button" class="v2-btn" disabled>${icon('plus', 18)}${escapeHtml(t(msgid('Add domain')))}</button>` : ''}</div>` })}
 ${bandwidthNotice}${hasUrgentWarning ? noticesHtml : ''}${certRenewal.urgent ? certRenewal.html : ''}<section class="v2-kpi-row" aria-label="${escapeHtml(t('Account summary'))}">${summary.map(item => kpiCard({ headingLevel: 2, ...item })).join('')}</section>
-${sites(props, t, routes)}${hasUrgentWarning ? '' : noticesHtml}${certRenewal.urgent ? '' : certRenewal.html}${announcementsHtml}<div class="v2-home-columns">${tools(props, t, traffic?.totals.uniqueVisitors)}<aside class="v2-stack" aria-label="${escapeHtml(t(msgctxt('theme:v2', 'Account information')))}">${resourceCard}${information(props, t)}${recentChanges(props, t)}</aside></div>
+${quickStrip}${sites(props, t, routes)}${hasUrgentWarning ? '' : noticesHtml}${certRenewal.urgent ? '' : certRenewal.html}${announcementsHtml}<div class="v2-home-columns">${tools(props, t, traffic?.totals.uniqueVisitors)}<aside class="v2-stack" aria-label="${escapeHtml(t(msgctxt('theme:v2', 'Account information')))}">${resourceCard}${information(props, t)}${recentChanges(props, t)}</aside></div>
 ${renderV2AccountPlugins(t, canReadAnnouncements)}
 </div>`
 }
@@ -398,6 +408,9 @@ export const V2_PANEL_HOME_CSS = V2_HOME_ANNOUNCEMENTS_CSS + V2_HOME_PLUGINS_CSS
 .v2-panel-home .v2-kpi__note{font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
 .v2-panel-home [data-home-generation] .v2-pill,.v2-panel-home [data-cert-renewal-strip] .v2-notice{font-variant-numeric:tabular-nums}
 .v2-panel-home .v2-home-page-actions{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2)}
+.v2-panel-home .v2-home-quick-actions{display:flex;flex-wrap:wrap;gap:var(--space-1)}
+.v2-panel-home .v2-home-quick-actions>a{display:inline-flex;align-items:center;gap:var(--space-1);min-inline-size:var(--target);min-block-size:var(--target);padding:0 14px;border:1px solid var(--line);border-radius:var(--radius-control);background:var(--surface);color:var(--text);font-size:13px;font-weight:600;text-decoration:none;transition:background-color 140ms ease-out,border-color 140ms ease-out,color 140ms ease-out}
+.v2-panel-home .v2-home-quick-actions>a:hover{background:var(--subtle);border-color:var(--line-strong);color:var(--accent)}
 .v2-panel-home .v2-home-columns>.v2-home-tools{flex:1.75 1 560px;min-inline-size:0}
 .v2-panel-home .v2-home-columns>aside{display:flex;flex-direction:column;flex:1 1 300px;min-inline-size:0;gap:var(--space-3)}
 .v2-panel-home .v2-home-columns>aside>.v2-card:last-child{flex:1;display:flex;flex-direction:column}
@@ -484,5 +497,5 @@ export const V2_PANEL_HOME_CSS = V2_HOME_ANNOUNCEMENTS_CSS + V2_HOME_PLUGINS_CSS
 .v2-home-columns>aside{display:flex}
 .v2-panel-home .v2-home-tool-filter{flex-basis:100%;min-inline-size:0}.v2-panel-home .v2-home-tool-search>input{font-size:16px}}
 @media(max-width:359px){.v2-panel-home .v2-home-tool-group>.v2-home-tool-grid{grid-template-columns:minmax(0,1fr)}}
-@media(prefers-reduced-motion:reduce){.v2-panel-home .v2-account-plugins__link,.v2-panel-home .v2-home-site__name>a,.v2-home-tool-heading__title>.v2-icon,.v2-panel-home .v2-home-tool{transition:none}}
+@media(prefers-reduced-motion:reduce){.v2-panel-home .v2-account-plugins__link,.v2-panel-home .v2-home-quick-actions>a,.v2-panel-home .v2-home-site__name>a,.v2-home-tool-heading__title>.v2-icon,.v2-panel-home .v2-home-tool{transition:none}}
 `

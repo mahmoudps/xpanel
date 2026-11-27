@@ -752,10 +752,16 @@ describe('normal registered operator and mailbox documents with stored identity 
     expect(new Set(routes.xmail).size).toBe(23)
     const whmAliases = registeredDocumentAliases.filter(alias => routes.xwhm.includes(alias.route))
     const mailAliases = registeredDocumentAliases.filter(alias => routes.xmail.includes(alias.route))
-    expect(whmAliases).toHaveLength(3)
+    expect(whmAliases).toHaveLength(7)
     expect(mailAliases).toHaveLength(4)
+    const foldedWhmParents: Record<string, string> = {
+      '/whm/resellers/more': '/whm/resellers',
+      '/whm/dns/more': '/whm/dns',
+      '/whm/services/more': '/whm/services',
+      '/whm/backups/restore-more': '/whm/backups/restore',
+    }
     for (const alias of whmAliases) {
-      expect(alias.parentRoute).toBe('/whm/software/site-software')
+      expect(alias.parentRoute).toBe(foldedWhmParents[alias.route] ?? '/whm/software/site-software')
       expect(canonicalNavigationRoute(alias.route)).toBe(alias.parentRoute)
     }
     for (const alias of mailAliases) {
