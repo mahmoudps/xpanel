@@ -148,7 +148,54 @@ export function scanStaticDesignCompliance(options = {}) {
     }
   }
 
+  const navDataPath = resolve(root, 'packages/catalog/src/data/navigation.ts')
+  const navApiPath = resolve(root, 'packages/catalog/src/navigation.ts')
+  if (existsSync(navDataPath) && existsSync(navApiPath)) {
+    const rawNav = readFileSync(navDataPath, 'utf8')
+    const eq = rawNav.indexOf('= [')
+    const parsedNav = eq >= 0 ? JSON.parse(rawNav.slice(eq + 2, rawNav.lastIndexOf(']') + 1)) : []
+    const xwhm = parsedNav.find(s => s.surface === 'xwhm')
+    const expectedOrder = ['home', 'accounts', 'domains', 'email', 'databases', 'software', 'services', 'security', 'backups', 'monitoring', 'server', 'panel']
+    const actualOrder = (xwhm?.sections ?? []).map(s => s.id)
+    if (JSON.stringify(actualOrder) !== JSON.stringify(expectedOrder)) {
+      findings.violations.push({ gate: 'G1', file: 'packages/catalog/src/data/navigation.ts', detail: `xWHM section order/count mismatch: ${actualOrder.join(',')}` })
+    }
+    for (const surface of parsedNav) {
+      for (const sec of surface.sections) {
+        if (sec.pages.length > 12) {
+          findings.violations.push({ gate: 'G1', file: 'packages/catalog/src/data/navigation.ts', detail: `${surface.surface}:${sec.id} exceeds 12 pages (${sec.pages.length})` })
+        }
+        for (const page of sec.pages) {
+          if (page.id.endsWith('-more') || page.route.endsWith('/more') || page.route.endsWith('/restore-more')) {
+            findings.violations.push({ gate: 'G1', file: 'packages/catalog/src/data/navigation.ts', detail: `Folded -more page still canonical: ${page.route}` })
+          }
+        }
+      }
+    }
+    const navApiSrc = readFileSync(navApiPath, 'utf8')
+    if (!navApiSrc.includes('CATALOG_PAGE_DISPOSITIONS')) {
+      findings.violations.push({ gate: 'G1', file: 'packages/catalog/src/navigation.ts', detail: 'Missing CATALOG_PAGE_DISPOSITIONS registry' })
+    }
+  }
+
+  const pagesRoot = resolve(root, 'apps/web/src/themes/v2/pages')
+  if (existsSync(pagesRoot)) {
+    const pageFiles = walkFiles(pagesRoot, (_p, name) => name.endsWith('.ts') && !name.endsWith('.test.ts'))
+    for (const file of pageFiles) {
+      const rel = relative(root, file).replaceAll('\\', '/')
+      const text = readFileSync(file, 'utf8')
+      if (rel === 'apps/web/src/themes/v2/pages/xpanel/home.ts' && /route:\s*'\/home'[^}]*Welcome back/.test(text)) {
+        findings.violations.push({ gate: 'G2', file: rel, detail: '/home pageHeader title drifts from canonical navName ("Home")' })
+      }
+      if (rel === 'apps/web/src/themes/v2/pages/xwhm/overview/index.ts' && /breadcrumb:\s*\[\s*\{\s*label:\s*t\('Home'\)\s*\}\s*,\s*\{\s*label:\s*t\('Dashboard'\)\s*\}\s*\]/.test(text)) {
+        findings.violations.push({ gate: 'G2', file: rel, detail: '/whm pageHeader breadcrumb drifts from canonical navName ("Server dashboard")' })
+      }
+    }
+  }
+
   findings.gates = {
+    G1: !findings.violations.some(v => v.gate === 'G1'),
+    G2: !findings.violations.some(v => v.gate === 'G2'),
     G4: !findings.violations.some(v => v.gate === 'G4'),
     G6: !findings.violations.some(v => v.gate === 'G6'),
     G8: !findings.violations.some(v => v.gate === 'G8'),
