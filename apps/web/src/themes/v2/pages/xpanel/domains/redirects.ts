@@ -5,7 +5,7 @@ import { domainButton, domainCard, domainContext, domainFacts, domainField, doma
 
 export function renderV2RedirectsPage(props: PanelSurfaceProps, authority: DomainPageAuthority = NO_DOMAIN_AUTHORITY): string {
   const { t, account, domains, selected, canManage } = domainContext(props, authority)
-  const unread = t(msgid('Not read'))
+  const unread = t(msgid('Loading...'))
   const current = domainCard('redirect-current', t(msgid('Current rules')), `${domainField('v2-redirect-domain', t(msgid('Domain')), domainSelect(`<select id="v2-redirect-domain" data-wd-domain disabled>${domains.map(domain => `<option value="${escapeHtml(domain.id)}"${domain.id === selected?.id ? ' selected' : ''}>${escapeHtml(domain.name)}</option>`).join('')}</select>`))}${domainFacts([
     { label: t(msgid('Account-relative file')), valueHtml: `<bdi dir="ltr" data-wd-path>${escapeHtml(unread)}</bdi>` },
     { label: t(msgid('Blocks managed by xPanel')), valueHtml: `<bdi dir="ltr" data-wd-managed>${escapeHtml(unread)}</bdi>` },

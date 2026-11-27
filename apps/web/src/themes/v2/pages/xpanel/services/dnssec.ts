@@ -20,7 +20,7 @@ export function renderV2DnssecCard(t: Translate, input: { zones: readonly string
   const select = (id: string, label: string, hook: string, html: string) => serviceField(id, t(label), serviceSelect(`<select id="${id}" ${hook}${off ? ' disabled' : ''}>${html}</select>`))
   const zones = input.zones.map(zone => `<option value="${escapeHtml(zone)}"${zone === input.selected ? ' selected' : ''}>${escapeHtml(zone)}</option>`).join('') || `<option value="">${escapeHtml(t('No account domain is available'))}</option>`
   const table = (label: string, heads: readonly string[], hook: string) => `<div class="v2-panel-service__table" tabindex="0" role="region" aria-label="${escapeHtml(t(label))}"><table class="v2-table"${phoneLabels(heads.map(head => t(head)))}><thead><tr>${heads.map(head => `<th scope="col">${escapeHtml(t(head))}</th>`).join('')}</tr></thead><tbody ${hook}></tbody></table></div>`
-  const notRead = escapeHtml(t('Not read'))
+  const notRead = escapeHtml(t('Loading...'))
   return card({
     title: t('DNSSEC'), titleId: 'v2-dnssec-heading',
     description: t('PowerDNS signs the zone with keys kept in its own key store. Give the DS record to your registrar only after the zone shows as signed.'),

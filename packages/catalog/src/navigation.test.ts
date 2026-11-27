@@ -19,9 +19,9 @@ const ACLS = new Set([
 const pages = navigation.flatMap(s => s.sections.flatMap(sec => sec.pages.map(p => ({ surface: s.surface, section: sec, page: p }))))
 
 describe('navigation', () => {
-  it('binds store and mail subdocuments to existing capability pages without duplicating tools or changing roles', () => {
-    expect(registeredDocumentAliases).toHaveLength(14)
-    expect(new Set(registeredDocumentAliases.map(row => row.route)).size).toBe(14)
+  it('binds store, mail and folded subtab subdocuments to existing capability pages without duplicating tools or changing roles', () => {
+    expect(registeredDocumentAliases).toHaveLength(18)
+    expect(new Set(registeredDocumentAliases.map(row => row.route)).size).toBe(18)
     const owner: VisibilityContext = { principal: { kind: 'user', id: 'owner', username: 'owner', accountId: 'account' }, disabledFeatures: new Set() }
     const root: VisibilityContext = { principal: { kind: 'root', id: 'root', username: 'root' }, disabledFeatures: new Set() }
     const reseller: VisibilityContext = { principal: { kind: 'reseller', id: 'reseller', username: 'reseller' }, reseller: { acl: ['list-accounts'] }, disabledFeatures: new Set() }
@@ -107,8 +107,14 @@ describe('navigation', () => {
 
   it('keeps menus within ergonomic limits', () => {
     for (const s of navigation) {
-      expect(s.sections.length, s.surface).toBeLessThanOrEqual(14)
-      for (const sec of s.sections) expect(sec.pages.length, `${s.surface}:${sec.id}`).toBeLessThanOrEqual(12)
+      expect(s.sections.length, s.surface).toBeLessThanOrEqual(s.surface === 'xwhm' ? 12 : 10)
+      for (const sec of s.sections) {
+        expect(sec.pages.length, `${s.surface}:${sec.id}`).toBeLessThanOrEqual(12)
+        for (const page of sec.pages) {
+          expect(page.id.endsWith('-more'), page.id).toBe(false)
+          expect(page.route.endsWith('/more') || page.route.endsWith('/restore-more'), page.route).toBe(false)
+        }
+      }
     }
   })
 

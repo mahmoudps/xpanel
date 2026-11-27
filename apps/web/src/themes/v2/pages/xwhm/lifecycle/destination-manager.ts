@@ -13,7 +13,7 @@ export function renderV2BackupDestinationManager(props: LifecycleAccess, options
   const actions = (body: string): string => `<div class="v2-lifecycle__actions">${body}</div>`
   const list = lifecycleCard(t, 'destination-list', msgid('Saved destinations'), `
 <p>${text(t, msgid('New and changed destinations stay inactive. A trusted remote provider must write, read and delete a small test object before activation. Scheduled backup execution is not verified here.'))}</p>
-${lifecycleTable(t, msgid('Saved backup destinations'), [msgid('Name'), msgid('Kind'), msgid('Endpoint and prefix'), msgid('Verification'), msgid('Actions')], { 'data-destination-rows': true }, msgid('Not read'), { value: 4 })}
+${lifecycleTable(t, msgid('Saved backup destinations'), [msgid('Name'), msgid('Kind'), msgid('Endpoint and prefix'), msgid('Verification'), msgid('Actions')], { 'data-destination-rows': true }, msgid('Loading...'), { value: 4 })}
 `)
   const container = manage ? 'form' : 'div'
   const editor = lifecycleCard(t, 'destination-editor', msgid('Destination configuration'), `

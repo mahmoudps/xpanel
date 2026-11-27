@@ -28,7 +28,7 @@ describe('approved V2 PHP composition', () => {
     const preview = previewCard.querySelector<HTMLElement>('[role="region"]')!
     expect(preview).not.toBeNull(); expect(preview.tabIndex).toBe(0)
     expect(preview.getAttribute('aria-label')).toBe(previewHeading.textContent)
-    expect(preview.textContent?.trim()).toBe(translator(locale)('Not read'))
+    expect(preview.textContent?.trim()).toBe(translator(locale)('Loading...'))
     expect(previewCard.querySelector<HTMLButtonElement>('[data-php-ini-copy]')!.disabled).toBe(true)
     expect(document.querySelector('[data-php-action="grant-exception"]')!.closest('aside')).not.toBeNull()
     expect(document.querySelector('[data-php-action="add-exception"]')).not.toBeNull()
