@@ -24,7 +24,7 @@ const ltr = (value: string): string => `<bdi dir="ltr">${escapeHtml(value)}</bdi
 /** A presentation of the supplied host sample. An absent observation is never a healthy zero. */
 function resources(t: Translate, props: WhmSurfaceProps): string {
   const host = props.hostSample
-  const missing = t('Not read')
+  const missing = t('Loading...')
   const cpu = finite(host?.load1) && integer(host?.cores) && host.cores > 0
     ? { value: number(host.load1), note: t(msgctxt('theme:v2', 'Load {load} on {cores} cores'), { load: number(host.load1), cores: host.cores }) }
     : { value: '—', note: missing }
@@ -94,14 +94,14 @@ function reconciler(t: Translate, props: WhmSurfaceProps): string {
   const gen = integer(props.generationId) && props.generationId > 0 ? props.generationId : undefined
   const knownDrift = integer(props.driftCount ?? undefined)
   const inSync = knownDrift && props.driftCount === 0 && gen !== undefined
-  const check = (value: { ok: boolean; at: string } | undefined): string => value ? t(value.ok ? 'Passed' : 'Failed') : t('Not read')
+  const check = (value: { ok: boolean; at: string } | undefined): string => value ? t(value.ok ? 'Passed' : 'Failed') : t('Loading...')
   const rows: { label: string; value: string; mono?: boolean }[] = [
     { label: 'nginx -t', value: check(props.hostSample?.nginxTest), mono: true },
     { label: 'apachectl configtest', value: check(props.hostSample?.apacheTest), mono: true },
-    { label: t('Rollback target'), value: integer(props.rollbackGenerationId) ? String(props.rollbackGenerationId) : t('Not read') },
-    { label: t(msgctxt('theme:v2', 'Last drift check')), value: props.driftCheckedAt ? formatDisplayDateTime(props.driftCheckedAt) : t('Not read') },
+    { label: t('Rollback target'), value: integer(props.rollbackGenerationId) ? String(props.rollbackGenerationId) : t('Loading...') },
+    { label: t(msgctxt('theme:v2', 'Last drift check')), value: props.driftCheckedAt ? formatDisplayDateTime(props.driftCheckedAt) : t('Loading...') },
   ]
-  const state = !knownDrift ? { tone: 'neutral' as const, label: t('Not read') }
+  const state = !knownDrift ? { tone: 'neutral' as const, label: t('Loading...') }
     : inSync ? { tone: 'ok' as const, label: t('In sync') }
       : { tone: 'warn' as const, label: t('Review required') }
   // "Desired = applied" is stated only for a read drift count of zero; otherwise the tile names the generation alone.
@@ -144,7 +144,7 @@ function services(t: Translate, props: WhmSurfaceProps): string {
 
 function hostFacts(t: Translate, props: WhmSurfaceProps): string {
   const sample = props.hostSample
-  const missing = t('Not read')
+  const missing = t('Loading...')
   return card({ title: t(msgctxt('theme:v2', 'Host facts')), titleId: 'v2-whm-host-facts', bodyHtml: factList([
     { label: t('Host'), value: sample?.hostname || props.hostname || missing, mono: true },
     { label: t('System'), value: sample?.system || missing },
@@ -164,7 +164,7 @@ function auditEvents(t: Translate, props: WhmSurfaceProps): string {
     const target = auditTargetLabel(entry.target, t.locale)
     return { cellsHtml: [time, actor ? ltr(actor) : '—', escapeHtml(auditActionLabel(entry.action, t.locale, entry)), target ? ltr(target) : '—', statusPill({ tone: entry.outcome === 'ok' ? 'ok' : entry.outcome === 'denied' ? 'warn' : 'bad', label: auditOutcomeLabel(entry.action, entry.outcome, t.locale) })] }
   })
-  const bodyHtml = rows === undefined ? `<p class="v2-inset" role="status">${escapeHtml(t('Not read'))}</p>`
+  const bodyHtml = rows === undefined ? `<p class="v2-inset" role="status">${escapeHtml(t('Loading...'))}</p>`
     : dataTable(t, { id: 'v2-whm-audit-table', caption: t(msgctxt('theme:v2', 'Recent audit events')), columns: [t('Time'), t('Actor'), t(msgctxt('xwhm', 'Action')), t('Target'), t('Result')].map(label => ({ label })), rows, emptyText: t('No audit entries yet') })
   return card({ title: t(msgctxt('theme:v2', 'Recent audit events')), titleId: 'v2-whm-recent-audit', flush: true, bodyHtml,
     footerHtml: `<a href="/whm/audit">${escapeHtml(t('Audit log'))}</a>`,
@@ -211,23 +211,58 @@ function certificateRenewalStrip(t: Translate, props: WhmSurfaceProps, canOpenTl
   })}</div>`
 }
 
+function attentionStrip(t: Translate, props: WhmSurfaceProps, open: (route: string) => boolean): string {
+  const alerts: { label: string; href?: string }[] = []
+  const stoppedCount = (props.services ?? []).filter(service => service.checked !== false && service.installed !== false && !service.active).length
+  if (stoppedCount > 0) {
+    alerts.push({
+      label: t(msgctxt('theme:v2', '{count, plural, one {# stopped service} other {# stopped services}}'), { count: stoppedCount }),
+      ...(open('/whm/services') ? { href: '/whm/services' } : {}),
+    })
+  }
+  const drift = props.driftCount ?? undefined
+  if (integer(drift) && drift > 0) {
+    alerts.push({
+      label: t(msgctxt('theme:v2', '{count, plural, one {# config drift item} other {# config drift items}}'), { count: drift }),
+      ...(open('/whm/services/health') ? { href: '/whm/services/health' } : {}),
+    })
+  }
+  if (props.nearLimits && props.nearLimits.length > 0) {
+    const nearLimitAccounts = new Set(props.nearLimits.map(item => item.name).filter(Boolean)).size
+    alerts.push({
+      label: t(msgctxt('theme:v2', '{count, plural, one {# account near limit} other {# accounts near limit}}'), { count: nearLimitAccounts || props.nearLimits.length }),
+      ...(open('/whm/accounts') ? { href: '/whm/accounts' } : {}),
+    })
+  }
+  const failedAuditCount = (props.auditEntries ?? []).filter(entry => entry.outcome === 'failed').length
+  if (failedAuditCount > 0) {
+    alerts.push({
+      label: t(msgctxt('theme:v2', '{count, plural, one {# failed audit event} other {# failed audit events}}'), { count: failedAuditCount }),
+      ...(open('/whm/audit') ? { href: '/whm/audit' } : {}),
+    })
+  }
+  if (alerts.length === 0) return ''
+  return `<section class="v2-whm-attention-strip" data-whm-attention-strip aria-label="${escapeHtml(t('Needs attention'))}">${alerts.map(item => item.href ? `<a class="v2-whm-attention-strip__item" href="${escapeHtml(item.href)}"><span>${escapeHtml(item.label)}</span></a>` : `<span class="v2-whm-attention-strip__item">${escapeHtml(item.label)}</span>`).join('')}</section>`
+}
+
 /** Body renderer; the surface owner supplies the v2 shell and core document slots once. */
 export function renderV2WhmOverview(t: Translate, props: WhmSurfaceProps): string {
   const principal = props.visibility?.principal ?? props.principal
   if (!principal || principal.kind === 'user' || props.capabilityUnavailable) return notice(t, { tone: 'warn', lead: t('Unavailable'), text: t(msgctxt('theme:v2', 'The server overview is unavailable for this caller.')) })
   const open = (route: string): boolean => canOpenRegisteredRoute(route, props.visibility)
   const actions = `${open('/whm/audit') ? `<a class="v2-btn" href="/whm/audit">${escapeHtml(t('Audit log'))}</a>` : ''}${open('/whm/accounts/new') ? `<a class="v2-btn v2-btn--primary" href="/whm/accounts/new">${escapeHtml(t('Create account'))}</a>` : ''}`
+  const attention = attentionStrip(t, props, open)
   const upgrade = principal.kind === 'root' && props.availableVersion && props.version && props.availableVersion !== props.version
     ? notice(t, { tone: 'info', lead: t(msgctxt('theme:v2', 'Upgrade {version} is available.'), { version: props.availableVersion }),
       text: t(msgctxt('theme:v2', 'This server runs {version}.'), { version: props.version }),
       ...(open('/whm/server/upgrade') ? { action: { label: t('Review the upgrade'), href: '/whm/server/upgrade' } } : {}) }) : ''
   const certStrip = principal.kind === 'root' ? certificateRenewalStrip(t, props, open('/whm/tls')) : ''
   const jobs = card({ title: t(msgctxt('theme:v2', 'Background jobs')), titleId: 'v2-whm-background-jobs',
-    bodyHtml: `<div class="v2-whm-overview__unread" role="status">${emptyState({ icon: 'clock', title: t('Not read'), text: t(msgctxt('theme:v2', 'Background jobs have not been read.')),
+    bodyHtml: `<div class="v2-whm-overview__unread" data-ds-live-read="auto" role="status">${emptyState({ icon: 'clock', title: t('Loading...'), text: t(msgctxt('theme:v2', 'Background jobs have not been read.')),
       ...(open('/whm/jobs') ? { actionHtml: `<a class="v2-btn" href="/whm/jobs">${escapeHtml(t(msgctxt('theme:v2', 'View jobs')))}</a>` } : {}) })}</div>`,
   })
   const audit = open('/whm/audit') ? auditEvents(t, props) : ''
-  return `<div class="v2-layout v2-whm-overview" data-whm-overview>${pageHeader(t, { breadcrumb: [{ label: t('Home') }, { label: t('Dashboard') }], route: '/whm', title: t('Server dashboard'), description: t(msgctxt('theme:v2', 'The reconciler, accounts, resources and services.')), actionsHtml: actions })}${upgrade}${certStrip}${resources(t, props)}<div class="v2-whm-overview__primary">${history(t, props)}${reconciler(t, props)}</div><div class="v2-whm-overview__secondary">${open('/whm/services') ? services(t, props) : ''}<div class="v2-stack">${open('/whm/accounts') ? accountsCard(t, props) : ''}${jobs}</div></div>${renderV2WhmHome(t)}${hostFacts(t, props)}${audit}</div>`
+  return `<div class="v2-layout v2-whm-overview" data-whm-overview>${pageHeader(t, { breadcrumb: [{ label: t('Home') }, { label: t('Server dashboard') }], route: '/whm', title: t('Server dashboard'), description: t(msgctxt('theme:v2', 'The reconciler, accounts, resources and services.')), actionsHtml: actions })}${attention}${upgrade}${certStrip}${resources(t, props)}<div class="v2-whm-overview__primary">${history(t, props)}${reconciler(t, props)}</div><div class="v2-whm-overview__secondary">${open('/whm/services') ? services(t, props) : ''}<div class="v2-stack">${open('/whm/accounts') ? accountsCard(t, props) : ''}${jobs}</div></div>${renderV2WhmHome(t)}${hostFacts(t, props)}${audit}</div>`
 }
 
 export const WHM_OVERVIEW_CSS = `.v2-whm-overview{gap:var(--space-3)}
@@ -265,10 +300,16 @@ export const WHM_OVERVIEW_CSS = `.v2-whm-overview{gap:var(--space-3)}
 .v2-whm-overview__services>li:last-child{border-block-end:0}
 .v2-whm-overview__service{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px var(--space-2)}
 .v2-whm-overview__service>span:first-child{display:flex;flex-direction:column;gap:2px;font-size:14px;min-inline-size:0;overflow-wrap:anywhere}
+.v2-whm-attention-strip{display:flex;flex-wrap:wrap;gap:var(--space-1)}
+.v2-whm-attention-strip__item{display:inline-flex;align-items:center;gap:6px;min-block-size:36px;padding:4px 12px;border:1px solid var(--warn-line);border-radius:var(--radius-pill);background:var(--warn-soft);color:var(--warn);font-size:13px;font-weight:600;text-decoration:none}
+.v2-whm-attention-strip__item:is(a):hover{border-color:var(--warn);background:var(--surface)}
 .v2-whm-inbox__row{padding-inline:0!important}
+.v2-whm-inbox__row[data-read=false]{background:var(--accent-soft)}
 .v2-whm-inbox__row[data-read=true]{color:var(--muted)}
 .v2-whm-inbox__row[hidden]{display:none}
 .v2-whm-inbox__main{display:flex;flex-direction:column;gap:3px;flex:1 1 220px;min-inline-size:0}
+.v2-whm-inbox__head{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.v2-whm-inbox__count{display:inline-flex;align-items:center;padding:1px 7px;border-radius:var(--radius-pill);background:var(--accent-soft);color:var(--accent);font-size:12px;font-weight:700;font-variant-numeric:tabular-nums}
 .v2-whm-inbox__meta{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:12px;font-variant-numeric:tabular-nums}
 .v2-whm-inbox__meta bdi{white-space:nowrap}
 .v2-whm-inbox__filter{display:inline-flex;align-items:center;gap:6px;min-block-size:var(--target);font-size:13px;font-weight:500;color:var(--text-2);cursor:pointer}

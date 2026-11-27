@@ -71,7 +71,7 @@ describe('v2 account resources', () => {
     const html = renderV2PanelResources({})
     expect(html).toContain('v2-resource-limits')
     expect(html).toContain('v2-resource-processes-title')
-    expect(html).toContain('Not read')
+    expect(html).toContain('Loading...')
     expect(html).not.toContain('xpanel-')
   })
 

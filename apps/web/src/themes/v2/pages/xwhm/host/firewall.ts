@@ -19,7 +19,7 @@ export function renderV2WhmFirewall(props: HostPageProps): string {
   const { t, readable } = hostContext(props, route)
   const qualified = readable && props.catalog?.some(tool => tool.id === 'aapanel-port-rules' && tool.status === 'verified' && tool.delivery.status === 'verified') === true
   const rules = qualified ? props.firewallRules : undefined
-  const unread = t(msgid('Not read'))
+  const unread = t(msgid('Loading...'))
   const action = (rule: FirewallRule): string => statusPill({ label: t(rule.action === 'accept' ? msgid('Allow') : rule.action === 'reject' ? msgid('Reject') : msgid('Drop')), tone: rule.action === 'accept' ? 'ok' : 'bad' })
   const field = (name: string, label: string, type: 'text' | 'textarea' | 'file' = 'text', disabled = true): string => {
     const id = `v2-firewall-${name}`

@@ -5,7 +5,7 @@ import { domainButton, domainCard, domainContext, domainFacts, domainHeader, dom
 
 export function renderV2StagingPage(props: PanelSurfaceProps, authority: DomainPageAuthority = NO_DOMAIN_AUTHORITY): string {
   const { t, account, canManage } = domainContext(props, authority)
-  const unread = t(msgid('Not read'))
+  const unread = t(msgid('Loading...'))
   const list = domainCard('staging-list', t(msgid('Staging copies')), `<p>${escapeHtml(t(msgid('A staging copy holds the files of one site in a private folder of your home directory. Change it, review the differences, then promote them to the live site.')))}</p>${domainTable(t(msgid('Sites and their staging copies')), [`${t(msgid('Domain'))} · ${t(msgid('Staging folder'))}`, t(msgid('State')), t(msgid('Files')), t(msgid('Created (UTC)')), t(msgid('Last promoted (UTC)')), t(msgid('Actions'))], `<tr><td colspan="6">${escapeHtml(unread)}</td></tr>`, { 'data-staging-rows': true })}`,
     domainButton(t(msgid('Refresh')), { 'data-staging-refresh': true }, !canManage))
   const review = domainCard('staging-review', t(msgid('Review changes')), `${domainFacts([

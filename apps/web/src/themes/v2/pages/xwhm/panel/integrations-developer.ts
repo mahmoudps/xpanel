@@ -14,7 +14,7 @@ function explorer(h: AdminView, surface: 'administrator' | 'integrations'): stri
     + h.status(h.canRead ? msgid('Supported operations have not been read.') : msgid('This session has not qualified this workspace. Its controls remain unavailable.'), { 'data-dev-status': true }))
   const response = h.section(`v2-${prefix}-response`, msgid('Response'), `<p>${h.text(msgid('Only reviewed response fields are shown. Credential values, session information and internal identifiers are omitted.'))}</p>` + h.facts([fact('status', msgid('HTTP status')), fact('observed', msgid('Read at (UTC)'))])
     + `<dl class="v2-admin-fields" data-dev-result-fields><div class="v2-admin-field"><dt>${h.text(msgid('Result'))}</dt><dd>${h.text(msgid('No read request has run.'))}</dd></div></dl><div data-dev-token-table hidden>${h.table(`v2-${prefix}-token-table`, msgid('Your API token metadata'), [msgid('Name'), msgid('Scopes'), msgid('Expires (UTC)'), msgid('State')], { 'data-dev-token-rows': true }, '')}</div>`
-    + h.actions(h.button(msgid('Copy reviewed response'), { 'data-dev-copy': true })) + h.status(msgid('Not read'), { 'data-dev-copy-status': true }, true))
+    + h.actions(h.button(msgid('Copy reviewed response'), { 'data-dev-copy': true })) + h.status(msgid('Loading...'), { 'data-dev-copy-status': true }, true))
   const authority = h.section(`v2-${prefix}-authority`, msgid('Current authority'), `<p>${h.text(msgid('The account and principal come from this session. Every selected read repeats its normal API authentication and permissions. API tokens cannot operate this console.'))}</p>` + (surface === 'integrations' ? `<a class="v2-btn" href="/whm/panel/api-tokens">${h.text(msgid('Manage your API tokens'))}</a>` : ''))
   const extra = surface === 'integrations'
     ? h.section('v2-integrations-related', msgid('Additional capabilities'), `<ul class="v2-admin-list">${[['/whm/panel/whmcs', 'WHMCS'], ['/whm/panel/notifications', msgid('Notification delivery')], ['/whm/backups/destinations', msgctxt('theme:v2', 'Backup storage')], ['/whm/dns/providers', msgctxt('theme:v2', 'DNS providers')]].map(([href, label]) => `<li><a href="${href}">${h.text(label!)}</a></li>`).join('')}</ul><p>${h.text(msgctxt('theme:v2', 'Each integration uses its own authorized workspace and qualification. This explorer does not establish its connection or delivery state.'))}</p>`)
@@ -46,7 +46,7 @@ function hooks(h: AdminView): string {
     + h.fields(h.field('v2-developer-hooks-select', msgid('Hook'), h.select('v2-developer-hooks-select', [['', msgid('Select a hook')]], { hooks: { 'data-hooks-select': true } })))
     + h.actions(action(msgid('Enable'), 'enable') + action(msgid('Disable'), 'disable') + action(msgid('Move up'), 'up') + action(msgid('Move down'), 'down') + action(msgid('Delete hook'), 'delete') + action(msgid('Refresh'), 'refresh'))
     + `<p>${h.text(msgid('Register a hook with xwhmapi hooks register: the agent pins the file digest, and a changed file does not run until it is registered again.'))}</p>`
-    + h.status(h.canManage ? msgid('Nothing has been read yet.') : msgid('This page requires an authorized administrator. Nothing was read or changed.'), { 'data-hooks-status': true }) + h.status(msgid('Not read'), { 'data-hooks-result': true }, true),
+    + h.status(h.canManage ? msgid('Nothing has been read yet.') : msgid('This page requires an authorized administrator. Nothing was read or changed.'), { 'data-hooks-status': true }) + h.status(msgid('Loading...'), { 'data-hooks-result': true }, true),
     { 'data-hooks-workspace': true, 'data-hooks-can-manage': String(h.canManage) })
 }
 
@@ -73,7 +73,7 @@ function plugins(h: AdminView): string {
       + h.field('v2-plugin-generator-icon', msgid('Icon'), h.input('v2-plugin-generator-icon', { type: 'file', accept: 'image/png,image/svg+xml', hooks: { 'data-plugin-generator-icon': true } }), msgid('A PNG or plain SVG of exactly 48 by 48 pixels, up to 16 KiB.')))
     + h.actions(action(msgid('Add item'), 'add') + action(msgid('Clear items'), 'clear') + action(msgid('Generate package'), 'generate', true))
     + h.table('v2-developer-plugin-items-table', msgid('Package items'), [msgid('Item id'), msgid('Item name'), msgid('Group'), msgid('Priority'), msgid('Address')], { 'data-plugin-generator-rows': true }, undefined, msgid('No items have been added.')) + `</div>`
-    + h.status(h.canManage ? msgid('Nothing has been read yet.') : msgid('This page requires an authorized administrator. Nothing was read or changed.'), { 'data-plugin-packages-status': true }) + h.status(msgid('Not read'), { 'data-plugin-packages-result': true }, true),
+    + h.status(h.canManage ? msgid('Nothing has been read yet.') : msgid('This page requires an authorized administrator. Nothing was read or changed.'), { 'data-plugin-packages-status': true }) + h.status(msgid('Loading...'), { 'data-plugin-packages-result': true }, true),
     { 'data-plugin-packages-workspace': true, 'data-plugin-packages-can-manage': String(h.canManage) })
 }
 

@@ -44,7 +44,8 @@ describe('design-system single-source tokens', () => {
 
     expect(SIDEBAR_NAV_COLORS.workspaceLight.nav).toBe('#FFFFFF')
     expect(SIDEBAR_NAV_COLORS.xwhmLight.nav).toBe('#0A1830')
-    expect(DESIGN_TOKENS_CSS).toContain('[data-ui-theme="v2"][data-surface="xpanel"]:not([data-theme="dark"])')
+    expect(DESIGN_TOKENS_CSS).toContain('[data-ui-theme="v2"][data-surface="xpanel"]:not([data-theme="dark"]) .v2-side')
+    expect(DESIGN_TOKENS_CSS).toContain('.v2-shell[data-surface="xpanel"]>.v2-side')
     expect(DESIGN_TOKENS_CSS).toContain('.ds-shell[data-surface="xpanel"]>.ds-sidebar')
     expect(DESIGN_TOKENS_CSS).toContain('--nav:#FFFFFF;')
     expect(DESIGN_TOKENS_CSS).toContain('--radius-control:8px;--radius-chip:8px;--radius-pill:999px')
