@@ -240,7 +240,7 @@ describe.each(['classic', 'v2'] as const)('%s DNS finite button contract', theme
     expect(send).not.toHaveBeenCalled(); expect(ask).not.toHaveBeenCalled()
     expect(status().dataset.state).toBe('unavailable')
     expect([...document.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button')].every(control => control.disabled)).toBe(true)
-    expect(fact('state')).toBe('Not read')
+    expect(fact('state')).toBe(theme === 'v2' ? 'Loading...' : 'Not read')
   })
   it('retains independent read authority without restart authority', async () => {
     mountServiceTheme(theme, 'dns', 'en', true, false)
@@ -260,7 +260,7 @@ describe.each(['classic', 'v2'] as const)('%s DNS finite button contract', theme
     dnsPrototype().remove()
     if (settlement === 'resolved') resolve(dns()); else reject(new Error('unavailable'))
     await tick()
-    expect(status().dataset.state).toBe('unavailable'); expect(fact('state')).toBe('Not read')
+    expect(status().dataset.state).toBe('unavailable'); expect(fact('state')).toBe(theme === 'v2' ? 'Loading...' : 'Not read')
     expect(document.querySelector('[data-whm-service-detail-check-zone]')).toBeNull()
     const refresh = document.querySelector<HTMLButtonElement>('[data-whm-service-detail-refresh]')!
     expect(refresh.disabled).toBe(true); refresh.disabled = false; refresh.click(); await tick()

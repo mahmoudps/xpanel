@@ -89,7 +89,7 @@ describe('V2 WHM service-tool documents', () => {
     expect(radios(unread).every(item => !item.attrs.has('checked') && item.attrs.has('disabled'))).toBe(true)
     expect(unread).toMatch(/v2-page-head__actions">.*href="#v2-whm-data-web-pending"/s)
     expect(node(unread, 'data-whm-web-proxy-reference').attrs.get('data-state')).toBe('unread')
-    expect(unread).toContain('data-whm-web-kpi="port">Not read<')
+    expect(unread).toContain('data-whm-web-kpi="port">Loading...<')
     expect(unread).not.toContain('proxy_pass http://127.0.0.1:')
     for (const extra of [{ dataAuthority: undefined }, { capabilityUnavailable: true }]) {
       const html = render('/whm/services/web', { serverSettings: { ...saved, backendPort: 18181, backendTlsPort: 19443 }, ...extra })

@@ -7,6 +7,8 @@ import { icon, type IconName } from '../icons.ts'
 import { statusPill } from '../components/status-pill.ts'
 import { stepper } from '../components/stepper.ts'
 
+import type { ActionFieldSpec, ActionMode } from '../../../features/actions/catalog.ts'
+
 export type V2Surface = 'xpanel' | 'xwhm' | 'xmail'
 
 /** One quick bar result, as core's command palette entries describe it. */
@@ -21,6 +23,16 @@ export interface PaletteEntry {
   /** Normalized search text (ASCII digits). */
   search: string
   persistable: boolean
+  commandAction?: {
+    readonly id: string
+    readonly mode: ActionMode
+    readonly method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+    readonly endpoint?: string
+    readonly confirm?: boolean
+    readonly destructive?: boolean
+    readonly undoEndpoint?: string
+    readonly fields?: readonly ActionFieldSpec[]
+  }
 }
 
 export interface CommandPaletteProps {
@@ -48,6 +60,10 @@ export function commandPalette(t: Translate, props: CommandPaletteProps): string
     }).join('') : ''
     if (!matches.length && !commandItems) return ''
     const items = matches.map(item => {
+      if (item.commandAction && item.commandAction.mode !== 'navigate') {
+        const spec = escapeHtml(JSON.stringify(item.commandAction))
+        return `<li data-cmdk-row role="presentation" class="v2-cmdk__row"><button type="button" id="xp-cmdk-option-${index++}" class="v2-cmdk__item" data-cmdk-item="${escapeHtml(item.route)}" data-cmdk-action="${escapeHtml(item.commandAction.id)}" data-cmdk-mode="${escapeHtml(item.commandAction.mode)}" data-cmdk-spec="${spec}" data-cmdk-kind="${item.kind}" data-cmdk-key="${escapeHtml(item.key)}" data-cmdk-persistable="false" data-cmdk-search-text="${escapeHtml(item.search)}" role="option" aria-selected="false" tabindex="-1"><span class="v2-cmdk__tile" aria-hidden="true">${icon(KIND_ICONS[kind], 16)}</span><span class="v2-cmdk__copy"><strong>${escapeHtml(item.label)}</strong><span>${escapeHtml(item.section)}</span></span><code dir="ltr"><bdi dir="ltr">${escapeHtml(item.hint)}</bdi></code></button></li>`
+      }
       const favorite = item.persistable
         ? `<button type="button" class="v2-cmdk__fav" data-cmdk-favorite="${escapeHtml(item.route)}" aria-pressed="false" aria-label="${escapeHtml(`${t('Favorite page')}: ${item.label}`)}">${icon('star', 16)}</button>`
         : ''

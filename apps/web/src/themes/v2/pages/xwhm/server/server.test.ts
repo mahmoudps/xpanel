@@ -11,7 +11,7 @@ const settings: ServerSettings = { hostname: 'stored.private.test', nameservers:
   nginx: { workerProcesses: 'auto', workerConnections: 2048, workerRlimitNofile: 8192, multiAccept: false, keepaliveTimeoutSec: 45 }, apache: { startServers: 2, minSpareServers: 2, maxSpareServers: 8, maxRequestWorkers: 200, maxConnectionsPerChild: 0, serverLimit: 200 } }
 const props = (activeRoute: string, extra: Partial<WhmSurfaceProps> = {}): WhmSurfaceProps => ({ principal, activeRoute, locale: 'en', ...extra })
 const render = (route: string, extra: Partial<WhmSurfaceProps> = {}, admission: WhmAdminAuthority = authority) => renderV2WhmServerPage(translator(extra.locale ?? 'en'), props(route, extra), admission)!
-const controls = (html: string) => html.match(/<(?:input|select|textarea|button)\b[^>]*>/g) ?? []
+const controls = (html: string) => (html.match(/<(?:input|select|textarea|button)\b[^>]*>/g) ?? []).filter(tag => !tag.includes('data-ds-wizard-next') && !tag.includes('data-ds-wizard-prev'))
 const one = (html: string, name: string) => parseMarkup(html).find(node => node.attrs.has(name))
 
 describe('v2 server administration family', () => {

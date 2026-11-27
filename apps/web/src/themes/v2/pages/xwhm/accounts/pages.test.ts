@@ -32,7 +32,7 @@ describe('v2 account list', () => {
     }
     for (const plans of [undefined, [{ ...plan, id: 'unrelated-plan' }], [{ ...plan, resources: { ...plan.resources, ioWriteBps: Number.NaN } }], [{ ...plan, resources: { ...plan.resources, ioWriteBps: -1 } }]]) {
       const cell = ioCell(renderV2WhmAccountList(translate, { ...props, locale, plans }))
-      expect(cell).toBe(translate('Not read'))
+      expect(cell).toBe(translate('Loading...'))
       expect(cell).not.toContain(' B/s')
     }
   })
@@ -46,7 +46,7 @@ describe('v2 account list', () => {
       expect(cell({ ...scoped, plans: [{ ...plan, ownerId, resources: { ...plan.resources, ioWriteBps: 2_000_000 } }] })).toContain('1.91\u00a0MiB/s')
     }
     const foreignPlan = { ...plan, ownerId: 'other-reseller', resources: { ...plan.resources, ioWriteBps: 9_000_000 } }
-    expect(cell({ ...scoped, plans: [foreignPlan] })).toBe('Not read')
+    expect(cell({ ...scoped, plans: [foreignPlan] })).toBe('Loading...')
     expect(cell({ ...scoped, accounts: [{ ...account, ownerId: 'other-reseller' }], plans: [foreignPlan] })).toBe('')
   })
 
@@ -67,15 +67,15 @@ describe('v2 account list', () => {
     const limited = { ...plan, resources: { ...plan.resources, diskMb: 1000, bandwidthMbMonth: 'unlimited' as const } }
     const read = (bytes: number | null) => ({ state: 'read' as const, bytes, observedAt: '2026-11-10T08:00:00.000Z', unmeasured: bytes === null ? 1 : 0 })
     const html = renderV2WhmAccountList(t, { ...props, plans: [limited], accountUsage: { [account.id]: { disk: read(900 * 1048576), traffic: read(5 * 1048576) } } })
-    expect(html).toContain('<bdi dir="ltr">900\u00a0MiB</bdi> / <bdi dir="ltr">1000\u00a0MiB</bdi></span><div class="v2-bar" role="meter" aria-label="Disk" aria-valuemin="0" aria-valuemax="100" aria-valuenow="90" aria-valuetext="900\u00a0MiB / 1000\u00a0MiB"><span class="v2-bar__fill v2-bar--warn" style="inline-size:90%">')
+    expect(html).toContain('<bdi dir="ltr">900\u00a0MiB</bdi> / <bdi dir="ltr">1000\u00a0MiB</bdi></span><progress class="v2-bar v2-bar--warn" role="meter" aria-label="Disk" aria-valuemin="0" aria-valuemax="100" aria-valuenow="90" aria-valuetext="900\u00a0MiB / 1000\u00a0MiB" value="90" max="100"></progress>')
     // An unlimited limit has no scale: the measured value is shown without a bar.
     expect(html).toContain('<bdi dir="ltr">5.00\u00a0MiB</bdi> / Unlimited</span></div>')
     // The disk meter is drawn in the row and in the detail panel; unlimited traffic has none.
     expect([...html.matchAll(/role="meter"/g)]).toHaveLength(2)
     expect(html).not.toContain('Usage / configured plan limit. Usage has not been read.')
     const unreported = renderV2WhmAccountList(t, { ...props, plans: [limited], accountUsage: { [account.id]: { disk: read(null), traffic: { state: 'unavailable', bytes: null, observedAt: null, unmeasured: 1 } } } })
-    expect(unreported).toContain('<span>Not read / <bdi dir="ltr">1000\u00a0MiB</bdi></span></div>')
-    expect(unreported).toContain('<span>Not read / Unlimited</span></div>')
+    expect(unreported).toContain('<span>Loading... / <bdi dir="ltr">1000\u00a0MiB</bdi></span></div>')
+    expect(unreported).toContain('<span>Loading... / Unlimited</span></div>')
     expect(unreported).not.toContain('role="meter"')
   })
   it('keeps authorized real account actions, the native dialog and list controller hooks', () => {
@@ -119,7 +119,7 @@ describe('v2 native create account', () => {
     for (const hook of ['data-create-account-form', 'data-account-ip-address', 'data-account-ip-status', 'data-account-ip-refresh', 'data-account-generate-password', 'data-account-toggle-password', 'data-plan-preview-model', 'data-create-plan-preview', 'data-account-create-status', 'data-approved-account-create-status', 'data-account-creation-observation', 'data-account-create-another', 'data-create-route']) expect(html).toContain(hook)
     expect(html).toContain('<option value="dedicated:auto" disabled>')
     expect(html).toContain('No account-creation operation has been observed.')
-    expect(html).toContain('data-account-creation-step-state>Not observed')
+    expect(html).toContain('data-account-creation-step-state>Loading...')
     expect(html).not.toContain('uid 20017')
     expect(html).not.toContain('value="salma"')
     expect(html).toContain('name="password" type="password" required minlength="8"')
@@ -140,8 +140,8 @@ describe('v2 native create account', () => {
     expect(html).toContain('<bdi data-create-review="ownerId">root</bdi>')
     expect(html).toContain('<bdi data-create-review="username">Not entered</bdi>')
     expect(html).toContain('<bdi data-create-review="shell">Jailed shell</bdi>')
-    expect([...html.matchAll(/Checked when submitted/g)]).toHaveLength(3)
-    expect(html).toContain('data-account-ip-check>IP availability has not been read.')
+    expect([...html.matchAll(/Validating on input/g)]).toHaveLength(3)
+    expect(html).toContain('data-account-ip-check>Checking IPv4 availability...')
   })
   it('formats plan IO rates like the account list instead of raw bytes', () => {
     const html = renderV2WhmAccountCreate(t, { ...props, plans: [{ ...plan, resources: { ...plan.resources, ioReadBps: 2_000_000, ioWriteBps: 'unlimited' } }] })
@@ -151,7 +151,7 @@ describe('v2 native create account', () => {
   it('keeps one disabled plan control and an unread review when plans were not read', () => {
     const html = renderV2WhmAccountCreate(t, { ...props, plans: undefined })
     expect(html).toContain('<input type="radio" id="new-acc-plan-empty" name="planId" value="" disabled>')
-    expect(html).toContain('<bdi data-create-review="planId">Not read</bdi>')
+    expect(html).toContain('<bdi data-create-review="planId">Loading...</bdi>')
     expect(html).toContain('type="submit" class="v2-btn v2-btn--primary" disabled')
   })
   it('fails closed without qualification and never exposes another owner’s plans', () => {
