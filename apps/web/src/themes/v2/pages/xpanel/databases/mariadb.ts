@@ -13,7 +13,7 @@ import { renderV2DbWizard } from './wizard.ts'
 /** Saved account metadata is distinct from native service, size and connection observations. */
 export function renderV2MariaDbPage(props: DatabasePageProps, authority: DatabasePageAuthority = NO_DATABASE_AUTHORITY): string {
   const { account, canRead, canManage, canReadDatabaseFacts, canReadUserFacts, direction, locale, t } = databaseContext(props, authority)
-  const unread = t('Not read')
+  const unread = t('Loading...')
   const databases = canReadDatabaseFacts ? props.databases?.filter(database => database.accountId === account!.id && database.engine === 'mariadb') : undefined
   const ids = new Set(databases?.map(database => database.id))
   const users = canReadUserFacts && databases !== undefined ? props.databaseUsers?.filter(user => (user.accountId === undefined || user.accountId === account!.id) && user.name.startsWith(account!.username + '_')

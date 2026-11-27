@@ -8,7 +8,7 @@ import {
 
 export function renderV2DatabaseRemotePage(props: DatabasePageProps, authority: DatabasePageAuthority = NO_DATABASE_AUTHORITY): string {
   const { account, canRead, canManage, direction, locale, t } = databaseContext(props, authority)
-  const unread = t('Not read')
+  const unread = t('Loading...')
   // The existing remote controller has one admission flag for both reads and writes.
   const connected = canRead && canManage
   const note = connected ? '' : notice(t, { tone: 'warn', text: t(msgctxt('theme:v2', 'Remote-host policy controls are unavailable for this session. No policy has been read or changed.')) })

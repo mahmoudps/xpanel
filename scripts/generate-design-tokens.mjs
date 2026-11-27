@@ -126,8 +126,10 @@ export function buildTokensCss(tokens) {
 
   const workspaceLightNavEntries = Object.entries(NAV_VAR_MAP).map(([k, cssVar]) => [cssVar, tokens.colors.nav.workspaceLight[k]])
   const workspaceLightSelectors = [
-    `${r}[data-surface="xpanel"]:not([data-theme="dark"])`,
-    `${r}[data-surface="xmail"]:not([data-theme="dark"])`,
+    `${r}[data-surface="xpanel"]:not([data-theme="dark"]) .v2-side`,
+    `${r}[data-surface="xmail"]:not([data-theme="dark"]) .v2-side`,
+    `${r}:not([data-theme="dark"]) .v2-shell[data-surface="xpanel"]>.v2-side`,
+    `${r}:not([data-theme="dark"]) .v2-shell[data-surface="xmail"]>.v2-side`,
     `${r}:not([data-theme="dark"]) .ds-shell[data-surface="xpanel"]>.ds-sidebar`,
     `${r}:not([data-theme="dark"]) .ds-shell[data-surface="xmail"]>.ds-sidebar`,
   ].join(',')

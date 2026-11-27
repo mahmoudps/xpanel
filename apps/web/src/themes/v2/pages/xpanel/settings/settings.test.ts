@@ -50,7 +50,7 @@ describe('v2 remaining account workspaces', () => {
       expect(controls).toHaveLength(0)
     } else {
       expect(outline.some(node => node.attrs.get('class')?.split(' ').includes('v2-card'))).toBe(true)
-      expect(html).toMatch(/Not read|not been read|unavailable|Unavailable/)
+      expect(html).toMatch(/Loading...|not been read|unavailable|Unavailable/)
     }
   })
 
@@ -124,8 +124,8 @@ describe('v2 remaining account workspaces', () => {
     }
     // The shell card reads the saved account; the header chips and the checks never invent a count.
     expect(html).toContain('data-v2-account-shell><bdi dir="ltr" class="v2-mono">jailed</bdi>')
-    expect(html).toContain('SSH keys: Not read')
-    expect(render('/security/account', { canRead: false, canManage: false })).toContain('data-v2-account-shell>Not read<')
+    expect(html).toContain('SSH keys: Loading...')
+    expect(render('/security/account', { canRead: false, canManage: false })).toContain('data-v2-account-shell>Loading...<')
   })
 
   it('lays the service user form out full width under the list and keeps its controls closed until read', () => {
@@ -160,7 +160,7 @@ describe('v2 remaining account workspaces', () => {
     const html = render('/security/ssl/files', allowed)
     expect(html).not.toContain('v2-panel-settings__split')
     expect(html.indexOf('id="v2-certificate-file-limits"')).toBeLessThan(html.indexOf('id="v2-certificate-installed"'))
-    expect(html).toContain(`<table id="v2-certificate-installed-table" style="--v2-pl2:'Source';--v2-pl3:'Expires';--v2-pl4:'Private key'">`)
+    expect(html).toContain(`<table id="v2-certificate-installed-table" data-phone-labels>`)
   })
 
   it('shows certificate names while hiding stored keys and foreign certificate metadata', () => {

@@ -5,7 +5,7 @@ import { actions, button, emailContext, esc, facts, field, fields, header, missi
 export function renderV2PanelQuarantine(props: PanelSurfaceProps, authority?: PanelEmailAuthority): string {
   const { locale, t, account, canManage, mailboxes } = emailContext(props, authority)
   const route = '/email/spam-quarantine', title = t(msgid('Spam quarantine'))
-  const value = (label: string, hook: string): { label: string; valueHtml: string } => ({ label, valueHtml: `<span data-quarantine-${hook}>${esc(t(msgid('Not read')))}</span>` })
+  const value = (label: string, hook: string): { label: string; valueHtml: string } => ({ label, valueHtml: `<span data-quarantine-${hook}>${esc(t(msgid('Loading...')))}</span>` })
   const held = section('v2-quarantine-held', t(msgid('Held messages')),
     `<p>${esc(t(msgid('Review messages held by the configured mail filter. Release is confirmed only after a not-spam correction and Inbox readback.')))}</p>`
     + fields(field('quarantine-mailbox', t(msgid('Mailbox')), select('quarantine-mailbox', (mailboxes ?? []).map(mailbox => [mailbox.login, mailbox.login] as const), { 'data-quarantine-mailbox': true }, !canManage, ' dir="ltr"'))

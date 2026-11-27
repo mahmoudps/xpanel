@@ -8,7 +8,7 @@ import { deniedOperationAuthority, operationButton, operationCard, operationCont
 export function renderV2AccountGitPage(props: PanelSurfaceProps, authority: PanelOperationAuthority = deniedOperationAuthority): string {
   const { t, canManage, account } = operationContext(props, authority, '/files/git')
   props = { ...props, account }
-  const unread = t(msgid('Not read'))
+  const unread = t(msgid('Loading...'))
   const repositories = operationCard('v2-git-repositories', t(msgid('Your repositories')),
     `${operationField('v2-git-repository', t(msgid('Repository')), operationSelect(`<select id="v2-git-repository" dir="ltr" data-git-repository disabled><option value="">${escapeHtml(t(msgid('Read the list first')))}</option></select>`))}
 <div class="v2-panel-operation-actions">${operationButton(t(msgid('Read repositories')), { 'data-git-refresh': true }, !canManage)}${operationButton(t(msgid('Read repository')), { 'data-git-inspect': true })}${operationButton(t(msgid('Remove from list')), { 'data-git-remove': true })}</div><p data-git-status role="status">${escapeHtml(t(msgid('Repositories have not been read.')))}</p>`,
