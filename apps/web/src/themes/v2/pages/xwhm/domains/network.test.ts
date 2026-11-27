@@ -121,7 +121,7 @@ describe('independent v2 WHM domains, DNS and certificate pages', () => {
     expect(live(html).find(node => node.attrs.get('data-whm-dns-tools-run') === 'apply')?.attrs.has('disabled')).toBe(true)
   })
 
-  it.each(['en', 'ar'] as const)('keeps unavailable presentation and capability overrides authoritative in %s', { tags: ['unit'] }, locale => {
+  it.each(['en', 'ar'] as const)('keeps unavailable presentation and capability overrides authoritative in %s', { tags: ['feature'] }, locale => {
     for (const route of ['/whm/domains', '/whm/dns', '/whm/dns/more', '/whm/dns/providers', '/whm/dns/cluster', '/whm/ssl', '/whm/ssl/install']) {
       for (const html of [
         renderV2WhmNetworkPage({ activeRoute: route, locale }, { ...authority, presentation: 'read-only' }),

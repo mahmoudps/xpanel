@@ -1,6 +1,7 @@
 import { backupFilesClientTemplates } from './backup-files-client-templates.ts'
 import type { WhmSurfaceProps } from '../../../../contract.ts'
 import { actions, button, context, esc, facts, field, page, status, table, toolCard, type WhmAccountToolAuthority } from '../account-tools/common.ts'
+import { subtabs } from '../../../components/page-header.ts'
 import { phoneTable, recoveryRules, recoverySteps, restoreMoreTemplates } from './common.ts'
 import type { PhoneRow } from '../lifecycle/shared.ts'
 
@@ -32,8 +33,12 @@ export function renderV2WhmRestoreComponentsPage(props: WhmSurfaceProps, authori
   const rules = [msgid('The selected account and parts must be checked before applying a restore.'), msgid('Mail restores only message files into mailboxes that exist now. A message that is already present is never replaced.'), msgid('Each restored message is written as the account by the confined file writer, read back and compared with the archive.'), msgid('One run restores at most 500 messages within a 20 second budget; review again to restore the next messages.'), msgid('Account mail settings are rendered from saved configuration and are not restored from a backup.')]
   const aside = toolCard('restore-more-rules', t(msgid('What these restores do')), recoveryRules(t, rules))
   const initial = readable ? msgid('Accounts have not been read.') : msgid('Restoring backup components requires an authorized root administrator or a reseller with the list-accounts privilege for its own accounts. Nothing was read or changed.')
+  const restoreTabs = subtabs(t(msgid('Restore views')), [
+    { label: t(msgid('Restore accounts')), href: '/whm/backups/restore' },
+    { label: t(msgid('Mail & partial restore')), href: '/whm/backups/restore-more', active: true },
+  ])
   return page(props, '/whm/backups/restore-more', title, t(msgid('Restore mail from an account server backup into mailboxes that exist now, and see what each backup can and cannot restore.')),
-    `<div class="v2-recovery-tools v2-recovery__column" data-whm-restore-more-workspace data-restore-more-can-read="${readable}" data-restore-more-can-restore="${editable}">${restoreMoreTemplates(t)}${steps}${status(t(initial), { 'data-restore-more-status': true }, readable ? 'unread' : 'unavailable')}<div class="v2-recovery__grid">${source}<aside class="v2-recovery__column">${aside}</aside></div>${components}${review}${result}</div>`, { 'data-capability-state': readable ? 'authorized' : 'unavailable' })
+    `${restoreTabs}<div class="v2-recovery-tools v2-recovery__column" data-whm-restore-more-workspace data-restore-more-can-read="${readable}" data-restore-more-can-restore="${editable}">${restoreMoreTemplates(t)}${steps}${status(t(initial), { 'data-restore-more-status': true }, readable ? 'unread' : 'unavailable')}<div class="v2-recovery__grid">${source}<aside class="v2-recovery__column">${aside}</aside></div>${components}${review}${result}</div>`, { 'data-capability-state': readable ? 'authorized' : 'unavailable' })
 }
 
 export function renderV2WhmRestoreFilesPage(props: WhmSurfaceProps, authority: WhmAccountToolAuthority): string {
