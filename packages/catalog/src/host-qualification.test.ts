@@ -372,11 +372,11 @@ describe('host qualification', () => {
   })
 
   it('opens scoped workspaces only with their affected host evidence', () => {
-    expect(routesFor(allPassed)).toEqual(expect.arrayContaining(['/whm/services/more', '/whm/monitoring/benchmark', '/whm/monitoring/traffic']))
+    expect(routesFor(allPassed)).toEqual(expect.arrayContaining(['/whm/services', '/whm/dns', '/whm/monitoring/benchmark', '/whm/monitoring/traffic']))
     expect(routesFor(allPassed)).toEqual(expect.arrayContaining(['/whm/services/default-index', '/whm/software/composer']))
     expect(routesFor(withProbe('apache', 'failed'))).not.toContain('/whm/services/default-index')
     expect(routesFor(withProbe('files', 'failed'))).not.toContain('/whm/software/composer')
-    expect(routesFor(withProbe('host-jobs', 'failed'))).not.toContain('/whm/services/more')
+    expect(routesFor(withProbe('systemd', 'failed'))).not.toContain('/whm/services')
     expect(routesFor(withProbe('benchmark', 'failed'))).not.toContain('/whm/monitoring/benchmark')
     expect(routesFor(withProbe('network-counters', 'failed'))).not.toContain('/whm/monitoring/traffic')
     expect(routesFor(allPassed, owner)).toContain('/domains/dynamic-dns')
@@ -384,7 +384,7 @@ describe('host qualification', () => {
     for (const id of ['aapanel-supervisor', 'service-watchdog']) {
       expect(qualifyHostTools(acceptedTools, withProbe('systemd', 'failed')).find(tool => tool.id === id)?.status, id).not.toBe('verified')
     }
-    for (const id of ['restart-ssh', 'aapanel-boot-items', 'system-reboot']) {
+    for (const id of ['restart-ssh', 'aapanel-boot-items', 'system-reboot', 'service-manager']) {
       expect(qualifyHostTools(acceptedTools, withProbe('host-jobs', 'failed')).find(tool => tool.id === id)?.status, id).toBe('researched')
     }
   })

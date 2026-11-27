@@ -96,14 +96,30 @@ function bindWhmHome(): void {
     }
     if (!inbox) return
     const list = inbox.querySelector<HTMLElement>('[data-whm-inbox-list]'), all = inbox.querySelector<HTMLButtonElement>('[data-whm-inbox-read]')
-    list?.replaceChildren(...items.map(entry => {
-      const row = document.createElement('li'), main = document.createElement('span'), title = document.createElement('strong'), meta = document.createElement('span')
+    const groups = new Map<string, { entry: Record<string, unknown>; ids: string[] }>()
+    for (const entry of items) {
+      const id = String(entry.id ?? '')
+      const key = `${String(entry.title ?? '')}\0${String(entry.target ?? '')}\0${String(entry.read === true)}`
+      const existing = groups.get(key)
+      if (existing) existing.ids.push(id)
+      else groups.set(key, { entry, ids: [id] })
+    }
+    list?.replaceChildren(...[...groups.values()].map(({ entry, ids }) => {
+      const row = document.createElement('li'), main = document.createElement('span'), head = document.createElement('span'), title = document.createElement('strong'), meta = document.createElement('span')
       const time = document.createElement('time'), at = document.createElement('bdi')
       const rawAt = String(entry.at ?? '')
       row.className = 'v2-whm-overview__service v2-whm-inbox__row'
       row.dataset.read = String(entry.read === true)
       main.className = 'v2-whm-inbox__main'
+      head.className = 'v2-whm-inbox__head'
       title.textContent = t(String(entry.title ?? ''))
+      head.append(title)
+      if (ids.length > 1) {
+        const repeat = document.createElement('span')
+        repeat.className = 'v2-whm-inbox__count v2-num'
+        repeat.textContent = '×' + ids.length
+        head.append(repeat)
+      }
       meta.className = 'v2-whm-inbox__meta v2-muted'
       time.dateTime = rawAt
       at.dir = 'ltr'; at.className = 'v2-mono'; at.textContent = rawAt.slice(0, 16).replace('T', ' ') + ' UTC'
@@ -113,10 +129,10 @@ function bindWhmHome(): void {
         const target = document.createElement('bdi'); target.dir = 'ltr'; target.className = 'v2-mono'; target.textContent = String(entry.target)
         meta.append(sep, target)
       }
-      main.append(title, meta); row.append(main)
+      main.append(head, meta); row.append(main)
       if (entry.read !== true) {
         const read = document.createElement('button'); read.type = 'button'; read.className = 'v2-btn'; read.textContent = t('Mark as read')
-        read.addEventListener('click', () => void mark([String(entry.id)])); row.append(read)
+        read.addEventListener('click', () => void mark(ids)); row.append(read)
       }
       return row
     }))

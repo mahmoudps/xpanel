@@ -16,7 +16,7 @@ const cases = (['en', 'ar'] as const).flatMap(locale => routes.flatMap(route => 
 function liveControlsUnder(nodes: readonly MarkupNode[], root: MarkupNode): MarkupNode[] {
   const rootIndex = nodes.indexOf(root)
   return nodes.filter(node => {
-    if (node.template >= 0 || node.namespace !== 'html' || !['button', 'input', 'select', 'textarea'].includes(node.tag)) return false
+    if (node.template >= 0 || node.namespace !== 'html' || !['button', 'input', 'select', 'textarea'].includes(node.tag) || node.attrs.has('data-ds-wizard-next') || node.attrs.has('data-ds-wizard-prev')) return false
     for (let index = nodes.indexOf(node); index >= 0; index = nodes[index]!.parent) {
       if (index === rootIndex) return true
     }

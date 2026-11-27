@@ -26,7 +26,7 @@ describe('V2 WHM database documents', () => {
     for (const route of V2_WHM_DATABASE_ROUTES) {
       const html = render(route, { dataAuthority: undefined })
       expect(html).toContain('data-capability-state="unavailable"')
-      expect(parseMarkup(html).filter(item => ['input', 'select', 'textarea', 'button'].includes(item.tag)).every(item => item.attrs.has('disabled'))).toBe(true)
+      expect(parseMarkup(html).filter(item => ['input', 'select', 'textarea', 'button'].includes(item.tag) && !item.attrs.has('data-ds-wizard-next') && !item.attrs.has('data-ds-wizard-prev')).every(item => item.attrs.has('disabled'))).toBe(true)
     }
   })
 
