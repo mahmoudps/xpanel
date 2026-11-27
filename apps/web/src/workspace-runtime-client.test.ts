@@ -15,6 +15,7 @@ import {
   renderToastRegion,
   renderWizard,
 } from './design-system/components/index.ts'
+import { renderGuidedWizard } from './features/wizards/flow.ts'
 import { WORKSPACE_RUNTIME_SCRIPT } from './workspace-runtime-client.ts'
 
 function bootRuntime(): void {
@@ -649,6 +650,13 @@ describe('workspace runtime client', () => {
       expect(nextBtn.hidden).toBe(true)
       expect(submitBtn.hidden).toBe(false)
       prevBtn.click()
+      expect(s1.hidden).toBe(false)
+      expect(s2.hidden).toBe(true)
+
+      nextBtn.click()
+      expect(s2.hidden).toBe(false)
+      const firstNav = wiz.querySelector<HTMLElement>('[data-ds-wizard-goto="0"]')!
+      firstNav.click()
       expect(s1.hidden).toBe(false)
       expect(s2.hidden).toBe(true)
 
@@ -1459,5 +1467,39 @@ describe('workspace runtime client', () => {
     expect(opt1.getAttribute('aria-selected')).toBe('true')
     expect(opt2.getAttribute('aria-selected')).toBe('false')
     expect(saveBar.hidden).toBe(true)
+  })
+
+  it('syncs disabled state and forwards final submit clicks to submitTarget across hidden steps', async () => {
+    const extWrap = document.createElement('div')
+    extWrap.innerHTML = renderGuidedWizard({
+      id: 'ext-target-wiz',
+      activeStepIndex: 0,
+      submitLabel: 'Publish target',
+      submitTarget: '[data-ext-publish]',
+      steps: [
+        { id: 'es1', label: 'Compose', bodyHtml: '<button type="button" data-ext-publish disabled>Hidden publish</button>' },
+        { id: 'es2', label: 'Preview', bodyHtml: '<p>Ready</p>' },
+      ],
+    })
+    document.body.appendChild(extWrap)
+    bootRuntime()
+
+    const extWiz = document.querySelector<HTMLElement>('#ext-target-wiz')!
+    const extNext = extWiz.querySelector<HTMLButtonElement>('[data-ds-wizard-next]')!
+    const extSubmit = extWiz.querySelector<HTMLButtonElement>('[data-ds-wizard-submit]')!
+    const extTarget = extWiz.querySelector<HTMLButtonElement>('[data-ext-publish]')!
+    let targetClicks = 0
+    extTarget.addEventListener('click', () => { targetClicks++ })
+
+    extNext.click()
+    expect(extSubmit.hidden).toBe(false)
+    expect(extSubmit.disabled).toBe(true)
+
+    extTarget.disabled = false
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(extSubmit.disabled).toBe(false)
+
+    extSubmit.click()
+    expect(targetClicks).toBe(1)
   })
 })

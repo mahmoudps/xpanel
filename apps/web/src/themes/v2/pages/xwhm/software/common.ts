@@ -39,10 +39,10 @@ export const section = (key: string, title: string, html: string, hooks?: HookAt
   return focusable ? `<div tabindex="-1"${hookAttrs(hooks)}>${body}</div>` : body
 }
 export function facts(t: Translate, rows: readonly (readonly [string, string])[], attribute: string): string {
-  return `<dl class="v2-whm-data__facts">${rows.map(([key, label]) => `<div><dt>${esc(t(label))}</dt><dd ${attribute}="${esc(key)}">${esc(t(msgid('Not read')))}</dd></div>`).join('')}</dl>`
+  return `<dl class="v2-whm-data__facts">${rows.map(([key, label]) => `<div><dt>${esc(t(label))}</dt><dd ${attribute}="${esc(key)}">${esc(t(msgid('Loading...')))}</dd></div>`).join('')}</dl>`
 }
-export function table(t: Translate, title: string, headers: readonly string[], hooks: HookAttributes, unread = t(msgid('Not read'))): string {
-  return `<div class="v2-whm-data__scroll" role="region" tabindex="0" aria-label="${esc(title)}"><table style="${esc(headers.map((label, index) => `--v2-col-${index + 1}:'${t(label).replace(/[\\']/g, '\\$&')}'`).join(';'))}"><caption class="v2-sr">${esc(title)}</caption><thead><tr>${headers.map(label => `<th scope="col">${esc(t(label))}</th>`).join('')}</tr></thead><tbody${hookAttrs(hooks)} data-columns="${headers.length}"><tr><td colspan="${headers.length}">${esc(unread)}</td></tr></tbody></table></div>`
+export function table(t: Translate, title: string, headers: readonly string[], hooks: HookAttributes, unread = t(msgid('Loading...'))): string {
+  return `<div class="v2-whm-data__scroll" role="region" tabindex="0" aria-label="${esc(title)}"><table data-phone-labels><caption class="v2-sr">${esc(title)}</caption><thead><tr>${headers.map(label => `<th scope="col">${esc(t(label))}</th>`).join('')}</tr></thead><tbody${hookAttrs(hooks)} data-columns="${headers.length}"><tr><td colspan="${headers.length}">${esc(unread)}</td></tr></tbody></table></div>`
 }
 export function page(input: WhmDataPageInput, route: string, title: string, description: string, body: string, hooks?: HookAttributes, actionsHtml?: string): string {
   const { t, canRead } = context(input)
@@ -103,14 +103,7 @@ ${whmPolish('.v2-whm-data')}@media(max-width:1000px){.v2-whm-data__split{grid-te
 @media(max-width:600px){.v2-whm-data__fields,.v2-whm-data__changes{grid-template-columns:minmax(0,1fr)}.v2-whm-data .v2-tool-card__table tbody>tr{padding-block:8px;border-block-end:1px solid var(--line)}.v2-whm-data .v2-tool-card__table tbody>tr>td{border-block-end:0}.v2-whm-data [data-sc-groups] td:is([data-xp-slot=candidate],[data-xp-slot=estimate],[data-xp-slot=relations]):not(:empty){display:block}.v2-whm-data [data-sc-groups] td:is([data-xp-slot=candidate],[data-xp-slot=estimate],[data-xp-slot=relations])::before{display:block;margin-block-end:4px}
 .v2-whm-data__scroll td:nth-child(n+3):not([colspan]){grid-column:1/-1;display:flex;justify-content:space-between;align-items:baseline;gap:16px;text-align:end;overflow-wrap:anywhere}
 .v2-whm-data__scroll td:nth-child(n+3):not([colspan])::before{flex:none;font-size:13px;color:var(--muted);text-align:start}
-.v2-whm-data__scroll td:nth-child(3):not([colspan])::before{content:var(--v2-col-3)}
-.v2-whm-data__scroll td:nth-child(4):not([colspan])::before{content:var(--v2-col-4)}
-.v2-whm-data__scroll td:nth-child(5):not([colspan])::before{content:var(--v2-col-5)}
-.v2-whm-data__scroll td:nth-child(6):not([colspan])::before{content:var(--v2-col-6)}
-.v2-whm-data__scroll td:nth-child(7):not([colspan])::before{content:var(--v2-col-7)}
-.v2-whm-data__scroll td:nth-child(8):not([colspan])::before{content:var(--v2-col-8)}
-.v2-whm-data__scroll td:nth-child(9):not([colspan])::before{content:var(--v2-col-9)}
-.v2-whm-data__scroll td:nth-child(10):not([colspan])::before{content:var(--v2-col-10)}}
+.v2-whm-data__scroll td[data-phone-label]:nth-child(n+3):not([colspan])::before{content:attr(data-phone-label)}}
 @media(min-width:601px) and (max-width:1439px){.v2-whm-data[data-whm-detail-route="/whm/services/certificates"] table:has(>[data-whm-service-detail-rows]){display:block;min-inline-size:0}
 .v2-whm-data[data-whm-detail-route="/whm/services/certificates"] table:has(>[data-whm-service-detail-rows])>thead{position:absolute;inline-size:1px;block-size:1px;overflow:hidden;clip-path:inset(50%)}
 .v2-whm-data[data-whm-detail-route="/whm/services/certificates"] table:has(>[data-whm-service-detail-rows])>tbody{display:block}
@@ -120,13 +113,5 @@ ${whmPolish('.v2-whm-data')}@media(max-width:1000px){.v2-whm-data__split{grid-te
 .v2-whm-data[data-whm-detail-route="/whm/services/certificates"] table:has(>[data-whm-service-detail-rows])>tbody>tr>td:is(:first-child,[colspan]){grid-column:1/-1}
 .v2-whm-data[data-whm-detail-route="/whm/services/certificates"] table:has(>[data-whm-service-detail-rows])>tbody>tr>td:first-child{font-weight:600}
 .v2-whm-data[data-whm-detail-route="/whm/services/certificates"] table:has(>[data-whm-service-detail-rows])>tbody>tr>td:not(:first-child,[colspan])::before{font-size:12px;color:var(--muted)}
-.v2-whm-data[data-whm-detail-route="/whm/services/certificates"] table:has(>[data-whm-service-detail-rows])>tbody>tr>td:nth-child(2):not([colspan])::before{content:var(--v2-col-2)}
-.v2-whm-data[data-whm-detail-route="/whm/services/certificates"] table:has(>[data-whm-service-detail-rows])>tbody>tr>td:nth-child(3):not([colspan])::before{content:var(--v2-col-3)}
-.v2-whm-data[data-whm-detail-route="/whm/services/certificates"] table:has(>[data-whm-service-detail-rows])>tbody>tr>td:nth-child(4):not([colspan])::before{content:var(--v2-col-4)}
-.v2-whm-data[data-whm-detail-route="/whm/services/certificates"] table:has(>[data-whm-service-detail-rows])>tbody>tr>td:nth-child(5):not([colspan])::before{content:var(--v2-col-5)}
-.v2-whm-data[data-whm-detail-route="/whm/services/certificates"] table:has(>[data-whm-service-detail-rows])>tbody>tr>td:nth-child(6):not([colspan])::before{content:var(--v2-col-6)}
-.v2-whm-data[data-whm-detail-route="/whm/services/certificates"] table:has(>[data-whm-service-detail-rows])>tbody>tr>td:nth-child(7):not([colspan])::before{content:var(--v2-col-7)}
-.v2-whm-data[data-whm-detail-route="/whm/services/certificates"] table:has(>[data-whm-service-detail-rows])>tbody>tr>td:nth-child(8):not([colspan])::before{content:var(--v2-col-8)}
-.v2-whm-data[data-whm-detail-route="/whm/services/certificates"] table:has(>[data-whm-service-detail-rows])>tbody>tr>td:nth-child(9):not([colspan])::before{content:var(--v2-col-9)}
-.v2-whm-data[data-whm-detail-route="/whm/services/certificates"] table:has(>[data-whm-service-detail-rows])>tbody>tr>td:nth-child(10):not([colspan])::before{content:var(--v2-col-10)}}
+.v2-whm-data[data-whm-detail-route="/whm/services/certificates"] table:has(>[data-whm-service-detail-rows])>tbody>tr>td[data-phone-label]:not(:first-child,[colspan])::before{content:attr(data-phone-label)}}
 `

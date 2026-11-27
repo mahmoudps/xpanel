@@ -10,7 +10,7 @@ export { WHM_NETWORK_CSS, type WhmNetworkAuthority } from './common.ts'
 
 export function renderV2WhmDomainsPage(props: WhmNetworkProps, authority: WhmNetworkAuthority = CLOSED_NETWORK_AUTHORITY): string {
   const { t, canRead, canReadFacts, canManage, accounts } = networkContext(props, authority)
-  const unread = t(msgid('Not read'))
+  const unread = t(msgid('Loading...'))
   const accountNames = new Map(accounts.map(account => [account.id, account.username]))
   const observed = canReadFacts(['aapanel-site-list', 'list-parked-domains', 'list-subdomains']) && canReadFacts(['list-accounts']) && props.accounts !== undefined && props.domains !== undefined
   const domains = observed ? props.domains!.filter(domain => accountNames.has(domain.accountId)) : []

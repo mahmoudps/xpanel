@@ -14,7 +14,7 @@ const INI_FIELDS = ['memory_limit', 'upload_max_filesize', 'post_max_size', 'max
 export function renderV2WhmPhp(props: HostPageProps): string {
   const route = '/whm/software/php'
   const { t, readable } = hostContext(props, route)
-  const unread = t(msgid('Not read'))
+  const unread = t(msgid('Loading...'))
   const savedDomains = readable ? props.domains : undefined
   const accounts = readable ? props.accounts : undefined
   const select = (name: string, label: string, choices: readonly { value: string; label: string; selected?: boolean }[] = []): string =>

@@ -6,7 +6,7 @@ export function renderV2WhmWebStatsEngines(t: Translate, canRead: boolean, enabl
   const policy = (name: string) => ({ 'data-web-stats-policy': name })
   const body = help(t, msgid('Choose which engines exist for users, who may change them, and when logs and bandwidth are processed. Analog is the traffic report on the account Traffic page, so turning it off keeps totals and bandwidth and withholds its lists.'))
     + status(t, msgid('The statistics configuration has not been read.'), { 'data-web-stats-status': true })
-    + `<p data-web-stats-summary>${esc(t(msgid('Not read')))}</p>`
+    + `<p data-web-stats-summary>${esc(t(msgid('Loading...')))}</p>`
     + fields(([['analog.available', msgid('Analog is available to users')], ['analog.byDefault', msgid('Analog is on by default')], ['awstats.available', msgid('AWStats is available to users')], ['awstats.byDefault', msgid('AWStats is on by default')], ['webalizer.available', msgid('Webalizer is available to users')], ['webalizer.byDefault', msgid('Webalizer is on by default')],
       ['allowInclude', msgid('Allow an AWStats include file in each account')], ['reverseDns', msgid('Resolve visitor addresses with reverse DNS')], ['avoidBackups', msgid('Never start a run during a backup')]] as const).map(([name, label]) => check(t, label, policy(name))).join(''))
     + fields(field(t, 'v2-web-stats-users', msgid('Who may change engines'), select(t, 'v2-web-stats-users', policy('users'), [['all', msgid('All users')], ['listed', msgid('Only the users listed here')]]))

@@ -28,15 +28,14 @@ export const group = (key: string, title: string, bodyHtml: string, actionsHtml?
   card({ title, titleId: `v2-whm-mail-${key}`, bodyHtml, ...(actionsHtml ? { actionsHtml } : {}) })
 
 export function facts(t: Translate, rows: readonly (readonly [string, string])[], attribute: string): string {
-  return `<dl class="v2-whm-mail__facts">${rows.map(([key, label]) => `<div><dt>${escapeHtml(t(label))}</dt><dd><bdi dir="ltr" ${attribute}="${escapeHtml(key)}">${escapeHtml(t(msgid('Not read')))}</bdi></dd></div>`).join('')}</dl>`
+  return `<dl class="v2-whm-mail__facts">${rows.map(([key, label]) => `<div><dt>${escapeHtml(t(label))}</dt><dd><bdi dir="ltr" ${attribute}="${escapeHtml(key)}">${escapeHtml(t(msgid('Loading...')))}</bdi></dd></div>`).join('')}</dl>`
 }
 
-/** Phone rows name each stacked value: the translated headers travel to CSS as custom properties on the table. */
-export const columnLabels = (headers: readonly string[], offset = 0): string =>
-  ` style="${escapeHtml(headers.map((label, index) => `--v2-col-${index + 1 + offset}:'${label.replace(/[\\']/g, '\\$&')}'`).join(';'))}"`
+/** Phone rows name each stacked value via table-phone-labels-client without inline style attributes. */
+export const columnLabels = (_headers: readonly string[], _offset = 0): string => ' data-phone-labels'
 
 export function table(t: Translate, title: string, headers: readonly string[], hooks: HookAttributes, empty = t(msgid('Nothing has been read.'))): string {
-  return `<div class="v2-whm-mail__scroll" role="region" tabindex="0" aria-label="${escapeHtml(title)}"><table class="v2-whm-mail__table"${columnLabels(headers)}><caption class="v2-sr">${escapeHtml(title)}</caption><thead><tr>${headers.map(label => `<th scope="col">${escapeHtml(label)}</th>`).join('')}</tr></thead><tbody${hookAttrs(hooks)}><tr><td colspan="${headers.length}">${escapeHtml(empty)}</td></tr></tbody></table></div>`
+  return `<div class="v2-whm-mail__scroll" role="region" tabindex="0" aria-label="${escapeHtml(title)}"><table class="v2-whm-mail__table" data-phone-labels><caption class="v2-sr">${escapeHtml(title)}</caption><thead><tr>${headers.map(label => `<th scope="col">${escapeHtml(label)}</th>`).join('')}</tr></thead><tbody${hookAttrs(hooks)}><tr><td colspan="${headers.length}">${escapeHtml(empty)}</td></tr></tbody></table></div>`
 }
 
 export function page(input: WhmMailPageInput, route: string, title: string, description: string, body: string): string {
@@ -133,6 +132,6 @@ export const WHM_MAIL_CSS = `.v2-whm-mail,.v2-whm-mail__stack{display:flex;flex-
 @media(max-width:640px){.v2-whm-mail__fields{grid-template-columns:minmax(0,1fr)}.v2-whm-mail__facts{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:600px){.v2-whm-mail :is(.v2-whm-mail__scroll tr:not(:has(>td>[type=checkbox]))>td:nth-child(n+3):not([colspan],:empty),.v2-whm-mail__scroll tr:has(>td>[type=checkbox])>td:nth-child(n+4):not(:empty)){grid-column:1/-1;display:flex;justify-content:space-between;align-items:baseline;gap:16px;text-align:end}
 .v2-whm-mail :is(.v2-whm-mail__scroll tr:not(:has(>td>[type=checkbox]))>td:nth-child(n+3):not([colspan],:empty),.v2-whm-mail__scroll tr:has(>td>[type=checkbox])>td:nth-child(n+4):not(:empty))::before{flex:none;font-size:13px;color:var(--muted);text-align:start}
-.v2-whm-mail__scroll td:nth-child(3):not([colspan])::before{content:var(--v2-col-3)}.v2-whm-mail__scroll tr:has(>td>[type=checkbox])>td:nth-child(3)::before{content:none}.v2-whm-mail__scroll td:nth-child(4):not([colspan])::before{content:var(--v2-col-4)}.v2-whm-mail__scroll td:nth-child(5):not([colspan])::before{content:var(--v2-col-5)}.v2-whm-mail__scroll td:nth-child(6):not([colspan])::before{content:var(--v2-col-6)}.v2-whm-mail__scroll td:nth-child(7):not([colspan])::before{content:var(--v2-col-7)}.v2-whm-mail__scroll td:nth-child(8):not([colspan])::before{content:var(--v2-col-8)}.v2-whm-mail__scroll td:nth-child(9):not([colspan])::before{content:var(--v2-col-9)}.v2-whm-mail__scroll td:nth-child(10):not([colspan])::before{content:var(--v2-col-10)}}
+.v2-whm-mail__scroll td[data-phone-label]:not([colspan])::before{content:attr(data-phone-label)}.v2-whm-mail__scroll tr:has(>td>[type=checkbox])>td:nth-child(3)::before{content:none}}
 @media(max-width:600px){.v2-whm-mail__table td>.v2-whm-mail__actions>.v2-btn{min-block-size:var(--target)}.v2-whm-mail table.v2-whm-mail__table tr>td:first-child:has(>[type=checkbox]){grid-column:auto;grid-row:auto;line-height:0}.v2-whm-mail__fields{grid-template-columns:minmax(0,1fr)}.v2-whm-mail__facts{grid-template-columns:repeat(2,minmax(0,1fr))}.v2-whm-mail__table{min-inline-size:560px}}
 `

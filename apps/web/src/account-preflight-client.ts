@@ -175,13 +175,16 @@ export const ACCOUNT_PREFLIGHT_CLIENT_BINDING = /* js */ String.raw`(function ()
       form.addEventListener('reset', function () {
         clearTimeout(timer);
         seq++;
-        setCheck('username', t('Checked when submitted'), '');
-        setCheck('primaryDomain', t('Checked when submitted'), '');
-        setCheck('capacity', t('Checked when submitted'), '');
+        setCheck('username', t('Validating on input...'), '');
+        setCheck('primaryDomain', t('Validating on input...'), '');
+        setCheck('capacity', t('Validating on input...'), '');
         setOwnerFact('accountsAfter', t('Candidate not read'));
         setOwnerFact('assignedDiskAfter', t('Candidate not read'));
         resetArtifacts();
       });
+      if ((usernameInput && usernameInput.value.trim()) || (domainInput && domainInput.value.trim()) || checkedValue(planInputs)) {
+        runPreflight();
+      }
     });
   }
 

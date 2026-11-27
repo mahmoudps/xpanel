@@ -41,6 +41,15 @@ export function pageHeader(t: Translate, props: PageHeaderProps): string {
 </header>`
 }
 
+export function subtabs(label: string, items: readonly { label: string; href: string; active?: boolean }[]): string {
+  return `<nav class="v2-subtabs" aria-label="${escapeHtml(label)}">${items.map(item => `<a href="${escapeHtml(item.href)}"${item.active ? ' aria-current="page"' : ''}>${escapeHtml(item.label)}</a>`).join('')}</nav>`
+}
+
+export const SUBTABS_CSS = `.v2-subtabs{display:flex;flex-wrap:wrap;gap:6px;padding-block-end:8px;margin-block-end:4px;border-block-end:1px solid var(--line)}
+.v2-subtabs>a{display:inline-flex;align-items:center;min-inline-size:var(--target);min-block-size:var(--target);padding:0 14px;border-radius:var(--radius-control);color:var(--text-2);font-size:14px;font-weight:600;text-decoration:none;transition:background-color .12s ease-out,color .12s ease-out}
+.v2-subtabs>a:hover{background:var(--subtle);color:var(--text)}
+.v2-subtabs>a[aria-current="page"]{background:var(--accent-soft);color:var(--accent)}`
+
 export const PAGE_HEADER_CSS = `.v2-page-head{display:flex;flex-direction:column;gap:6px}
 .v2-crumbs{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--space-1);min-height:22px}
 .v2-crumbs ol{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:12px;color:var(--muted)}

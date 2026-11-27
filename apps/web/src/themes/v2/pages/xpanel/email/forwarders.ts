@@ -56,12 +56,12 @@ function forwarderForm(t: Translate): string {
 }
 
 function forwarders(t: Translate, props: EmailForwardersPageProps): string {
-  const rows = props.forwarders?.map(row => ({ cellsHtml: [technical(row.source), row.destinations.map(technical).join('<br>'), row.createdAtLabel ? technical(row.createdAtLabel) : escapeHtml(t('Not read')), escapeHtml(t('Not read')), props.canManage ? `<button type="button" class="v2-btn" data-forwarder-delete="${escapeHtml(row.id)}" data-forwarder-source="${escapeHtml(row.source)}">${escapeHtml(t('Delete forwarder'))}</button>` : escapeHtml(t('Read only'))] }))
+  const rows = props.forwarders?.map(row => ({ cellsHtml: [technical(row.source), row.destinations.map(technical).join('<br>'), row.createdAtLabel ? technical(row.createdAtLabel) : escapeHtml(t('Loading...')), escapeHtml(t('Loading...')), props.canManage ? `<button type="button" class="v2-btn" data-forwarder-delete="${escapeHtml(row.id)}" data-forwarder-source="${escapeHtml(row.source)}">${escapeHtml(t('Delete forwarder'))}</button>` : escapeHtml(t('Read only'))] }))
   const table = routingTable(t, {
     id: 'v2-forwarders-table', title: t('Forwarders'), headers: [t('Address'), t('Forwards to'), t('Created'), t('Mail server'), t('Actions')],
-    rowHook: 'forwarder', emptyHook: 'forwarder', ...(rows ? { rows } : {}), emptyText: props.forwarders === undefined ? t('Not read') : t('No forwarders.'),
+    rowHook: 'forwarder', emptyHook: 'forwarder', ...(rows ? { rows } : {}), emptyText: props.forwarders === undefined ? t('Loading...') : t('No forwarders.'),
   })
-  const domains = props.domainsObserved === false ? escapeHtml(t('Not read')) : props.domains.length ? props.domains.map(domain => technical(domain.name)).join(', ') : escapeHtml(t('No domains read'))
+  const domains = props.domainsObserved === false ? escapeHtml(t('Loading...')) : props.domains.length ? props.domains.map(domain => technical(domain.name)).join(', ') : escapeHtml(t('No domains read'))
   return card({ title: t('Forwarders'), titleId: 'v2-forwarders-title', bodyHtml: `<div class="v2-email-routing-workspace" data-forwarder-workspace data-forwarder-can-read="${props.canManage}" data-forwarder-manage="${props.canManage}">${accountRoutingClientTemplates()}<p>${escapeHtml(t('Mail to an address is copied to another address. Each row shows whether the mail server runs it.'))}</p><dl><dt>${escapeHtml(t('Source domains'))}</dt><dd>${domains}</dd></dl><div class="v2-email-routing-actions"><button type="button" class="v2-btn" data-forwarder-refresh${props.readOnly === true ? ' disabled' : ''}>${escapeHtml(t('Refresh'))}</button></div><p role="status" aria-live="polite" data-forwarder-status>${props.forwarders === undefined ? escapeHtml(t('Records have not been read.')) : ''}</p>${table}${props.canManage ? forwarderForm(t) : props.readOnly === true ? `<fieldset disabled>${forwarderForm(t)}</fieldset>` : ''}</div>` })
 }
 
@@ -77,7 +77,7 @@ function autoresponderForm(t: Translate, props: EmailForwardersPageProps): strin
 }
 
 function autoresponders(t: Translate, props: EmailForwardersPageProps): string {
-  const table = routingTable(t, { id: 'v2-autoresponders-table', title: t('Autoresponders'), headers: [t('Address'), t('Subject'), t('When'), t('Mail server'), t('Actions')], rowHook: 'autoresponder', emptyHook: 'autoresponder', emptyText: t('Not read') })
+  const table = routingTable(t, { id: 'v2-autoresponders-table', title: t('Autoresponders'), headers: [t('Address'), t('Subject'), t('When'), t('Mail server'), t('Actions')], rowHook: 'autoresponder', emptyHook: 'autoresponder', emptyText: t('Loading...') })
   return card({ title: t('Autoresponders'), titleId: 'v2-autoresponders-title', bodyHtml: `<div class="v2-email-routing-workspace" data-autoresponder-workspace data-autoresponder-can-read="${props.canManage}" data-autoresponder-manage="${props.canManage}">${accountRoutingClientTemplates()}<p>${escapeHtml(t('An automatic reply sent once per sender within the interval, so two autoresponders never answer each other in a loop.'))}</p><p role="status" aria-live="polite" data-autoresponder-status>${escapeHtml(t('Records have not been read.'))}</p>${table}${props.canManage && props.domains.length ? autoresponderForm(t, props) : props.readOnly === true ? `<fieldset disabled>${autoresponderForm(t, props)}</fieldset>` : ''}</div>` })
 }
 
