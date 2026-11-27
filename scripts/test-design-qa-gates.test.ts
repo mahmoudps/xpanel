@@ -15,16 +15,18 @@ import {
 const SCRIPTS_DIR = dirname(fileURLToPath(import.meta.url))
 
 describe('design-qa-gates static compliance & scale checks', () => {
-  it('passes strict G4/G6/G8 static checks across apps/web/src/design-system', () => {
+  it('passes strict G1/G2/G4/G6/G8 static checks across catalog and design-system', () => {
     const res = scanStaticDesignCompliance({ scope: 'design-system' })
     expect(res.violations).toEqual([])
     expect(res.passed).toBe(true)
-    expect(res.gates).toEqual({ G4: true, G6: true, G8: true })
+    expect(res.gates).toEqual({ G1: true, G2: true, G4: true, G6: true, G8: true })
   })
 
   it('tracks repo-wide ratchet ceilings cleanly without regressions', () => {
     const res = scanStaticDesignCompliance({ scope: 'ratchet' })
     expect(res.passed).toBe(true)
+    expect(res.gates.G1).toBe(true)
+    expect(res.gates.G2).toBe(true)
     expect(res.metrics.notReadCount).toBeLessThanOrEqual(1002)
     expect(res.metrics.importantCount).toBeLessThanOrEqual(456)
   })
