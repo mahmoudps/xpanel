@@ -23,7 +23,7 @@ describe('V2 WHM account tools', () => {
 
   it('does not present absent health evidence as a healthy zero or an authorized repair', () => {
     const html = render('/whm/accounts/health')
-    for (const key of ['count-accounts', 'count-affected', 'count-problems', 'count-unavailable', 'observed-at']) expect(html).toContain(`data-whm-health-${key}>Not read</bdi>`)
+    for (const key of ['count-accounts', 'count-affected', 'count-problems', 'count-unavailable', 'observed-at']) expect(html).toContain(`data-whm-health-${key}>Loading...</bdi>`)
     expect(html).toContain('Not verified means the evidence could not be read. It is never counted as healthy.')
     expect(html).toContain('data-whm-health-run>Run checks</button>')
     expect(html).not.toContain('data-whm-health-repair')
@@ -42,7 +42,7 @@ describe('V2 WHM account tools', () => {
   it('retains all bandwidth sources and unmeasured state, separating plan enforcement from service availability', () => {
     const html = render('/whm/accounts/bandwidth')
     expect(html).toContain('data-whm-metering="bandwidth"')
-    for (const key of ['month', 'since', 'updated', 'pending', 'web', 'mail', 'ftp']) expect(html).toContain(`data-whm-metering-fact="${key}">Not read`)
+    for (const key of ['month', 'since', 'updated', 'pending', 'web', 'mail', 'ftp']) expect(html).toContain(`data-whm-metering-fact="${key}">Loading...`)
     expect(html).toContain('Mail, FTP and the panels keep working.')
     expect(html).toContain('data-whm-metering-rows="bandwidth" data-xp-columns="8"')
     expect(html).toContain('No bandwidth has been read.')
