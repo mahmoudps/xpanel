@@ -1,5 +1,6 @@
 import type { Translate } from '../../../../../i18n.ts'
 import type { WhmSurfaceProps } from '../../../../contract.ts'
+import { renderGuidedWizard } from '../../../../../features/wizards/flow.ts'
 import { adminContext, DENIED_ADMIN_AUTHORITY, type AdminView, type WhmAdminAuthority } from './common.ts'
 import { renderV2ServerOps } from './server-ops.ts'
 import { renderV2HostTools } from './host-tools.ts'
@@ -36,5 +37,22 @@ export function renderV2WhmServerRole(t: Translate, props: WhmSurfaceProps, auth
   const saved = h.section('v2-server-role-saved', msgid('Saved configuration'), status(h, msgid('The server role has not been read.')) + facts(h, [['saved-hostname', msgid('Saved hostname'), true], ['engine', msgid('Web engine'), true], ['setup-completed', msgid('Setup completed (UTC)'), true], ['php-versions', msgid('PHP versions in use'), true], ['count-accounts', msgid('Accounts'), true], ['count-domains', msgid('Domains'), true], ['count-mailboxes', msgid('Mailboxes'), true], ['count-databases', msgid('Databases'), true], ['count-zones', msgid('DNS zones'), true]]) + read(h, msgid('Read role')))
   const components = h.section('v2-server-role-components', msgid('Role components'), `<p>${h.text(msgid('Saved configuration and observed services are shown side by side; neither is inferred from the other.'))}</p>${table(h, 'component-rows', msgid('Role components'), [msgid('Component'), msgid('Saved configuration'), msgid('Observed services')], msgid('No role has been read.'))}`)
   const services = h.section('v2-server-role-services', msgid('Observed services'), facts(h, [['observed-at', msgid('Observed at (UTC)'), true]]) + table(h, 'service-rows', msgid('Observed services'), [msgid('Service'), msgid('Unit'), msgid('State')], msgid('No services have been read.')))
-  return h.page(msgid('Server role'), msgctxt('theme:v2', 'Read desired host services independently of their observed running state.'), observation(h, 'role', saved + components + services + renderV2ServerOps(t, ['role-profile'], h.canManage)))
+  const roleOps = renderV2ServerOps(t, ['role-profile'], h.canManage)
+  const wizard = renderGuidedWizard({
+    id: 'whm-server-role-wizard',
+    activeStepIndex: 0,
+    disabled: !h.canRead,
+    locale: props.locale,
+    copy: t,
+    submitLabel: t(msgid('Apply')),
+    changePlan: [
+      { label: t(msgid('Server role')), before: t(msgid('Current saved profile')), after: t(msgid('Selected role profile')) },
+    ],
+    steps: [
+      { id: 'inspect', label: t(msgid('Saved configuration')), bodyHtml: saved + components },
+      { id: 'services', label: t(msgid('Observed services')), bodyHtml: services },
+      { id: 'apply', label: t(msgid('Role profile')), bodyHtml: roleOps },
+    ],
+  })
+  return h.page(msgid('Server role'), msgctxt('theme:v2', 'Read desired host services independently of their observed running state.'), observation(h, 'role', wizard))
 }

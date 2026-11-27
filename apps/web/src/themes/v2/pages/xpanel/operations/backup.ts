@@ -1,5 +1,6 @@
 import type { PanelSurfaceProps } from '../../../../contract.ts'
-import { kpiCard, stepper, tabPanel, tabs } from '../../../components/index.ts'
+import { kpiCard, tabPanel, tabs } from '../../../components/index.ts'
+import { renderGuidedWizard } from '../../../../../features/wizards/flow.ts'
 import { escapeHtml, xpTemplate } from '../../../html.ts'
 import { renderV2FileRestorationSection } from './file-restoration.ts'
 import { v2WebsiteBackupsCard } from './owner-tools.ts'
@@ -16,7 +17,7 @@ function archiveTemplates(t: ReturnType<typeof operationContext>['t']): string {
 export function renderV2AccountBackupPage(props: PanelSurfaceProps, authority: PanelOperationAuthority = deniedOperationAuthority): string {
   const { t, canManage, canRead, account } = operationContext(props, authority, '/files/backup')
   props = { ...props, account }
-  const unknown = t(msgid('Not read'))
+  const unknown = t(msgid('Loading...'))
   const summary = `<div class="v2-kpi-row">${[
     { label: t(msgctxt('theme:v2', 'Archive workflow')), value: t(msgid('Home files')), note: t(msgid('Mailbox data and mail settings — preserved separately')) },
     { label: t(msgctxt('theme:v2', 'Maximum home archive')), value: '2 GiB', note: t(msgctxt('theme:v2', 'The account archive provider enforces this limit.')) },
@@ -29,13 +30,11 @@ ${operationTable('v2-account-backup-table', t(msgid('Account archives')), [t(msg
 <div class="v2-panel-operation-actions"><a class="v2-btn" data-account-backup-download aria-disabled="true">${escapeHtml(t(msgid('Download selected archive')))}</a>${operationButton(t(msgid('Review restore differences')), { 'data-account-backup-preview': true })}${operationButton(t(msgid('Read archives')), { 'data-account-backup-refresh': true })}</div>${archiveTemplates(t)}`,
     t(msgctxt('theme:v2', 'A host archive is not an off-server disaster recovery copy.')))
   const create = operationCard('v2-backup-create', t(msgid('Back up account files')),
-    `${stepper({ label: t(msgid('Steps')), inline: true, steps: [{ label: t(msgid('Select parts')), state: 'current' }, { label: t(msgid('Create archive')), state: 'upcoming' }, { label: t(msgid('Download')), state: 'upcoming' }] })}
-<fieldset class="v2-panel-operation-options"><legend>${escapeHtml(t(msgid('Archive contents')))}</legend><label><input type="checkbox" checked disabled><span>${escapeHtml(t(msgid('Home files')))}</span></label><label><input type="checkbox" disabled><span>${escapeHtml(t(msgid('Databases — separate database archive service required')))}</span></label><label><input type="checkbox" disabled><span>${escapeHtml(t(msgid('Mailbox data and mail settings — preserved separately')))}</span></label></fieldset>
+    `<fieldset class="v2-panel-operation-options"><legend>${escapeHtml(t(msgid('Archive contents')))}</legend><label><input type="checkbox" checked disabled><span>${escapeHtml(t(msgid('Home files')))}</span></label><label><input type="checkbox" disabled><span>${escapeHtml(t(msgid('Databases — separate database archive service required')))}</span></label><label><input type="checkbox" disabled><span>${escapeHtml(t(msgid('Mailbox data and mail settings — preserved separately')))}</span></label></fieldset>
 <p>${escapeHtml(t(msgid('Create a real archive of home files, up to 2 GiB. Mailbox data and account mail settings are excluded from this home-file workflow. A host archive is not an off-server disaster recovery copy.')))}</p>
 <div class="v2-panel-operation-actions">${operationButton(t(msgid('Create home archive')), { 'data-account-backup-create': true }, true, true)}</div>`)
   const differences = operationCard('v2-backup-differences', t(msgid('Review the difference')),
-    `${stepper({ label: t(msgid('Steps')), inline: true, steps: [{ label: t(msgid('Select archive')), state: 'current' }, { label: t(msgid('Review changes')), state: 'upcoming' }, { label: t(msgid('Confirm restore')), state: 'upcoming' }] })}
-${operationFacts([['add', t(msgid('Added'))], ['replace', t(msgid('Changed'))], ['unchanged', t(msgid('Unchanged'))], ['keep', t(msgid('Missing from archive (kept)'))], ['preserve-mail', t(msgctxt('theme:v2', 'Mailbox files kept'))]].map(([key, label]) => ({ label: label!, valueHtml: `<span data-account-backup-count="${key}">${escapeHtml(unknown)}</span>` })))}
+    `${operationFacts([['add', t(msgid('Added'))], ['replace', t(msgid('Changed'))], ['unchanged', t(msgid('Unchanged'))], ['keep', t(msgid('Missing from archive (kept)'))], ['preserve-mail', t(msgctxt('theme:v2', 'Mailbox files kept'))]].map(([key, label]) => ({ label: label!, valueHtml: `<span data-account-backup-count="${key}">${escapeHtml(unknown)}</span>` })))}
 ${operationTable('v2-account-backup-diff', t(msgid('Restore differences')), [t(msgid('Path')), t(msgid('Result')), t(msgid('In archive (bytes)')), t(msgid('Current (bytes)'))], { 'data-account-backup-differences': true, 'data-xp-columns': 4 }, unreadRow(4, t(msgid('No archive has been compared.'))))}
 <p data-account-backup-diff-limit hidden></p><div class="v2-panel-operation-actions"><a class="v2-btn" data-account-backup-csv aria-disabled="true">${escapeHtml(t(msgid('Download full difference list (CSV)')))}</a></div>`)
   const restore = operationCard('v2-backup-review', t(msgid('Before a restore')),
@@ -46,7 +45,23 @@ ${operationTable('v2-account-backup-diff', t(msgid('Restore differences')), [t(m
   const aside = operationCard('v2-backup-scope', t(msgctxt('theme:v2', 'Backup scope and safeguards')),
     `${operationFacts([{ label: t(msgid('Account')), valueHtml: account ? technical(account.username) : escapeHtml(unknown) }, { label: t(msgid('Home')), valueHtml: account ? technical(account.home) : escapeHtml(unknown) }])}<p>${escapeHtml(t(msgctxt('theme:v2', 'Database, mailbox and server restore points require their own qualified providers. They are not included in the home-file archive.')))}</p>`)
   const columns = (main: string, side: string): string => `<div class="v2-panel-operation-columns"><div class="v2-panel-operation-stack">${main}</div><aside class="v2-panel-operation-stack" aria-label="${escapeHtml(t(msgctxt('theme:v2', 'Backup information')))}">${side}</aside></div>`
-  const archives = `<div class="v2-panel-operation-stack" data-wizard="guided"><div data-wizard-step="1">${columns(create, aside)}</div><div data-wizard-step="2">${archiveList}</div><div data-wizard-step="3">${columns(differences, restore)}</div></div>`
+  const archives = renderGuidedWizard({
+    id: 'panel-backup-wizard',
+    activeStepIndex: 0,
+    disabled: !canRead,
+    locale: props.locale,
+    copy: t,
+    submitLabel: t(msgid('Restore reviewed home files')),
+    changePlan: [
+      { label: t(msgid('Home files')), before: t(msgid('Current home folder')), after: t(msgid('Reviewed archive entries')) },
+      { label: t(msgid('Safety copy')), before: '—', after: t(msgid('Recovery archive preserved separately')) },
+    ],
+    steps: [
+      { id: 'create', label: t(msgid('Select parts')), bodyHtml: columns(create, aside) },
+      { id: 'archives', label: t(msgid('Archives')), bodyHtml: archiveList },
+      { id: 'restore', label: t(msgid('Confirm restore')), bodyHtml: columns(differences, restore) },
+    ],
+  })
   // The archive flow stays on one panel: a review started from the archive list shows its result right below it.
   const views = account ? [
     ['archives', t(msgid('Account archives')), archives],

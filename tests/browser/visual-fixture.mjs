@@ -130,6 +130,27 @@ export async function createVisualFixture({ port = 0, host = '127.0.0.1', qualif
         outgoing.end(incoming.method === 'HEAD' ? undefined : JSON.stringify({ scope: 'desired-state', hostBinding: 'unverified', defaultSharedIpv4: { poolId: 'visual-ip', address: account.ipv4 }, dedicated: { entitled: false, unallocated: [], count: 0 } }))
         return
       }
+      if (url.pathname === '/api/accounts/preflight') {
+        const username = (url.searchParams.get('username') ?? '').trim()
+        const primaryDomain = (url.searchParams.get('primaryDomain') ?? '').trim()
+        outgoing.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'x-visual-fixture': 'synthetic' })
+        outgoing.end(incoming.method === 'HEAD' ? undefined : JSON.stringify({
+          checkedAt: at,
+          username: username ? { status: 'available', value: username, reason: null } : { status: 'empty', value: '', reason: null },
+          primaryDomain: primaryDomain ? { status: 'available', value: primaryDomain, reason: null } : { status: 'empty', value: '', reason: null },
+          capacity: { status: 'fits', ownerUsername: 'root', accountsAfter: 2, assignedDiskMbAfter: plan.resources.diskMb, limitsSummary: 'No reseller allocation cap', reason: null },
+          preview: {
+            linuxUser: username || null,
+            home: username ? '/home/' + username : null,
+            apacheVhost: primaryDomain ? primaryDomain + ' (Apache vhost)' : null,
+            nginxServer: primaryDomain ? primaryDomain + ' (Nginx server)' : null,
+            phpPool: username ? 'xpanel-php-fpm-' + username : null,
+            dnsZone: primaryDomain || null,
+            mailDomain: primaryDomain || null,
+          },
+        }))
+        return
+      }
       if (!asset && !route && !component) {
         outgoing.writeHead(404, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' })
         outgoing.end(incoming.method === 'HEAD' ? undefined : 'No synthetic visual document exists here.')

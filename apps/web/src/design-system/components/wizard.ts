@@ -24,6 +24,8 @@ export interface WizardProps {
   readonly id: string
   readonly steps: readonly WizardStep[]
   readonly activeStepIndex: number
+  readonly disabled?: boolean
+  readonly revealAllPanels?: boolean
   readonly preflightState?: {
     readonly tone: BadgeTone
     readonly message: string
@@ -43,7 +45,7 @@ export function renderWizard(props: WizardProps): string {
     props.steps
       .map((step, index) => {
         const state = index < boundedIndex ? 'done' : index === boundedIndex ? 'current' : 'upcoming'
-        return `<li class="ds-stepper__item" data-step-state="${state}"${index === boundedIndex ? ' aria-current="step"' : ''}>` +
+        return `<li class="ds-stepper__item" data-step-state="${state}" data-ds-wizard-goto="${index}"${index === boundedIndex ? ' aria-current="step"' : ''}>` +
           `<span class="ds-num">${formatNumber(index + 1, props.locale)}</span>` +
           `<span>${escapeHtml(step.label)}</span>` +
         `</li>`
@@ -52,7 +54,7 @@ export function renderWizard(props: WizardProps): string {
   `</ol>`
 
   const panelsHtml = props.steps
-    .map((step, index) => `<div class="ds-card" data-ds-wizard-step="${escapeAttr(step.id)}"${index === boundedIndex ? '' : ' hidden'}>${step.bodyHtml}</div>`)
+    .map((step, index) => `<div class="ds-card" data-ds-wizard-step="${escapeAttr(step.id)}"${props.revealAllPanels ? ` data-ds-wizard-panel-state="${index === boundedIndex ? 'active' : 'inactive'}"` : index === boundedIndex ? '' : ' hidden'}>${step.bodyHtml}</div>`)
     .join('')
 
   const preflightHtml = props.preflightState
@@ -88,9 +90,9 @@ export function renderWizard(props: WizardProps): string {
   const isFirst = boundedIndex === 0
   const isLast = boundedIndex >= props.steps.length - 1
   const navHtml = `<div class="ds-page-head__actions">` +
-    `<button type="button" class="ds-btn" data-ds-wizard-prev${isFirst ? ' disabled' : ''}>${escapeHtml(t('Previous'))}</button>` +
-    `<button type="button" class="ds-btn ds-btn--primary" data-ds-wizard-next${isLast ? ' hidden disabled' : ''}>${escapeHtml(t('Next'))}</button>` +
-    `<button type="submit" class="ds-btn ds-btn--primary" data-ds-wizard-submit${isLast ? '' : ' hidden disabled'}>${escapeHtml(t('Finish'))}</button>` +
+    `<button type="button" class="ds-btn" data-ds-wizard-prev${props.disabled || isFirst ? ' disabled' : ''}>${escapeHtml(t('Previous'))}</button>` +
+    `<button type="button" class="ds-btn ds-btn--primary" data-ds-wizard-next${isLast ? ' hidden' : ''}${props.disabled || isLast ? ' disabled' : ''}>${escapeHtml(t('Next'))}</button>` +
+    `<button type="submit" class="ds-btn ds-btn--primary" data-ds-wizard-submit${isLast ? '' : ' hidden'}${props.disabled || !isLast ? ' disabled' : ''}>${escapeHtml(t('Finish'))}</button>` +
   `</div>`
 
   return `<div class="ds-wizard" id="${escapeAttr(props.id)}" data-ds-wizard data-active-step="${boundedIndex}">` +

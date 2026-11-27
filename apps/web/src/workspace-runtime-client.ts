@@ -7,10 +7,14 @@
 // - Drives file dropzones and keyboard-accessible sortable lists
 // Served as a same-origin external script under strict CSP (script-src 'self').
 
+import { LIVE_DATA_STORE_SCRIPT } from './data/live-store.ts'
+
 export const WORKSPACE_RUNTIME_SCRIPT = /* js */ String.raw`(function () {
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
   if (window.__xpanelWorkspaceRuntime) return;
   window.__xpanelWorkspaceRuntime = true;
+
+  ${LIVE_DATA_STORE_SCRIPT}
 
   function t(message, values) {
     if (typeof window.xpT === 'function') return window.xpT(message, values);
@@ -31,7 +35,7 @@ export const WORKSPACE_RUNTIME_SCRIPT = /* js */ String.raw`(function () {
   };
 
   /* 1. Shared GET request coalescing and short-TTL cache for session/chrome endpoints */
-  var CACHEABLE = /^\/api\/(?:auth\/me|ui-preferences|admin\/favorites|admin\/notifications|server\/info|account\/summary)(?:\?.*)?$/;
+  var CACHEABLE = LIVE_CACHEABLE;
   var inflight = new Map();
   var cache = new Map();
   var CACHE_TTL_MS = 6000;
@@ -1955,11 +1959,52 @@ export const WORKSPACE_RUNTIME_SCRIPT = /* js */ String.raw`(function () {
           showStep(activeIndex - 1);
         });
       }
+      navItems.forEach(function (item, idx) {
+        item.addEventListener('click', function () {
+          if (idx < activeIndex) showStep(idx);
+        });
+      });
       if (nextBtn) {
         nextBtn.addEventListener('click', function () {
           advanceStep();
         });
       }
+      var syncDiffPreview = function () {
+        var diffSection = Array.prototype.slice.call(wiz.querySelectorAll('[data-ds-wizard-diff]')).filter(function (el) {
+          return el.closest('[data-ds-wizard]') === wiz;
+        })[0] || null;
+        if (!diffSection) return;
+        diffSection.querySelectorAll('[data-ds-diff-source]').forEach(function (cell) {
+          var fieldName = cell.getAttribute('data-ds-diff-source');
+          if (!fieldName) return;
+          var ctrl = Array.prototype.find.call(wiz.querySelectorAll('[name]'), function (el) {
+            return el.getAttribute('name') === fieldName;
+          });
+          if (!ctrl) return;
+          var val = ctrl.type === 'checkbox' ? (ctrl.checked ? 'on' : 'off') : String(ctrl.value || '').trim();
+          if (val) cell.textContent = val;
+        });
+      };
+      wiz.addEventListener('input', syncDiffPreview);
+      wiz.addEventListener('change', syncDiffPreview);
+      document.addEventListener('xpanel:ws-event', function (ev) {
+        var detail = ev && ev.detail;
+        var payload = detail && detail.data && typeof detail.data === 'object' ? detail.data : null;
+        if (!detail || detail.kind !== 'job.updated' || !payload) return;
+        var prog = Array.prototype.slice.call(wiz.querySelectorAll('[data-ds-wizard-progress]')).filter(function (el) {
+          return el.closest('[data-ds-wizard]') === wiz;
+        })[0] || null;
+        if (!prog) return;
+        var targetStep = payload.stepId
+          ? Array.prototype.find.call(prog.querySelectorAll('[data-ds-progress-step]'), function (el) {
+              return el.getAttribute('data-ds-progress-step') === String(payload.stepId);
+            })
+          : prog.querySelector('.ds-stepper__item[data-step-state="running"], .ds-stepper__item[data-step-state="upcoming"]');
+        if (targetStep) {
+          var mapped = payload.status === 'succeeded' ? 'done' : payload.status === 'failed' || payload.status === 'cancelled' ? 'failed' : 'running';
+          targetStep.setAttribute('data-step-state', mapped);
+        }
+      });
       if (submitBtn) {
         submitBtn.addEventListener('click', validateWizardForSubmit);
       }

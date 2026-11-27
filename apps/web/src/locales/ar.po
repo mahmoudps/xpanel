@@ -68797,3 +68797,195 @@ msgstr "تعذر التحقق"
 
 msgid "Enter a valid cron expression"
 msgstr "أدخل تعبير جدولة صالحاً"
+
+msgid "Quick actions"
+msgstr "إجراءات سريعة"
+
+msgid "Reseller views"
+msgstr "عروض الموزعين"
+
+msgid "DNS views"
+msgstr "عروض DNS"
+
+msgid "Service views"
+msgstr "عروض الخدمات"
+
+msgid "Restore views"
+msgstr "عروض الاستعادة"
+
+msgid "Validating on input..."
+msgstr "جارٍ التحقق عند الإدخال..."
+
+msgid "Recovery archive"
+msgstr "أرشيف الاسترداد"
+
+msgid "Current files"
+msgstr "الملفات الحالية"
+
+msgid "30-day home backup before overwrite"
+msgstr "نسخة احتياطية للمجلد الرئيسي لمدة 30 يومًا قبل الاستبدال"
+
+msgid "Static index"
+msgstr "صفحة الفهرس الثابتة"
+
+msgid "Previewed template HTML"
+msgstr "قالب HTML المعاين"
+
+msgid "Template and content"
+msgstr "القالب والمحتوى"
+
+msgid "Current home folder"
+msgstr "المجلد الرئيسي الحالي"
+
+msgid "Reviewed archive entries"
+msgstr "عناصر الأرشيف المُراجعة"
+
+msgid "Safety copy"
+msgstr "نسخة أمان"
+
+msgid "Recovery archive preserved separately"
+msgstr "أرشيف استرداد محفوظ بشكل منفصل"
+
+msgid "Domain selected for ACME validation"
+msgstr "تم اختيار النطاق للتحقق عبر ACME"
+
+msgid "Select an owned domain"
+msgstr "اختر نطاقًا مملوكًا"
+
+msgid "Target account"
+msgstr "الحساب المستهدف"
+
+msgid "Current disk files & databases"
+msgstr "الملفات وقواعد البيانات الحالية على القرص"
+
+msgid "Selected archive parts only"
+msgstr "أجزاء الأرشيف المحددة فقط"
+
+msgid "Source accounts"
+msgstr "حسابات المصدر"
+
+msgid "New local UID, slice, vhost, zones, mail"
+msgstr "معرف مستخدم محلي جديد وشريحة ومضيف افتراضي ومناطق وبريد"
+
+msgid "Domains & Mail"
+msgstr "النطاقات والبريد"
+
+msgid "Addon domain under parent account"
+msgstr "نطاق إضافي تحت الحساب الأصلي"
+
+msgid "Independent account with dedicated UID/slice"
+msgstr "حساب مستقل بمعرف مستخدم وشريحة مخصصين"
+
+msgid "Parent account zone"
+msgstr "منطقة الحساب الأصلي"
+
+msgid "New account zone ownership"
+msgstr "ملكية منطقة الحساب الجديد"
+
+msgid "Target mailboxes"
+msgstr "صناديق البريد المستهدفة"
+
+msgid "Current mailbox contents"
+msgstr "محتويات صندوق البريد الحالية"
+
+msgid "Missing messages appended (no overwrites)"
+msgstr "إضافة الرسائل المفقودة دون استبدال"
+
+msgid "Archive snapshot"
+msgstr "لقطة الأرشيف"
+
+msgid "Selected files written without overwriting"
+msgstr "كتابة الملفات المحددة دون استبدال"
+
+msgid "Current saved profile"
+msgstr "الملف التعريفي المحفوظ حاليًا"
+
+msgid "Selected role profile"
+msgstr "ملف الدور المحدد"
+
+msgid "Role profile"
+msgstr "ملف الدور"
+
+msgid "Selected engine & MPM"
+msgstr "المحرك ونمط المعالجة المحددان"
+
+msgid "Configured nginx & Apache limits"
+msgstr "حدود Nginx وApache المُهيأة"
+
+msgid "Ready for validation"
+msgstr "جاهز للتحقق"
+
+msgid "Current certificate"
+msgstr "الشهادة الحالية"
+
+msgid "Uploaded PEM chain"
+msgstr "سلسلة PEM المرفوعة"
+
+msgid "Selected domain & SANs"
+msgstr "النطاق المحدد والأسماء البديلة"
+
+msgid "Root-only PEM key storage"
+msgstr "تخزين مفتاح PEM بصلاحية root فقط"
+
+msgid "Restart host service"
+msgstr "إعادة تشغيل خدمة الخادم"
+
+msgid "Suspend hosting account"
+msgstr "تعليق حساب الاستضافة"
+
+msgid "Run AutoSSL certificate check"
+msgstr "تشغيل فحص شهادات AutoSSL"
+
+msgid "Create MariaDB database"
+msgstr "إنشاء قاعدة بيانات MariaDB"
+
+msgid "Create email mailbox"
+msgstr "إنشاء صندوق بريد إلكتروني"
+
+msgid "Purge edge cache"
+msgstr "مسح ذاكرة التخزين المؤقت الطرفية"
+
+msgid "Inspect mail queue"
+msgstr "فحص طابور البريد"
+
+msgid "Create home backup archive"
+msgstr "إنشاء أرشيف احتياطي للمجلد الرئيسي"
+
+msgid "Switch domain PHP version"
+msgstr "تغيير إصدار PHP للنطاق"
+
+msgid "Unblock firewall IP address"
+msgstr "رفع الحظر عن عنوان IP في جدار الحماية"
+
+msgid "Run configuration health check"
+msgstr "تشغيل فحص سلامة الإعدادات"
+
+msgid "Operation submitted"
+msgstr "تم إرسال العملية"
+
+msgid "Action undone"
+msgstr "تم التراجع عن الإجراء"
+
+msgid "Action failed"
+msgstr "فشل الإجراء"
+
+msgid "Run action"
+msgstr "تنفيذ الإجراء"
+
+msgid "Confirm running this operation on the server?"
+msgstr "هل تريد تأكيد تشغيل هذه العملية على الخادم؟"
+
+msgid "Session request transport is unavailable."
+msgstr "ناقل طلبات الجلسة غير متاح."
+
+msgid "Domains & DNS"
+msgstr "النطاقات وDNS"
+
+msgid "Security & SSL"
+msgstr "الأمان وSSL"
+
+msgid "Health check"
+msgstr "فحص السلامة"
+
+msgid "Step {current} of {total}"
+msgstr "الخطوة {current} من {total}"

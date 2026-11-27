@@ -68,9 +68,9 @@ function createMailbox(t: Translate, props: EmailAccountsPageProps): string {
 
 function accountFacts(t: Translate, props: EmailAccountsPageProps): string {
   const facts = [
-    { label: t('Account'), value: props.account?.username ?? t('Not read'), technical: !!props.account },
-    { label: t('Primary domain'), value: props.account?.primaryDomain ?? t('Not read'), technical: !!props.account },
-    { label: t('Plan'), value: props.plan?.name ?? t('Not read'), technical: false },
+    { label: t('Account'), value: props.account?.username ?? t('Loading...'), technical: !!props.account },
+    { label: t('Primary domain'), value: props.account?.primaryDomain ?? t('Loading...'), technical: !!props.account },
+    { label: t('Plan'), value: props.plan?.name ?? t('Loading...'), technical: false },
   ]
   return card({ title: t('Account and plan'), titleId: 'v2-email-account-title', bodyHtml: `<dl class="v2-email-facts">${facts.map(item => `<div><dt>${escapeHtml(item.label)}</dt><dd>${item.technical ? technical(item.value) : escapeHtml(item.value)}</dd></div>`).join('')}</dl>` })
 }
@@ -92,7 +92,7 @@ function usersTable(t: Translate, props: EmailAccountsPageProps): string {
   const table = dataTable(t, {
     id: 'v2-email-users', caption: t('Service users'), columns, actions: true, minWidth: 900,
     state: props.users.state === 'failed' ? 'error' : props.users.state === 'unread' ? 'empty' : users.length ? 'ready' : 'empty',
-    emptyText: props.users.state === 'unread' ? t('Not read') : t('No service users were returned.'),
+    emptyText: props.users.state === 'unread' ? t('Loading...') : t('No service users were returned.'),
     ...(props.users.state === 'failed' ? { error: { lead: t(msgctxt('theme:v2', 'This list could not be read.')) } } : {}),
     rows: users.map(user => ({
       cellsHtml: [
@@ -100,7 +100,7 @@ function usersTable(t: Translate, props: EmailAccountsPageProps): string {
         `<div class="v2-email-services">${[user.services.email ? t('Email') : '', user.services.ftp ? 'FTP' : '', user.services.webdisk ? 'Web Disk' : ''].filter(Boolean).map(label => statusPill({ tone: 'neutral', hollow: true, label })).join('')}</div>`,
         fact(2, user.services.email ? user.mailboxQuotaMb === 'unlimited' ? escapeHtml(t('Unlimited')) : technical(user.mailboxQuotaMb) : escapeHtml(t('No mailbox'))),
         fact(3, user.services.ftp || user.services.webdisk ? technical(user.ftpDir) : escapeHtml(t('No file access'))),
-        fact(4, `<span class="v2-muted">${escapeHtml(t('Not read'))}</span>`),
+        fact(4, `<span class="v2-muted">${escapeHtml(t('Loading...'))}</span>`),
       ],
       hooks: { 'data-email-services': serviceKeys(user).join(' '), 'data-list-row': true, 'data-list-search': user.login.toLowerCase() },
       actionsHtml: rowActions(t, user, props.canManage, props.readOnly === true),
@@ -131,9 +131,9 @@ export function renderV2EmailAccountsPage(t: Translate, props: EmailAccountsPage
   const users = props.users.state === 'read' ? props.users.items : undefined
   const counts = users ? { email: users.filter(user => user.services.email).length, ftp: users.filter(user => user.services.ftp).length, webdisk: users.filter(user => user.services.webdisk).length } : undefined
   const summaries = kpiStrip({ label: t('Service users'), items: [
-    { label: t('Mailboxes'), value: counts ? String(counts.email) : t('Not read'), ...(props.plan ? { unit: `/ ${props.plan.caps.mailboxes === 'unlimited' ? t('Unlimited') : props.plan.caps.mailboxes}` } : {}) },
-    { label: t('FTP accounts'), value: counts ? String(counts.ftp) : t('Not read') },
-    { label: t('Web Disk'), value: counts ? String(counts.webdisk) : t('Not read') },
+    { label: t('Mailboxes'), value: counts ? String(counts.email) : t('Loading...'), ...(props.plan ? { unit: `/ ${props.plan.caps.mailboxes === 'unlimited' ? t('Unlimited') : props.plan.caps.mailboxes}` } : {}) },
+    { label: t('FTP accounts'), value: counts ? String(counts.ftp) : t('Loading...') },
+    { label: t('Web Disk'), value: counts ? String(counts.webdisk) : t('Loading...') },
   ] })
   const connection = card({ title: t('Connection information'), titleId: 'v2-email-connection-title', bodyHtml: `<p class="v2-muted">${escapeHtml(t('Connection hosts, ports, mailbox usage and delivery health were not read.'))}</p>` })
   const main = `<div class="v2-stack">${usersTable(t, props)}${connection}${howServiceUsersWork(t)}</div>`

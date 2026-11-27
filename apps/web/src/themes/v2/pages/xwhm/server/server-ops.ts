@@ -37,13 +37,13 @@ export function renderV2ServerOps(t: Translate, ids: readonly ServerOpsCardId[],
   }
   const body = ids.map(id => {
     const spec = SERVER_OPS_CARDS[id]
-    const table = spec.columns ? `<div class="v2-server-ops__scroll" role="region" tabindex="0" aria-label="${e(spec.title)}"><table><caption class="v2-sr">${e(spec.title)}</caption><thead><tr>${spec.columns.map(title => `<th scope="col">${e(title)}</th>`).join('')}</tr></thead><tbody data-server-ops-rows><tr><td colspan="${spec.columns.length}">${e(msgid('Not read'))}</td></tr></tbody></table></div>` : ''
+    const table = spec.columns ? `<div class="v2-server-ops__scroll" role="region" tabindex="0" aria-label="${e(spec.title)}"><table><caption class="v2-sr">${e(spec.title)}</caption><thead><tr>${spec.columns.map(title => `<th scope="col">${e(title)}</th>`).join('')}</tr></thead><tbody data-server-ops-rows><tr><td colspan="${spec.columns.length}">${e(msgid('Loading...'))}</td></tr></tbody></table></div>` : ''
     // Consecutive checkboxes form their own row group so they never interleave with text fields.
     const runs: ServerOpsField[][] = []
     for (const field of spec.fields) { const last = runs.at(-1); if (last && (last[0]!.kind === 'check') === (field.kind === 'check')) last.push(field); else runs.push([field]) }
     const fields = runs.map(run => `<div class="v2-server-ops__${run[0]!.kind === 'check' ? 'checks' : 'fields'}">${run.map(field => control(id, field)).join('')}</div>`).join('')
     const job = spec.jobLink ? `<a class="v2-btn" href="/whm/jobs" data-server-ops-job hidden>${e(msgid('Open job'))}</a>` : ''
-    return card({ id: `v2-server-ops-${id}`, title: t(spec.title), titleId: `v2-server-ops-${id}-heading`, bodyHtml: `<div class="v2-server-ops__form" role="group" aria-labelledby="v2-server-ops-${id}-heading" data-server-ops="${id}" data-server-ops-api="${SERVER_OPS_API[id]}" data-server-ops-can-read="${canRead}" data-server-ops-can-manage="${canManage}"><p class="v2-muted">${e(spec.lede)}</p>${fields}${table}<p role="status" data-state="unread" data-server-ops-status>${e(msgid('Not read'))}</p><div class="v2-server-ops__actions"><button type="button" class="v2-btn${spec.danger ? ' v2-btn--danger' : ' v2-btn--primary'}" data-server-ops-submit disabled>${e(spec.submit)}</button>${job}</div></div>` })
+    return card({ id: `v2-server-ops-${id}`, title: t(spec.title), titleId: `v2-server-ops-${id}-heading`, bodyHtml: `<div class="v2-server-ops__form" role="group" aria-labelledby="v2-server-ops-${id}-heading" data-server-ops="${id}" data-server-ops-api="${SERVER_OPS_API[id]}" data-server-ops-can-read="${canRead}" data-server-ops-can-manage="${canManage}"><p class="v2-muted">${e(spec.lede)}</p>${fields}${table}<p role="status" data-state="unread" data-server-ops-status>${e(msgid('Loading...'))}</p><div class="v2-server-ops__actions"><button type="button" class="v2-btn${spec.danger ? ' v2-btn--danger' : ' v2-btn--primary'}" data-server-ops-submit disabled>${e(spec.submit)}</button>${job}</div></div>` })
   }).join('')
   return `<div class="v2-server-ops">${body}</div>`
 }

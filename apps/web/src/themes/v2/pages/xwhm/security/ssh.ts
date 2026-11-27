@@ -10,7 +10,7 @@ export function renderV2WhmSsh(input: WhmObservationInput): string {
   const { t, canRead, canManage } = context(input)
   // A read-only page still shows the saved port, disabled.
   const portKnown = (canRead || whmStoredFacts(input, input.observationAuthority ?? {}, ['server-settings-edit'])) && Number.isInteger(input.serverSettings?.sshPort)
-  const unread = t(msgid('Not read'))
+  const unread = t(msgid('Loading...'))
   // The policy client writes sign-in counts into the two today tiles, so they keep the numeric value size; service state stays text.
   const tiles = `<section class="v2-kpi-row" aria-label="${esc(t(msgid('SSH service')))}">${([['active', msgid('Service')], ['enabled', msgid('Starts at boot')], ['today-accepted', msgid('Successful sign-ins today')], ['today-failed', msgid('Failed sign-ins today')]] as const).map(([key, label]) => kpiCard({ label: t(label), value: unread, numeric: key.startsWith('today-'), headingLevel: 2, valueHooks: { 'data-whm-ssh-fact': key } })).join('')}</section>`
   const openSessionsText = canRead && input.sshOpenSessions
@@ -33,7 +33,7 @@ export function renderV2WhmSsh(input: WhmObservationInput): string {
       + help(t, msgid('Each alert names the user, the source address and the time, and goes to the notification channels within a minute.'))
       + status(t, '', { 'data-whm-ssh-alarm-status': true }, 'unread'))
     + section(t, 'ssh-effective', msgctxt('approved-xwhm', 'Effective config'), help(t, msgid('These are observed global defaults from sshd -T. Connection-specific Match rules and authentication with a key are not verified here. Saved port configuration is a separate source.'))
-      + `<dl class="v2-observation__facts" data-whm-ssh-effective><div><dt>${esc(t(msgid('Observed global policy')))}</dt><dd>${esc(t(msgid('Not read')))}</dd></div></dl>`)
+      + `<dl class="v2-observation__facts" data-whm-ssh-effective><div><dt>${esc(t(msgid('Observed global policy')))}</dt><dd>${esc(t(msgid('Loading...')))}</dd></div></dl>`)
     + section(t, 'ssh-keys', msgctxt('approved-xwhm', 'Authorized keys for root'), `<div class="v2-observation__groups" data-whm-ssh-keys data-whm-ssh-manage="${canManage}">${help(t, msgid('Existing and fleet keys are protected. Only keys added and tracked by this panel can be removed. Last-use timestamps are unavailable unless separately observed.'))}
       ${table(t, msgid('Authorized root keys have not been read'), [msgid('Fingerprint'), msgid('Type'), msgid('Comment'), msgctxt('whm-security-components', 'Added (UTC)'), msgid('Last used (UTC)'), msgid('Action')], { 'data-whm-ssh-key-rows': true })}
       <p data-whm-ssh-opaque hidden></p>${field(t, 'v2-ssh-key', msgid('Add a public key'), area('v2-ssh-key', { 'data-whm-ssh-public-key': true }, ' dir="ltr" maxlength="8192" spellcheck="false" autocomplete="off"'))}

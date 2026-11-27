@@ -652,6 +652,13 @@ describe('workspace runtime client', () => {
       expect(s1.hidden).toBe(false)
       expect(s2.hidden).toBe(true)
 
+      nextBtn.click()
+      expect(s2.hidden).toBe(false)
+      const firstNav = wiz.querySelector<HTMLElement>('[data-ds-wizard-goto="0"]')!
+      firstNav.click()
+      expect(s1.hidden).toBe(false)
+      expect(s2.hidden).toBe(true)
+
       // 4. Table select-all & row selection
       const selectAll = document.querySelector<HTMLInputElement>('#kb-tbl [data-ds-select-all]')!
       const rowChecks = document.querySelectorAll<HTMLInputElement>('#kb-tbl [data-ds-row-select]')

@@ -1698,7 +1698,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/command-palette-client.ts",
-    "sha256": "1c37e5714d60d620393a2b8a337753222095da32927fa3338bb8e41114696169",
+    "sha256": "32d89c96219d5d923d4f10fe2f126983b7b9dcf2663bcca92c55669071db47d3",
     "sites": [
       {
         "line": 32,

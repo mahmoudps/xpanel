@@ -83,8 +83,8 @@ function quota(t: Translate, label: string, used: MeasuredTotal | undefined, val
   // Limits are stored in MiB; both sides use the product byte format.
   const bytes = usedBytes(used), shown = bytes === undefined ? undefined : formatAsciiBytes(bytes), limit = typeof value === 'number' ? formatAsciiBytes(value * 1048576) : undefined
   const percent = bytes !== undefined && typeof value === 'number' && value > 0 ? Math.min(100, Math.round(bytes / (value * 1048576) * 1000) / 10) : undefined
-  const bar = percent === undefined ? '' : `<div class="v2-bar" role="meter" aria-label="${escapeHtml(label)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percent}" aria-valuetext="${escapeHtml(`${shown} / ${limit}`)}"><span class="v2-bar__fill v2-bar--${percent >= 95 ? 'bad' : percent >= 80 ? 'warn' : 'info'}" style="inline-size:${percent}%"></span></div>`
-  return `<small class="v2-muted">${escapeHtml(label)}</small><span>${shown === undefined ? escapeHtml(t('Not read')) : ltr(shown)} / ${value === undefined ? escapeHtml(t('Not read')) : value === 'unlimited' ? escapeHtml(t('Unlimited')) : ltr(limit!)}</span>${bar}${custom ? `<small class="v2-muted">${escapeHtml(bytes === undefined ? t('Usage / the account’s own limit. Usage has not been read.') : t(msgctxt('theme:v2', 'Usage / the account’s own limit.')))}</small>` : ''}`
+  const bar = percent === undefined ? '' : `<progress class="v2-bar v2-bar--${percent >= 95 ? 'bad' : percent >= 80 ? 'warn' : 'info'}" role="meter" aria-label="${escapeHtml(label)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percent}" aria-valuetext="${escapeHtml(`${shown} / ${limit}`)}" value="${percent}" max="100"></progress>`
+  return `<small class="v2-muted">${escapeHtml(label)}</small><span>${shown === undefined ? escapeHtml(t('Loading...')) : ltr(shown)} / ${value === undefined ? escapeHtml(t('Loading...')) : value === 'unlimited' ? escapeHtml(t('Unlimited')) : ltr(limit!)}</span>${bar}${custom ? `<small class="v2-muted">${escapeHtml(bytes === undefined ? t('Usage / the account’s own limit. Usage has not been read.') : t(msgctxt('theme:v2', 'Usage / the account’s own limit.')))}</small>` : ''}`
 }
 
 function details(t: Translate, props: WhmSurfaceProps, account: Account, canManage: boolean): string {
@@ -92,7 +92,7 @@ function details(t: Translate, props: WhmSurfaceProps, account: Account, canMana
   const plan = accountPlan(props, account)
   const owner = account.ownerId === null ? 'root' : principal.kind === 'reseller' && account.ownerId === principal.id ? principal.username : props.resellers?.find(item => item.id === account.ownerId)?.username
   const key = 'v2-account-detail-' + encodeURIComponent(account.username)
-  const missing = t('Not read')
+  const missing = t('Loading...')
   const usage = props.accountUsage?.[account.id]
   const limit = (value: number | 'unlimited' | undefined, unit = ''): string => value === 'unlimited' ? t('Unlimited')
     : typeof value === 'number' && Number.isFinite(value) && value >= 0 ? String(value) + unit : missing
@@ -188,7 +188,7 @@ function row(t: Translate, props: WhmSurfaceProps, account: Account, canManage: 
   const usage = props.accountUsage?.[account.id]
   const ioWrite = plan?.resources.ioWriteBps
   const ioWriteCap = ioWrite === 'unlimited' ? escapeHtml(t('Unlimited'))
-    : typeof ioWrite === 'number' && Number.isFinite(ioWrite) && ioWrite >= 0 ? ltr(formatAsciiRate(ioWrite)) : escapeHtml(t('Not read'))
+    : typeof ioWrite === 'number' && Number.isFinite(ioWrite) && ioWrite >= 0 ? ltr(formatAsciiRate(ioWrite)) : escapeHtml(t('Loading...'))
   const status = account.status === 'active' ? t('Active') : account.status === 'suspended' ? t('Suspended') : t('Terminating')
   const fields = hookAttrs({ 'data-account-row': account.username, 'data-account-id': account.id, 'data-list-search': `${account.username} ${account.primaryDomain}`.toLowerCase(), 'data-list-owner': account.ownerId ?? '', 'data-list-plan': account.planId, 'data-list-state': account.status })
   const select = `<td><label class="v2-whm-accounts__selection"><input type="checkbox" value="${escapeHtml(account.username)}" data-account-selection disabled><span class="v2-sr">${escapeHtml(t('Select account'))} ${ltr(account.username)}</span></label></td>`
@@ -197,7 +197,7 @@ function row(t: Translate, props: WhmSurfaceProps, account: Account, canManage: 
   const domain = `<td><div class="v2-whm-accounts__stack"><span class="v2-mono">${ltr(account.primaryDomain)}</span><small class="v2-muted v2-mono" data-account-table-value="ip">${ltr(account.ipv4)}${account.ipv6 ? ` ${ltr(account.ipv6)}` : ''}</small></div></td>`
   const used = `<td><div class="v2-whm-accounts__stack"><div class="v2-whm-accounts__quota" data-account-table-value="disk">${quota(t, t('Disk'), usage?.disk, plan?.resources.diskMb, account.limits?.resources?.diskMb !== undefined)}</div><div class="v2-whm-accounts__quota" data-account-table-value="bandwidth">${quota(t, t('Bandwidth per month'), usage?.traffic, plan?.resources.bandwidthMbMonth, account.limits?.resources?.bandwidthMbMonth !== undefined)}</div></div></td>`
   const state = `<td><span data-account-status data-state="${account.status}"><span class="v2-pill v2-pill--state"><span class="v2-pill__dot" aria-hidden="true"></span><span data-account-status-label>${escapeHtml(status)}</span></span></span><template data-account-status-pending><span class="v2-pill v2-pill--warn"><span class="v2-pill__dot" aria-hidden="true"></span><span data-account-status-label>${escapeHtml(t('Verification required'))}</span></span></template></td>`
-  const planCell = `<td${phoneLabel(t('Plan'))}><div class="v2-whm-accounts__stack"><span>${escapeHtml(plan?.name ?? t('Not read'))}</span><small class="v2-muted" data-account-table-value="owner">${escapeHtml(t('Owner'))} ${owner ? ltr(owner) : escapeHtml(t('Not read'))}</small></div></td>`
+  const planCell = `<td${phoneLabel(t('Plan'))}><div class="v2-whm-accounts__stack"><span>${escapeHtml(plan?.name ?? t('Loading...'))}</span><small class="v2-muted" data-account-table-value="owner">${escapeHtml(t('Owner'))} ${owner ? ltr(owner) : escapeHtml(t('Loading...'))}</small></div></td>`
   return `<tr${fields}>${select}${opener}${domain}${used}${state}${planCell}<td data-account-table-value="io-write"${phoneLabel(t('IO write cap'))}>${ioWriteCap}</td><td class="v2-whm-accounts__actions">${actions(t, props, account, canManage)}</td></tr>`
 }
 
@@ -224,7 +224,7 @@ export function renderV2WhmAccountList(t: Translate, props: WhmSurfaceProps, aut
   // Status quick filters: the account list client binds data-list-state-chip to its status filter.
   const quick = filterBar({ segments: { label: t('Status'), options: ([['', 'All'], ['active', 'Active'], ['suspended', 'Suspended'], ['terminating', 'Terminating']] as const).map(([value, label]) => ({ label: t(label), count: value ? list.accounts.filter(account => account.status === value).length : list.accounts.length, pressed: value === '', hooks: { 'data-list-state-chip': value } })) } })
   const columns = [t('Select'), t('Account'), t('Primary domain'), t('Usage'), t('Status'), t('Plan'), t('IO write cap'), t('Actions')]
-  const table = `<div class="v2-table-scroll" role="region" aria-labelledby="v2-whm-accounts-list" tabindex="0"><table class="v2-table v2-whm-accounts__table"><caption class="v2-sr">${escapeHtml(t('Accounts'))}</caption><thead><tr>${columns.map(label => `<th scope="col">${escapeHtml(label)}</th>`).join('')}</tr></thead><tbody>${list.accounts.map(account => row(t, props, account, canManage)).join('') || `<tr><td colspan="${columns.length}"><p role="status">${escapeHtml(empty)}</p></td></tr>`}</tbody></table></div><p class="v2-muted v2-whm-accounts__note">${escapeHtml(props.accountUsage ? t(msgctxt('theme:v2', 'Usage / configured plan limit. An account the host did not report shows Not read.')) : t('Usage / configured plan limit. Usage has not been read.'))}</p>`
+  const table = `<div class="v2-table-scroll" role="region" aria-labelledby="v2-whm-accounts-list" tabindex="0"><table class="v2-table v2-whm-accounts__table"><caption class="v2-sr">${escapeHtml(t('Accounts'))}</caption><thead><tr>${columns.map(label => `<th scope="col">${escapeHtml(label)}</th>`).join('')}</tr></thead><tbody>${list.accounts.map(account => row(t, props, account, canManage)).join('') || `<tr><td colspan="${columns.length}"><p role="status">${escapeHtml(empty)}</p></td></tr>`}</tbody></table></div><p class="v2-muted v2-whm-accounts__note">${escapeHtml(props.accountUsage ? t(msgctxt('theme:v2', 'Usage / configured plan limit.')) : t('Usage / configured plan limit. Usage has not been read.'))}</p>`
   const description = root && listed
     ? `${t(msgctxt('theme:v2', 'Hosting accounts, their configured plans and authorized actions.'))} ${t(msgctxt('theme:v2', 'Resellers see only the accounts they own.'))}`
     : t(msgctxt('theme:v2', 'Hosting accounts, their configured plans and authorized actions.'))
