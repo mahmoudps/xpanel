@@ -5,7 +5,7 @@ import { CLOSED_NETWORK_AUTHORITY, netButton, netCard, netFacts, netField, netTa
 
 export function renderV2WhmDnsProvidersPage(props: WhmNetworkProps, authority: WhmNetworkAuthority = CLOSED_NETWORK_AUTHORITY): string {
   const { t, canRead, canManage } = networkContext(props, authority)
-  const unread = t(msgid('Not read'))
+  const unread = t(msgid('Loading...'))
   const table = (key: string, title: string, labels: string[], empty: string): string => netTable(t, `provider-${key}`, title, labels, [], empty, { 'data-sec-rows': key })
   const status = `<p data-sec-status data-state="${canRead ? 'unread' : 'unavailable'}" role="status">${escapeHtml(t(msgid('Nothing has been read yet.')))}</p>`
   const connect = `${status}${table('accounts', t(msgid('Provider accounts')), [t(msgid('Name')), t(msgid('Provider')), t(msgid('Token ID')), t(msgid('Verified (UTC)')), t(msgid('Actions'))], t(msgid('No provider accounts have been read.')))}<h3>${escapeHtml(t(msgid('Connect provider')))}</h3><div class="v2-whm-network__fields">${netField('provider-label', t(msgid('Name')), { kind: 'input', maxlength: 64, autocomplete: 'off', hooks: { 'data-sec-input': 'label' } })}${netField('provider-token', t(msgid('Cloudflare API token')), { kind: 'input', type: 'password', maxlength: 40, autocomplete: 'off', spellcheck: false, dir: 'ltr', hooks: { 'data-sec-input': 'token' } }, t(msgid('The token is checked with Cloudflare before it is saved. It is stored only on this server and is never shown again.')))}</div><p>${escapeHtml(t(msgid('Only Cloudflare is supported. Other DNS providers are not available.')))}</p><div class="v2-whm-network__actions">${netButton(t(msgid('Connect provider')), { 'data-sec-action': 'connect' }, { primary: true })}</div><p data-sec-result role="status" hidden></p>`
@@ -16,7 +16,7 @@ export function renderV2WhmDnsProvidersPage(props: WhmNetworkProps, authority: W
 
 export function renderV2WhmDnsClusterPage(props: WhmNetworkProps, authority: WhmNetworkAuthority = CLOSED_NETWORK_AUTHORITY): string {
   const { t, canRead, canManage } = networkContext(props, authority)
-  const unread = t(msgid('Not read'))
+  const unread = t(msgid('Loading...'))
   const table = (key: string, title: string, labels: string[], empty: string): string => netTable(t, `cluster-${key}`, title, labels, [], empty, { 'data-sec-rows': key })
   const fact = (keys: [string, string][]) => netFacts(keys.map(([key, label]) => ({ label: t(label), valueHtml: escapeHtml(unread), hooks: { 'data-sec-field': key } })))
   const state = `<p data-sec-status data-state="${canRead ? 'unread' : 'unavailable'}" role="status">${escapeHtml(t(msgid('Nothing has been read yet.')))}</p>${fact([['application', msgid('Cluster state')], ['launch', msgid('PowerDNS backends')], ['primary', msgid('Sends NOTIFY to peers')], ['include-dir', msgid('Include directory')], ['axfr', msgid('Zone transfers allowed from')], ['updated', msgid('Last saved (UTC)')]])}<p>${escapeHtml(t(msgid('This server is the primary. Peers are secondary nameservers that transfer zones from it; PowerDNS sends them NOTIFY when a serial changes.')))}</p>`

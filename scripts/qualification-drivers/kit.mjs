@@ -6,6 +6,7 @@ import https from 'node:https'
 import net from 'node:net'
 import { connect } from 'node:tls'
 import { navigation } from '../../packages/catalog/src/data/navigation.ts'
+import { canonicalNavigationRoute } from '../../packages/catalog/src/navigation.ts'
 
 /**
  * Shared kit for the per-slice acceptance drivers. A driver acts only as a real client of the installed release:
@@ -29,16 +30,39 @@ export const safeResponse = response => ({ status: response?.status ?? null, cod
 const SESSION_ACTORS = ['root', 'owner', 'mailbox']
 /** The listener each actor signs in on; `reseller` is reached only through `signIn`. */
 export const ACTOR_ENTRY = Object.freeze({ root: 'xwhm', reseller: 'xwhm', owner: 'xpanel', mailbox: 'xmail' })
+/** Folded subtab tools retain their registered subdocument route for qualification browser checks. */
+const FOLDED_SUBTAB_ROUTES = Object.freeze({
+  'show-reseller-accounts': '/whm/resellers/more',
+  'view-reseller-usage-and-account-status': '/whm/resellers/more',
+  'reseller-account-limits': '/whm/resellers/more',
+  'reseller-package-limits': '/whm/resellers/more',
+  'change-ownership-multiple-accounts': '/whm/resellers/more',
+  'email-all-resellers': '/whm/resellers/more',
+  'zone-ttl-bulk': '/whm/dns/more',
+  'hostname-a-record': '/whm/dns/more',
+  'dns-config-cleanup': '/whm/dns/more',
+  'service-manager': '/whm/services/more',
+  'restart-php-fpm': '/whm/services/more',
+  'restart-postgresql': '/whm/services/more',
+  'restart-ssh': '/whm/services/more',
+  'restart-mailing-lists': '/whm/services/more',
+  'aapanel-boot-items': '/whm/services/more',
+  'aapanel-supervisor': '/whm/services/more',
+  'system-reboot': '/whm/services/more',
+  'service-watchdog': '/whm/services/more',
+  'transfer-or-restore-account': '/whm/backups/restore-more',
+  'account-restore-progress': '/whm/backups/restore-more',
+})
 /** Every tool's page and the actor who opens it, read from the catalog so a moved route cannot leave a stale declaration. */
-const PAGES = new Map(navigation.flatMap(({ surface, sections }) => sections.flatMap(section => section.pages.flatMap(page => page.tools.map(id => [id, { route: page.route, actor: surface === 'xpanel' ? 'owner' : surface === 'xmail' ? 'mailbox' : 'root' }])))))
+const PAGES = new Map(navigation.flatMap(({ surface, sections }) => sections.flatMap(section => section.pages.flatMap(page => page.tools.map(id => [id, { route: FOLDED_SUBTAB_ROUTES[id] ?? page.route, actor: surface === 'xpanel' ? 'owner' : surface === 'xmail' ? 'mailbox' : 'root' }])))))
 const CHECK_ID = /^[A-Z0-9]+(?:-[A-Z0-9]+)*$/
 
 /** Declares one reviewed driver. Check IDs are the observations it owes; a missing one stays blocked in the report. */
 export function tool(id, definition) {
   const { prefix, as = 'root', also = [], probe, paths, checks, unit = [], run, requests = 30, deadlineMs = 120_000, gate = id, restores = [], hostOnly = [], accounts = 0 } = definition
   const location = PAGES.get(id), declared = definition.page
-  if (location === undefined || (declared !== undefined && (declared.route !== location.route || (declared.read !== undefined && typeof declared.read !== 'string') || (declared.shows !== undefined && typeof declared.shows !== 'function')))) throw new Error(`Invalid qualification driver for ${id}`)
-  const page = { ...location, read: declared?.read ?? (location.actor === as ? probe : '/api/auth/me'), ...(declared?.shows ? { shows: declared.shows } : {}) }
+  if (location === undefined || (declared !== undefined && (canonicalNavigationRoute(declared.route) !== canonicalNavigationRoute(location.route) || (declared.read !== undefined && typeof declared.read !== 'string') || (declared.shows !== undefined && typeof declared.shows !== 'function')))) throw new Error(`Invalid qualification driver for ${id}`)
+  const page = { ...location, ...(declared?.route ? { route: declared.route } : {}), read: declared?.read ?? (location.actor === as ? probe : '/api/auth/me'), ...(declared?.shows ? { shows: declared.shows } : {}) }
   const needs = [...new Set([...(definition.needs ?? []), ...(page.actor === 'root' ? [] : ['account']), ...(page.actor === 'mailbox' ? ['mailbox'] : [])])]
   if (!/^[A-Z][A-Z0-9]{1,7}$/.test(prefix ?? '') || !SESSION_ACTORS.includes(as) || typeof probe !== 'string' || !(paths instanceof RegExp) || typeof run !== 'function'
     || !Array.isArray(checks) || checks.length === 0 || new Set(checks).size !== checks.length || !checks.every(item => CHECK_ID.test(item))

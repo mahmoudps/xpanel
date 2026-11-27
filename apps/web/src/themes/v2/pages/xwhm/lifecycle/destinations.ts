@@ -10,7 +10,7 @@ export function renderV2BackupDestinationsPage(props: V2BackupDestinationsPagePr
   const t = v2Messages.translator(props.locale)
   const manage = props.canRead && props.canManage
   const actions = (body: string): string => `<div class="v2-lifecycle__actions">${body}</div>`
-  const runsTable = (key: string, title: string, labels: readonly string[], empty: string, value: number): string => `${lifecycleTable(t, title, labels, { 'data-backup-runs-rows': key }, msgid('Not read'), { value })}<p class="v2-muted" data-backup-runs-empty="${key}" hidden>${text(t, empty)}</p>`
+  const runsTable = (key: string, title: string, labels: readonly string[], empty: string, value: number): string => `${lifecycleTable(t, title, labels, { 'data-backup-runs-rows': key }, msgid('Loading...'), { value })}<p class="v2-muted" data-backup-runs-empty="${key}" hidden>${text(t, empty)}</p>`
   const runsButton = (key: string, label: string, primary = false): string => lifecycleButton(t, label, { [`data-backup-${key}`]: true }, primary)
   // The run controller refuses to read without its four row templates inside this section.
   const technical = (slot: string): string => `<td><bdi dir="ltr" class="v2-mono" data-xp-slot="${slot}"></bdi></td>`, plain = (slot: string): string => `<td data-xp-slot="${slot}"></td>`
@@ -36,7 +36,7 @@ ${runsTable('recoveries', msgid('Recoveries'), [msgid('Started (UTC)'), msgid('A
 `)
   const retention = lifecycleCard(t, 'destination-retention', msgid('Remote retention'), `
 <p>${text(t, msgid('Per account, the newest archive, the newest verified copy and the newest archives up to the schedule retention count are always kept. Only older archives past the destination retention days are deleted. Scheduled runs apply this after every copy is verified.'))}</p>
-${lifecycleField(t, 'v2-backup-retention-destination', msgid('Destination'), `<select id="v2-backup-retention-destination" data-backup-retention-destination disabled><option value="">${text(t, msgid('Not read'))}</option></select>`)}
+${lifecycleField(t, 'v2-backup-retention-destination', msgid('Destination'), `<select id="v2-backup-retention-destination" data-backup-retention-destination disabled><option value="">${text(t, msgid('Loading...'))}</option></select>`)}
 ${actions(runsButton('retention-preview', msgid('Review retention')) + runsButton('retention-apply', msgid('Delete expired archives')))}
 ${lifecycleStatus(t, '', { 'data-backup-retention-status': true }, true)}
 ${runsTable('retention', msgid('Retention plan'), [msgid('Archive'), msgid('Account'), msgid('Created (UTC)'), msgid('Size'), msgctxt('acct-backup-runs-workspace', 'Plan')], msgid('No xPanel archive was found at this destination.'), 5)}

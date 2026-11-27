@@ -69,17 +69,22 @@ const lost = (answer: Answer<unknown>): answer is { kind: 'timeout' | 'failed' }
 const lookupCause = (answer: { kind: 'timeout' | 'failed' }): string => answer.kind === 'timeout' ? 'lookup_timeout' : 'lookup_failed'
 
 /** One memoized, deadline-bound lookup per (type, name) for the whole run; oversized or malformed answers are 'failed', never data. */
-function createLookups(resolver: MailQualityResolver, deadline: number, lookupMs: number) {
+function createLookups(resolver: MailQualityResolver, deadline: number, lookupMs: number, onDeadline?: () => void) {
   const memo = new Map<string, Promise<Answer<unknown>>>()
   const run = <T>(key: string, call: () => Promise<unknown>, read: (value: unknown) => T | null): Promise<Answer<T>> => {
     let pending = memo.get(key)
     if (!pending) {
       pending = (async (): Promise<Answer<unknown>> => {
-        const left = Math.min(lookupMs, deadline - Date.now())
-        if (left <= 0) return { kind: 'timeout' }
+        const remaining = deadline - Date.now()
+        const boundedByDeadline = remaining <= lookupMs
+        const left = Math.min(lookupMs, remaining)
+        if (left <= 0) {
+          onDeadline?.()
+          return { kind: 'timeout' }
+        }
         let timer: ReturnType<typeof setTimeout> | undefined
         try {
-          const value = await Promise.race([call(), new Promise<never>((_, reject) => { timer = setTimeout(() => reject(Object.assign(new Error('timeout'), { code: 'ETIMEOUT' })), left) })])
+          const value = await Promise.race([call(), new Promise<never>((_, reject) => { timer = setTimeout(() => { if (boundedByDeadline) onDeadline?.(); reject(Object.assign(new Error('timeout'), { code: 'ETIMEOUT' })) }, left) })])
           const parsed = read(value)
           return parsed === null ? { kind: 'failed' } : { kind: 'ok', value: parsed }
         } catch (error) {
@@ -326,12 +331,16 @@ export interface MailQualityRun { targets: MailQualityTarget[]; resolver: MailQu
 
 /** Checks at most MAIL_QUALITY_CONCURRENCY domains at a time; every lookup after the total deadline reports lookup_timeout. Nothing is changed. */
 export async function runMailQualityChecks(run: MailQualityRun): Promise<{ results: MailQualityResult[]; timedOut: boolean }> {
-  const lookupMs = run.lookupMs ?? LOOKUP_MS, deadline = Date.now() + (run.totalMs ?? TOTAL_MS), dns = createLookups(run.resolver, deadline, lookupMs)
+  let hitDeadline = false
+  const lookupMs = run.lookupMs ?? LOOKUP_MS, deadline = Date.now() + (run.totalMs ?? TOTAL_MS), dns = createLookups(run.resolver, deadline, lookupMs, () => { hitDeadline = true })
   const material = async (domain: string): Promise<DkimMaterial | null> => {
-    const left = Math.min(lookupMs, deadline - Date.now())
-    if (!run.material || left <= 0) return null
+    const remaining = deadline - Date.now()
+    const boundedByDeadline = remaining <= lookupMs
+    const left = Math.min(lookupMs, remaining)
+    if (!run.material) return null
+    if (left <= 0) { hitDeadline = true; return null }
     let timer: ReturnType<typeof setTimeout> | undefined
-    try { return await Promise.race([run.material(domain), new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), left) })]) } catch { return null } finally { clearTimeout(timer) }
+    try { return await Promise.race([run.material(domain), new Promise<null>(resolve => { timer = setTimeout(() => { if (boundedByDeadline) hitDeadline = true; resolve(null) }, left) })]) } catch { return null } finally { clearTimeout(timer) }
   }
   const results: MailQualityResult[] = []
   let next = 0
@@ -342,7 +351,7 @@ export async function runMailQualityChecks(run: MailQualityRun): Promise<{ resul
       results[index] = { domain: target.domain, mx, spf, dkim, dmarc, ptr }
     }
   }))
-  return { results, timedOut: Date.now() >= deadline }
+  return { results, timedOut: hitDeadline || Date.now() >= deadline }
 }
 
 /** The reconciler's mail-domain rule: a domain with at least one email service user, outside terminating accounts (see mail-server-workspace domainRows). */

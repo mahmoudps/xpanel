@@ -7,10 +7,14 @@
 // - Drives file dropzones and keyboard-accessible sortable lists
 // Served as a same-origin external script under strict CSP (script-src 'self').
 
+import { LIVE_DATA_STORE_SCRIPT } from './data/live-store.ts'
+
 export const WORKSPACE_RUNTIME_SCRIPT = /* js */ String.raw`(function () {
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
   if (window.__xpanelWorkspaceRuntime) return;
   window.__xpanelWorkspaceRuntime = true;
+
+  ${LIVE_DATA_STORE_SCRIPT}
 
   function t(message, values) {
     if (typeof window.xpT === 'function') return window.xpT(message, values);
@@ -31,7 +35,7 @@ export const WORKSPACE_RUNTIME_SCRIPT = /* js */ String.raw`(function () {
   };
 
   /* 1. Shared GET request coalescing and short-TTL cache for session/chrome endpoints */
-  var CACHEABLE = /^\/api\/(?:auth\/me|ui-preferences|admin\/favorites|admin\/notifications|server\/info|account\/summary)(?:\?.*)?$/;
+  var CACHEABLE = LIVE_CACHEABLE;
   var inflight = new Map();
   var cache = new Map();
   var CACHE_TTL_MS = 6000;
@@ -1890,6 +1894,44 @@ export const WORKSPACE_RUNTIME_SCRIPT = /* js */ String.raw`(function () {
       var submitBtn = Array.prototype.slice.call(wiz.querySelectorAll('[data-ds-wizard-submit]')).filter(function (el) {
         return el.closest('[data-ds-wizard]') === wiz;
       })[0] || null;
+      var submitTargetSel = submitBtn ? submitBtn.getAttribute('data-ds-wizard-submit-target') : null;
+      var matchesTargetSpec = function (el, spec) {
+        var parts = String(spec || '').trim().split(/\s+/);
+        var cur = el;
+        for (var p = parts.length - 1; p >= 0; p--) {
+          var m = /^\[([a-zA-Z0-9_-]+)(?:=(?:"([^"]*)"|'([^']*)'|([^\]]*)))?\]$/.exec(parts[p]);
+          if (!m) return false;
+          var attrName = m[1];
+          var wantVal = m[2] !== undefined ? m[2] : (m[3] !== undefined ? m[3] : m[4]);
+          while (cur && cur !== wiz.parentNode) {
+            var has = cur.hasAttribute && cur.hasAttribute(attrName);
+            var ok = has && (wantVal === undefined || cur.getAttribute(attrName) === wantVal);
+            if (ok) break;
+            if (p === parts.length - 1) return false;
+            cur = cur.parentElement;
+          }
+          if (!cur || cur === wiz.parentNode) return false;
+          cur = cur.parentElement;
+        }
+        return true;
+      };
+      var resolveSubmitTarget = function () {
+        if (!submitTargetSel) return null;
+        var buttons = wiz.querySelectorAll('button');
+        for (var i = 0; i < buttons.length; i++) {
+          if (matchesTargetSpec(buttons[i], submitTargetSel)) return buttons[i];
+        }
+        return null;
+      };
+      var syncSubmitTargetDisabled = function () {
+        if (!submitBtn || !submitTargetSel) return;
+        var wantDisabled = activeIndex < panels.length - 1;
+        if (!wantDisabled) {
+          var tgt = resolveSubmitTarget();
+          wantDisabled = tgt ? Boolean(tgt.disabled) : true;
+        }
+        if (submitBtn.disabled !== wantDisabled) submitBtn.disabled = wantDisabled;
+      };
       var activeIndex = Math.max(0, Math.min(panels.length - 1, Number(wiz.getAttribute('data-active-step') || 0) || 0));
 
       function firstInvalidControl(panel) {
@@ -1919,6 +1961,7 @@ export const WORKSPACE_RUNTIME_SCRIPT = /* js */ String.raw`(function () {
         if (submitBtn) {
           submitBtn.hidden = activeIndex < panels.length - 1;
           submitBtn.disabled = activeIndex < panels.length - 1;
+          syncSubmitTargetDisabled();
         }
       }
       function advanceStep() {
@@ -1948,6 +1991,12 @@ export const WORKSPACE_RUNTIME_SCRIPT = /* js */ String.raw`(function () {
             return;
           }
         }
+        if (submitTargetSel) {
+          ev.preventDefault();
+          var targetAction = resolveSubmitTarget();
+          if (!targetAction || targetAction.disabled) return;
+          targetAction.click();
+        }
       }
 
       if (prevBtn) {
@@ -1955,11 +2004,52 @@ export const WORKSPACE_RUNTIME_SCRIPT = /* js */ String.raw`(function () {
           showStep(activeIndex - 1);
         });
       }
+      navItems.forEach(function (item, idx) {
+        item.addEventListener('click', function () {
+          if (idx < activeIndex) showStep(idx);
+        });
+      });
       if (nextBtn) {
         nextBtn.addEventListener('click', function () {
           advanceStep();
         });
       }
+      var syncDiffPreview = function () {
+        var diffSection = Array.prototype.slice.call(wiz.querySelectorAll('[data-ds-wizard-diff]')).filter(function (el) {
+          return el.closest('[data-ds-wizard]') === wiz;
+        })[0] || null;
+        if (!diffSection) return;
+        diffSection.querySelectorAll('[data-ds-diff-source]').forEach(function (cell) {
+          var fieldName = cell.getAttribute('data-ds-diff-source');
+          if (!fieldName) return;
+          var ctrl = Array.prototype.find.call(wiz.querySelectorAll('[name]'), function (el) {
+            return el.getAttribute('name') === fieldName;
+          });
+          if (!ctrl) return;
+          var val = ctrl.type === 'checkbox' ? (ctrl.checked ? 'on' : 'off') : String(ctrl.value || '').trim();
+          if (val) cell.textContent = val;
+        });
+      };
+      wiz.addEventListener('input', syncDiffPreview);
+      wiz.addEventListener('change', syncDiffPreview);
+      document.addEventListener('xpanel:ws-event', function (ev) {
+        var detail = ev && ev.detail;
+        var payload = detail && detail.data && typeof detail.data === 'object' ? detail.data : null;
+        if (!detail || detail.kind !== 'job.updated' || !payload) return;
+        var prog = Array.prototype.slice.call(wiz.querySelectorAll('[data-ds-wizard-progress]')).filter(function (el) {
+          return el.closest('[data-ds-wizard]') === wiz;
+        })[0] || null;
+        if (!prog) return;
+        var targetStep = payload.stepId
+          ? Array.prototype.find.call(prog.querySelectorAll('[data-ds-progress-step]'), function (el) {
+              return el.getAttribute('data-ds-progress-step') === String(payload.stepId);
+            })
+          : prog.querySelector('.ds-stepper__item[data-step-state="running"], .ds-stepper__item[data-step-state="upcoming"]');
+        if (targetStep) {
+          var mapped = payload.status === 'succeeded' ? 'done' : payload.status === 'failed' || payload.status === 'cancelled' ? 'failed' : 'running';
+          targetStep.setAttribute('data-step-state', mapped);
+        }
+      });
       if (submitBtn) {
         submitBtn.addEventListener('click', validateWizardForSubmit);
       }
@@ -1980,6 +2070,10 @@ export const WORKSPACE_RUNTIME_SCRIPT = /* js */ String.raw`(function () {
         ev.preventDefault();
         advanceStep();
       });
+      if (submitTargetSel && typeof MutationObserver === 'function') {
+        var targetObserver = new MutationObserver(syncSubmitTargetDisabled);
+        targetObserver.observe(wiz, { subtree: true, childList: true, attributes: true, attributeFilter: ['disabled'] });
+      }
       showStep(activeIndex);
     });
 

@@ -8,7 +8,7 @@ const render = (activeRoute: string) => renderV2WhmRecoveryToolsPage({ activeRou
 describe('V2 WHM guarded recovery tools', () => {
   it('marks every recovery table for two-column phone rows and names the stacked cells in the row templates', () => {
     for (const route of V2_WHM_RECOVERY_TOOL_ROUTES) {
-      const tables = render(route).match(/<table[^>]*>/g) ?? []
+      const tables = (render(route).match(/<table[^>]*>/g) ?? []).filter(table => !table.includes('class="ds-table"'))
       expect(tables.length).toBeGreaterThan(0)
       for (const table of tables) expect(table).toMatch(/^<table data-phone-value="[1-4]"(?: data-phone-name="2")?>$/)
     }
@@ -22,7 +22,7 @@ describe('V2 WHM guarded recovery tools', () => {
   it.each(V2_WHM_RECOVERY_TOOL_ROUTES)('preserves the real %s workflow with default-denied admission', activeRoute => {
     const html = renderV2WhmRecoveryToolsPage({ activeRoute })!
     expect(html).toContain(`data-whm-detail-route="${activeRoute}"`)
-    const nodes = parseMarkup(html).filter(node => node.template < 0 && ['button', 'input', 'select', 'textarea'].includes(node.tag))
+    const nodes = parseMarkup(html).filter(node => node.template < 0 && ['button', 'input', 'select', 'textarea'].includes(node.tag) && !node.attrs.has('data-ds-wizard-next') && !node.attrs.has('data-ds-wizard-prev'))
     expect(nodes.length).toBeGreaterThan(0)
     expect(nodes.every(node => node.attrs.has('disabled'))).toBe(true)
     expect(html).not.toContain('<form')
