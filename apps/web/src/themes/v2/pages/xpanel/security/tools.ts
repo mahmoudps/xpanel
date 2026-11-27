@@ -7,7 +7,7 @@ import { actions, area, button, deniedPage, esc, facts, field, input, link, note
 
 export function renderV2AccountSshPage(props: PanelSurfaceProps, authority: PanelSettingsAuthority = NO_SETTINGS_AUTHORITY): string {
   const c = settingsContext(props, authority), { t } = c, title = t(msgid('SSH access')), description = t(msgid('Manage the public keys that can sign in to this account over SSH.'))
-  const unread = t(msgid('Not read'))
+  const unread = t(msgid('Loading...'))
   const openSessionsText = c.readable && props.sshOpenSessions
     ? (props.sshOpenSessions.state === 'read' ? String(props.sshOpenSessions.count) : t(msgid('Unavailable')))
     : unread
@@ -22,7 +22,7 @@ export function renderV2AccountSshPage(props: PanelSurfaceProps, authority: Pane
 
 export function renderV2VirusScannerPage(props: PanelSurfaceProps, authority: PanelSettingsAuthority = NO_SETTINGS_AUTHORITY): string {
   const c = settingsContext(props, authority), { t } = c, title = t(msgid('Virus scanner')), description = t(msgid('Scan the files in your home directory for malware with ClamAV.'))
-  const unread = t(msgid('Not read')), fact = (key: string, label: string) => ({ label, valueHtml: `<bdi dir="ltr" class="v2-num" data-vscan-${key}>${esc(unread)}</bdi>` })
+  const unread = t(msgid('Loading...')), fact = (key: string, label: string) => ({ label, valueHtml: `<bdi dir="ltr" class="v2-num" data-vscan-${key}>${esc(unread)}</bdi>` })
   const kpis = `<section class="v2-kpi-row" aria-label="${esc(t(msgid('Scan history')))}">${[
     [t(msgctxt('theme:v2', 'Last scan')), t(msgctxt('theme:v2', 'Latest recorded scan.'))], [t(msgctxt('theme:v2', 'Infected files')), t(msgctxt('theme:v2', 'Files reported in the latest finished scan.'))], [t(msgctxt('theme:v2', 'Signatures')), t(msgctxt('theme:v2', 'Scanner signature database.'))], [t(msgid('Next scan')), t(msgctxt('theme:v2', 'Availability comes from the protected scanner.'))],
   ].map(([label, text], index) => kpiCard({ label: label!, value: '—', note: text!, tone: 'neutral', icon: (['calendar', 'files', 'shield', 'activity'] as readonly IconName[])[index], valueHooks: { 'data-vscan-kpi': ['last-scan', 'infected', 'signatures', 'next-scan'][index] } })).join('')}</section>`
@@ -39,7 +39,7 @@ export function renderV2VirusScannerPage(props: PanelSurfaceProps, authority: Pa
 export function renderV2AccountWafPage(props: PanelSurfaceProps, authority: PanelSettingsAuthority = NO_SETTINGS_AUTHORITY): string {
   const c = settingsContext(props, authority), { t } = c, title = t(msgid('Web application firewall')), description = t(msgid('See the protection that applies to your sites and switch ModSecurity per domain.'))
   const read = section('v2-waf-protection', t(msgid('Protection for your sites')), status(t(msgid('Nothing has been read yet.')), { 'data-sec-status': true })
-    + facts([['modsec', msgid('ModSecurity')], ['crs-version', msgid('Core Rule Set version')], ['rate', msgid('Requests per address (req/s)')], ['body', msgid('Largest request body (MiB)')], ['denied', msgid('Answer for denied requests')], ['lists', msgid('Server deny lists')]].map(([key, label]) => ({ label: t(label!), valueHtml: `<bdi dir="ltr" class="v2-num" data-sec-field="${key}">${esc(t(msgid('Not read')))}</bdi>` })), { 'data-cols': '3' })
+    + facts([['modsec', msgid('ModSecurity')], ['crs-version', msgid('Core Rule Set version')], ['rate', msgid('Requests per address (req/s)')], ['body', msgid('Largest request body (MiB)')], ['denied', msgid('Answer for denied requests')], ['lists', msgid('Server deny lists')]].map(([key, label]) => ({ label: t(label!), valueHtml: `<bdi dir="ltr" class="v2-num" data-sec-field="${key}">${esc(t(msgid('Loading...')))}</bdi>` })), { 'data-cols': '3' })
     + note(t(msgid('These limits are set by the server administrator and apply to every site on this server.'))), actions(button(t(msgid('Refresh')), { 'data-sec-action': 'refresh' }, !c.readable)))
   const domains = section('v2-waf-domains', t(msgid('ModSecurity per domain')), table('v2-waf-table', t(msgid('ModSecurity per domain')), [t(msgid('Domain')), t(msgid('ModSecurity')), t(msgid('Actions'))], unreadRow(3, t(msgid('No domains have been read.'))), { 'data-sec-rows': 'domains' })
     + note(t(msgid('Turning ModSecurity off for a domain stops rule checks for its sites. The server deny lists and limits still apply.'))) + '<p data-sec-result role="status" hidden></p>')

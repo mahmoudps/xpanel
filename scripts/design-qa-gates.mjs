@@ -9,10 +9,10 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const TOKENS_JSON_PATH = resolve(ROOT, 'apps/web/src/design-system/tokens.json')
 
 const RATCHET_LIMITS = {
-  notReadMax: 1002,
-  notObservedMax: 32,
+  notReadMax: 560,
+  notObservedMax: 25,
   importantMax: 456,
-  inlineStyleMax: 841,
+  inlineStyleMax: 825,
 }
 
 const PHYSICAL_CSS_PROP = /(?:^|[{;])\s*(?:margin|padding|border)-(?:left|right)\s*:|(?:^|[{;])\s*(?:left|right)\s*:|text-align\s*:\s*(?:left|right)\b/i
@@ -69,6 +69,8 @@ export function scanStaticDesignCompliance(options = {}) {
     const inStrictZone = rel.startsWith('apps/web/src/design-system/')
       || rel.startsWith('apps/web/src/data/')
       || rel.startsWith('apps/web/src/features/')
+    const inV2SurfaceZone = rel.startsWith('apps/web/src/themes/v2/pages/')
+      || rel === 'apps/web/src/themes/v2/tool-card-view.ts'
 
     const base = rel.split('/').pop().replace(/\.(?:ts|css|json)$/, '')
     if (inStrictZone && FORBIDDEN_NAMING_RE.test(base)) {
@@ -80,14 +82,28 @@ export function scanStaticDesignCompliance(options = {}) {
     const notObs = (text.match(/\bNot observed\b/g) ?? []).length
     const imp = (text.match(/!important/g) ?? []).length
     const inStyle = (text.match(/\bstyle="/g) ?? []).length
+    const rawSec = (text.match(/\$\{[^}]+\}\s+seconds\b/g) ?? []).length
     findings.metrics.notReadCount += notRead
     findings.metrics.notObservedCount += notObs
     findings.metrics.importantCount += imp
     findings.metrics.inlineStyleCount += inStyle
+    findings.metrics.rawSecondsConcatCount += rawSec
+
+    if (inV2SurfaceZone) {
+      if (notRead > 0 || notObs > 0) {
+        findings.violations.push({ gate: 'G4', file: rel, detail: `v2 surface contains Not read (${notRead}) / Not observed (${notObs})` })
+      }
+      if (inStyle > 0) {
+        findings.violations.push({ gate: 'G6', file: rel, detail: `v2 surface contains ${inStyle} inline style= attribute(s)` })
+      }
+    }
 
     if (inStrictZone) {
       if (notRead > 0 || notObs > 0) {
         findings.violations.push({ gate: 'G4', file: rel, detail: `Found Not read (${notRead}) / Not observed (${notObs})` })
+      }
+      if (rawSec > 0) {
+        findings.violations.push({ gate: 'G5', file: rel, detail: `Found ${rawSec} interpolated raw seconds string(s)` })
       }
       if (imp > 0) {
         findings.violations.push({ gate: 'G6', file: rel, detail: `Found ${imp} !important declaration(s)` })
@@ -148,7 +164,54 @@ export function scanStaticDesignCompliance(options = {}) {
     }
   }
 
+  const navDataPath = resolve(root, 'packages/catalog/src/data/navigation.ts')
+  const navApiPath = resolve(root, 'packages/catalog/src/navigation.ts')
+  if (existsSync(navDataPath) && existsSync(navApiPath)) {
+    const rawNav = readFileSync(navDataPath, 'utf8')
+    const eq = rawNav.indexOf('= [')
+    const parsedNav = eq >= 0 ? JSON.parse(rawNav.slice(eq + 2, rawNav.lastIndexOf(']') + 1)) : []
+    const xwhm = parsedNav.find(s => s.surface === 'xwhm')
+    const expectedOrder = ['home', 'accounts', 'domains', 'email', 'databases', 'software', 'services', 'security', 'backups', 'monitoring', 'server', 'panel']
+    const actualOrder = (xwhm?.sections ?? []).map(s => s.id)
+    if (JSON.stringify(actualOrder) !== JSON.stringify(expectedOrder)) {
+      findings.violations.push({ gate: 'G1', file: 'packages/catalog/src/data/navigation.ts', detail: `xWHM section order/count mismatch: ${actualOrder.join(',')}` })
+    }
+    for (const surface of parsedNav) {
+      for (const sec of surface.sections) {
+        if (sec.pages.length > 12) {
+          findings.violations.push({ gate: 'G1', file: 'packages/catalog/src/data/navigation.ts', detail: `${surface.surface}:${sec.id} exceeds 12 pages (${sec.pages.length})` })
+        }
+        for (const page of sec.pages) {
+          if (page.id.endsWith('-more') || page.route.endsWith('/more') || page.route.endsWith('/restore-more')) {
+            findings.violations.push({ gate: 'G1', file: 'packages/catalog/src/data/navigation.ts', detail: `Folded -more page still canonical: ${page.route}` })
+          }
+        }
+      }
+    }
+    const navApiSrc = readFileSync(navApiPath, 'utf8')
+    if (!navApiSrc.includes('CATALOG_PAGE_DISPOSITIONS')) {
+      findings.violations.push({ gate: 'G1', file: 'packages/catalog/src/navigation.ts', detail: 'Missing CATALOG_PAGE_DISPOSITIONS registry' })
+    }
+  }
+
+  const pagesRoot = resolve(root, 'apps/web/src/themes/v2/pages')
+  if (existsSync(pagesRoot)) {
+    const pageFiles = walkFiles(pagesRoot, (_p, name) => name.endsWith('.ts') && !name.endsWith('.test.ts'))
+    for (const file of pageFiles) {
+      const rel = relative(root, file).replaceAll('\\', '/')
+      const text = readFileSync(file, 'utf8')
+      if (rel === 'apps/web/src/themes/v2/pages/xpanel/home.ts' && /route:\s*'\/home'[^}]*Welcome back/.test(text)) {
+        findings.violations.push({ gate: 'G2', file: rel, detail: '/home pageHeader title drifts from canonical navName ("Home")' })
+      }
+      if (rel === 'apps/web/src/themes/v2/pages/xwhm/overview/index.ts' && /breadcrumb:\s*\[\s*\{\s*label:\s*t\('Home'\)\s*\}\s*,\s*\{\s*label:\s*t\('Dashboard'\)\s*\}\s*\]/.test(text)) {
+        findings.violations.push({ gate: 'G2', file: rel, detail: '/whm pageHeader breadcrumb drifts from canonical navName ("Server dashboard")' })
+      }
+    }
+  }
+
   findings.gates = {
+    G1: !findings.violations.some(v => v.gate === 'G1'),
+    G2: !findings.violations.some(v => v.gate === 'G2'),
     G4: !findings.violations.some(v => v.gate === 'G4'),
     G6: !findings.violations.some(v => v.gate === 'G6'),
     G8: !findings.violations.some(v => v.gate === 'G8'),
@@ -306,15 +369,33 @@ export async function runBrowserGates({
           const pageErrors = []
           const cspViolations = []
           const failedRequests = []
+          const httpErrors = []
           let authMeRequests = 0
 
           await recordCspViolations(page, cspViolations)
+          await page.addInitScript(() => {
+            window.__xpanelCls = 0
+            if (typeof PerformanceObserver === 'function') {
+              try {
+                new PerformanceObserver((list) => {
+                  for (const entry of list.getEntries()) {
+                    if (!entry.hadRecentInput) window.__xpanelCls += entry.value
+                  }
+                }).observe({ type: 'layout-shift', buffered: true })
+              } catch {}
+            }
+          })
           page.on('console', msg => {
             if (msg.type() === 'error') consoleErrors.push(msg.text())
           })
           page.on('pageerror', err => pageErrors.push(err.message))
           page.on('request', req => {
             if (new URL(req.url()).pathname === '/api/auth/me') authMeRequests++
+          })
+          page.on('response', res => {
+            if (res.status() >= 400 && new URL(res.url()).pathname.startsWith('/api/')) {
+              httpErrors.push(`${res.status()} ${res.url()}`)
+            }
           })
           page.on('requestfailed', req => failedRequests.push(`${req.method()} ${req.url()}`))
 
@@ -362,18 +443,47 @@ export async function runBrowserGates({
           }
 
           await injectTestScript(page, axeSource)
-          const domAudit = await page.evaluate(async () => {
+          await page.keyboard.press('Tab').catch(() => {})
+          const domAudit = await page.evaluate(async (modeArg) => {
             const bodyText = document.body.innerText ?? ''
-            const hasNotRead = /\bNot (?:read|observed)\b/i.test(bodyText)
+            const hasNotRead = /\bNot (?:read|observed)\b|غير مقروء/i.test(bodyText)
             const hasNonAsciiDigits = /[\u0660-\u0669\u06F0-\u06F9]/.test(bodyText)
-            const hasRawSeconds = /\b\d+\s+seconds\b/i.test(bodyText)
+            const hasRawSeconds = Array.from(document.querySelectorAll('td, dd, [data-ds-metric], [data-ds-duration]'))
+              .some(el => /^\d+\s+seconds$/i.test(el.textContent?.trim() ?? ''))
+            const hasRawIsoTimestamp = /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z\b/.test(bodyText)
             const rawRouteHeader = Array.from(document.querySelectorAll('.ds-page-head, .v2-page-head'))
               .some(h => /(?:^|\s)\/(?:whm|home|mail|domains|files|security|software|databases)\b/.test(h.textContent ?? ''))
+
+            const html = document.documentElement
+            const modeMatch = html.lang === modeArg.locale
+              && html.dir === (modeArg.locale === 'ar' ? 'rtl' : 'ltr')
+              && (html.dataset.theme ? html.dataset.theme === modeArg.theme : true)
 
             const h1s = Array.from(document.querySelectorAll('h1')).map(el => el.textContent?.trim() ?? '')
             const activeNav = Array.from(document.querySelectorAll('a[aria-current="page"]')).map(el => el.textContent?.trim() ?? '')
             const crumbs = Array.from(document.querySelectorAll('.ds-page-head__breadcrumbs li:last-child > span:last-child, .v2-crumbs [aria-current="page"]'))
               .map(el => el.textContent?.trim() ?? '')
+
+            const isDesktop = window.innerWidth >= 1200
+            const theadTop = document.querySelector('table thead')?.getBoundingClientRect().top ?? 0
+            const firstRowTop = document.querySelector('table tbody tr:not([hidden])')?.getBoundingClientRect().top ?? 0
+            const primaryTop = document.querySelector('[data-ds-wizard], .v2-kpi-row')?.getBoundingClientRect().top ?? 0
+            const yBudgetViolation = isDesktop && (
+              (theadTop > 0 && theadTop > 290)
+              || (firstRowTop > 0 && firstRowTop > 340)
+              || (primaryTop > 0 && primaryTop > 260)
+            )
+
+            const inlineStylesOutsideCharts = Array.from(document.querySelectorAll('main [style]'))
+              .filter(el => !el.closest('.v2-chart, .ds-chart'))
+              .length
+            const arabicFontOk = modeArg.locale !== 'ar' || (html.dir === 'rtl' && /IBM Plex Sans Arabic/i.test(getComputedStyle(document.body).fontFamily))
+            const badTimestampCount = Array.from(document.querySelectorAll('[data-ds-ts]'))
+              .filter(el => {
+                const txt = el.textContent?.trim() ?? ''
+                return !txt || /Invalid Date/i.test(txt)
+              }).length
+            const contradictoryStateCount = document.querySelectorAll('[data-state="loading"] [data-state="ready"], [data-ds-state="loading"] [data-ds-state="ready"]').length
 
             const ids = Array.from(document.querySelectorAll('[id]')).map(el => el.id)
             const dupIds = ids.filter((id, i) => ids.indexOf(id) !== i)
@@ -411,7 +521,7 @@ export async function runBrowserGates({
               return rects
             }
             const smallTargets = window.innerWidth <= 500
-              ? Array.from(document.querySelectorAll('button,a.ds-btn,a.v2-btn,.ds-nav-link,input:not([type="hidden"]),select'))
+              ? Array.from(document.querySelectorAll('button,a.ds-btn,a.v2-btn,.ds-nav-link,[role="tab"],[role="button"],summary,input:not([type="hidden"]),select'))
                 .map(el => {
                   const s = getComputedStyle(el)
                   const r = el.getBoundingClientRect()
@@ -432,14 +542,26 @@ export async function runBrowserGates({
             const tableRows = Array.from(document.querySelectorAll('table tbody')).map(tb => tb.querySelectorAll('tr:not([hidden])').length)
             const oversizedTable = tableRows.some(count => count > 25)
 
-            const axe = await window.axe.run(document, { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'] } })
+            const clsScore = Number(window.__xpanelCls ?? 0)
+            const hasFocusTarget = Boolean(document.activeElement && document.activeElement !== document.body)
+
+            const axe = await window.axe.run(document, { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'] } })
             const axeSerious = axe.violations.filter(v => v.impact === 'serious' || v.impact === 'critical')
 
             return {
+              modeMatch,
               hasNotRead,
               hasNonAsciiDigits,
               hasRawSeconds,
+              hasRawIsoTimestamp,
               rawRouteHeader,
+              yBudgetViolation,
+              inlineStylesOutsideCharts,
+              arabicFontOk,
+              badTimestampCount,
+              contradictoryStateCount,
+              hasFocusTarget,
+              clsScore,
               h1s,
               activeNav,
               crumbs,
@@ -452,20 +574,26 @@ export async function runBrowserGates({
               oversizedTable,
               axeViolations: axeSerious.map(v => `${v.id}:${v.nodes.length}`),
             }
-          })
+          }, mode)
 
           const gates = {
+            G1: domAudit.h1s.length === 1 && domAudit.modeMatch,
             G2: domAudit.h1s.length === 1
               && (!domAudit.activeNav.length || domAudit.activeNav.includes(domAudit.h1s[0]))
               && (!domAudit.crumbs.length || domAudit.crumbs.includes(domAudit.h1s[0])),
-            G3: domAudit.h1s.length === 1 && !domAudit.rawRouteHeader,
+            G3: domAudit.h1s.length === 1 && !domAudit.rawRouteHeader && !domAudit.yBudgetViolation,
             G4: !domAudit.hasNotRead,
-            G5: !domAudit.hasNonAsciiDigits && !domAudit.hasRawSeconds,
+            G5: !domAudit.hasNonAsciiDigits && !domAudit.hasRawSeconds && !domAudit.hasRawIsoTimestamp,
+            G6: domAudit.inlineStylesOutsideCharts === 0,
             G7: !domAudit.oversizedTable && !domAudit.tooTall,
+            G8: domAudit.arabicFontOk && domAudit.modeMatch,
+            G9: domAudit.badTimestampCount === 0,
+            G10: domAudit.contradictoryStateCount === 0,
             G11: !domAudit.overflowX && domAudit.smallTargets.length === 0,
-            G12: domAudit.axeViolations.length === 0,
+            G12: domAudit.axeViolations.length === 0 && domAudit.hasFocusTarget,
             G13: domAudit.dupIds.length === 0 && !domAudit.skippedHeading && domAudit.unlabeledInputs.length === 0,
-            G14: navCheck.ok && loadMs < 1500 && consoleErrors.length === 0 && pageErrors.length === 0 && cspViolations.length === 0 && failedRequests.length === 0 && authMeRequests <= 1,
+            G14: navCheck.ok && loadMs < 1500 && consoleErrors.length === 0 && pageErrors.length === 0 && cspViolations.length === 0 && failedRequests.length === 0 && httpErrors.length === 0 && authMeRequests <= 1,
+            G15: domAudit.clsScore < 0.05,
             G16: true,
           }
 

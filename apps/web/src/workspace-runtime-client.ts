@@ -7,10 +7,14 @@
 // - Drives file dropzones and keyboard-accessible sortable lists
 // Served as a same-origin external script under strict CSP (script-src 'self').
 
+import { LIVE_DATA_STORE_SCRIPT } from './data/live-store.ts'
+
 export const WORKSPACE_RUNTIME_SCRIPT = /* js */ String.raw`(function () {
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
   if (window.__xpanelWorkspaceRuntime) return;
   window.__xpanelWorkspaceRuntime = true;
+
+  ${LIVE_DATA_STORE_SCRIPT}
 
   function t(message, values) {
     if (typeof window.xpT === 'function') return window.xpT(message, values);
@@ -31,7 +35,7 @@ export const WORKSPACE_RUNTIME_SCRIPT = /* js */ String.raw`(function () {
   };
 
   /* 1. Shared GET request coalescing and short-TTL cache for session/chrome endpoints */
-  var CACHEABLE = /^\/api\/(?:auth\/me|ui-preferences|admin\/favorites|admin\/notifications|server\/info|account\/summary)(?:\?.*)?$/;
+  var CACHEABLE = LIVE_CACHEABLE;
   var inflight = new Map();
   var cache = new Map();
   var CACHE_TTL_MS = 6000;
@@ -1427,6 +1431,7 @@ export const WORKSPACE_RUNTIME_SCRIPT = /* js */ String.raw`(function () {
       var hiddenExprEl = builder.querySelector('[data-ds-cron-expression]');
       var summaryEl = builder.querySelector('[data-ds-cron-summary-text]');
       var codeEl = builder.querySelector('[data-ds-cron-code]');
+      var cronSyncing = false;
 
       var CRON_MACROS = /^(?:@hourly|@daily|@midnight|@weekly|@monthly|@yearly|@annually)$/i;
       var CRON_FIVE_FIELDS = /^[0-9*,/-]+(?:\s+[0-9*,/-]+){2}\s+[0-9A-Za-z*,/-]+\s+[0-9A-Za-z*,/-]+$/;
@@ -1440,8 +1445,9 @@ export const WORKSPACE_RUNTIME_SCRIPT = /* js */ String.raw`(function () {
         });
         if (!wrap) return;
         wrap.hidden = !visible;
+        var locked = builder.getAttribute('data-cron-locked') === 'true';
         wrap.querySelectorAll('input, select, textarea').forEach(function (ctrl) {
-          ctrl.disabled = !visible;
+          ctrl.disabled = !visible || locked;
         });
       }
       function fmt(tpl, vars) {
@@ -1449,7 +1455,7 @@ export const WORKSPACE_RUNTIME_SCRIPT = /* js */ String.raw`(function () {
           return vars[k] == null ? '' : String(vars[k]);
         });
       }
-      function syncCron() {
+      function syncCron(emitEvent) {
         var freq = freqEl ? freqEl.value : 'daily';
         var rawM = Number(asciiDigits(minuteEl ? minuteEl.value : 0));
         var rawH = Number(asciiDigits(hourEl ? hourEl.value : 0));
@@ -1511,20 +1517,61 @@ export const WORKSPACE_RUNTIME_SCRIPT = /* js */ String.raw`(function () {
           bdi.textContent = expr;
           if (!bdi.parentNode) codeEl.replaceChildren(bdi);
         }
+        if (emitEvent && !cronSyncing) {
+          builder.dispatchEvent(new CustomEvent('xpanel:cron-change', {
+            bubbles: true,
+            detail: { expression: expr, frequency: freq, hour: h, minute: m, dayOfWeek: dow, dayOfMonth: dom },
+          }));
+        }
       }
+
+      builder.addEventListener('xpanel:cron-sync', function (ev) {
+        var detail = ev && ev.detail ? ev.detail : null;
+        var raw = detail && typeof detail.expression === 'string' ? asciiDigits(detail.expression).trim().replace(/\s+/g, ' ') : '';
+        if (!raw) return;
+        var parts = raw.split(/\s+/);
+        cronSyncing = true;
+        try {
+          if (parts.length === 5 && /^\d+$/.test(parts[0]) && parts[1] === '*' && parts[2] === '*' && parts[3] === '*' && parts[4] === '*') {
+            if (freqEl) freqEl.value = 'hourly';
+            if (minuteEl) minuteEl.value = String(Math.min(59, Math.max(0, Number(parts[0]))));
+          } else if (parts.length === 5 && /^\d+$/.test(parts[0]) && /^\d+$/.test(parts[1]) && parts[2] === '*' && parts[3] === '*' && parts[4] === '*') {
+            if (freqEl) freqEl.value = 'daily';
+            if (minuteEl) minuteEl.value = String(Math.min(59, Math.max(0, Number(parts[0]))));
+            if (hourEl) hourEl.value = String(Math.min(23, Math.max(0, Number(parts[1]))));
+          } else if (parts.length === 5 && /^\d+$/.test(parts[0]) && /^\d+$/.test(parts[1]) && parts[2] === '*' && parts[3] === '*' && /^[0-6]$/.test(parts[4])) {
+            if (freqEl) freqEl.value = 'weekly';
+            if (minuteEl) minuteEl.value = String(Math.min(59, Math.max(0, Number(parts[0]))));
+            if (hourEl) hourEl.value = String(Math.min(23, Math.max(0, Number(parts[1]))));
+            if (dowEl) dowEl.value = parts[4];
+          } else if (parts.length === 5 && /^\d+$/.test(parts[0]) && /^\d+$/.test(parts[1]) && /^(?:[1-9]|1\d|2[0-8])$/.test(parts[2]) && parts[3] === '*' && parts[4] === '*') {
+            if (freqEl) freqEl.value = 'monthly';
+            if (minuteEl) minuteEl.value = String(Math.min(59, Math.max(0, Number(parts[0]))));
+            if (hourEl) hourEl.value = String(Math.min(23, Math.max(0, Number(parts[1]))));
+            if (domEl) domEl.value = parts[2];
+          } else {
+            if (freqEl) freqEl.value = 'custom';
+            if (customEl) customEl.value = raw;
+          }
+          syncCron(false);
+        } finally {
+          cronSyncing = false;
+        }
+      });
 
       [freqEl, hourEl, minuteEl, dowEl, domEl, customEl].forEach(function (ctrl) {
         if (!ctrl) return;
-        ctrl.addEventListener('input', syncCron);
-        ctrl.addEventListener('change', syncCron);
+        var emit = function () { syncCron(true); };
+        ctrl.addEventListener('input', emit);
+        ctrl.addEventListener('change', emit);
       });
       var cronForm = (freqEl && freqEl.form) || builder.closest('form');
       if (cronForm) {
         cronForm.addEventListener('reset', function () {
-          setTimeout(syncCron, 0);
+          setTimeout(function () { syncCron(false); }, 0);
         });
       }
-      syncCron();
+      syncCron(false);
     });
 
     root.querySelectorAll('[data-ds-menu]').forEach(function (menu) {
@@ -1890,6 +1937,44 @@ export const WORKSPACE_RUNTIME_SCRIPT = /* js */ String.raw`(function () {
       var submitBtn = Array.prototype.slice.call(wiz.querySelectorAll('[data-ds-wizard-submit]')).filter(function (el) {
         return el.closest('[data-ds-wizard]') === wiz;
       })[0] || null;
+      var submitTargetSel = submitBtn ? submitBtn.getAttribute('data-ds-wizard-submit-target') : null;
+      var matchesTargetSpec = function (el, spec) {
+        var parts = String(spec || '').trim().split(/\s+/);
+        var cur = el;
+        for (var p = parts.length - 1; p >= 0; p--) {
+          var m = /^\[([a-zA-Z0-9_-]+)(?:=(?:"([^"]*)"|'([^']*)'|([^\]]*)))?\]$/.exec(parts[p]);
+          if (!m) return false;
+          var attrName = m[1];
+          var wantVal = m[2] !== undefined ? m[2] : (m[3] !== undefined ? m[3] : m[4]);
+          while (cur && cur !== wiz.parentNode) {
+            var has = cur.hasAttribute && cur.hasAttribute(attrName);
+            var ok = has && (wantVal === undefined || cur.getAttribute(attrName) === wantVal);
+            if (ok) break;
+            if (p === parts.length - 1) return false;
+            cur = cur.parentElement;
+          }
+          if (!cur || cur === wiz.parentNode) return false;
+          cur = cur.parentElement;
+        }
+        return true;
+      };
+      var resolveSubmitTarget = function () {
+        if (!submitTargetSel) return null;
+        var buttons = wiz.querySelectorAll('button');
+        for (var i = 0; i < buttons.length; i++) {
+          if (matchesTargetSpec(buttons[i], submitTargetSel)) return buttons[i];
+        }
+        return null;
+      };
+      var syncSubmitTargetDisabled = function () {
+        if (!submitBtn || !submitTargetSel) return;
+        var wantDisabled = activeIndex < panels.length - 1;
+        if (!wantDisabled) {
+          var tgt = resolveSubmitTarget();
+          wantDisabled = tgt ? Boolean(tgt.disabled) : true;
+        }
+        if (submitBtn.disabled !== wantDisabled) submitBtn.disabled = wantDisabled;
+      };
       var activeIndex = Math.max(0, Math.min(panels.length - 1, Number(wiz.getAttribute('data-active-step') || 0) || 0));
 
       function firstInvalidControl(panel) {
@@ -1919,6 +2004,7 @@ export const WORKSPACE_RUNTIME_SCRIPT = /* js */ String.raw`(function () {
         if (submitBtn) {
           submitBtn.hidden = activeIndex < panels.length - 1;
           submitBtn.disabled = activeIndex < panels.length - 1;
+          syncSubmitTargetDisabled();
         }
       }
       function advanceStep() {
@@ -1948,6 +2034,12 @@ export const WORKSPACE_RUNTIME_SCRIPT = /* js */ String.raw`(function () {
             return;
           }
         }
+        if (submitTargetSel) {
+          ev.preventDefault();
+          var targetAction = resolveSubmitTarget();
+          if (!targetAction || targetAction.disabled) return;
+          targetAction.click();
+        }
       }
 
       if (prevBtn) {
@@ -1955,11 +2047,52 @@ export const WORKSPACE_RUNTIME_SCRIPT = /* js */ String.raw`(function () {
           showStep(activeIndex - 1);
         });
       }
+      navItems.forEach(function (item, idx) {
+        item.addEventListener('click', function () {
+          if (idx < activeIndex) showStep(idx);
+        });
+      });
       if (nextBtn) {
         nextBtn.addEventListener('click', function () {
           advanceStep();
         });
       }
+      var syncDiffPreview = function () {
+        var diffSection = Array.prototype.slice.call(wiz.querySelectorAll('[data-ds-wizard-diff]')).filter(function (el) {
+          return el.closest('[data-ds-wizard]') === wiz;
+        })[0] || null;
+        if (!diffSection) return;
+        diffSection.querySelectorAll('[data-ds-diff-source]').forEach(function (cell) {
+          var fieldName = cell.getAttribute('data-ds-diff-source');
+          if (!fieldName) return;
+          var ctrl = Array.prototype.find.call(wiz.querySelectorAll('[name]'), function (el) {
+            return el.getAttribute('name') === fieldName;
+          });
+          if (!ctrl) return;
+          var val = ctrl.type === 'checkbox' ? (ctrl.checked ? 'on' : 'off') : String(ctrl.value || '').trim();
+          if (val) cell.textContent = val;
+        });
+      };
+      wiz.addEventListener('input', syncDiffPreview);
+      wiz.addEventListener('change', syncDiffPreview);
+      document.addEventListener('xpanel:ws-event', function (ev) {
+        var detail = ev && ev.detail;
+        var payload = detail && detail.data && typeof detail.data === 'object' ? detail.data : null;
+        if (!detail || detail.kind !== 'job.updated' || !payload) return;
+        var prog = Array.prototype.slice.call(wiz.querySelectorAll('[data-ds-wizard-progress]')).filter(function (el) {
+          return el.closest('[data-ds-wizard]') === wiz;
+        })[0] || null;
+        if (!prog) return;
+        var targetStep = payload.stepId
+          ? Array.prototype.find.call(prog.querySelectorAll('[data-ds-progress-step]'), function (el) {
+              return el.getAttribute('data-ds-progress-step') === String(payload.stepId);
+            })
+          : prog.querySelector('.ds-stepper__item[data-step-state="running"], .ds-stepper__item[data-step-state="upcoming"]');
+        if (targetStep) {
+          var mapped = payload.status === 'succeeded' ? 'done' : payload.status === 'failed' || payload.status === 'cancelled' ? 'failed' : 'running';
+          targetStep.setAttribute('data-step-state', mapped);
+        }
+      });
       if (submitBtn) {
         submitBtn.addEventListener('click', validateWizardForSubmit);
       }
@@ -1980,7 +2113,41 @@ export const WORKSPACE_RUNTIME_SCRIPT = /* js */ String.raw`(function () {
         ev.preventDefault();
         advanceStep();
       });
+      function syncWizardToHash(hash) {
+        var raw = typeof hash === 'string' && hash.charAt(0) === '#' ? hash.slice(1) : '';
+        if (!raw) return;
+        var el = null;
+        wiz.querySelectorAll('[id]').forEach(function (node) {
+          if (!el && node.id === raw) el = node;
+        });
+        if (!el) return;
+        for (var i = 0; i < panels.length; i++) {
+          if (panels[i] === el || panels[i].contains(el)) {
+            showStep(i);
+            return;
+          }
+        }
+      }
+      var hashScope = wiz.closest('[data-setup-stepper]') || wiz;
+      hashScope.addEventListener('click', function (ev) {
+        var target = ev.target && ev.target.closest ? ev.target.closest('a[href^="#"]') : null;
+        if (!target) return;
+        syncWizardToHash(target.getAttribute('href'));
+      });
+      window.addEventListener('hashchange', function () {
+        syncWizardToHash(window.location.hash);
+      });
+      if (submitTargetSel && typeof MutationObserver === 'function') {
+        var targetObserver = new MutationObserver(syncSubmitTargetDisabled);
+        targetObserver.observe(wiz, { subtree: true, childList: true, attributes: true, attributeFilter: ['disabled'] });
+      }
+      wiz.addEventListener('xpanel:wizard-step', function (ev) {
+        var detail = ev && ev.detail ? ev.detail : null;
+        var idx = detail && typeof detail.step === 'number' ? detail.step : Number(detail && detail.step);
+        if (Number.isInteger(idx)) showStep(idx);
+      });
       showStep(activeIndex);
+      syncWizardToHash(window.location.hash);
     });
 
     root.querySelectorAll('.ds-table-card').forEach(function (card) {

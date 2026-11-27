@@ -89,7 +89,7 @@ describe('route registry', () => {
   it('has one entry per registered page and no stale entries', () => {
     const canonical = navigation.flatMap(surface => surface.sections.flatMap(section => section.pages.map(page => page.route)))
     const routes = [...canonical, ...registeredDocumentAliases.map(alias => alias.route)]
-    expect(canonical).toHaveLength(204)
+    expect(canonical).toHaveLength(200)
     expect(routes).toHaveLength(218)
     expect(Object.keys(ROUTE_HOOKS).sort()).toEqual([...routes].sort())
     expect(routeContracts().map(contract => contract.route)).toEqual(routes)

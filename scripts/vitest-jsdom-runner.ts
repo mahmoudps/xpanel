@@ -8,9 +8,18 @@ const ENV_OPTIONS_RE = /@vitest-environment-options\s+(\{[^\r\n]+\})/
 
 export default class JsdomSharedRunner extends TestRunner {
   private currentDom: EnvironmentReturn | undefined
+  private readonly nativeFetch = globalThis.fetch
 
   constructor(config: TestRunnerConfig) {
     super(config)
+  }
+
+  private resetXpanelGlobals(): void {
+    const g = globalThis as Record<string, unknown>
+    for (const key of Object.keys(g)) {
+      if (key.startsWith('__xpanel')) delete g[key]
+    }
+    globalThis.fetch = this.nativeFetch
   }
 
   override async importFile(filepath: string, source: 'collect' | 'setup'): Promise<unknown> {
@@ -18,10 +27,12 @@ export default class JsdomSharedRunner extends TestRunner {
       vi.restoreAllMocks()
       vi.unstubAllGlobals()
       vi.useRealTimers()
+      this.resetXpanelGlobals()
       if (this.currentDom) {
         await this.currentDom.teardown(globalThis)
         this.currentDom = undefined
       }
+      this.resetXpanelGlobals()
       let jsdomOpts: Record<string, unknown> = {}
       try {
         const head = readFileSync(filepath, 'utf8').slice(0, 512)
@@ -54,10 +65,12 @@ export default class JsdomSharedRunner extends TestRunner {
       vi.restoreAllMocks()
       vi.unstubAllGlobals()
       vi.useRealTimers()
+      this.resetXpanelGlobals()
       if (this.currentDom) {
         await this.currentDom.teardown(globalThis)
         this.currentDom = undefined
       }
+      this.resetXpanelGlobals()
     }
   }
 }

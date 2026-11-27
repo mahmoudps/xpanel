@@ -52,6 +52,12 @@ describe('v2 stylesheet asset', () => {
       }
     }
     for (const viewKind of ['login', 'status'] as const) expect(compressedBytes([...foundationAssets, ...v2StylesheetsForDocument({ viewKind })])).toBeLessThanOrEqual(60 * 1024)
+    for (const [surface, route] of [['xpanel', '/domains'], ['xwhm', '/whm/domains'], ['xmail', '/mail/inbox']] as const) {
+      const routeCss = v2StylesheetsForDocument({ surface, route }).map(asset => asset.body).join('\n')
+      for (const selector of ['[data-ui-theme="v2"] .ds-drawer', '[data-ui-theme="v2"] .ds-dialog', '[data-ui-theme="v2"] .ds-toast-region', '[data-ui-theme="v2"] .ds-btn']) {
+        expect(routeCss, `${surface}:${route}`).toContain(selector)
+      }
+    }
   })
 
   it('splits a selector list only at its top-level commas', () => {

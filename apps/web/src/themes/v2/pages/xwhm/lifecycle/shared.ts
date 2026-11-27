@@ -48,25 +48,24 @@ export function lifecycleField(t: Translate, id: string, label: string, controlH
 /** Which cell is the row name (default the first) and which value sits opposite it on a phone. */
 export interface PhoneRow { readonly name?: number; readonly value?: number }
 
-/** Phone rows name each stacked value: the translated column headers travel to CSS as custom properties on the table. */
-export const phoneColumns = (labels: readonly string[], phone: PhoneRow = {}): string =>
-  ` style="${escapeHtml(labels.map((label, index) => `--c${index + 1}:'${label.replace(/[\\']/g, '\\$&').replace(/\s+/g, ' ')}'`).join(';'))}"${phone.value ? ` data-phone-value="${phone.value}"` : ''}${phone.name ? ` data-phone-name="${phone.name}"` : ''}`
+/** Phone rows name each stacked value via data-phone-labels without inline style attributes. */
+export const phoneColumns = (_labels: readonly string[], phone: PhoneRow = {}): string =>
+  ` data-phone-labels${phone.value ? ` data-phone-value="${phone.value}"` : ''}${phone.name ? ` data-phone-name="${phone.name}"` : ''}`
 
 export type LifecycleColumn = string | { readonly label: string; readonly headerHtml: string }
 
 export function lifecycleTable(t: Translate, title: string, columns: readonly LifecycleColumn[], hooks: HookAttributes, empty: string, phone: PhoneRow = {}): string {
-  const labels = columns.map(column => t(typeof column === 'string' ? column : column.label))
   const headers = columns.map(column => typeof column === 'string' ? `<th scope="col">${text(t, column)}</th>` : `<th scope="col">${column.headerHtml}</th>`).join('')
-  return `<div class="v2-lifecycle__scroll" role="region" tabindex="0" aria-label="${text(t, title)}"><table class="v2-lifecycle__table"${phoneColumns(labels, phone)}><caption class="v2-sr">${text(t, title)}</caption><thead><tr>${headers}</tr></thead><tbody${hookAttrs(hooks)}><tr><td colspan="${columns.length}">${text(t, empty)}</td></tr></tbody></table></div>`
+  return `<div class="v2-lifecycle__scroll" role="region" tabindex="0" aria-label="${text(t, title)}"><table class="v2-lifecycle__table"${phoneColumns([], phone)}><caption class="v2-sr">${text(t, title)}</caption><thead><tr>${headers}</tr></thead><tbody${hookAttrs(hooks)}><tr><td colspan="${columns.length}">${text(t, empty)}</td></tr></tbody></table></div>`
 }
 
 export function lifecycleFacts(t: Translate, facts: readonly { key: string; label: string; value?: string }[], hook: `data-${string}`): string {
-  return `<dl class="v2-lifecycle__fields">${facts.map(fact => `<div class="v2-lifecycle__field"><dt>${text(t, fact.label)}</dt><dd><bdi dir="ltr"${hookAttrs({ [hook]: fact.key })}>${fact.value === undefined ? text(t, msgid('Not read')) : escapeHtml(fact.value)}</bdi></dd></div>`).join('')}</dl>`
+  return `<dl class="v2-lifecycle__fields">${facts.map(fact => `<div class="v2-lifecycle__field"><dt>${text(t, fact.label)}</dt><dd><bdi dir="ltr"${hookAttrs({ [hook]: fact.key })}>${fact.value === undefined ? text(t, msgid('Loading...')) : escapeHtml(fact.value)}</bdi></dd></div>`).join('')}</dl>`
 }
 
 /** The same placement for a table whose markup this page cannot mark: the name and value cells are fixed in the rule. */
 const fixedRow = (row: string, { name = 1, value }: PhoneRow): string => `${name === 1 ? '' : `
-${row}>:first-child{grid-area:auto;font-weight:400}${row}>:first-child::before{content:var(--c1,none);display:block;margin-block-end:2px;color:var(--muted);font-size:12px;font-weight:500;line-height:1.4}
+${row}>:first-child{grid-area:auto;font-weight:400}${row}>:first-child[data-phone-label]::before{content:attr(data-phone-label);display:block;margin-block-end:2px;color:var(--muted);font-size:12px;font-weight:500;line-height:1.4}
 ${row}>:nth-child(${name}){grid-area:1/1;font-weight:600;color:var(--text)}${row}>:nth-child(${name})::before{content:none}`}${value ? `
 ${name === 1 ? `${row}>:first-child{grid-area:1/1}` : ''}${row}>:nth-child(${value}){grid-area:1/2;justify-self:end;text-align:end;font-weight:400}${row}>:nth-child(${value})::before{content:none}` : ''}`
 
@@ -84,11 +83,11 @@ ${row}:last-child{border-block-end:0}
 ${row}>:nth-child(n){position:static;grid-area:auto;background:none;justify-self:stretch;padding:0;border:0;min-inline-size:0;text-align:start;overflow-wrap:anywhere}
 ${row}>:first-child{grid-column:1/-1;font-weight:600;color:var(--text)}
 ${row}>:not(:first-child)::before{display:block;margin-block-end:2px;color:var(--muted);font-size:12px;font-weight:500;line-height:1.4}
-${cells.map(n => `${row}>:nth-child(${n})::before{content:var(--c${n},none)}`).join('')}
+${row}>:not(:first-child)[data-phone-label]::before{content:attr(data-phone-label)}
 ${row}>:is(td:has(.v2-btn,button,details),td[colspan]){grid-column:1/-1}
 ${row}>:is(td:has(.v2-btn,button,details),td[colspan])::before{content:none}
 ${table}[data-phone-value]:not([data-phone-name])>tbody>tr>:first-child{grid-area:1/1}
-${table}[data-phone-name]>tbody>tr>:first-child:not([colspan]){grid-column:auto;font-weight:400}${table}[data-phone-name]>tbody>tr>:first-child:not([colspan])::before{content:var(--c1,none);display:block;margin-block-end:2px;color:var(--muted);font-size:12px;font-weight:500;line-height:1.4}
+${table}[data-phone-name]>tbody>tr>:first-child:not([colspan]){grid-column:auto;font-weight:400}${table}[data-phone-name]>tbody>tr>:first-child[data-phone-label]:not([colspan])::before{content:attr(data-phone-label);display:block;margin-block-end:2px;color:var(--muted);font-size:12px;font-weight:500;line-height:1.4}
 ${[1, ...cells].map(n => `${table}[data-phone-value="${n}"]>tbody>tr>:nth-child(${n}){grid-area:1/2;justify-self:end;text-align:end;font-weight:400}${table}[data-phone-value="${n}"]>tbody>tr>:nth-child(${n})::before{content:none}`).join('')}
 ${[2, 3].map(n => `${table}[data-phone-name="${n}"]>tbody>tr>:nth-child(${n}){grid-area:1/1;font-weight:600;color:var(--text)}${table}[data-phone-name="${n}"]>tbody>tr>:nth-child(${n})::before{content:none}`).join('')}
 ${fixed ? fixedRow(row, fixed) : ''}

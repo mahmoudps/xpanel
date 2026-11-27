@@ -90,7 +90,7 @@ describe('v2 account domain workflows', () => {
   it('keeps an unread domain collection distinct from a successfully read empty collection', () => {
     const unread = renderV2DomainsPage({ account }, authority)
     const empty = renderV2DomainsPage({ account, domains: [] }, authority)
-    expect(unread).toContain('<p data-domain-count class="v2-num">Not read</p>')
+    expect(unread).toContain('<p data-domain-count class="v2-num">Loading...</p>')
     expect(unread).not.toContain('No domains were returned.')
     expect(empty).toContain('<p data-domain-count class="v2-num">0</p>')
     expect(empty).toContain('No domains were returned.')

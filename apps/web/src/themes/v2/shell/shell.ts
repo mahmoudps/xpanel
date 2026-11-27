@@ -102,7 +102,7 @@ function sidebarSectionsHtml(locale: Translate['locale'], surface: V2Surface, se
         const label = catalogText(locale, `nav.page.${surface}.${page.id}.name`, page.name)
         return `<li><a href="${escapeHtml(page.route)}" data-nav-route="${escapeHtml(page.route)}">${escapeHtml(label)}</a></li>`
       }).join('')
-      return `<li data-nav-section="${escapeHtml(section.id)}"><details><summary>${icon(catalogIcon(section.icon))}<span>${escapeHtml(name)}</span>${CHEV_RIGHT_HTML}</summary><ul aria-label="${escapeHtml(name)}">${pages}</ul></details></li>`
+      return `<li data-nav-section="${escapeHtml(section.id)}"><details><summary title="${escapeHtml(name)}" aria-label="${escapeHtml(name)}">${icon(catalogIcon(section.icon))}<span>${escapeHtml(name)}</span>${CHEV_RIGHT_HTML}</summary><ul aria-label="${escapeHtml(name)}">${pages}</ul></details></li>`
     })
     entry = { closedSections, closedJoined: closedSections.join(''), byCurrent: new Map() }
     if (SIDEBAR_SECTIONS_CACHE.size >= 64) SIDEBAR_SECTIONS_CACHE.clear()
@@ -240,14 +240,14 @@ ${SIDE} :focus-visible{outline-color:var(--nav-focus)}
 ${SIDE}__top{display:flex;align-items:center;justify-content:space-between;gap:var(--space-1)}
 .v2-brand{display:flex;align-items:center;gap:10px;min-height:var(--target);padding:0 6px;color:var(--nav-strong);text-decoration:none}
 .v2-brand:hover{color:var(--nav-strong)}
-.v2-brand__mark{flex:none;display:flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:9px;background:var(--accent-fill);color:var(--nav-strong);font-family:var(--font-mono);font-size:17px;font-weight:700;box-shadow:0 2px 8px rgba(29,91,214,.38)}
+.v2-brand__mark{flex:none;display:flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:9px;background:var(--accent-fill);color:var(--on-accent);font-family:var(--font-mono);font-size:17px;font-weight:700;box-shadow:0 2px 8px rgba(29,91,214,.38)}
 .v2-brand__text{display:flex;flex-direction:column;line-height:1.2}
 .v2-brand__name{font-size:17px;font-weight:700;letter-spacing:-.01em}
 .v2-brand__sub{font-size:11px;color:var(--nav-muted)}
 ${SIDE}__close{display:none;border-color:var(--nav-line);background:transparent;color:var(--nav-text)}
 .v2-ctx{display:flex;flex-direction:column;gap:10px;padding:12px;border-radius:var(--radius-notice);background:var(--nav-2);border:1px solid var(--nav-line)}
 .v2-ctx__id{display:flex;align-items:center;gap:10px;min-width:0}
-.v2-ctx__avatar,.v2-ctx__tile{flex:none;display:flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:50%;background:var(--accent-fill);color:var(--nav-strong);font-weight:600}
+.v2-ctx__avatar,.v2-ctx__tile{flex:none;display:flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:50%;background:var(--accent-fill);color:var(--on-accent);font-weight:600}
 .v2-ctx__tile{border-radius:var(--radius-control);background:rgba(76,195,138,.16);color:var(--nav-ok)}
 .v2-ctx__text{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1 1 auto}
 .v2-ctx__title{display:flex;flex-wrap:wrap;align-items:center;gap:6px;color:var(--nav-strong);font-size:13px;font-weight:600;min-width:0}
@@ -275,7 +275,7 @@ ${SIDE}__close{display:none;border-color:var(--nav-line);background:transparent;
 .v2-nav summary:hover,.v2-nav a:hover,${SIDE}__foot a:hover{background:var(--nav-2);color:var(--nav-strong)}
 .v2-nav details>ul{margin-inline-start:18px;padding-block:4px 6px;padding-inline-start:24px;border-inline-start:1px solid var(--nav-line)}
 .v2-nav details a{font-size:13px;border-radius:var(--radius-chip)}
-.v2-nav a[aria-current="page"]{background:var(--accent-fill);color:var(--nav-strong);font-weight:600;box-shadow:0 1px 4px rgba(29,91,214,.35)}
+.v2-nav a[aria-current="page"]{background:var(--accent-fill);color:var(--on-accent);font-weight:600;box-shadow:0 1px 4px rgba(29,91,214,.35)}
 .v2-nav__empty{padding:0 12px var(--space-1);font-size:12px;color:var(--nav-muted)}
 ${SIDE}__foot{margin-top:auto;display:flex;flex-direction:column;gap:4px;padding-top:12px;border-top:1px solid var(--nav-line)}
 ${SIDE}__foot a{justify-content:space-between}
