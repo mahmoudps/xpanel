@@ -92,7 +92,7 @@ describe('v2 account email tool family', () => {
     expect(matched).toContain('>17</bdi>')
     const foreign = renderV2PanelMailingLists({ ...props, plan: { ...plan, id: 'neighbor-plan', caps: { ...plan.caps, mailingLists: 901 } } }, authority)
     expect(foreign).not.toContain('>901</bdi>')
-    expect(foreign).toContain('Not read')
+    expect(foreign).toContain('Loading...')
   })
 
   it('preserves saved list configuration and the independent delivery/moderation workspace', () => {

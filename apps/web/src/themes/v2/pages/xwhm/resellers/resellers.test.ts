@@ -44,7 +44,7 @@ describe('v2 reseller family', () => {
   })
   it('does not treat unread account or plan collections as zero usage', () => {
     const html = renderV2WhmResellers(t, props({ accounts: undefined, plans: undefined }), authority)
-    expect(html).toContain('Not read')
+    expect(html).toContain('Loading...')
     expect(html).not.toContain('data-reseller-owner-form')
     expect(html).not.toContain('>0 MiB</bdi>')
   })

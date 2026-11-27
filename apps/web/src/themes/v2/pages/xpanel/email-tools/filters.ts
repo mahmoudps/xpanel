@@ -17,7 +17,7 @@ export function renderV2PanelEmailFilters(props: PanelSurfaceProps, authority?: 
     `<p>${esc(t(msgid('Filters run on delivery as Sieve rules, account-wide rules first. Each rule shows whether the mail server runs it.')))}</p>${scope}`
     + actions(button(t(msgid('Refresh configuration')), { 'data-filter-refresh': true }, false) + button(t(msgid('Create filter')), { 'data-filter-new': true, 'data-filter-write': true }, !canManage))
     + state(t(msgid('Configuration has not been read.')), { 'data-filter-status': true })
-    + `<p data-filter-count></p><ol data-filter-list data-sortable-list class="v2-panel-extra__list"></ol><p data-filter-empty>${esc(t(msgid('Not read')))}</p>${editor}`)
+    + `<p data-filter-count></p><ol data-filter-list data-sortable-list class="v2-panel-extra__list"></ol><p data-filter-empty>${esc(t(msgid('Loading...')))}</p>${editor}`)
   const test = section('v2-filter-test', t(msgid('Test a message')),
     `<p>${esc(t(msgid('Runs a sample message through the saved rules in the order the mail server runs them. Nothing is delivered or sent.')))}</p><div data-filter-test-section><div data-filter-test role="group" aria-label="${esc(t(msgid('Test a message')))}" class="v2-panel-extra__groups"${!authority?.canRead || authority.presentation === 'read-only' || !account ? ' data-readonly="true"' : ''}>`
     + fields(field('filter-test-from', t(msgctxt('theme:v2', 'From address')), input('filter-test-from', undefined, ' type="text" name="from" maxlength="998" autocomplete="off" dir="ltr"', false))
@@ -27,7 +27,7 @@ export function renderV2PanelEmailFilters(props: PanelSurfaceProps, authority?: 
     + actions(button(t(msgid('Run test')), { 'data-filter-test-run': true }, false))
     + '</div><p data-filter-test-status role="status" aria-live="polite"></p><ol data-filter-trace class="v2-panel-extra__list"></ol><p data-filter-outcome></p></div>')
   const preview = section('v2-filter-preview', t(msgid('Selected-scope Sieve preview')),
-    `<p data-filter-compilation>${esc(t(msgid('Not read')))}</p><pre class="v2-panel-extra__raw v2-mono" tabindex="0" role="region" data-filter-preview aria-label="${esc(t(msgid('Selected-scope Sieve preview')))}"></pre><p>${esc(t(msgid('Mixed AND/OR expressions, regular expressions and program execution are unavailable. A test explains the rules; it does not prove delivery.')))}</p>`)
+    `<p data-filter-compilation>${esc(t(msgid('Loading...')))}</p><pre class="v2-panel-extra__raw v2-mono" tabindex="0" role="region" data-filter-preview aria-label="${esc(t(msgid('Selected-scope Sieve preview')))}"></pre><p>${esc(t(msgid('Mixed AND/OR expressions, regular expressions and program execution are unavailable. A test explains the rules; it does not prove delivery.')))}</p>`)
   return page(locale, route, header(t, route, title, t(msgctxt('theme:v2', 'Review rule order, match conditions, actions and the compiled delivery policy.')))
     + `<div class="v2-panel-extra__groups"${!authority?.canRead || authority.presentation === 'read-only' || !account ? ' data-readonly="true"' : ''} data-filter-workspace data-filter-can-read="${canManage}" data-filter-manage="${canManage}" data-filter-account="${esc((account?.id ?? ''))}">${filterClientTemplates()}${rules}${test}${preview}</div>` + renderV2EmailDiskUsage(t, canManage, mailboxes?.map(mailbox => mailbox.login) ?? []) + panelMailCards(route, locale, t, !!authority?.canRead && authority.presentation !== 'read-only' && !!account, canManage, domains?.map(domain => domain.name)))
 }

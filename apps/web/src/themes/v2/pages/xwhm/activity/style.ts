@@ -41,7 +41,7 @@ ${page} [data-whm-jobs-rows]>tr>:is(:first-child,:nth-child(n+6):nth-child(-n+8)
 ${page} [data-whm-jobs-rows]>tr>:nth-child(3){min-inline-size:176px}
 ${page} [data-whm-jobs-rows] .v2-btn{justify-content:flex-start;padding-inline:0;text-align:start;white-space:nowrap;min-block-size:var(--target)}
 @media(min-width:601px){${page} .v2-audit__generations td:not(:nth-child(3)){white-space:nowrap}${page} .v2-audit__generations :is(th,td){padding-inline:8px}}
-${page} table{${[1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => `--c${n}:var(--v2-col-${n})`).join(';')}}
+${page} table[data-phone-labels] td[data-phone-label]::before{content:attr(data-phone-label)}
 @media(max-width:640px){${page} .v2-observation__facts{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:1599px){${phoneRows(JOBS, { name: 2, value: 4 })}
 ${JOB}{grid-template-columns:repeat(4,minmax(0,1fr))}
