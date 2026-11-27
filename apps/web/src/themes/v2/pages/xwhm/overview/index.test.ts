@@ -96,4 +96,21 @@ describe('v2 server overview observations', () => {
     expect(secOverview).toContain('/gate-secret')
     expect(secOverview).toContain('xWHM: 2, xPanel: 1, xMail: 0')
   })
+
+  it('aligns G2 Server dashboard breadcrumb and renders attention strip only for real measured alerts', () => {
+    const clean = renderV2WhmOverview(t, base)
+    expect(clean).toContain('<span aria-current="page">Server dashboard</span>')
+    expect(clean).not.toContain('data-whm-attention-strip')
+
+    const alerted = renderV2WhmOverview(t, {
+      ...base,
+      driftCount: 2,
+      services: [{ name: 'nginx', unit: 'nginx.service', version: '1', active: false, enabled: true, rssMb: 0, role: 'web' }],
+    })
+    expect(alerted).toContain('data-whm-attention-strip')
+    expect(alerted).toContain('1 stopped service')
+    expect(alerted).toContain('2 config drift items')
+    expect(alerted).toContain('href="/whm/services"')
+    expect(alerted).toContain('href="/whm/services/health"')
+  })
 })
