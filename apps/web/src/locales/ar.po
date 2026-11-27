@@ -68797,3 +68797,18 @@ msgstr "تعذر التحقق"
 
 msgid "Enter a valid cron expression"
 msgstr "أدخل تعبير جدولة صالحاً"
+
+msgid "Quick actions"
+msgstr "إجراءات سريعة"
+
+msgid "Reseller views"
+msgstr "عروض الموزعين"
+
+msgid "DNS views"
+msgstr "عروض DNS"
+
+msgid "Service views"
+msgstr "عروض الخدمات"
+
+msgid "Restore views"
+msgstr "عروض الاستعادة"

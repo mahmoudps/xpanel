@@ -5,7 +5,7 @@ import type { Translate } from '../../../../../i18n.ts'
 import type { WhmSurfaceProps } from '../../../../contract.ts'
 import { card } from '../../../components/card.ts'
 import { dataTable } from '../../../components/data-table.ts'
-import { pageHeader } from '../../../components/page-header.ts'
+import { pageHeader, subtabs } from '../../../components/page-header.ts'
 import { escapeHtml } from '../../../html.ts'
 import type { WhmResellerAuthority } from './index.ts'
 import { phoneCell, renderV2ResellerEmail, renderV2ResellerIpsNameservers, renderV2ResellerUsage } from './tools.ts'
@@ -40,5 +40,9 @@ export function renderV2WhmResellerRecords(t: Translate, props: WhmSurfaceProps,
   const tools = !readable ? `<p role="status" data-wiring="unavailable">${escapeHtml(t(msgctxt('theme:v2', 'This document shows stored records only. Use the qualified reseller workspace for individual changes.')))}</p>`
     : route === '/whm/resellers/more' ? (principal.kind === 'root' ? renderV2ResellerUsage(t, scoped) + renderV2ResellerEmail(t, scoped, root) : '')
     : renderV2ResellerIpsNameservers(t, scoped, root)
-  return `<section class="v2-resellers" data-whm-detail-route="${route}" data-capability-state="${readable ? 'authorized' : 'unavailable'}">${pageHeader(t, { title, route, description: t(route === '/whm/resellers/more' ? msgid('Measured reseller usage, Email All Resellers and stored reseller account limits and nameservers.') : msgid('IPs each reseller may assign, the shared IP of its new accounts and its nameservers.')), breadcrumb: [{ label: t('Home'), href: '/whm' }, { label: t('Resellers'), href: '/whm/resellers' }, { label: title }] })}${route === '/whm/resellers/more' ? records + tools : tools + records}</section>`
+  const resellerTabs = route === '/whm/resellers/more' ? subtabs(t('Reseller views'), [
+    { label: t('Resellers'), href: '/whm/resellers' },
+    { label: t('Reseller usage & mail'), href: '/whm/resellers/more', active: true },
+  ]) : ''
+  return `<section class="v2-resellers" data-whm-detail-route="${route}" data-capability-state="${readable ? 'authorized' : 'unavailable'}">${pageHeader(t, { title, route, description: t(route === '/whm/resellers/more' ? msgid('Measured reseller usage, Email All Resellers and stored reseller account limits and nameservers.') : msgid('IPs each reseller may assign, the shared IP of its new accounts and its nameservers.')), breadcrumb: [{ label: t('Home'), href: '/whm' }, { label: t('Resellers'), href: '/whm/resellers' }, { label: title }] })}${resellerTabs}${route === '/whm/resellers/more' ? records + tools : tools + records}</section>`
 }

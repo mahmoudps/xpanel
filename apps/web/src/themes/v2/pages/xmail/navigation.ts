@@ -6,15 +6,31 @@ import { icon } from '../../icons.ts'
 import { mailIcon } from './icons.ts'
 import type { MailFolderFacts, MailPageFacts } from './types.ts'
 
+function folderIcon(id: string): string {
+  switch (id.toLowerCase()) {
+    case 'inbox': return mailIcon('inbox')
+    case 'sent': return mailIcon('send')
+    case 'drafts': return mailIcon('compose')
+    case 'trash': return mailIcon('trash')
+    case 'junk':
+    case 'spam': return mailIcon('junk')
+    case 'starred': return mailIcon('star')
+    case 'archive': return icon('archive')
+    default: return icon('folder')
+  }
+}
+
 function folder(item: MailFolderFacts): string {
-  const label = `<span>${escapeHtml(item.label)}</span>${item.count === undefined ? '' : `<span class="v2-num" data-mail-count="${escapeHtml(item.id)}">${item.count}</span>`}`
-  const attrs = ` data-mail-folder="${escapeHtml(item.id)}"${item.current ? ' aria-current="page"' : ''}`
-  return `<li>${item.href ? `<a class="v2-mail-folder" href="${escapeHtml(item.href)}" data-nav-route="${escapeHtml(item.href)}"${attrs}>${icon('folder')}${label}</a>` : `<span class="v2-mail-folder"${attrs}>${icon('folder')}${label}</span>`}</li>`
+  const glyph = folderIcon(item.id)
+  const label = `<span class="v2-mail-folder__label">${escapeHtml(item.label)}</span>${item.count === undefined ? '' : `<span class="v2-num" data-mail-count="${escapeHtml(item.id)}">${item.count}</span>`}`
+  const attrs = ` data-mail-folder="${escapeHtml(item.id)}" title="${escapeHtml(item.label)}"${item.current ? ' aria-current="page"' : ''}`
+  return `<li>${item.href ? `<a class="v2-mail-folder" href="${escapeHtml(item.href)}" data-nav-route="${escapeHtml(item.href)}" aria-label="${escapeHtml(item.label)}"${attrs}>${glyph}${label}</a>` : `<span class="v2-mail-folder"${attrs}>${glyph}${label}</span>`}</li>`
 }
 
 /** Only core-qualified folder links are interactive; observed names alone never grant folder access. */
 export function renderV2MailSidebar(t: Translate, view: MailPageFacts, access: Pick<MailSurfaceProps, 'visibility' | 'catalog'>): string {
-  const compose = view.canCompose ? `<a class="v2-btn v2-btn--primary" href="/mail/compose" data-nav-route="/mail/compose"${view.route === '/mail/compose' ? ' aria-current="page"' : ''}>${mailIcon('compose')}${escapeHtml(t('Compose'))}</a>` : ''
+  const composeLabel = escapeHtml(t('Compose'))
+  const compose = view.canCompose ? `<a class="v2-btn v2-btn--primary" href="/mail/compose" data-nav-route="/mail/compose" aria-label="${composeLabel}" title="${composeLabel}"${view.route === '/mail/compose' ? ' aria-current="page"' : ''}>${mailIcon('compose')}<span class="v2-mail-compose__label">${composeLabel}</span></a>` : ''
   const manage = view.folderManageHref ? `<a class="v2-btn v2-btn--ghost" href="${escapeHtml(view.folderManageHref)}">${escapeHtml(t('Manage'))}</a>` : ''
   const quota = view.quota.percent === null ? '' : `<div class="v2-mail-storage__track" role="meter" aria-label="${escapeHtml(t('Mailbox quota'))}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.max(0, Math.min(100, view.quota.percent))}"><span style="inline-size:${Math.max(0, Math.min(100, view.quota.percent))}%"></span></div>`
   const folderRoutes = new Set(['/mail/inbox', '/mail/compose', ...view.folders.flatMap(item => item.href ? [item.href] : [])])
