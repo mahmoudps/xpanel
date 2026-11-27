@@ -6,6 +6,7 @@ import https from 'node:https'
 import net from 'node:net'
 import { connect } from 'node:tls'
 import { navigation } from '../../packages/catalog/src/data/navigation.ts'
+import { canonicalNavigationRoute } from '../../packages/catalog/src/navigation.ts'
 
 /**
  * Shared kit for the per-slice acceptance drivers. A driver acts only as a real client of the installed release:
@@ -37,8 +38,8 @@ const CHECK_ID = /^[A-Z0-9]+(?:-[A-Z0-9]+)*$/
 export function tool(id, definition) {
   const { prefix, as = 'root', also = [], probe, paths, checks, unit = [], run, requests = 30, deadlineMs = 120_000, gate = id, restores = [], hostOnly = [], accounts = 0 } = definition
   const location = PAGES.get(id), declared = definition.page
-  if (location === undefined || (declared !== undefined && (declared.route !== location.route || (declared.read !== undefined && typeof declared.read !== 'string') || (declared.shows !== undefined && typeof declared.shows !== 'function')))) throw new Error(`Invalid qualification driver for ${id}`)
-  const page = { ...location, read: declared?.read ?? (location.actor === as ? probe : '/api/auth/me'), ...(declared?.shows ? { shows: declared.shows } : {}) }
+  if (location === undefined || (declared !== undefined && (canonicalNavigationRoute(declared.route) !== location.route || (declared.read !== undefined && typeof declared.read !== 'string') || (declared.shows !== undefined && typeof declared.shows !== 'function')))) throw new Error(`Invalid qualification driver for ${id}`)
+  const page = { ...location, ...(declared?.route ? { route: declared.route } : {}), read: declared?.read ?? (location.actor === as ? probe : '/api/auth/me'), ...(declared?.shows ? { shows: declared.shows } : {}) }
   const needs = [...new Set([...(definition.needs ?? []), ...(page.actor === 'root' ? [] : ['account']), ...(page.actor === 'mailbox' ? ['mailbox'] : [])])]
   if (!/^[A-Z][A-Z0-9]{1,7}$/.test(prefix ?? '') || !SESSION_ACTORS.includes(as) || typeof probe !== 'string' || !(paths instanceof RegExp) || typeof run !== 'function'
     || !Array.isArray(checks) || checks.length === 0 || new Set(checks).size !== checks.length || !checks.every(item => CHECK_ID.test(item))
