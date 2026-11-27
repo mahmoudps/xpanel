@@ -6109,11 +6109,6 @@ msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/accounts/list.ts
 msgctxt "theme:v2"
-msgid "Usage / configured plan limit. An account the host did not report shows Not read."
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xwhm/accounts/list.ts
-msgctxt "theme:v2"
 msgid "Usage / limit in force: the package value or the account’s own limit. Only disk and bandwidth usage are read."
 msgstr ""
 
@@ -6267,11 +6262,6 @@ msgctxt "theme:v2"
 msgid "Web server"
 msgstr ""
 
-#: apps/web/src/themes/v2/pages/xpanel/home.ts
-msgctxt "theme:v2"
-msgid "Welcome back, {username}"
-msgstr ""
-
 #: apps/web/src/themes/v2/pages/xwhm/host/firewall.ts
 msgctxt "theme:v2"
 msgid "What a save does"
@@ -6385,4 +6375,39 @@ msgstr ""
 #: apps/web/src/themes/v2/pages/xwhm/lifecycle/backups.ts
 msgctxt "theme:v2"
 msgid "Zstandard"
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xwhm/overview/index.ts
+msgctxt "theme:v2"
+msgid "{count, plural, one {# stopped service} other {# stopped services}}"
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xwhm/overview/index.ts
+msgctxt "theme:v2"
+msgid "{count, plural, one {# config drift item} other {# config drift items}}"
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xwhm/overview/index.ts
+msgctxt "theme:v2"
+msgid "{count, plural, one {# account near limit} other {# accounts near limit}}"
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xwhm/overview/index.ts
+msgctxt "theme:v2"
+msgid "{count, plural, one {# failed audit event} other {# failed audit events}}"
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xwhm/accounts/create.ts
+msgctxt "theme:v2"
+msgid "Validating on input..."
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xwhm/accounts/create.ts
+msgctxt "theme:v2"
+msgid "Checking IPv4 availability..."
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xwhm/accounts/list.ts
+msgctxt "theme:v2"
+msgid "Usage / configured plan limit."
 msgstr ""

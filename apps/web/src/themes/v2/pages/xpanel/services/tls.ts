@@ -27,7 +27,7 @@ export function renderV2TlsPage(props: PanelSurfaceProps, authority: PanelServic
     ? `<tr><td colspan="6">${escapeHtml(t(msgctxt('theme:v2', 'Stored certificates have not been read.')))}</td></tr>`
     : storedRows || `<tr><td colspan="6">${escapeHtml(t('No certificates are installed on this account yet.'))}</td></tr>`
   const unreadCertificates = !account || props.certificates === undefined || readOnly && !authority.authorizedTools?.has('ssl-tls-status')
-  const summary = `<section class="v2-kpi-row" aria-label="${escapeHtml(t('Certificate summary'))}">${kpiCard({ label: t('Stored certificates'), headingLevel: 2, value: unreadCertificates ? t('Not read') : String(certificates.length), tone: 'neutral', icon: 'shield', ...(unreadCertificates ? { hooks: { 'data-unread': true } } : {}), note: t(msgctxt('theme:v2', 'Stored state does not verify the certificate served by the host.')) })}${kpiCard({ label: t(msgctxt('theme:v2', 'Renewing soon')), headingLevel: 2, value: t('Not observed'), tone: 'neutral', icon: 'calendar', hooks: { 'data-unread': true }, note: t('The renewal schedule has not been read yet.') })}${kpiCard({ label: t(msgctxt('theme:v2', 'Host name coverage')), headingLevel: 2, value: t('Not observed'), tone: 'neutral', icon: 'globe', hooks: { 'data-unread': true }, note: t(msgctxt('theme:v2', 'Certificate coverage and live installation are checked separately.')) })}</section>`
+  const summary = `<section class="v2-kpi-row" aria-label="${escapeHtml(t('Certificate summary'))}">${kpiCard({ label: t('Stored certificates'), headingLevel: 2, value: unreadCertificates ? t('Loading...') : String(certificates.length), tone: 'neutral', icon: 'shield', ...(unreadCertificates ? { hooks: { 'data-unread': true } } : {}), note: t(msgctxt('theme:v2', 'Stored state does not verify the certificate served by the host.')) })}${kpiCard({ label: t(msgctxt('theme:v2', 'Renewing soon')), headingLevel: 2, value: t('Loading...'), tone: 'neutral', icon: 'calendar', hooks: { 'data-unread': true }, note: t('The renewal schedule has not been read yet.') })}${kpiCard({ label: t(msgctxt('theme:v2', 'Host name coverage')), headingLevel: 2, value: t('Loading...'), tone: 'neutral', icon: 'globe', hooks: { 'data-unread': true }, note: t(msgctxt('theme:v2', 'Certificate coverage and live installation are checked separately.')) })}</section>`
   const table = `<div class="v2-panel-service__table" tabindex="0" role="region" aria-label="${escapeHtml(t('Installed certificates'))}"><table class="v2-table"${phoneLabels([t('Names'), t('Issuer and key'), t('Expires'), t('Auto-renew'), t('Installed on'), t('Actions')])}><thead><tr>${[t('Names'), t('Issuer and key'), t('Expires'), t('Auto-renew'), t('Installed on'), t('Actions')].map(label => `<th scope="col">${escapeHtml(label)}</th>`).join('')}</tr></thead><tbody data-account-ssl-rows>${rows}</tbody></table></div>`
   const installed = card({
     title: t('Installed certificates'), titleId: 'v2-ssl-installed-heading',
@@ -50,7 +50,7 @@ export function renderV2TlsPage(props: PanelSurfaceProps, authority: PanelServic
     bodyHtml: serviceFacts([
       { label: t('Validation'), valueHtml: technical('HTTP-01') },
       { label: t(msgctxt('theme:v2', 'Installation')), valueHtml: escapeHtml(t(msgctxt('theme:v2', 'No installation result has been read.'))) },
-      { label: t('Renewal'), valueHtml: escapeHtml(t('Not observed')) },
+      { label: t('Renewal'), valueHtml: escapeHtml(t('Loading...')) },
     ]),
   })
   const wildcard = card({

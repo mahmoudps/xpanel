@@ -1039,9 +1039,11 @@ describe('authorized command palette rendering', () => {
     const expected = visibleNavigation(visibility, qualifiedCatalog).find(item => item.surface === surface)!.sections.flatMap(section => section.pages)
     const html = renderWebApp({ uiTheme: 'classic', surface, visibility, catalog: qualifiedCatalog, locale: 'ar', theme: 'dark', density: 'compact', accountId: 'fixture-account' })
     const parsed = new DOMParser().parseFromString(html, 'text/html')
-    const options = [...parsed.querySelectorAll<HTMLAnchorElement>('[data-cmdk-item]')]
+    const options = [...parsed.querySelectorAll<HTMLAnchorElement>('[data-cmdk-item][data-cmdk-key^="page:"]')]
     expect(options).toHaveLength(expected.length)
     expect(new Set(options.map(option => option.dataset.cmdkItem)).size).toBe(expected.length)
+    const actionOptions = [...parsed.querySelectorAll<HTMLElement>('[data-cmdk-item][data-cmdk-key^="cmd:"]')]
+    expect(new Set(actionOptions.map(option => option.dataset.cmdkKey)).size).toBe(actionOptions.length)
     if (surface !== 'xmail') expect(options.length).toBeGreaterThan(8)
     for (const page of expected) {
       const option = options.find(item => item.dataset.cmdkItem === page.route)!
