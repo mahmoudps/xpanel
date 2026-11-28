@@ -106,4 +106,18 @@ describe('v2 email accounts', () => {
     expect(unread).not.toContain('data-list-filter')
     expect(unread).toContain('id="v2-email-how-title"')
   })
+
+  it('renders the account-level connect devices section and keeps send controls hidden until read', () => {
+    const html = page()
+    expect(html).toContain('data-account-connect-devices')
+    expect(html).toContain('data-account-devices-can-read="true"')
+    expect(html).toContain('data-account-devices-manage="true"')
+    expect(html).toContain('data-account-devices-mailbox')
+    expect(html).toContain('sales@example.test')
+    expect(html).toContain('data-xp-template="account-device-row"')
+    expect(html).toContain('data-account-devices-send-form')
+    const ro = page({ canManage: false, readOnly: true })
+    expect(ro).toContain('data-account-devices-can-read="false"')
+    expect(ro).toContain('data-account-devices-manage="false"')
+  })
 })

@@ -14,6 +14,7 @@ export type DnsCheckJobItem = { id: string; status: string; summary: string; zon
 export type DnsCheckResultItem = { zone: string | null; state: string; records: number | null; errors: number | null; warnings: number | null; messages: string[] }
 export type DnsCompareItem = { zone: string; saved: { stateSerial: number | null; file: string; fileSerial: number | null; ns: string[] }; live: { state: string; serial: number | null; nsState: string; ns: string[] }; drift: string[] }
 export type DnsNameserverItem = { zone: string; soa: string; truncated: boolean; nameservers: { host: string; state: string; addresses: { address: string; thisServer: boolean }[]; result: string }[] }
+export type DnsNameserverReportRow = { zone: string; accountUsername: string | null; nameservers: string[]; expectedNameservers: string[]; status: 'matched' | 'custom' | 'missing' }
 export type DnsTtlPreviewItem = { zone: string; state: string; revision: string | null; records: number; changes: number; minTtl: number | null; maxTtl: number | null }
 export type DnsToolsViews = {
   overview: { observedAt: string; zones: DnsToolsZoneItem[] }
@@ -21,6 +22,7 @@ export type DnsToolsViews = {
   job: { job: DnsCheckJobItem; logAvailable: boolean; logTruncated: boolean; results: DnsCheckResultItem[] }
   compare: { observedAt: string; control: string; page: number; pages: number; total: number; zones: DnsCompareItem[] }
   nameservers: { observedAt: string; page: number; pages: number; total: number; zones: DnsNameserverItem[] }
+  'ns-report': { observedAt: string; totalZones: number; matchedZones: number; customZones: number; missingZones: number; rows: DnsNameserverReportRow[] }
   submit: { jobs: { id: string; status: string; zones: number }[]; zones: number; notQueued: number; incomplete: boolean }
   preview: { ttl: number; zones: DnsTtlPreviewItem[] }
   apply: { ttl: number; reconcile: string; auditIncomplete: boolean; results: { zone: string; state: string; revision: string | null; changes: number }[] }
@@ -88,6 +90,25 @@ export function readDnsToolsView<K extends keyof DnsToolsViews>(kind: K, value: 
         addresses: list(entry.addresses, 32).map(address => object(address) && typeof address.address === 'string' && /^[0-9a-f.:]{2,45}$/.test(address.address) && typeof address.thisServer === 'boolean' ? { address: address.address, thisServer: address.thisServer } : bad()) } : bad()) } : bad())
     return { ...base, zones } as DnsToolsViews[K]
   }
+  if (kind === 'ns-report') {
+    if (!time(value.observedAt) || !int(value.totalZones) || !int(value.matchedZones) || !int(value.customZones) || !int(value.missingZones)
+      || value.matchedZones + value.customZones + value.missingZones !== value.totalZones) return bad()
+    const rows = list(value.rows, 5000).map(item => object(item) && zone(item.zone)
+      && (item.accountUsername === null || text(item.accountUsername, 128))
+      && hosts(item.nameservers) && hosts(item.expectedNameservers)
+      && oneOf(item.status, ['matched', 'custom', 'missing'])
+      ? {
+          zone: item.zone,
+          accountUsername: item.accountUsername as string | null,
+          nameservers: item.nameservers,
+          expectedNameservers: item.expectedNameservers,
+          status: item.status as DnsNameserverReportRow['status'],
+        }
+      : bad())
+    return rows.length === value.totalZones
+      ? { observedAt: value.observedAt, totalZones: value.totalZones, matchedZones: value.matchedZones, customZones: value.customZones, missingZones: value.missingZones, rows } as DnsToolsViews[K]
+      : bad()
+  }
   if (kind === 'submit') {
     if (!int(value.zones) || !int(value.notQueued) || typeof value.incomplete !== 'boolean') return bad()
     const jobs = list(value.jobs, 64).map(item => object(item) && uuid(item.id) && item.kind === 'dns.tools.check-zones' && oneOf(item.status, statuses) && int(item.zones, 32) && item.zones >= 1 ? { id: item.id, status: item.status, zones: item.zones } : bad())
@@ -118,6 +139,7 @@ function bindWhmDnsTools(askDialog: Ask | undefined): void {
     root.dataset.dnsToolsBound = 'true'
     const q = <T extends Element = HTMLElement>(selector: string): T | null => root.querySelector<T>(selector)
     const refresh = q<HTMLButtonElement>('[data-whm-dns-tools-refresh]'), ttlInput = q<HTMLInputElement>('[data-whm-dns-tools-ttl]'), search = q<HTMLInputElement>('[data-whm-dns-tools-search]')
+    const nsReportButton = root.querySelector<HTMLButtonElement>('[data-whm-dns-ns-report]'), nsReportStatus = root.querySelector<HTMLElement>('[data-whm-dns-tools-status="ns-report"]')
     const link = q<HTMLAnchorElement>('[data-whm-dns-tools-job-link]'), selectedNote = q('[data-whm-dns-tools-selected]')
     const request = frameRequest(root)
     if (!refresh) return
@@ -134,7 +156,7 @@ function bindWhmDnsTools(askDialog: Ask | undefined): void {
     const lines = (values: string[]): HTMLElement => { const box = document.createElement('div'); for (const value of values) { const line = document.createElement('div'); line.append(technical(value)); box.append(line) } return box }
     const fact = (key: string, value: string | null): void => { const cell = q('[data-whm-dns-tools-fact="' + key + '"]'); if (cell) cell.textContent = value ?? t('Not read') }
     const utc = (value: string | null): string => value === null ? t('Not yet') : displayDateTime(value)
-    const tableSlots:Readonly<Record<string,readonly string[]>>={zones:['select','zone','records','ttl'],jobs:['summary','zones','status','created','finished','actions'],results:['zone','state','records','errors','warnings','messages'],compare:['zone','saved','file','published','saved-ns','published-ns','drift'],nameservers:['zone','soa','host','addresses','result'],preview:['zone','records','changes','ttl','state'],applied:['zone','changes','state']}
+    const tableSlots:Readonly<Record<string,readonly string[]>>={zones:['select','zone','records','ttl'],jobs:['summary','zones','status','created','finished','actions'],results:['zone','state','records','errors','warnings','messages'],compare:['zone','saved','file','published','saved-ns','published-ns','drift'],nameservers:['zone','soa','host','addresses','result'],'ns-report':['zone','account','nameservers','expected','status'],preview:['zone','records','changes','ttl','state'],applied:['zone','changes','state']}
     const templates=new Map([...root.querySelectorAll<HTMLElement>('[data-whm-dns-tools-rows]')].map(body=>{const key=body.dataset.whmDnsToolsRows!,slots=tableSlots[key];if(!slots)throw new Error('unknown_dns_tools_table');const row=clientTemplate(root,'dns-tools-'+key+'-row'),empty=clientTemplate(root,'dns-tools-'+key+'-empty');cloneClientTemplate(row,'tr',slots);cloneClientTemplate(empty,'tr',['message']);return[key,{body,slots,row,empty}] as const}))
     const jobTemplate=clientTemplate(root,'dns-tools-job-action'),pickTemplate=clientTemplate(root,'dns-tools-zone-select');cloneClientTemplate(jobTemplate,'button',['label']);cloneClientTemplate(pickTemplate,'input',['checkbox'])
     const fill=(key:string,rows:(string|Node)[][],empty:string,_columns:number):void=>{
@@ -169,6 +191,7 @@ function bindWhmDnsTools(askDialog: Ask | undefined): void {
       set('[data-whm-dns-tools-run="check"]', manageable() && !!overview?.zones.length)
       set('[data-whm-dns-tools-load]', admitted())
       set('[data-whm-dns-tools-job]', admitted())
+      if (nsReportButton) nsReportButton.disabled = busy || !admitted()
       for (const key of ['compare', 'nameservers']) {
         const at = pages[key]
         root.querySelectorAll<HTMLButtonElement>('[data-whm-dns-tools-page="' + key + '"]').forEach(button => { button.disabled = busy || !admitted() || !at || (button.dataset.direction === 'next' ? at.page >= at.pages : at.page <= 1) })
@@ -275,6 +298,28 @@ function bindWhmDnsTools(askDialog: Ask | undefined): void {
           : t('Zones with a nameserver not confirmed on this server: {attention} / {shown}', counts))
       } catch (error) { if (admitted()) note('nameservers', 'failed', failure(outcome(error), false)) }
     })
+    const nsReportStatusText: Record<string, string> = { matched: t('Matches expected'), custom: t('Custom nameservers'), missing: t('Missing apex NS') }
+    const noteNsReport = (state: string, message: string): void => {
+      if (!nsReportStatus) return
+      nsReportStatus.dataset.state = state
+      nsReportStatus.textContent = message
+      nsReportStatus.setAttribute('role', state === 'failed' ? 'alert' : 'status')
+    }
+    const loadNameserverReport = (): Promise<void> => guarded(async () => {
+      noteNsReport('reading', t('Loading cross-zone nameserver report…'))
+      try {
+        const next = readDnsToolsView('ns-report', await request!('GET', '/api/server/dns/nameserver-report'))
+        if (!admitted()) return
+        fill('ns-report', next.rows.map(item => [
+          technical(item.zone),
+          item.accountUsername ? technical(item.accountUsername) : t('Server'),
+          item.nameservers.length ? lines(item.nameservers) : t('No apex NS records'),
+          item.expectedNameservers.length ? lines(item.expectedNameservers) : '-',
+          nsReportStatusText[item.status] ?? item.status,
+        ]), t('No saved DNS zones exist.'), 5)
+        noteNsReport('read', t('Zones: {total}. Matched: {matched}. Custom: {custom}. Missing NS: {missing}', { total: next.totalZones, matched: next.matchedZones, custom: next.customZones, missing: next.missingZones }))
+      } catch (error) { if (admitted()) noteNsReport('failed', failure(outcome(error), false)) }
+    })
     const previewText: Record<string, string> = { ready: t('Will change'), unchanged: t('Already at this TTL'), 'not-found': t('Zone no longer saved') }
     const runPreview = (): Promise<void> => guarded(async () => {
       const ttl = ttlValue(), zones = [...selected].sort()
@@ -323,6 +368,7 @@ function bindWhmDnsTools(askDialog: Ask | undefined): void {
       else if (target.dataset.whmDnsToolsLoad === 'jobs') void loadJobs()
       else if (target.dataset.whmDnsToolsLoad === 'compare') void loadCompare(1)
       else if (target.dataset.whmDnsToolsLoad === 'nameservers') void loadNameservers(1)
+      else if (target.hasAttribute('data-whm-dns-ns-report')) void loadNameserverReport()
       else if (target.dataset.whmDnsToolsJob) void loadJob(target.dataset.whmDnsToolsJob)
       else if (target.dataset.whmDnsToolsPage) {
         const key = target.dataset.whmDnsToolsPage, at = pages[key]

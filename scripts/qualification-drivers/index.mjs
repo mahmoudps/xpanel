@@ -18,10 +18,11 @@ import s17 from './s17.mjs'
 import s18 from './s18.mjs'
 import s19 from './s19.mjs'
 import s20 from './s20.mjs'
+import s21 from './s21.mjs'
 import aapanel from './aapanel.mjs'
 
 /** The reviewed acceptance drivers per audit slice; a tool absent here is planned as not run. */
-export const SLICES = Object.freeze({ s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11, s12, s13, s14, s15, s16, s17, s18, s19, s20, aapanel })
+export const SLICES = Object.freeze({ s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11, s12, s13, s14, s15, s16, s17, s18, s19, s20, s21, aapanel })
 
 export const DRIVER_MODULES = Object.freeze(['kit', 'index', ...Object.keys(SLICES)].map(name => `scripts/qualification-drivers/${name}.mjs`))
 
