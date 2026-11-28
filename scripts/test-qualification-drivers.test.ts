@@ -54,6 +54,10 @@ describe('driver declarations', () => {
     expect(driver.page).toMatchObject({ route: '/security/account', actor: 'owner' })
     expect(driver.needs).toEqual(['account'])
     expect(tool('webmail-compose', definition).driver.needs).toEqual(['account', 'mailbox'])
+    expect(DRIVERS['service-manager']?.page.route).toBe('/whm/services/more')
+    expect(DRIVERS['zone-ttl-bulk']?.page.route).toBe('/whm/dns/more')
+    expect(DRIVERS['transfer-or-restore-account']?.page.route).toBe('/whm/backups/restore-more')
+    expect(DRIVERS['email-all-resellers']?.page.route).toBe('/whm/resellers/more')
   })
 
   it('compares only identifying values a page could show, never ids, dates or the actor', () => {

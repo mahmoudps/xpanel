@@ -1,8 +1,10 @@
 import type { DocumentProps, ThemeSurface } from '../contract.ts'
+import { DESIGN_SYSTEM_INTERACTIVE_CSS, DESIGN_SYSTEM_SCOPED_OVERLAYS_CSS } from '../../design-system/stylesheet.ts'
 import { createV2Stylesheet, type V2Stylesheet } from './stylesheet.ts'
 import { V2_PHONE_TABLE_ROWS_CSS } from './base.ts'
 import { WORKSPACE_INTERACTIONS_CSS } from './workspace-interactions.ts'
 import { FILTER_BAR_CSS } from './components/filter-bar.ts'
+import { SUBTABS_CSS } from './components/page-header.ts'
 import { V2_PANEL_HOME_CSS } from './pages/xpanel/home.ts'
 import { V2_PANEL_RESOURCES_CSS } from './pages/xpanel/resources.ts'
 import { EMAIL_ACCOUNTS_CSS } from './pages/xpanel/email/accounts.ts'
@@ -61,9 +63,9 @@ export interface V2RouteStylesheet {
   readonly dependencies: readonly Readonly<V2Stylesheet>[]
 }
 
-// A page stylesheet also carries the phone table rows and workspace interaction rules, keeping the shared 12 KB foundation lean.
+// A page stylesheet also carries the phone table rows, workspace interaction rules, and command/overlay rules, keeping the shared 12 KB foundation lean.
 const page = (surface: ThemeSurface, name: string, routes: readonly string[], css: string | readonly string[], dependencies: readonly Readonly<V2Stylesheet>[] = [], phoneRows = true): Readonly<V2RouteStylesheet> =>
-  Object.freeze({ surface, routes: Object.freeze([...routes]), stylesheet: createV2Stylesheet(name, [...(typeof css === 'string' ? [css] : css), ...(phoneRows ? [V2_PHONE_TABLE_ROWS_CSS, WORKSPACE_INTERACTIONS_CSS] : [])]), dependencies: Object.freeze([...dependencies]) })
+  Object.freeze({ surface, routes: Object.freeze([...routes]), stylesheet: createV2Stylesheet(name, [...(typeof css === 'string' ? [css] : css), ...(phoneRows ? [V2_PHONE_TABLE_ROWS_CSS, WORKSPACE_INTERACTIONS_CSS, DESIGN_SYSTEM_SCOPED_OVERLAYS_CSS, DESIGN_SYSTEM_INTERACTIVE_CSS] : [])]), dependencies: Object.freeze([...dependencies]) })
 /** A supplement loads beside its page stylesheet, which already carries the phone rows. */
 const supplement = (surface: ThemeSurface, name: string, routes: readonly string[], css: string | readonly string[]): Readonly<V2RouteStylesheet> => page(surface, name, routes, css, [], false)
 
@@ -111,6 +113,10 @@ export const v2SupplementalStylesheets: readonly Readonly<V2RouteStylesheet>[] =
   supplement('xwhm', 'whm-account-admin', ['/whm', '/whm/plans/enhancements', '/whm/security/isolation', '/whm/panel/languages'], WHM_ACCOUNT_TOOLS_CSS),
   supplement('xwhm', 'whm-activity', ['/whm/jobs', '/whm/audit', '/whm/support'], WHM_ACTIVITY_CSS),
   supplement('xwhm', 'whm-service-tools', V2_WHM_SERVICE_TOOL_ROUTES, WHM_SERVICE_TOOLS_PAGE_CSS),
+  supplement('xwhm', 'whm-subtabs', [
+    '/whm/resellers', '/whm/resellers/more', '/whm/dns', '/whm/dns/more',
+    '/whm/services', '/whm/services/more', '/whm/backups/restore', '/whm/backups/restore-more',
+  ], SUBTABS_CSS),
 ])
 
 /** Explicit renderer coverage. A catalog alias alone does not establish an implemented page. */

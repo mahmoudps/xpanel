@@ -23,8 +23,7 @@ export const WHM_SERVER_CSS = adminStyles('.v2-server-page') + `.v2-server-page 
 .v2-server-page [data-terminal-pill],.v2-server-page [data-terminal-exec-pill]{display:inline-flex;align-items:center;gap:var(--space-1);padding:4px 10px;border:1px solid var(--line);border-radius:8px;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums}
 .v2-server-page [data-tone=ok]{background:var(--ok-soft);color:var(--ok)}
 .v2-server-page [data-tone=warn]{background:var(--warn-soft);color:var(--warn)}
-@media(min-width:901px){.v2-server-page [data-setup-stepper]:not(:has(#v2-setup-workers:target,#v2-setup-review:target)) [data-setup-wizard-form]{flex:1}.v2-server-page [data-setup-wizard-form]>[data-setup-step],.v2-server-page [data-setup-stepper] .v2-admin-stack>[data-setup-step]:target{flex:1;display:flex;flex-direction:column}.v2-server-page [data-setup-step]>.v2-card__body{flex:1}.v2-server-page [data-setup-step] .v2-server-setup-foot{margin-block-start:auto}}
-.v2-server-page [data-setup-stepper]:has([data-setup-step]:target) [data-setup-step]:not(:target),.v2-server-page [data-setup-stepper]:not(:has([data-setup-step]:target)) [data-setup-step]:not([data-setup-step=identity]){display:none}
+@media(min-width:901px){.v2-server-page [data-setup-wizard-form]{flex:1;display:flex;flex-direction:column}.v2-server-page [data-setup-step]{display:flex;flex-direction:column}.v2-server-page [data-setup-step]>.v2-card__body{flex:1}.v2-server-page [data-setup-step] .v2-server-setup-foot{margin-block-start:auto}}
 .v2-server-page [data-setup-step]{scroll-margin-block-start:240px}
 .v2-server-page .v2-server-setup-choices{border:0;padding:0;margin:0;min-inline-size:0;display:flex;flex-direction:column;gap:var(--space-2)}
 .v2-server-page .v2-server-setup-choices>legend{padding:0;margin-block-end:8px;font-size:13px;font-weight:600;color:var(--text-2)}

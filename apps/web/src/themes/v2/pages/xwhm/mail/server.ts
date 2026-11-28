@@ -94,13 +94,13 @@ function outboundPolicy(input: WhmMailPageInput): string {
   const controls = [['defaultIpv4', msgid('Default outbound IPv4')], ['defaultIpv6', msgid('Default outbound IPv6')], ['defaultHelo', msgid('Default EHLO / HELO Hostname')]] as const
   return group('outbound-policy', t(msgid('Postfix Outbound Mail IP & HELO Transport Map')),
     `<form action="/api/mail/ips" method="post" data-mail-ip-config-form="true" data-mail-ip-editable="${editable}"><div class="v2-whm-mail__fields">${formField({ id: 'mail-outbound-mode', label: t(msgid('Outbound mail routing')), control: {
-      kind: 'select', name: 'mode', disabled: !editable, options: [...(!saved ? [{ value: '', label: t(msgid('Not read')), selected: true }] : []), ...[
+      kind: 'select', name: 'mode', disabled: !editable, options: [...(!saved ? [{ value: '', label: t(msgid('Loading...')), selected: true }] : []), ...[
         { value: 'server-default', label: t(msgid('Server Default IP')) }, { value: 'account-ip', label: t(msgid('Per-Account Dedicated IP')) },
         { value: 'domain-ip', label: t(msgid('Per-Domain Dedicated IP')) }, { value: 'custom-map', label: t(msgid('Explicit Per-Domain Custom Map')) },
       ].map(option => ({ ...option, selected: saved?.mode === option.value }))],
     } })}${controls.map(([key, label]) => formField({ id: `mail-${key}`, label: t(label), control: { kind: 'input', type: 'text', name: key,
       dir: 'ltr', mono: true, disabled: !editable, value: saved?.[key] ?? '', autocomplete: 'off', spellcheck: false } })).join('')}</div>
-<div class="v2-whm-mail__field"><span id="v2-mail-overrides-label">${escapeHtml(t(msgid('Per-Domain Outbound IPv4/IPv6 & HELO Overrides')))}</span><pre role="region" aria-labelledby="v2-mail-overrides-label"><bdi dir="ltr" data-mail-ip-overrides>${saved ? escapeHtml(saved.domainOverrides.map(row => [row.domainName, row.ipv4, row.ipv6, row.heloHostname].filter(Boolean).join(' · ')).join('\n') || t(msgid('No domain overrides are configured.'))) : escapeHtml(t(msgid('Not read')))}</bdi></pre></div>
+<div class="v2-whm-mail__field"><span id="v2-mail-overrides-label">${escapeHtml(t(msgid('Per-Domain Outbound IPv4/IPv6 & HELO Overrides')))}</span><pre role="region" aria-labelledby="v2-mail-overrides-label"><bdi dir="ltr" data-mail-ip-overrides>${saved ? escapeHtml(saved.domainOverrides.map(row => [row.domainName, row.ipv4, row.ipv6, row.heloHostname].filter(Boolean).join(' · ')).join('\n') || t(msgid('No domain overrides are configured.'))) : escapeHtml(t(msgid('Loading...')))}</bdi></pre></div>
 <p data-mail-ip-status role="status" aria-live="polite" tabindex="-1" hidden></p><noscript><p>${escapeHtml(t(msgid('Saving mail settings requires JavaScript.')))}</p></noscript>
 <button type="submit" class="v2-btn v2-btn--primary" disabled>${escapeHtml(t(msgctxt('common', 'Review changes')))}</button></form>`)
 }

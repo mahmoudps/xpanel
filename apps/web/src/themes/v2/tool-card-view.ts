@@ -40,7 +40,7 @@ const block = (t: Translate, cardId: string, item: ToolBlock, index: number): st
   switch (item.kind) {
     case 'note': return `<p class="v2-muted">${escapeHtml(t(item.text))}</p>`
     case 'warning': return `<p class="v2-tool-card__warning" role="note">${escapeHtml(t(item.text))}</p>`
-    case 'facts': return `<dl class="v2-tool-card__facts">${item.rows.map(row => `<div><dt>${escapeHtml(t(row.label))}</dt><dd${hooks(row.hooks)}${row.technical ? ' dir="ltr"' : ''}>${escapeHtml(t(msgid('Not read')))}</dd></div>`).join('')}</dl>`
+    case 'facts': return `<dl class="v2-tool-card__facts">${item.rows.map(row => `<div><dt>${escapeHtml(t(row.label))}</dt><dd${hooks(row.hooks)}${row.technical ? ' dir="ltr"' : ''}>${escapeHtml(t(msgid('Loading...')))}</dd></div>`).join('')}</dl>`
     case 'fields': return `<div class="v2-tool-card__fields">${item.fields.map(entry => field(t, entry)).join('')}</div>`
     case 'table': { const caption = `v2-${cardId}-table-${index}`; return `<div class="v2-tool-card__table" role="region" tabindex="0" aria-labelledby="${caption}"><table><caption id="${caption}" class="v2-sr">${escapeHtml(t(item.label))}</caption><thead><tr>${item.columns.map(name => `<th scope="col">${escapeHtml(t(name))}</th>`).join('')}</tr></thead><tbody${hooks(item.hooks)}><tr><td colspan="${item.columns.length}">${escapeHtml(t(item.empty))}</td></tr></tbody></table></div>` }
     case 'actions': return `<div class="v2-tool-card__actions">${item.buttons.map(button => `<button type="button" class="v2-btn${button.primary ? ' v2-btn--primary' : ''}${button.danger ? ' v2-btn--danger' : ''}"${hooks(button.hooks)} disabled>${escapeHtml(t(button.label))}</button>`).join('')}</div>`

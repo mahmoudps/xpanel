@@ -54,7 +54,7 @@ export const panelRate = (value: Limit | undefined, t: Translate): string => typ
 
 export const panelLimit = (value: Limit | undefined, t: Translate, unit = ''): string =>
   value === 'unlimited' ? t('Unlimited') : typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > Number.MAX_SAFE_INTEGER
-    ? t(msgctxt('resources-board', 'Not read')) : `${value}${unit ? ` ${unit}` : ''}`
+    ? t(msgid('Loading...')) : `${value}${unit ? ` ${unit}` : ''}`
 
 export const panelFact = (label: string, value: string, technical = false): string =>
   `<div><dt>${escapeHtml(label)}</dt><dd>${technical ? `<bdi dir="ltr" class="v2-mono">${escapeHtml(value)}</bdi>` : escapeHtml(value)}</dd></div>`
@@ -88,7 +88,7 @@ export function panelHomeMeters(props: PanelPageProps, t: Translate): MeterProps
     quantity(t, t('Disk'), panelCount(props.usage?.diskBytes), bytesCap(plan?.resources.diskMb), true),
     quantity(t, t('Monthly bandwidth'), panelCount(props.usage?.bandwidthMonth?.totalBytes), bytesCap(plan?.resources.bandwidthMbMonth), true),
     { label: t(msgctxt('theme:v2', 'IO write cap')), valueText: panelRate(plan?.resources.ioWriteBps, t),
-      note: t(props.usage?.ioEnforced === true ? msgid('Verified for this sample') : props.usage?.ioEnforced === false ? msgid('Observed mismatch') : msgctxt('resources-board', 'Not read')),
+      note: t(props.usage?.ioEnforced === true ? msgid('Verified for this sample') : props.usage?.ioEnforced === false ? msgid('Observed mismatch') : msgid('Loading...')),
       tone: props.usage?.ioEnforced === false ? 'warn' : 'neutral' },
     quantity(t, t('Memory'), panelCount(props.usage?.memoryBytes), bytesCap(plan?.resources.memoryMb), true),
     quantity(t, t('Processes'), panelCount(props.usage?.processCount), plan?.resources.maxProcesses),
@@ -113,7 +113,7 @@ function sites(props: PanelPageProps, t: Translate, routes: ReadonlySet<string>)
     const storedCertificate = props.certificates?.find(certificate => certificate.id === domain.certificateId && certificate.accountId === account?.id)
     const expires = storedCertificate && Number.isFinite(Date.parse(storedCertificate.notAfter)) ? new Date(storedCertificate.notAfter).toISOString().slice(0, 16).replace('T', ' ') : undefined
     const certificateLabel = t(domain.certificateId === null ? msgctxt('theme:v2', 'No stored certificate')
-      : storedCertificate ? msgctxt('theme:v2', 'Stored certificate') : msgctxt('resources-board', 'Not read'))
+      : storedCertificate ? msgctxt('theme:v2', 'Stored certificate') : msgid('Loading...'))
     const name = routes.has('/domains/site-settings')
       ? `<a class="v2-mono" href="${escapeHtml(domainHref('/domains/site-settings', domain.name))}"><bdi dir="ltr">${escapeHtml(domain.name)}</bdi></a>`
       : `<bdi dir="ltr" class="v2-mono">${escapeHtml(domain.name)}</bdi>`
@@ -257,7 +257,7 @@ function tools(props: PanelPageProps, t: Translate, visitors: number | undefined
       const enabled = personal || (qualified.has(item.capability) && routes.has(item.route))
       const hint = !enabled ? t('Unavailable')
         : item.capability === 'change-language' ? localeInfo(t.locale).nativeName
-        : item.hint ? (hints[item.hint] ?? t(msgctxt('resources-board', 'Not read')))
+        : item.hint ? (hints[item.hint] ?? '')
         : ''
       const href = item.capability === 'change-language' ? `?lang=${alternateLocales(t.locale)[0]!.tag}` : item.route
       const technicalHint = enabled && item.hint !== undefined && hints[item.hint] !== undefined && /^[ -~]+$/.test(hint) // translated words stay in the reading direction
@@ -275,11 +275,11 @@ function information(props: PanelPageProps, t: Translate): string {
   const plan = selectedPanelPlan(props)
   return card({ title: t('General information'), titleId: 'v2-home-information-title', bodyHtml:
     `<dl class="v2-panel-facts">${[
-      panelFact(t('Username'), account?.username ?? t('Not read'), !!account), panelFact(t('Primary domain'), account?.primaryDomain ?? t('Not read'), !!account),
-      panelFact(t('Home directory'), account?.home ?? t('Not read'), !!account), panelFact(t('Shared IP'), account?.ipv4 ?? t('Not read'), !!account?.ipv4),
-      panelFact(t('Plan'), plan?.name ?? t(msgctxt('resources-board', 'Not read'))),
+      panelFact(t('Username'), account?.username ?? t('Loading...'), !!account), panelFact(t('Primary domain'), account?.primaryDomain ?? t('Loading...'), !!account),
+      panelFact(t('Home directory'), account?.home ?? t('Loading...'), !!account), panelFact(t('Shared IP'), account?.ipv4 ?? t('Loading...'), !!account?.ipv4),
+      panelFact(t('Plan'), plan?.name ?? t(msgid('Loading...'))),
       panelFact(t('Default PHP'), props.usage?.phpVersion ?? t('Not reported by the agent'), !!props.usage?.phpVersion),
-      panelFact(t('Isolation slice'), account ? `xpanel-${account.uid}.slice` : t('Not read'), !!account),
+      panelFact(t('Isolation slice'), account ? `xpanel-${account.uid}.slice` : t('Loading...'), !!account),
       panelFact(t('Last sign-in'), props.lastSignInAt && Number.isFinite(Date.parse(props.lastSignInAt)) ? new Date(props.lastSignInAt).toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, ' UTC') : t('Not reported by the agent'), !!props.lastSignInAt && Number.isFinite(Date.parse(props.lastSignInAt))),
     ].join('')}</dl>`,
   })
@@ -308,7 +308,7 @@ export function renderV2PanelHome(props: PanelPageProps, authority?: SurfaceAuth
   const principal = props.visibility?.principal
   const canReadAnnouncements = !!account && principal?.kind === 'user' && principal.accountId === account.id
     && authority?.presentation === 'live' && authority.canRead
-  const domain = account ? props.domains?.find(item => item.accountId === account.id && item.name === props.activeDomain)?.name ?? account.primaryDomain : t('Not read')
+  const domain = account ? props.domains?.find(item => item.accountId === account.id && item.name === props.activeDomain)?.name ?? account.primaryDomain : t('Loading...')
   const routes = new Set(visibleNavigation(props.visibility, props.catalog).find(surface => surface.surface === 'xpanel')?.sections.flatMap(section => section.pages.map(page => page.route)))
   const domainsDefinition = (props.catalog ?? defaultCatalog).find(tool => tool.id === 'domains')
   const domainsAuthorized = !!props.visibility && !!domainsDefinition && isToolAuthorized(domainsDefinition, props.visibility)
@@ -379,12 +379,22 @@ export function renderV2PanelHome(props: PanelPageProps, authority?: SurfaceAuth
     title: t('Resource usage'), titleId: 'v2-home-resources-title', bodyHtml: meters.map(item => meter(item)).join(''),
     ...(routes.has('/resources') ? { footerHtml: `<a href="/resources">${escapeHtml(t('Resources & quotas'))}${icon('arrow', 16)}</a>` } : {}),
   })
+  const quickLinks = [
+    ['/files/manager', 'folder', msgid('File manager')],
+    ['/email/accounts', 'mail', msgid('Email accounts')],
+    ['/databases/mariadb', 'database', msgid('Databases')],
+    ['/domains', 'globe', msgid('Domains')],
+    ['/security/ssl', 'shield', msgid('SSL/TLS')],
+  ].filter(([route]) => routes.has(route!))
+  const quickStrip = quickLinks.length
+    ? `<nav class="v2-home-quick-actions" data-home-quick-actions aria-label="${escapeHtml(t('Quick actions'))}">${quickLinks.map(([route, glyph, label]) => `<a href="${escapeHtml(route!)}">${icon(glyph as Parameters<typeof icon>[0], 16)}<span>${escapeHtml(t(label!))}</span></a>`).join('')}</nav>`
+    : ''
   return `<div class="v2-layout v2-panel-home" data-panel-home ${account ? `${authority?.presentation === 'read-only' ? '' : `data-account="${escapeHtml(account.id)}" `}data-uid="${account.uid}"` : ''}>
-${pageHeader(t, { breadcrumb: [{ label: t('Home') }], route: '/home', title: t(msgctxt('theme:v2', 'Welcome back, {username}'), { username: account?.username ?? t('Not read') }),
+${pageHeader(t, { breadcrumb: [{ label: t('Home') }], route: '/home', title: t('Home'),
     description: t(msgctxt('theme:v2', 'Your sites, tools and account resources.')),
     actionsHtml: `<div class="v2-home-page-actions">${generation}<p class="v2-home-selected-domain"><span>${escapeHtml(t('Selected domain'))}</span><bdi dir="ltr" class="v2-mono">${escapeHtml(domain)}</bdi></p>${routes.has('/domains') ? `<a class="v2-btn v2-btn--primary" href="/domains">${icon('plus', 18)}${escapeHtml(t(msgid('Add domain')))}</a>` : domainsAuthorized ? `<button type="button" class="v2-btn" disabled>${icon('plus', 18)}${escapeHtml(t(msgid('Add domain')))}</button>` : ''}</div>` })}
 ${bandwidthNotice}${hasUrgentWarning ? noticesHtml : ''}${certRenewal.urgent ? certRenewal.html : ''}<section class="v2-kpi-row" aria-label="${escapeHtml(t('Account summary'))}">${summary.map(item => kpiCard({ headingLevel: 2, ...item })).join('')}</section>
-${sites(props, t, routes)}${hasUrgentWarning ? '' : noticesHtml}${certRenewal.urgent ? '' : certRenewal.html}${announcementsHtml}<div class="v2-home-columns">${tools(props, t, traffic?.totals.uniqueVisitors)}<aside class="v2-stack" aria-label="${escapeHtml(t(msgctxt('theme:v2', 'Account information')))}">${resourceCard}${information(props, t)}${recentChanges(props, t)}</aside></div>
+${quickStrip}${sites(props, t, routes)}${hasUrgentWarning ? '' : noticesHtml}${certRenewal.urgent ? '' : certRenewal.html}${announcementsHtml}<div class="v2-home-columns">${tools(props, t, traffic?.totals.uniqueVisitors)}<aside class="v2-stack" aria-label="${escapeHtml(t(msgctxt('theme:v2', 'Account information')))}">${resourceCard}${information(props, t)}${recentChanges(props, t)}</aside></div>
 ${renderV2AccountPlugins(t, canReadAnnouncements)}
 </div>`
 }
@@ -398,6 +408,9 @@ export const V2_PANEL_HOME_CSS = V2_HOME_ANNOUNCEMENTS_CSS + V2_HOME_PLUGINS_CSS
 .v2-panel-home .v2-kpi__note{font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
 .v2-panel-home [data-home-generation] .v2-pill,.v2-panel-home [data-cert-renewal-strip] .v2-notice{font-variant-numeric:tabular-nums}
 .v2-panel-home .v2-home-page-actions{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2)}
+.v2-panel-home .v2-home-quick-actions{display:flex;flex-wrap:wrap;gap:var(--space-1)}
+.v2-panel-home .v2-home-quick-actions>a{display:inline-flex;align-items:center;gap:var(--space-1);min-inline-size:var(--target);min-block-size:var(--target);padding:0 14px;border:1px solid var(--line);border-radius:var(--radius-control);background:var(--surface);color:var(--text);font-size:13px;font-weight:600;text-decoration:none;transition:background-color 140ms ease-out,border-color 140ms ease-out,color 140ms ease-out}
+.v2-panel-home .v2-home-quick-actions>a:hover{background:var(--subtle);border-color:var(--line-strong);color:var(--accent)}
 .v2-panel-home .v2-home-columns>.v2-home-tools{flex:1.75 1 560px;min-inline-size:0}
 .v2-panel-home .v2-home-columns>aside{display:flex;flex-direction:column;flex:1 1 300px;min-inline-size:0;gap:var(--space-3)}
 .v2-panel-home .v2-home-columns>aside>.v2-card:last-child{flex:1;display:flex;flex-direction:column}
@@ -484,5 +497,5 @@ export const V2_PANEL_HOME_CSS = V2_HOME_ANNOUNCEMENTS_CSS + V2_HOME_PLUGINS_CSS
 .v2-home-columns>aside{display:flex}
 .v2-panel-home .v2-home-tool-filter{flex-basis:100%;min-inline-size:0}.v2-panel-home .v2-home-tool-search>input{font-size:16px}}
 @media(max-width:359px){.v2-panel-home .v2-home-tool-group>.v2-home-tool-grid{grid-template-columns:minmax(0,1fr)}}
-@media(prefers-reduced-motion:reduce){.v2-panel-home .v2-account-plugins__link,.v2-panel-home .v2-home-site__name>a,.v2-home-tool-heading__title>.v2-icon,.v2-panel-home .v2-home-tool{transition:none}}
+@media(prefers-reduced-motion:reduce){.v2-panel-home .v2-account-plugins__link,.v2-panel-home .v2-home-quick-actions>a,.v2-panel-home .v2-home-site__name>a,.v2-home-tool-heading__title>.v2-icon,.v2-panel-home .v2-home-tool{transition:none}}
 `
