@@ -5,6 +5,11 @@ import { SETTINGS_INDEX, suggestedWorkerFields, TWEAKS } from '@xpanel/core'
 import { renderV2HostTools } from './host-tools.ts'
 import { adminContext, DENIED_ADMIN_AUTHORITY, type AdminView, type WhmAdminAuthority } from './common.ts'
 
+const QUOTA_FILESYSTEM_CHOICES: readonly (readonly [string, string])[] = [
+  ['/home', '/home'],
+  ...Array.from({ length: 100 }, (_, index) => [`/home${index}`, `/home${index}`] as const),
+]
+
 /** WHM Advanced Settings Browser: every setting with its saved value and the page that changes it; Tweak Settings keys change here. */
 function advancedSettings(h: AdminView): string {
   let group = ''
@@ -33,18 +38,40 @@ export function renderV2WhmSetup(t: Translate, props: WhmSurfaceProps, authority
   const primary = h.canRead ? props.ipPool?.find(ip => ip.isPrimary && ip.version === 4)?.address : undefined
   const steps = [[msgctxt('theme:v2', 'Server identity'), 'identity'], [msgctxt('theme:v2', 'Network and nameservers'), 'network'], [msgid('Admin email'), 'email'], [msgid('Web engine'), 'engine'], [msgid('Workers'), 'workers'], [msgctxt('theme:v2', 'Review and apply'), 'review']] as const
   const navigation = `<nav class="v2-server-setup-steps" aria-label="${h.text(msgid('Setup steps'))}"><ol>${steps.map(([label, key], index) => `<li><a href="#v2-setup-${key}"><span class="v2-num" aria-hidden="true">${index + 1}</span><span>${h.text(label)}</span></a></li>`).join('')}</ol></nav>`
-  // shortcut: the visible step follows the URL fragment (:target), so the current step has no aria-current; upgrade when the setup controller owns step state.
   const step = (index: number, body: string, submit = '') => `<p class="v2-server-setup-eyebrow">${h.e(t(msgctxt('theme:v2', 'Step {current} of {total}'), { current: index + 1, total: steps.length }))}</p>${body}<div class="v2-server-setup-foot">${index ? `<a class="v2-btn" href="#v2-setup-${steps[index - 1]![1]}">${h.text(msgid('Previous'))}</a>` : ''}${submit}${index < steps.length - 1 ? `<a class="v2-btn${submit ? '' : ' v2-btn--primary'}" href="#v2-setup-${steps[index + 1]![1]}">${h.text(msgid('Next'))}</a>` : ''}</div>`
   const text = (name: string, label: string, value?: string | number, type = 'text', required = false) => h.field(`v2-setup-${name}`, label, h.input(`v2-setup-${name}`, { name, value, type, dir: 'ltr', disabled: !h.canManage, required }))
   const identity = h.section('v2-setup-identity', msgctxt('theme:v2', 'Server identity'), step(0, h.fields(text('hostname', msgid('Server hostname'), saved?.hostname, 'text', true) + text('panelPort', msgid('Panel port'), saved?.panelPort, 'number') + text('sshPort', msgid('SSH port'), saved?.sshPort, 'number'))
     + h.status(msgctxt('theme:v2', 'Forward and reverse hostname checks have not been read for this setup request.'))), { 'data-setup-step': 'identity' })
-  const network = h.section('v2-setup-network', msgctxt('theme:v2', 'Network and nameservers'), step(1, h.fields(text('primaryIpv4', msgid('Primary IPv4 address'), primary, 'text', true) + text('quotaFilesystem', msgid('Quota filesystem')))
+  const quotaSelect = h.field(
+    'v2-setup-quotaFilesystem',
+    msgid('Quota filesystem'),
+    h.select('v2-setup-quotaFilesystem', QUOTA_FILESYSTEM_CHOICES, {
+      name: 'quotaFilesystem',
+      value: '/home',
+      dir: 'ltr',
+      disabled: !h.canManage,
+      hooks: { 'data-quota-filesystem': true },
+    }),
+    msgid('Choose /home or /home0 through /home99 for ext4 user quota initialization.'),
+  )
+  const quotaControls = `<div class="v2-admin-subgroup" data-quota-setup data-quota-can-read="${h.canRead}" data-quota-can-manage="${h.canManage}">`
+    + h.facts([
+      { label: msgid('Mounted filesystem'), technical: true, hooks: { 'data-quota-fact': 'filesystem' } },
+      { label: msgid('Filesystem type'), technical: true, hooks: { 'data-quota-fact': 'filesystemType' } },
+      { label: msgid('Quota enforcement'), hooks: { 'data-quota-fact': 'quotaStatus' } },
+      { label: msgctxt('theme:v2', 'Observed at (UTC)'), technical: true, hooks: { 'data-quota-fact': 'observedAt' } },
+    ])
+    + h.actions(
+      h.button(msgid('Inspect quota mount'), { 'data-quota-refresh': true }, { disabled: !h.canRead })
+      + h.button(msgid('Initialize quotas'), { 'data-quota-init': true }, { disabled: !h.canManage, primary: true }),
+    )
+    + h.status(msgid('Quota status has not been read yet.'), { 'data-quota-status': true })
+    + '</div>'
+  const network = h.section('v2-setup-network', msgctxt('theme:v2', 'Network and nameservers'), step(1, h.fields(text('primaryIpv4', msgid('Primary IPv4 address'), primary, 'text', true) + quotaSelect)
+    + quotaControls
     + h.field('v2-setup-nameservers', msgid('Nameservers, one per line'), h.area('v2-setup-nameservers', { name: 'nameservers', value: saved?.nameservers.join('\n'), dir: 'ltr', disabled: !h.canManage }))
-    + h.fields(h.field('v2-setup-ns1-address', msgid('Nameserver 1 address'), h.input('v2-setup-ns1-address', { dir: 'ltr' })) + h.field('v2-setup-ns2-address', msgid('Nameserver 2 address'), h.input('v2-setup-ns2-address', { dir: 'ltr' })))
-    + `<p>${h.text(msgid('Use the actual primary IPv4 assigned to this server. No address is generated or assumed.'))}</p>${h.status(msgid('Names are read from the saved nameserver list and can be changed in the list above. Nameserver addresses have not been read; address assignment has no connected setup operation.'))}`), { 'data-setup-step': 'network' })
-  const email = h.section('v2-setup-email', msgid('Admin email'), step(2, text('adminEmail', msgid('Admin email'), saved?.adminEmail, 'email')
-    + `<fieldset><legend>${h.text(msgid('Send notices about'))}</legend>${[msgid('Failed configuration tests and rollbacks'), msgid('Certificates that fail to renew'), msgid('Upgrade results'), msgid('Paused sign-ins to xWHM')].map(label => h.check(label)).join('')}</fieldset>`
-    + h.status(msgid('Notification preferences have not been read and cannot be saved by the setup API. No delivery or always-sent policy is assumed.'))), { 'data-setup-step': 'email' })
+    + `<p>${h.text(msgid('Use the actual primary IPv4 assigned to this server. No address is generated or assumed.'))}</p>`), { 'data-setup-step': 'network' })
+  const email = h.section('v2-setup-email', msgid('Admin email'), step(2, text('adminEmail', msgid('Admin email'), saved?.adminEmail, 'email')), { 'data-setup-step': 'email' })
   // Radio cards: the setup controller submits the checked radio of a name (approved-workspace-forms.ts enabledValues).
   const choices = (id: string, name: 'engine' | 'apacheMpm', legend: string, items: readonly (readonly [string, string, string, boolean?])[]) => `<fieldset class="v2-server-setup-choices" id="${id}"><legend>${h.e(legend)}</legend><div>${items.map(([value, label, help, refused]) => `<label class="v2-server-setup-choice"><input type="radio" name="${name}" value="${value}" data-review-label="${h.e(label)}"${saved?.[name] === value ? ' checked' : ''} required${!h.canManage || refused ? ' disabled' : ''}><span><strong><bdi dir="ltr">${h.e(label)}</bdi></strong><span class="v2-muted">${h.text(help)}</span></span></label>`).join('')}</div>${saved ? '' : `<p class="v2-muted">${h.text(msgctxt('theme:v2', 'The saved choice has not been read.'))}</p>`}</fieldset>`
   const engine = h.section('v2-setup-engine', msgid('Web engine'), step(3, choices('v2-setup-engine-choice', 'engine', t(msgid('Web engine')), [
@@ -59,11 +86,10 @@ export function renderV2WhmSetup(t: Translate, props: WhmSurfaceProps, authority
   const workerEnabled = h.canManage && !!saved, suggested = h.canRead ? suggestedWorkerFields(props.hostSample) : null
   const worker = (name: string, label: string, value?: string | number) => h.field(`v2-setup-worker-${name.replaceAll('.', '-')}`, label, h.input(`v2-setup-worker-${name.replaceAll('.', '-')}`, { name, value, dir: 'ltr', type: name === 'nginx.workerProcesses' ? 'text' : 'number', min: 0, step: 1, disabled: !workerEnabled }))
   const nginx = `<fieldset><legend>${h.text(msgid('Nginx at the edge'))}</legend>${h.fields(worker('nginx.workerProcesses', 'worker_processes', saved?.nginx.workerProcesses) + worker('nginx.workerConnections', 'worker_connections', saved?.nginx.workerConnections) + worker('nginx.workerRlimitNofile', 'worker_rlimit_nofile', saved?.nginx.workerRlimitNofile) + worker('nginx.keepaliveTimeoutSec', msgid('keepalive_timeout (seconds)'), saved?.nginx.keepaliveTimeoutSec))}${h.check('multi_accept', { name: 'nginx.multiAccept', checked: saved?.nginx.multiAccept, disabled: !workerEnabled, hooks: saved ? { 'data-review-label': 'on', 'data-review-off': 'off' } : undefined })}</fieldset>`
-  const apache = `<fieldset><legend>Apache mpm-itk</legend>${h.fields(([['startServers', 'StartServers'], ['minSpareServers', 'MinSpareServers'], ['maxSpareServers', 'MaxSpareServers'], ['maxRequestWorkers', 'MaxRequestWorkers'], ['serverLimit', 'ServerLimit'], ['maxConnectionsPerChild', 'MaxConnectionsPerChild']] as const).map(([key, label]) => worker(`apache.${key}`, label, saved?.apache[key])).join(''))}${h.check(msgid('Unlimited child lifetime'), { checked: saved ? saved.apache.maxConnectionsPerChild === 0 : undefined })}<p>${h.text(msgid('Set MaxConnectionsPerChild to 0 for an unlimited child lifetime; the checkbox reflects the saved value.'))}</p></fieldset>`
-  const defaults = `<details><summary>${h.text(msgid('Default PHP-FPM pool for new accounts'))}</summary><div class="v2-admin-subgroup">${h.fields(['pm', 'pm.max_children', 'pm.process_idle_timeout', 'pm.max_requests'].map(name => h.field(`v2-setup-default-${name.replaceAll('.', '-')}`, name, h.input(`v2-setup-default-${name.replaceAll('.', '-')}`, { dir: 'ltr' }))).join(''))}<h3>${h.text(msgid('OpenLiteSpeed and lsphp'))}</h3>${h.fields([msgid('Server max connections'), msgid('lsphp children per account'), msgid('lsphp connections per account')].map((label, index) => h.field(`v2-setup-lsphp-${index}`, label, h.input(`v2-setup-lsphp-${index}`, { type: 'number', dir: 'ltr' }))).join(''))}${h.status(msgid('Global account defaults for PHP-FPM and lsphp have not been read and have no connected setup write operation. Per-domain PHP settings do not establish these global defaults.'))}</div></details>`
+  const apache = `<fieldset><legend>Apache mpm-itk</legend>${h.fields(([['startServers', 'StartServers'], ['minSpareServers', 'MinSpareServers'], ['maxSpareServers', 'MaxSpareServers'], ['maxRequestWorkers', 'MaxRequestWorkers'], ['serverLimit', 'ServerLimit'], ['maxConnectionsPerChild', 'MaxConnectionsPerChild']] as const).map(([key, label]) => worker(`apache.${key}`, label, saved?.apache[key])).join(''))}${h.check(msgid('Unlimited child lifetime'), { checked: saved ? saved.apache.maxConnectionsPerChild === 0 : undefined, disabled: !workerEnabled, hooks: { 'data-setup-unlimited-child': true } })}<p>${h.text(msgid('Set MaxConnectionsPerChild to 0 for an unlimited child lifetime; the checkbox reflects the saved value.'))}</p></fieldset>`
   const workers = h.section('v2-setup-workers', msgid('Workers and account defaults'), step(4, (!saved ? h.status(msgid('Worker settings have not been read. Reload after the saved server settings are available; no suggested values are assumed.')) : '')
     + h.form({ 'data-server-settings-form': true }, nginx + apache + h.status(msgid('Loading...'), { 'data-server-settings-status': true }, true) + h.actions(h.button(msgid('Save worker settings'), undefined, { type: workerEnabled ? 'submit' : 'button', disabled: !workerEnabled, primary: true })), workerEnabled)
-    + defaults + `<details><summary>${h.text(msgctxt('theme:v2', 'Reset worker limits'))}</summary><p>${h.text(suggested ? msgid('Suggested values come from the processors and memory read on this host. Nothing changes until you save.') : msgctxt('theme:v2', 'No reviewed host-specific suggested values have been read. The saved worker limits are retained.'))}</p>${h.actions(h.button(msgid('Reset to suggested values'), { 'data-server-settings-suggest': suggested ?? '' }, { disabled: !workerEnabled || !suggested }))}</details>`), { 'data-setup-step': 'workers' })
+    + `<details><summary>${h.text(msgctxt('theme:v2', 'Reset worker limits'))}</summary><p>${h.text(suggested ? msgid('Suggested values come from the processors and memory read on this host. Nothing changes until you save.') : msgctxt('theme:v2', 'No reviewed host-specific suggested values have been read. The saved worker limits are retained.'))}</p>${h.actions(h.button(msgid('Reset to suggested values'), { 'data-server-settings-suggest': suggested ?? '' }, { disabled: !workerEnabled || !suggested }))}</details>`), { 'data-setup-step': 'workers' })
   // Each value follows its control of the same name inside [data-form-review] (account-list.ts bindAccountCreateReviews).
   const summaryRows: readonly (readonly [string, string | number | undefined, string, string])[] = [
     [msgid('Server hostname'), saved?.hostname, 'identity', 'hostname'], [msgid('Panel port'), saved?.panelPort, 'identity', 'panelPort'], [msgid('SSH port'), saved?.sshPort, 'identity', 'sshPort'],
@@ -94,9 +120,15 @@ export function renderV2WhmSetup(t: Translate, props: WhmSurfaceProps, authority
   const host = h.canRead ? props.hostSample : undefined
   const detected = h.section('v2-setup-detected', msgid('Detected on this host'), h.facts([{ label: msgid('Hostname'), value: h.canRead ? props.hostname : undefined, technical: true }, { label: msgid('Engine'), value: host?.engine }, { label: msgid('System'), value: host?.system }, { label: msgid('Kernel'), value: host?.kernel, technical: true }])
     + `<p>${h.text(msgid('Repository plans and saved metadata do not prove that packages, quotas or isolation are active on this host.'))}</p>` + h.actions(`<a class="v2-btn" href="/whm/server/setup?lang=${h.locale}">${h.text(msgid('Detect again'))}</a>`))
-  const flow = h.section('v2-setup-flow', msgctxt('theme:v2', 'Request flow preview'), `<ol class="v2-admin-list"><li><bdi dir="ltr">Nginx</bdi></li><li>${saved ? `<bdi dir="ltr">${h.e(saved.engine)}</bdi>` : h.text(msgid('Loading...'))}</li><li>${h.text(msgid('Account UID'))}</li></ol>${h.status(msgctxt('theme:v2', 'This is the saved stack model. A live request identity observation has not been read.'))}`)
-  const difference = h.section('v2-setup-difference', msgctxt('theme:v2', 'Changes from defaults'), h.table('v2-setup-defaults-diff', msgid('Pending configuration difference'), [msgid('Setting'), msgid('Current'), msgid('Proposed'), msgid('State')], undefined, undefined, msgctxt('theme:v2', 'No reviewed comparison with host-specific defaults has been read.')))
-  const handlers = h.section('v2-setup-handlers', msgid('PHP handlers by engine'), h.table('v2-setup-handler-table', msgid('PHP handler compatibility'), [msgid('Handler'), 'Apache + itk', 'OpenLiteSpeed'], undefined, ['PHP-FPM', 'CGI / suexec', 'suPHP', 'lsphp'].map(name => `<tr><th scope="row" class="v2-setup-handler-name">${h.technical(name)}</th><td>${h.text(msgid('Loading...'))}</td><td>${h.text(msgid('Loading...'))}</td></tr>`).join('')))
+  const flow = h.section('v2-setup-flow', msgctxt('theme:v2', 'Request flow preview'), `<ol class="v2-admin-list"><li><bdi dir="ltr">Nginx</bdi></li><li>${saved ? `<bdi dir="ltr" data-setup-flow-engine>${h.e(saved.engine)}</bdi>` : `<bdi dir="ltr" data-setup-flow-engine>${h.text(msgid('Loading...'))}</bdi>`}</li><li>${h.text(msgid('Account UID'))}</li></ol>${h.status(msgctxt('theme:v2', 'This is the saved stack model. A live request identity observation has not been read.'))}`)
+  const difference = h.section('v2-setup-difference', msgctxt('theme:v2', 'Changes from defaults'), h.table('v2-setup-defaults-diff', msgid('Pending configuration difference'), [msgid('Setting'), msgid('Current'), msgid('Proposed'), msgid('State')], { 'data-setup-diff-rows': true }, undefined, msgctxt('theme:v2', 'No reviewed comparison with host-specific defaults has been read.')))
+  const handlerRows: readonly (readonly [string, string, string])[] = [
+    ['PHP-FPM', msgid('Supported'), msgid('Supported')],
+    ['CGI / suexec', msgid('Supported'), msgid('Not used')],
+    ['suPHP', msgid('Unsupported'), msgid('Not used')],
+    ['lsphp', msgid('Not used'), msgid('Supported')],
+  ]
+  const handlers = h.section('v2-setup-handlers', msgid('PHP handlers by engine'), h.table('v2-setup-handler-table', msgid('PHP handler compatibility'), [msgid('Handler'), 'Apache + itk', 'OpenLiteSpeed'], undefined, handlerRows.map(([name, apacheSupport, olsSupport]) => `<tr><th scope="row" class="v2-setup-handler-name">${h.technical(name)}</th><td>${h.text(apacheSupport)}</td><td>${h.text(olsSupport)}</td></tr>`).join('')))
   const secondary = `<details class="v2-setup-drawer"><summary>${h.text(msgid('Host detection and PHP handler compatibility'))}</summary><div class="v2-admin-columns">${detected}${handlers}</div></details>`
     + `<details class="v2-setup-drawer"><summary>${h.text(msgid('Advanced settings'))}</summary>${advancedSettings(h)}</details>`
     + (h.canManage ? `<details class="v2-setup-drawer"><summary>${h.text(msgid('Host tools'))}</summary><div class="v2-admin-stack">${renderV2HostTools(t, ['timezone', 'swap', 'ram-disks', 'hosts-file', 'system-password', 'diagnostics'], h.canManage)}</div></details>` : '')

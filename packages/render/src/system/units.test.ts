@@ -10,6 +10,7 @@ import {
   renderContainerUnit,
   cachePaths,
   isContainerImage,
+  renderCronNotifyTemplate,
   renderCronUnits,
   CRON_COMMAND_RUNNER,
   cronCommandPath,
@@ -309,8 +310,31 @@ describe('renderCronUnits', () => {
     ['bad id', { id: 'Back Up' }],
     ['id traversal', { id: '../../etc/x' }],
     ['runtime 0', { maxRuntimeSec: 0 }],
+    ['invalid mailto', { mailto: 'bad address', mailMode: 'failures' as const }],
   ])('rejects %s', (_, patch) => {
     expect(() => renderCronUnits(account, { id: 'x', schedule: '@daily', command: 'true', ...patch }, debianOs)).toThrowError(XpanelError)
+  })
+
+  it('wires OnFailure, OnSuccess, mailConfigFile, and notification template when mailto delivery is active', () => {
+    const onFail = renderCronUnits(account, { id: 'nightly', schedule: '@daily', command: 'true', mailto: 'ops@example.com', mailMode: 'failures' }, debianOs)
+    expect(unitValues(onFail.service.content, 'OnFailure')).toEqual(['xpanel-cron-notify@%N.service'])
+    expect(unitValues(onFail.service.content, 'OnSuccess')).toEqual([])
+    expect(onFail.mailConfigFile).toEqual({
+      path: '/etc/xpanel/cron/alice/nightly.mail',
+      content: 'MAILTO=ops@example.com\nMODE=failures\nJOB=nightly\nUSER=alice\n',
+      mode: 0o600,
+      owner: 'root',
+      group: 'root',
+    })
+
+    const onAlways = renderCronUnits(account, { id: 'nightly', schedule: '@daily', command: 'true', mailto: 'ops@example.com', mailMode: 'always' }, debianOs)
+    expect(unitValues(onAlways.service.content, 'OnFailure')).toEqual(['xpanel-cron-notify@%N.service'])
+    expect(unitValues(onAlways.service.content, 'OnSuccess')).toEqual(['xpanel-cron-notify@%N.service'])
+
+    const tpl = renderCronNotifyTemplate(debianOs)
+    expect(tpl.path).toBe('/etc/systemd/system/xpanel-cron-notify@.service')
+    expect(tpl.content).toContain('/usr/sbin/sendmail -i -- \\"$$mailto\\"')
+    expect(tpl.content).not.toContain('\nTo:')
   })
 })
 

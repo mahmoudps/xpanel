@@ -74,7 +74,8 @@ import type { ReleasePackages } from './release-packages.ts'
 import { handlePhpManagerRoute } from './php-manager-routes.ts'
 import { PHP_STAGING_DIR } from './php-manager.ts'
 import { readBans, unbanAddresses, type BanRun } from './firewall-bans.ts'
-import { clearPersistedSshAutobanBans } from './ssh-autoban.ts'
+import { clearPersistedSshAutobanBans, readGlobalPhpDisabledFunctions } from './ssh-autoban.ts'
+import { readAccountPages } from './account-pages.ts'
 import { handleSwContainersRoute } from './sw-containers.ts'
 import { handleCtrRoute, resolveContainerTerminal } from './ctr-workspace.ts'
 import { createCtrCatalog } from './ctr-catalog.ts'
@@ -99,6 +100,8 @@ import type { ApplicationArtifactProvider, ApplicationInstallCoordinator } from 
 import type { HostJobPlan } from './host-job-contract.ts'
 import { handleMariadbAdminRoute, parseMariadbVersion } from './mariadb-admin.ts'
 import { handleDatabaseTuningRoute } from './database-tuning.ts'
+import { handleWebStackRoute } from './web-stack-builder.ts'
+import { handleOlsManagerRoute } from './ols-manager.ts'
 import { handleAccountDbMaintenanceRoute, handleDbMaintenanceRoute } from './db-maintenance.ts'
 import { handleDbAdminToolsRoute } from './db-admin-tools.ts'
 import type { HostAction } from '@xpanel/core'
@@ -215,6 +218,8 @@ import { relabelAccountPaths } from './selinux-homes.ts'
 import type { TransferTaskController } from './lifecycle-transfer-tasks.ts'
 import { MariaDbServiceAdapter } from './services/mariadb.ts'
 import { handleConvertAddonFilesRoute } from './lifecycle-convert-addon-files.ts'
+import { withHostEffectAuthority } from './host-effect-authority.ts'
+import { renderAddonDropIn, swAddonActionArgv, swAddonService, swAddonShowArgv, type AddonDropInConfig } from '../../../packages/os/src/sw-addon-command.ts'
 import { cronJobUnitId, cronWorkspaceRevision } from '@xpanel/core'
 import type { CronWorkspaceJob } from '@xpanel/core'
 import { system } from '@xpanel/render'
@@ -1580,6 +1585,62 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         const svcResponse = await handleSvcRoute(req, url, method, svcRouteContext(deps, freshRoot('services'), secHostProfile(), linuxHost, caller.principalId))
         if (svcResponse) return svcResponse
       }
+      if (url.pathname.startsWith('/host/web-stack') || url.pathname.startsWith('/host/services/openlitespeed')) {
+        const osProfile = secHostProfile() ?? profileFor('ID=' + deps.os.id + '\nVERSION_ID=' + deps.os.versionId)
+        const webStackResponse = await handleWebStackRoute(req, url, method, {
+          assertRoot: freshRoot('web stack builder'),
+          os: osProfile,
+          stateRoot: deps.store.rootDir,
+          readServerSettings: () => deps.store.getServerSettings(),
+          updateServerSettings: async patch => {
+            const current = await deps.store.getServerSettings()
+            if (!current) return fail('PRECONDITION_FAILED', 'server settings not initialized', { stateChanged: false })
+            await deps.store.saveServerSettings({ ...current, engine: patch.engine, apacheMpm: patch.apacheMpm })
+          },
+          renderOlsConfig: async nextSettings => {
+            const snapshot = await deps.store.readSnapshot()
+            const plansById = new Map(snapshot.plans.map(plan => [plan.id, plan]))
+            const globalDisabledFunctions = await readGlobalPhpDisabledFunctions(deps.store.rootDir)
+            const accountPages = await readAccountPages(deps.store.rootDir, { accounts: snapshot.accounts, resellers: snapshot.resellers, settings: nextSettings })
+            const renders: edge.OlsAccountRender[] = []
+            for (const account of snapshot.accounts) {
+              if (account.status === 'terminating') continue
+              const rawPlan = plansById.get(account.planId)
+              const accountDomains = snapshot.domains.filter(d => d.accountId === account.id)
+              if (!rawPlan || accountDomains.length === 0) continue
+              const plan = effectivePlan(rawPlan, account)
+              const allowedFunctions = nextSettings.phpFunctionExceptions?.find(item => item.account === account.username)?.functions ?? []
+              renders.push(edge.renderOlsAccount(account, edge.servedDomains(accountDomains), nextSettings, osProfile, {
+                workerCap: plan.caps.phpWorkers,
+                globalDisabledFunctions,
+                allowedFunctions,
+                now: new Date(),
+                pageScope: accountPages.scopeOf.get(account.id) ?? '',
+              }))
+            }
+            const maps = renders.flatMap(r => r.maps)
+            return [
+              edge.renderOlsServerBase(nextSettings).trimEnd(),
+              edge.renderOlsListener(nextSettings, maps).trimEnd(),
+              ...renders.map(r => r.server.trimEnd()),
+              '',
+            ].join('\n\n')
+          },
+          ...(linuxHost ? { reconcile: actor => deps.reconciler.reconcile({ actor }) } : {}),
+          run: linuxHost ? argv => deps.executor!.runCommand([...argv]) : null,
+          audit: async entry => { await appendAudit(deps.db, { ...entry, principalId: caller.principalId }) },
+        })
+        if (webStackResponse) return webStackResponse
+        const olsManagerResponse = await handleOlsManagerRoute(req, url, method, {
+          assertRoot: freshRoot('OpenLiteSpeed manager'),
+          os: osProfile,
+          stateRoot: deps.store.rootDir,
+          readServerSettings: () => deps.store.getServerSettings(),
+          run: linuxHost ? argv => deps.executor!.runCommand([...argv]) : null,
+          audit: async entry => { await appendAudit(deps.db, { ...entry, principalId: caller.principalId }) },
+        })
+        if (olsManagerResponse) return olsManagerResponse
+      }
       const systemUpdates = await handleSystemUpdatesRoute(req, url, method, {
         assertRoot: freshRoot('system update'),
         family: linuxHost ? (deps.os.family === 'debian' ? 'debian' : deps.os.family === 'rhel' ? 'rhel' : null) : null,
@@ -1652,7 +1713,8 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         response.headers.set('cache-control', 'no-store')
         return response
       }
-      if (method === 'GET' && pathname === '/host/php/inventory') {
+      if (pathname === '/host/php/inventory') {
+        if (method !== 'GET') return new Response(null, { status: 405, headers: { allow: 'GET' } })
         await assertRootCaller(caller, 'host.php.inventory')
         if (url.search) return fail('VALIDATION', 'PHP inventory does not accept request selectors')
         if (!(deps.executor instanceof LinuxHostExecutor)) return jsonResponse({ available: false }, 404)
@@ -1663,6 +1725,125 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         const source = profile.family === 'debian' ? 'dpkg' : 'rpm'
         const inventory = await readPhpRuntimeInventory(argv => executor.runCommand(argv), source)
         const response = jsonResponse(inventory)
+        response.headers.set('cache-control', 'no-store')
+        return response
+      }
+
+      if (pathname === '/host/workspace/php-ini' || pathname === '/host/workspace/database-charset' || pathname === '/host/workspace/addon-service-config') {
+        if (method !== 'POST') return new Response(null, { status: 405, headers: { allow: 'POST' } })
+        if (url.search) return fail('VALIDATION', 'workspace control host routes accept no query selectors', { stateChanged: false })
+        if (req.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() !== 'application/json') {
+          return fail('VALIDATION', 'JSON request body is required', { stateChanged: false })
+        }
+        const rawBody = await req.text()
+        let parsedBody: unknown
+        try { parsedBody = rawBody.length <= 16384 ? JSON.parse(rawBody) : null } catch { parsedBody = null }
+        if (!parsedBody || typeof parsedBody !== 'object' || Array.isArray(parsedBody)) {
+          return fail('VALIDATION', 'a JSON object within the size limit is required', { stateChanged: false })
+        }
+        const body = parsedBody as Record<string, unknown>
+
+        if (pathname === '/host/workspace/php-ini') {
+          await assertRootCaller(caller, 'host.workspace.php_ini')
+          if (!linuxHost) return fail('PRECONDITION_FAILED', 'host PHP INI apply requires native Linux host execution', { stateChanged: false, reason: 'server_php_ini_apply_unavailable' })
+          const fresh = await freshRoot('server PHP INI')('host.workspace.php_ini')
+          const gen = await deps.reconciler.reconcile({ actor: fresh.actor })
+          await appendAudit(deps.db, { actor: fresh.actor, principalId: caller.principalId, action: 'host.workspace.php_ini_applied', target: 'php:global', outcome: 'ok', detail: { generationId: (gen as { id?: number } | null)?.id ?? null } }).catch(() => undefined)
+          const response = jsonResponse({ applied: true, reconcile: 'requested', generationId: (gen as { id?: number } | null)?.id ?? null })
+          response.headers.set('cache-control', 'no-store')
+          return response
+        }
+
+        if (pathname === '/host/workspace/database-charset') {
+          const charsetMap: Readonly<Record<string, readonly string[]>> = {
+            utf8mb4: ['utf8mb4_unicode_ci', 'utf8mb4_unicode_520_ci', 'utf8mb4_general_ci'],
+            utf8mb3: ['utf8mb3_unicode_ci', 'utf8mb3_general_ci'],
+            latin1: ['latin1_swedish_ci', 'latin1_general_ci'],
+          }
+          const accountId = typeof body.accountId === 'string' ? body.accountId : ''
+          const databaseName = typeof body.databaseName === 'string' ? body.databaseName : ''
+          const charset = typeof body.charset === 'string' ? body.charset.trim() : ''
+          const collation = typeof body.collation === 'string' ? body.collation.trim() : ''
+          if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(accountId)
+            || !/^[a-z0-9_]{1,64}$/.test(databaseName)
+            || !Object.hasOwn(charsetMap, charset)
+            || !charsetMap[charset]!.includes(collation)) {
+            return fail('VALIDATION', 'accountId, databaseName, charset, and allowed collation are required', { stateChanged: false })
+          }
+          const account = await deps.store.getAccount(accountId)
+          if (!account || account.status !== 'active') return fail('NOT_FOUND', 'active account not found', { stateChanged: false })
+          if (caller.role === 'root') {
+            await assertRootCaller(caller, 'host.workspace.database_charset')
+          } else if (caller.role === 'user' && caller.accountId === account.id) {
+            await assertAccountCaller(caller, account, 'database.update')
+          } else {
+            return fail('FORBIDDEN', 'account or root authority is required', { stateChanged: false })
+          }
+          const dbs = await deps.store.listDatabases(account.id, { includeTrashed: false })
+          if (!dbs.some(d => d.name === databaseName && d.accountId === account.id && d.trashedAt === null)) {
+            return fail('NOT_FOUND', 'database not found for account', { stateChanged: false })
+          }
+          if (!deps.mariadbAdmin) {
+            return fail('PRECONDITION_FAILED', 'MariaDB host adapter is unavailable', { stateChanged: false, reason: 'mariadb_unavailable' })
+          }
+          const fresh = await authenticateCaller(req)
+          if (fresh.principalId !== caller.principalId || fresh.role !== caller.role) {
+            return fail('FORBIDDEN', 'database charset authority changed', { stateChanged: false })
+          }
+          await deps.mariadbAdmin.query([`ALTER DATABASE \`${databaseName}\` CHARACTER SET = ${charset} COLLATE = ${collation}`])
+          await appendAudit(deps.db, { actor: fresh.actor, principalId: caller.principalId, action: 'host.workspace.database_charset_applied', target: `database:${databaseName}`, outcome: 'ok', detail: { charset, collation } }).catch(() => undefined)
+          const response = jsonResponse({ applied: true, databaseName, charset, collation })
+          response.headers.set('cache-control', 'no-store')
+          return response
+        }
+
+        // /host/workspace/addon-service-config
+        await assertRootCaller(caller, 'host.workspace.addon_service_config')
+        const service = swAddonService(body.serviceId)
+        const memoryLimitMb = body.memoryLimitMb
+        const bindAddress = body.bindAddress
+        const maxConnections = body.maxConnections ?? null
+        if (!service
+          || typeof memoryLimitMb !== 'number' || !Number.isSafeInteger(memoryLimitMb) || memoryLimitMb < 64 || memoryLimitMb > 65536
+          || (bindAddress !== '127.0.0.1' && bindAddress !== '::1' && bindAddress !== '0.0.0.0')
+          || (maxConnections !== null && (typeof maxConnections !== 'number' || !Number.isSafeInteger(maxConnections) || maxConnections < 16 || maxConnections > 65535))) {
+          return fail('VALIDATION', 'invalid add-on service drop-in parameters', { stateChanged: false })
+        }
+        if (!linuxHost) {
+          return fail('PRECONDITION_FAILED', 'applying add-on service drop-ins requires native Linux host execution', { stateChanged: false, reason: 'addon_service_apply_unavailable' })
+        }
+        const cfg: AddonDropInConfig = { serviceId: service.id, memoryLimitMb, bindAddress, maxConnections }
+        const { dropInPath, previewText } = renderAddonDropIn(service.unit, cfg)
+        const show = await deps.executor!.runCommand(swAddonShowArgv(service))
+        if (!show.ok || !show.stdout.includes('LoadState=loaded')) {
+          return fail('PRECONDITION_FAILED', `add-on service ${service.unit} is not installed`, { stateChanged: false, reason: 'addon_service_not_installed' })
+        }
+        await freshRoot('add-on service configuration')('host.workspace.addon_service_config')
+        await withHostEffectAuthority(deps.executor!, {
+          signal: req.signal,
+          assertAuthority: async () => {
+            const latest = await authenticateCaller(req)
+            if (latest.principalId !== caller.principalId || latest.role !== 'root') fail('FORBIDDEN', 'authority changed')
+          },
+        }, async () => {
+          const prev = await deps.executor!.readFile(dropInPath)
+          await deps.executor!.writeFile({ path: dropInPath, content: previewText + '\n', mode: 0o644, owner: 'root', group: 'root' })
+          await deps.executor!.runAction({ kind: 'systemd-daemon-reload' })
+          if (show.stdout.includes('ActiveState=active')) {
+            const restart = await deps.executor!.runCommand(swAddonActionArgv('restart', service))
+            if (!restart.ok) {
+              if (prev !== null) {
+                await deps.executor!.writeFile({ path: dropInPath, content: prev, mode: 0o644, owner: 'root', group: 'root' }).catch(() => undefined)
+              } else {
+                await deps.executor!.removePath(dropInPath).catch(() => undefined)
+              }
+              await deps.executor!.runAction({ kind: 'systemd-daemon-reload' }).catch(() => undefined)
+              return fail('CONFIG_TEST_FAILED', `restarting ${service.unit} failed; previous drop-in restored`, { stateChanged: false, restored: true })
+            }
+          }
+        })
+        await appendAudit(deps.db, { actor: caller.actor, principalId: caller.principalId, action: 'host.workspace.addon_service_config_applied', target: service.unit, outcome: 'ok', detail: { serviceId: service.id, dropInPath } }).catch(() => undefined)
+        const response = jsonResponse({ applied: true, dropInPath })
         response.headers.set('cache-control', 'no-store')
         return response
       }
@@ -1743,13 +1924,17 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
       const dbAdminNative = url.pathname === '/host/databases/access-hosts/push' ? await resolveDatabaseRemoteAccessNative() : undefined
       const dbAdminToolsResponse = await handleDbAdminToolsRoute(req, url, method, { caller, reauthenticate: () => authenticateCaller(req), assertRoot: assertRootCaller, audit: entry => appendAudit(deps.db, entry), store: deps.store, ...(deps.mariadbAdmin ? { mariadb: deps.mariadbAdmin } : {}), ...(dbAdminNative ? { native: dbAdminNative } : {}), ...(deps.executor instanceof LinuxHostExecutor ? { host: deps.executor, runAction: (action: HostAction) => deps.executor!.runAction(action) } : {}) })
       if (dbAdminToolsResponse) return dbAdminToolsResponse
+      const dbFamily = linuxHost ? (deps.os.family === 'debian' ? 'debian' as const : deps.os.family === 'rhel' ? 'rhel' as const : null) : null
+      const dbRun = linuxHost ? (argv: readonly string[]) => new LinuxHostExecutor({ timeoutMs: 180_000 }).runCommand([...argv]) : null
       const databaseTuningResponse = await handleDatabaseTuningRoute(req, url, method, {
         caller, reauthenticate: () => authenticateCaller(req), assertRoot: assertRootCaller,
+        ...(dbFamily ? { family: dbFamily } : {}),
+        ...(deps.executor instanceof LinuxHostExecutor ? { host: deps.executor } : {}),
+        ...(dbRun ? { run: dbRun } : {}),
+        stateRoot: deps.store.rootDir,
         ...(deps.mariadbAdmin ? { mariadb: deps.mariadbAdmin } : {}),
       })
       if (databaseTuningResponse) return databaseTuningResponse
-      const dbFamily = linuxHost ? (deps.os.family === 'debian' ? 'debian' as const : deps.os.family === 'rhel' ? 'rhel' as const : null) : null
-      const dbRun = linuxHost ? (argv: readonly string[]) => new LinuxHostExecutor({ timeoutMs: 180_000 }).runCommand([...argv]) : null
       const dbAccount = { caller, store: deps.store, currentPrincipal: () => getPrincipal(deps.db, caller.principalId) }
       const dbEnginesResponse = await handleDbEnginesRoute(req, url, method, { ...dbAccount, assertRoot: freshRoot('database engines'), family: dbFamily, run: dbRun, readFile: linuxHost ? nodeDbSignonFs.readFile : null,
         runPostgresql: linuxHost ? statements => deps.executor!.runAction({ kind: 'sql', engine: 'postgresql', statements }) : null })

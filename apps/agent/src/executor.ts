@@ -98,7 +98,27 @@ const isReadonlyQuotaObservation = (argv: readonly string[]): boolean => {
   try { validateQuotaFilesystem(argv[argv.length - 1]); return true } catch { return false }
 }
 
-const isReviewedServiceCommand = (argv: readonly string[]): boolean =>
+const WEB_STACK_UNITS = new Set(['nginx', 'nginx.service', 'apache2', 'apache2.service', 'httpd', 'httpd.service', 'lshttpd', 'lshttpd.service', 'lsws', 'lsws.service'])
+const WEB_STACK_ACTIONS = new Set(['start', 'stop', 'restart', 'reload', 'enable', 'disable'])
+const WEB_STACK_SHOW_PROPS = new Set(['LoadState', 'LoadState,ActiveState', 'Id,LoadState,ActiveState,UnitFileState', 'ActiveState'])
+const WEB_STACK_APACHE_MODS = new Set(['rewrite', 'ssl', 'headers', 'proxy_fcgi', 'remoteip', 'expires', 'deflate', 'security2', 'evasive'])
+const WEB_STACK_PHP_BIN_RE = /^\/(?:usr\/bin\/php(?:7\.4|8\.[0-4])|opt\/remi\/php(?:74|8[0-4])\/root\/usr\/bin\/php)$/
+const isWebStackOrOlsCommand = (argv: readonly unknown[]): boolean => {
+  if (!Array.isArray(argv) || argv.some(v => typeof v !== 'string')) return false
+  const words = argv as string[]
+  if (words.length === 2 && (words[0] === '/usr/sbin/apache2ctl' || words[0] === '/usr/sbin/apachectl') && words[1] === '-M') return true
+  if (words.length === 2 && (words[0] === '/usr/sbin/a2enmod' || words[0] === '/usr/sbin/a2dismod') && WEB_STACK_APACHE_MODS.has(words[1]!)) return true
+  if (words.length === 2 && WEB_STACK_PHP_BIN_RE.test(words[0]!) && words[1] === '-m') return true
+  if (words.length === 2 && words[0] === '/usr/local/lsws/bin/lswsctrl' && words[1] === 'configtest') return true
+  if (words[0] !== '/usr/bin/systemctl') return false
+  if (words.length === 4 && WEB_STACK_ACTIONS.has(words[1]!) && words[2] === '--' && WEB_STACK_UNITS.has(words[3]!)) return true
+  return words.length === 6 && words[1] === 'show' && words[2] === '--no-pager' && words[3]!.startsWith('--property=')
+    && WEB_STACK_SHOW_PROPS.has(words[3]!.slice('--property='.length)) && words[4] === '--' && WEB_STACK_UNITS.has(words[5]!)
+}
+
+/** Command grammars reviewed and exported from @xpanel/os; only these run through the root service boundary. */
+const isReviewedServiceCommand = (argv: readonly unknown[]): boolean =>
+  argv.every((item): item is string => typeof item === 'string') && (
   isServiceManagerCommand(argv)
   || isMailxCommand(argv)
   || isDatabaseEngineCommand(argv)
@@ -149,10 +169,10 @@ const isReviewedServiceCommand = (argv: readonly string[]): boolean =>
   || isDnssecCommand(argv)
   || isBoxTrapperCommand(argv)
   || isListGateCommand(argv)
+  || isWebStackOrOlsCommand(argv)
   || isServerRoleCommand(argv)
   || isHostToolsCommand(argv)
-  || isSiteQuotaCommand(argv)
-  || isOpsFileSharingCommand(argv)
+  || isSiteQuotaCommand(argv))
 
 const assertValidCommandArgv = (argv: readonly string[]): void => {
   const head = Array.isArray(argv) ? argv[0] : undefined
@@ -373,6 +393,7 @@ const SYSTEM_CONFIG_PREFIXES: readonly string[] = [
   '/etc/apache2/',
   // EL: Apache, Remi PHP and PowerDNS keep their configuration here
   '/etc/httpd/',
+  '/usr/local/lsws/conf/',
   '/etc/php/',
   '/etc/opt/remi/',
   '/etc/xpanel/php-fpm/',
@@ -555,7 +576,7 @@ export const createProductionHostTargetMatcher = (): ((path: string, operation: 
     if (path === CTR_REGISTRIES_CONF || path === system.CONTAINER_GUARD_PATH) return operation === 'read' || operation === 'write' || operation === 'remove'
     if (path === '/etc/xpanel/cron') return operation === 'ensure-directory'
     if (/^\/etc\/xpanel\/cron\/[a-z][a-z0-9]{0,15}$/.test(path)) return operation === 'ensure-directory'
-    if (/^\/etc\/xpanel\/cron\/[a-z][a-z0-9]{0,15}\/[A-Za-z0-9_-]{1,64}\.command$/.test(path)) return operation === 'read' || operation === 'write' || operation === 'remove'
+    if (/^\/etc\/xpanel\/cron\/[a-z][a-z0-9]{0,15}\/[A-Za-z0-9_-]{1,64}\.(?:command|mail)$/.test(path)) return operation === 'read' || operation === 'write' || operation === 'remove'
     if (path === '/var/lib/xpanel/backups' || path === '/var/lib/xpanel/backups/account-workspaces'
       || /^\/var\/lib\/xpanel\/backups\/account-workspaces\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?:\/[a-z][a-z0-9]{0,15})?$/.test(path)
       || path === '/run/xpanel/account-restores' || /^\/run\/xpanel\/account-restores\/[a-z][a-z0-9]{0,15}$/.test(path)) return operation === 'ensure-directory'
@@ -597,8 +618,10 @@ export const createProductionHostTargetMatcher = (): ((path: string, operation: 
     if (path === '/etc/xpanel/db-profiles.json' || path === '/etc/xpanel/mariadb-admin.cnf') return operation === 'read' || operation === 'write'
     if (/^\/etc\/xpanel\/db-profile-[a-z0-9][a-z0-9_-]{0,31}\.(?:cnf|pem)$/.test(path)) return operation === 'read' || operation === 'write' || operation === 'remove'
     if (path === '/root/.pgpass') return operation === 'read' || operation === 'write'
-    // Tweak Settings: SQL (db-server-config.ts) owns this one drop-in.
-    if (path === '/etc/mysql/mariadb.conf.d/90-xpanel.cnf' || path === '/etc/my.cnf.d/90-xpanel.cnf') return operation === 'read' || operation === 'write' || operation === 'remove'
+    // Tweak Settings: SQL (db-server-config.ts), database tuning, and MySQL drop-ins.
+    if (path === '/etc/mysql/mariadb.conf.d/90-xpanel.cnf' || path === '/etc/my.cnf.d/90-xpanel.cnf'
+      || path === '/etc/mysql/mariadb.conf.d/90-xpanel-tuning.cnf' || path === '/etc/my.cnf.d/90-xpanel-tuning.cnf'
+      || path === '/etc/mysql/mariadb.conf.d/90-xpanel-mysql.cnf' || path === '/etc/my.cnf.d/90-xpanel-mysql.cnf') return operation === 'read' || operation === 'write' || operation === 'remove'
     if (path === '/etc/opendkim.conf' || path.startsWith('/etc/opendkim.conf.bak.')) {
       return operation === 'read' || operation === 'write'
     }

@@ -85,4 +85,33 @@ describe('account edge desired state', () => {
       for (const path of paths(OTHER)) await expect(access(join(root, path))).resolves.toBeUndefined()
     } finally { await rm(root, { recursive: true, force: true }) }
   })
+  it('loads valid proxy project files for reconciliation and rejects malformed files', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'xpanel-account-edge-'))
+    try {
+      await mkdir(join(root, 'extended/edge/proxy-projects'), { recursive: true })
+      const projectFile = join(root, `extended/edge/proxy-projects/${ACCOUNT}.json`)
+      await writeFile(projectFile, JSON.stringify({
+        rulesVersion: 1,
+        updatedAt: at,
+        projects: [{
+          id: '66666666-6666-4666-8666-666666666666',
+          accountId: ACCOUNT,
+          name: 'Proxy Site',
+          domains: ['proxy.example.test'],
+          note: '',
+          ssl: { enabled: false, certificateId: null },
+          cache: true,
+          gzip: false,
+          rules: [{ id: '77777777-7777-4777-8777-777777777777', path: '/', target: 'http://127.0.0.1:4300', websocket: true, hostHeader: 'client', headers: [] }],
+          createdAt: at,
+          updatedAt: at,
+        }],
+      }))
+      const edgeMap = await readAccountEdge(root, [{ id: ACCOUNT }])
+      expect(accountEdgeSiteOptions(edgeMap, ACCOUNT).proxyProjects).toHaveLength(1)
+      expect(accountEdgeSiteOptions(edgeMap, ACCOUNT).proxyProjects![0]!.domains).toEqual(['proxy.example.test'])
+      await removeAccountEdgeState(root, ACCOUNT)
+      await expect(access(projectFile)).rejects.toMatchObject({ code: 'ENOENT' })
+    } finally { await rm(root, { recursive: true, force: true }) }
+  })
 })

@@ -95,6 +95,7 @@ import { readRemoteServiceIps } from './remote-service-ips.ts'
 import { applyServerOperations, readServerOperations, renderZoneCatalog, type ServerOperationsInput } from './server-operations.ts'
 import { applyHostTools, readHostTools } from './host-tools.ts'
 import { readAppliedNfsClients } from './ops-file-sharing-native.ts'
+import { readJsonIfExists } from '@xpanel/state'
 import { readMailxSaved } from './mailx-routes.ts'
 import { renderMailxRspamdHeaders, renderMailxRspamdLogging } from './mailx-policy.ts'
 import { MAILX_RSPAMD_MILTER } from '../../../packages/os/src/mailx-command.ts'
@@ -304,6 +305,44 @@ export interface CompileOptions {
   phpMyAdminAccess?: PhpMyAdminHostObservation
   /** Databases over their size limit; their grants keep only what db-quota.ts allows. */
   dbQuotaLocks?: ReadonlySet<string>
+  /** Global PHP INI overrides (`extended/server/php-ini-overrides.json`). */
+  serverPhpIni?: { version: string | null; ini: Record<string, string> } | null
+  /** Per-account cron output MAILTO policy (`extended/account/<id>/cron-mailto.json`). */
+  cronMailto?: ReadonlyMap<string, { mailto: string | null; mode: 'failures' | 'always' | 'never' }>
+}
+
+const VALID_CRON_MODES = new Set(['failures', 'always', 'never'])
+const CRON_MAILTO_SAFE_RE = /^[^\s@<>;"'\\]+@[^\s@<>;"'\\]+\.[^\s@<>;"'\\]+$/
+
+async function readServerPhpIniOverrides(rootDir: string): Promise<{ version: string | null; ini: Record<string, string> } | null> {
+  const raw = await readJsonIfExists<unknown>(join(rootDir, 'extended/server/php-ini-overrides.json')).catch(() => null)
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const rec = raw as Record<string, unknown>
+  if (rec.schemaVersion !== 1 || !rec.ini || typeof rec.ini !== 'object' || Array.isArray(rec.ini)) return null
+  const version = rec.version === null ? null : typeof rec.version === 'string' && /^(?:7\.4|8\.[0-4])$/.test(rec.version) ? rec.version : undefined
+  if (version === undefined) return null
+  const ini: Record<string, string> = {}
+  for (const [k, v] of Object.entries(rec.ini as Record<string, unknown>)) {
+    if (typeof v === 'string' && v.length > 0 && v.length <= 128 && !/[\r\n\0]/.test(v)) ini[k] = v
+  }
+  return { version, ini }
+}
+
+async function readAccountCronMailtoMap(
+  rootDir: string,
+  accounts: readonly Pick<Account, 'id'>[],
+): Promise<ReadonlyMap<string, { mailto: string | null; mode: 'failures' | 'always' | 'never' }>> {
+  const map = new Map<string, { mailto: string | null; mode: 'failures' | 'always' | 'never' }>()
+  for (const acc of accounts) {
+    if (!/^[0-9a-f-]{36}$/.test(acc.id)) continue
+    const raw = await readJsonIfExists<unknown>(join(rootDir, `extended/account/${acc.id}/cron-mailto.json`)).catch(() => null)
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue
+    const rec = raw as Record<string, unknown>
+    if (rec.schemaVersion !== 1 || !VALID_CRON_MODES.has(String(rec.mode))) continue
+    const mailto = typeof rec.mailto === 'string' && rec.mailto.length <= 254 && CRON_MAILTO_SAFE_RE.test(rec.mailto) ? rec.mailto : null
+    map.set(acc.id, { mailto, mode: mailto ? (rec.mode as 'failures' | 'always' | 'never') : 'never' })
+  }
+  return map
 }
 
 const DEFAULT_ZONE_DIR = '/var/lib/powerdns/zones'
@@ -490,6 +529,8 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
   const sqlStatements: string[] = []
   let needsDaemonReload = false
   const calDavNames: string[] = []
+  const claimedNginxNames = new Set(snapshot.domains.map(d => d.name.toLowerCase()))
+  let hasCronNotify = false
 
   for (const account of snapshot.accounts) {
     const accountDomains = snapshot.domains.filter((d) => d.accountId === account.id)
@@ -608,10 +649,15 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
     postActions.push(...dav.postActions)
 
     // Edge & backend vhosts + PHP-FPM pools
-    if (snapshot.server && accountDomains.length > 0) {
+    const ownedLoopbackPorts = new Set((runtime?.apps ?? []).filter(app => app.enabled && app.project?.port).map(app => app.project!.port))
+    const edgeSiteOpts = accountEdgeSiteOptions(opts.accountEdge, account.id)
+    if (snapshot.server && (accountDomains.length > 0 || (edgeSiteOpts.proxyProjects?.length ?? 0) > 0)) {
       const settings = snapshot.server.settings
       // sec: per-site WAF limits and ModSecurity switches
-      files.push(edge.nginxSiteFile(account, accountDomains, edgeSettings(settings), os, certs, { now, dedicatedAddresses, ...(opts.secEdge ? { waf: opts.secEdge.sites } : {}), ...(runtimeRender ? { appRoutes: runtimeRender.routes, ...(runtimeRender.compression ? { compression: runtimeRender.compression } : {}) } : {}), ...accountEdgeSiteOptions(opts.accountEdge, account.id), mailAutoconfig: mailAutoconfigOption(snapshot, account.id), calDavNames: dav.calDavNames, ...(opts.panelRedirects ? { panelRedirects: opts.panelRedirects } : {}), ...(opts.accountPages ? { pageScope: opts.accountPages.scopeOf.get(account.id) ?? '' } : {}) }))
+      files.push(edge.nginxSiteFile(account, accountDomains, edgeSettings(settings), os, certs, { now, dedicatedAddresses, claimedNames: claimedNginxNames, ...(opts.secEdge ? { waf: opts.secEdge.sites } : {}), ...(runtimeRender ? { appRoutes: runtimeRender.routes, ...(runtimeRender.compression ? { compression: runtimeRender.compression } : {}) } : {}), ...(ownedLoopbackPorts.size ? { allowedLoopbackPorts: ownedLoopbackPorts } : {}), ...edgeSiteOpts, mailAutoconfig: mailAutoconfigOption(snapshot, account.id), calDavNames: dav.calDavNames, ...(opts.panelRedirects ? { panelRedirects: opts.panelRedirects } : {}), ...(opts.accountPages ? { pageScope: opts.accountPages.scopeOf.get(account.id) ?? '' } : {}) }))
+    }
+    if (snapshot.server && accountDomains.length > 0) {
+      const settings = snapshot.server.settings
 
       // Per-domain custom configuration drop-in files (cPanel userdata style) + .user.ini
       const customByDomain = new Map(
@@ -662,6 +708,11 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
         }
       }
       for (const [version, phpSettings] of fpmByVersion) {
+        const svcIniDefaults = fpmIniDefaults(opts.svcHost?.phpFpm ?? null)
+        const svcKeys = new Set(svcIniDefaults.map(item => item.key))
+        const serverIniOverrides = opts.serverPhpIni && (opts.serverPhpIni.version === null || opts.serverPhpIni.version === version)
+          ? Object.entries(opts.serverPhpIni.ini).filter(([k]) => !svcKeys.has(k)).map(([key, value]) => ({ key, value, locked: false }))
+          : []
         preActions.push(...edge.fpmInstanceDirs(account, version))
         files.push(
           edge.renderFpmPool(account, { ...phpSettings, fpm: effectiveFpm(phpSettings.fpm, opts.svcHost?.phpFpm ?? null, plan.caps.phpWorkers) }, os, {
@@ -670,7 +721,7 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
             apacheMpm: settings.apacheMpm,
             ...phpDisableOpts,
             narrowableBasedir: accountDomains.some(dom => dom.site?.isolated && dom.php.version === version),
-            iniDefaults: fpmIniDefaults(opts.svcHost?.phpFpm ?? null),
+            iniDefaults: [...svcIniDefaults, ...serverIniOverrides],
             pearLibrary: opts.svcHost?.pearLibraries[version] ?? null,
           }),
         )
@@ -692,14 +743,25 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
       { kind: 'ensure-dir', path: system.CRON_COMMAND_ROOT, mode: 0o755, owner: 'root', group: 'root' },
       { kind: 'ensure-dir', path: system.cronCommandDir(account.username), mode: 0o750, owner: 'root', group: account.username },
     )
+    const cronMail = opts.cronMailto?.get(account.id)
     for (const cron of accountCrons) {
       const shortId = cronJobUnitId(cron.id)
       const rendered = system.renderCronUnits(
         account,
-        { id: shortId, schedule: cron.schedule, command: cron.command, ...(cron.maxRuntimeSec !== undefined ? { maxRuntimeSec: cron.maxRuntimeSec } : {}) },
+        {
+          id: shortId,
+          schedule: cron.schedule,
+          command: cron.command,
+          ...(cron.maxRuntimeSec !== undefined ? { maxRuntimeSec: cron.maxRuntimeSec } : {}),
+          ...(cronMail?.mailto ? { mailto: cronMail.mailto, mailMode: cronMail.mode } : {}),
+        },
         os,
       )
       files.push(rendered.commandFile, rendered.service, rendered.timer)
+      if (rendered.mailConfigFile) {
+        files.push(rendered.mailConfigFile)
+        hasCronNotify = true
+      }
       if (cron.enabled && cronEnabled) {
         postActions.push(
           { kind: 'systemd', verb: 'enable', unit: rendered.timerName },
@@ -830,6 +892,10 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
   }
 
   // OpenLiteSpeed server-level httpd_config.conf when OLS is the engine
+  if (hasCronNotify) {
+    files.push(system.renderCronNotifyTemplate(os, { systemdDir: os.paths.systemdDir }))
+  }
+
   if (snapshot.server && snapshot.server.settings.engine === 'openlitespeed') {
     const settings = snapshot.server.settings
     const maps = olsAccountRenders.flatMap((r) => r.maps)
@@ -1989,6 +2055,8 @@ export class HostReconciler {
     const runtime = await readRuntimeRegistries(this.deps.store.rootDir, snapshot.accounts)
     const containerRegistries = renderRegistriesConf(await readCtrPolicy(this.deps.store.rootDir))
     const accountEdge = await readAccountEdge(this.deps.store.rootDir, snapshot.accounts)
+    const serverPhpIni = await readServerPhpIniOverrides(this.deps.store.rootDir)
+    const cronMailto = await readAccountCronMailtoMap(this.deps.store.rootDir, snapshot.accounts)
     const retirements = await this.journal.readRetirements(snapshot.accounts.filter(account => account.status === 'terminating'))
     const runtimeText = JSON.stringify(savedRuntimes(runtime))
     if (opts.expectedRestoredRuntime && runtimeText !== JSON.stringify(savedRuntimes(opts.expectedRestoredRuntime))) {
@@ -2038,6 +2106,8 @@ export class HostReconciler {
       const next = compileDesiredGeneration(snapshot, {
         os: this.deps.os,
         ...(this.deps.managementHosts ? { managementHosts: this.deps.managementHosts } : {}),
+        serverPhpIni,
+        cronMailto,
         ...(managementPorts ? { managementPorts } : {}),
         ...(this.deps.davIngress ? { davIngress: this.deps.davIngress } : {}),
         ...(this.deps.panelRedirects && redirection.panelPaths ? { panelRedirects: this.deps.panelRedirects } : {}),
@@ -2235,6 +2305,8 @@ export class HostReconciler {
         ? new Set(compileDesiredGeneration(appliedSnapshot, {
           os: this.deps.os,
           ...(this.deps.managementHosts ? { managementHosts: this.deps.managementHosts } : {}),
+        serverPhpIni,
+        cronMailto,
           ...(managementPorts ? { managementPorts } : {}),
           ...(this.deps.davIngress ? { davIngress: this.deps.davIngress } : {}),
           ...(this.deps.panelRedirects && redirection.panelPaths ? { panelRedirects: this.deps.panelRedirects } : {}),

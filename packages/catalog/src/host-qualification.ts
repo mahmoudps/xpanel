@@ -544,6 +544,16 @@ export const PHASE1_TOOL_PROBES: Readonly<Record<string, readonly HostProbe[]>> 
   'spam-quarantine': ['control-plane', 'mail'],
   'traffic-monitor-account': ['control-plane', 'apache'],
   'git-deployments': ['control-plane', 'files', 'systemd'],
+  'disk-quota-setup': ['control-plane', 'linux-account', 'files'],
+  'web-stack-builder': ['control-plane', 'apache', 'systemd'],
+  'aapanel-openlitespeed-manager': ['control-plane', 'systemd'],
+  'distro-packages': ['control-plane', 'packages', 'host-jobs'],
+  'aapanel-one-click-deploy': ['control-plane', 'apache', 'mariadb', 'files', 'host-jobs'],
+  'app-installer': ['control-plane', 'apache', 'mariadb', 'files', 'host-jobs'],
+  'aapanel-site-reverse-proxy': ['control-plane', 'apache'],
+  'aapanel-proxy-project': ['control-plane', 'apache'],
+  'aapanel-mysql-service': ['control-plane', 'mariadb', 'mariadb-admin', 'systemd'],
+  'database-tuning': ['control-plane', 'mariadb', 'mariadb-admin', 'systemd'],
 }
 
 /**
@@ -980,6 +990,16 @@ export const QUALIFIED_SCOPE: Readonly<Record<string, string>> = {
   'web-disk': 'The main account login and User Manager users with Web Disk, each limited to its directory with read-write or read-only rights, over HTTPS on port 2078 of every account domain with an installed certificate once management TLS is active; the page downloads connection settings as a text file; a missing directory is created as the account, and one that cannot be created leaves that login unavailable. Authentication is Basic over TLS: Digest would store a password-equivalent secret for every login, and it only serves clients on plain connections, which this port does not offer. Downloadable client scripts are not provided.',
   'calendars-contacts-config': 'CalDAV and CardDAV on port 2080 of every account domain with an installed certificate for the account login and every mailbox, with the server, principal, default calendar and default address book URLs, an Apple device profile for each login without any password, RFC 6764 SRV and path records in zones hosted here, and .well-known redirects on the website and on that port, the same collections xMail reads and writes; a zone hosted elsewhere gets no SRV records, and Android has no profile format, so DAVx5 discovers the server or takes the URL.',
   'webmail-dav-config': 'The CalDAV and CardDAV server, principal, default calendar and default address book URLs of the signed-in mailbox on port 2080, with an Apple device profile that holds no password.',
+  'disk-quota-setup': 'Live filesystem mount and user-quota readiness inspection alongside fstab backup and quotacheck/quotaon initialization across hosting mounts.',
+  'web-stack-builder': 'Preset web stack profile selection (Nginx + Apache mpm_itk or OpenLiteSpeed), module verification and worker-pool limits tested before reload.',
+  'aapanel-openlitespeed-manager': 'OpenLiteSpeed service lifecycle control, httpd_config.conf validation, backup and rollback.',
+  'distro-packages': 'Reviewed distribution component search, dependency preview, install and removal through the signed OS package manager and host job queue.',
+  'aapanel-one-click-deploy': 'One-click PHP application deployment onto owned domain document roots through reviewed installer packages and host jobs.',
+  'app-installer': 'Application catalog installation onto owned domains and instance lifecycle removal through host jobs.',
+  'aapanel-site-reverse-proxy': 'Path-scoped site reverse-proxy rules targeting validated HTTP/HTTPS backends or owned runtime loopback ports.',
+  'aapanel-proxy-project': 'Standalone reverse-proxy site projects with multi-domain TLS, caching, compression and path routing rules.',
+  'aapanel-mysql-service': 'MariaDB/MySQL daemon control, listener/bind/max-connections settings in 90-xpanel-mysql.cnf with mariadbd validation and automatic rollback, plus log inspection.',
+  'database-tuning': 'MariaDB runtime telemetry, recommendations and bounded 90-xpanel-tuning.cnf buffer/connection preview, apply and rollback.',
 }
 
 /**
