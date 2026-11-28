@@ -146,7 +146,8 @@ describe('v2 account observations', () => {
     expect(html).toContain('>8.79\u00a0KiB</span>')
     expect(html).toContain('&lt;/td&gt;&lt;script&gt;alert(1)&lt;/script&gt;')
     expect(html).not.toContain('<script>')
-    expect(html).toContain(v2Messages.translator('ar')('Daily visitor readings have not been read. Request totals do not establish a daily visitor series.'))
+    expect(html).toContain('data-traffic-monitor-daily')
+    expect(html).toContain('data-account-traffic-monitor')
     const charts = chartGeometry(html)
     expect(charts).toHaveLength(2)
     expect(charts.map(paths => paths.length)).toEqual([2, 2])
@@ -183,7 +184,7 @@ describe('v2 account observations', () => {
     expect(blocked).not.toContain('href="/metrics/logs?')
     const html = renderV2PanelTraffic(props, { ...authority, relatedRoutes: new Set(['/metrics/logs']) })
     expect(html).toContain('href="/metrics/logs?')
-    expect(html).toContain('Archived log downloads have not been qualified.')
+    expect(html).toContain('Read the bounded access log and download raw access archives in the site log workspace.')
     expect(html).not.toContain('Download logs</button>')
   })
 

@@ -3,7 +3,7 @@ import type { PanelSurfaceProps } from '../../../../contract.ts'
 import { formatAsciiBytes, formatAsciiNumber, formatDisplayDateTime } from '../../../../../display-format.ts'
 import { parseWebsiteAnalyticsSnapshot, WEBSITE_ANALYTICS_WINDOWS, type WebsiteAnalyticsWindow } from '../../../../../models/website-analytics.ts'
 import { kpiCard, lineChart, notice, statusPill } from '../../../components/index.ts'
-import { actions, button, emailContext, esc, facts, field, fields, header, missingAccount, page, section, select, table, technical, unread } from '../email-tools/common.ts'
+import { actions, button, emailContext, esc, facts, field, fields, header, missingAccount, page, section, select, state, table, technical, unread } from '../email-tools/common.ts'
 import { blankState, pair, strip, tableCard, type PanelObservationAuthority } from './common.ts'
 
 export function renderV2PanelTraffic(props: PanelSurfaceProps, authority?: PanelObservationAuthority): string {
@@ -75,17 +75,45 @@ export function renderV2PanelTraffic(props: PanelSurfaceProps, authority?: Panel
   const errors = tableCard('v2-traffic-error', t(msgid('Errors by path')), [t(msgid('Path')), t(msgid('Status')), t(msgid('Errors'))], entries(report?.topPaths.filter(row => (row.errors5xx ?? 0) > 0), 3, true))
   const referrers = tableCard('v2-traffic-referrer', t(msgid('Top Referrers')), [t(msgid('Referrer')), t(msgid('Requests')), t(msgid('Transferred'))], entries(report?.topReferrers, 3))
   const clients = tableCard('v2-traffic-client', t(msgid('Top Client IP Addresses')), [t(msgid('Client')), t(msgid('Requests')), t(msgid('Transferred'))], entries(report?.topClientIps, 3))
+  const canMonitor = authority?.canRead === true && authority.presentation !== 'read-only' && !!account && account.status === 'active'
+    && (!authority.authorizedTools || authority.authorizedTools.has('traffic-monitor-account'))
+  const canBlockIp = canMonitor && authority.canManage === true && (!authority.authorizedTools || authority.authorizedTools.has('ip-blocker'))
+  const monitorFact = (key: string, label: string): { label: string; valueHtml: string } => ({
+    label,
+    valueHtml: `<bdi dir="ltr" class="v2-mono v2-num" data-traffic-monitor-fact="${key}">${notRead}</bdi>`,
+  })
   const visitors = section('v2-traffic-visitors', t(msgid('Unique visitors per day')),
-    blankState(t(msgid('Daily visitor readings have not been read. Request totals do not establish a daily visitor series.')), 'unread')
-    + facts([{ label: t(msgid('Unique visitors')), valueHtml: totals ? technical(totals.uniqueVisitors) : notRead }]))
+    facts([{ label: t(msgid('Unique visitors')), valueHtml: totals ? technical(totals.uniqueVisitors) : notRead }])
+    + table('v2-traffic-daily-visitors', t(msgid('Unique visitors per day')), [t(msgid('Day (UTC)')), t(msgid('Unique visitors')), t(msgid('Requests'))], unread(t, 3), { 'data-traffic-monitor-daily': true }))
   const latency = section('v2-traffic-cache-latency', t(msgid('Avg / P95 Latency')),
     facts([{ label: t(msgid('Cache Hit Ratio')), valueHtml: totals ? technical(value(totals.cacheHitRatioPercent, 'percent')) : notRead }, { label: t(msgctxt('theme:v2', 'Average request latency')), valueHtml: totals ? technical(value(totals.avgRequestTimeMs, 'ms')) : notRead }, { label: t(msgctxt('theme:v2', 'P95 request latency')), valueHtml: totals ? technical(value(totals.p95RequestTimeMs, 'ms')) : notRead }]))
   const logs = section('v2-traffic-raw-logs', t(msgid('Raw access logs')),
-    `<p>${esc(t(msgctxt('theme:v2', 'Read the bounded access log in the site log workspace. Archived log downloads have not been qualified.')))}</p>`
+    `<p>${esc(t(msgctxt('theme:v2', 'Read the bounded access log and download raw access archives in the site log workspace.')))}</p>`
     + actions(authority?.relatedRoutes?.has('/metrics/logs') ? `<a class="v2-btn" href="/metrics/logs?${esc(params.toString())}">${esc(t(msgid('Read log')))}</a>` : `<button type="button" class="v2-btn" disabled>${esc(t(msgid('Read log')))}</button>`))
+  const liveOverview = section('v2-traffic-live-monitor', t(msgid('Live visitor stream')),
+    actions(button(t(msgid('Read live traffic')), { 'data-traffic-monitor-refresh': true }, !canMonitor, true))
+    + state(canMonitor ? t(msgid('Live traffic has not been read.')) : t(msgid('Live traffic is unavailable here. Nothing was read.')), { 'data-traffic-monitor-status': true })
+    + facts([
+      monitorFact('requests', t(msgid('Total Requests'))),
+      monitorFact('visitors', t(msgid('Unique Visitors'))),
+      monitorFact('errors', t(msgid('5xx errors'))),
+      monitorFact('blocked', t(msgid('Blocked addresses'))),
+    ])
+    + table('v2-traffic-live-requests', t(msgid('Recent requests')), [t(msgid('Time (UTC)')), t(msgid('Method')), t(msgid('Path')), t(msgid('Status')), t(msgid('Client IP')), t(msgid('User agent'))], unread(t, 6), { 'data-traffic-monitor-requests': true }))
+  const liveAgents = tableCard('v2-traffic-live-agents', t(msgid('Top user agents')), [t(msgid('User agent')), t(msgid('Requests')), t(msgid('Transferred'))], unread(t, 3), { bodyHooks: { 'data-traffic-monitor-agents': true } })
+  const liveIps = tableCard('v2-traffic-live-ips', t(msgid('Live client IP addresses')), [t(msgid('Client IP')), t(msgid('Requests')), t(msgid('Errors')), t(msgid('Action'))], unread(t, 4), { bodyHooks: { 'data-traffic-monitor-ips': true } })
+  const liveTemplates = `<template data-xp-template="traffic-monitor-daily-row"><tr><td><bdi dir="ltr" class="v2-mono v2-num" data-xp-slot="date"></bdi></td><td><bdi dir="ltr" class="v2-num" data-xp-slot="visitors"></bdi></td><td><bdi dir="ltr" class="v2-num" data-xp-slot="requests"></bdi></td></tr></template>`
+    + `<template data-xp-template="traffic-monitor-daily-empty"><tr><td colspan="3" data-xp-slot="message"></td></tr></template>`
+    + `<template data-xp-template="traffic-monitor-request-row"><tr><td><bdi dir="ltr" class="v2-mono v2-num" data-xp-slot="time"></bdi></td><td><bdi dir="ltr" class="v2-mono" data-xp-slot="method"></bdi></td><td><bdi dir="ltr" class="v2-mono" data-xp-slot="path"></bdi></td><td><bdi dir="ltr" class="v2-num" data-xp-slot="status"></bdi></td><td><bdi dir="ltr" class="v2-mono v2-num" data-xp-slot="ip"></bdi></td><td><bdi dir="ltr" data-xp-slot="agent"></bdi></td></tr></template>`
+    + `<template data-xp-template="traffic-monitor-request-empty"><tr><td colspan="6" data-xp-slot="message"></td></tr></template>`
+    + `<template data-xp-template="traffic-monitor-agent-row"><tr><td><bdi dir="ltr" data-xp-slot="agent"></bdi></td><td><bdi dir="ltr" class="v2-num" data-xp-slot="requests"></bdi></td><td><bdi dir="ltr" class="v2-num" data-xp-slot="bytes"></bdi></td></tr></template>`
+    + `<template data-xp-template="traffic-monitor-agent-empty"><tr><td colspan="3" data-xp-slot="message"></td></tr></template>`
+    + `<template data-xp-template="traffic-monitor-ip-row"><tr><td><bdi dir="ltr" class="v2-mono v2-num" data-xp-slot="ip"></bdi></td><td><bdi dir="ltr" class="v2-num" data-xp-slot="requests"></bdi></td><td><bdi dir="ltr" class="v2-num" data-xp-slot="errors"></bdi></td><td><button type="button" class="v2-btn" data-xp-slot="block" disabled></button></td></tr></template>`
+    + `<template data-xp-template="traffic-monitor-ip-empty"><tr><td colspan="4" data-xp-slot="message"></td></tr></template>`
+  const liveMonitor = `<div class="v2-panel-extra__groups" data-account-traffic-monitor data-traffic-monitor-can-read="${canMonitor}" data-traffic-monitor-manage="${canBlockIp}" data-traffic-monitor-domain="${selected ? esc(selected.name) : ''}">${strip(latency + visitors + logs)}${liveOverview}${pair(liveAgents, liveIps, true)}${liveTemplates}</div>`
   const readonly = !authority?.canRead || authority.presentation === 'read-only' || !account ? ' data-readonly="true"' : ''
   return page(locale, route, header(t, route, title, t(msgctxt('theme:v2', 'Visitors, requests, bandwidth and errors for your domains, counted from the Nginx access logs.'))) + meta
-    + `<div class="v2-panel-extra__groups"${readonly} data-surface-widget="website-analytics" data-chart-state="${readState}"${selected ? ` data-domain="${esc(selected.name)}"` : ''}>${scope}${status}${summary}${requests}${pair(bandwidthChart, bandwidth)}${pair(`<div class="v2-panel-extra__groups">${paths}${errors}</div>`, responses)}${pair(referrers, clients, true)}${strip(latency + visitors + logs)}</div>`)
+    + `<div class="v2-panel-extra__groups"${readonly} data-surface-widget="website-analytics" data-chart-state="${readState}"${selected ? ` data-domain="${esc(selected.name)}"` : ''}>${scope}${status}${summary}${requests}${pair(bandwidthChart, bandwidth)}${pair(`<div class="v2-panel-extra__groups">${paths}${errors}</div>`, responses)}${pair(referrers, clients, true)}${liveMonitor}</div>`)
 }
 
 export const ftpReport = (props: PanelSurfaceProps, authority: PanelObservationAuthority | undefined): string => {
