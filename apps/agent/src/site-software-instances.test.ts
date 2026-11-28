@@ -42,4 +42,36 @@ describe('host site software instances', () => {
     await expect(call(ctx, '/host/site-software/artifacts', { ...body, contentBase64: 'AQ' })).rejects.toMatchObject({ code: 'VALIDATION' })
     await expect(call(ctx, '/host/site-software/artifacts', { ...body, offset: -1 })).rejects.toMatchObject({ code: 'VALIDATION' })
   })
+
+  it('dispatches one-click deploy and app-installer install jobs through the real coordinator', async () => {
+    const rev = 'e'.repeat(64)
+    const job = { id: '44444444-4444-4444-8444-444444444444', kind: 'application.install', accountId: account.id, status: 'queued' }
+    const submitJob = vi.fn(async () => job)
+    const coordinator = { prepare: vi.fn(async () => ({ plan: { kind: 'application.install' }, discardUnstarted: () => true })) } as unknown as NonNullable<SiteSoftwareInstancesContext['coordinator']>
+    const provider = {
+      admission: {
+        descriptorConfinement: true, accountLifetimeFence: true, durablePreimages: true,
+        scopedWrites: true, digestReadback: true, boundedDeadlines: true, contentAddressedEgress: true,
+      },
+      readArtifact: vi.fn(),
+      openTarget: vi.fn(),
+      pendingTransactions: vi.fn(),
+    } as unknown as NonNullable<SiteSoftwareInstancesContext['provider']>
+    const ctx = context({ coordinator, provider, submitJob: submitJob as unknown as NonNullable<SiteSoftwareInstancesContext['submitJob']> })
+
+    for (const [endpoint, action] of [['/host/software/one-click/deploy', 'server.one_click.job_submitted'], ['/host/software/app-installer/install', 'server.app_installer.job_submitted']] as const) {
+      const payload = {
+        accountId: account.id, username: 'alice', domainId: domain.id, docRoot: domain.docRoot, path: 'blog',
+        appId: 'sample', version: '1.0.0', expectedRevision: rev, expectedCatalogRevision: rev,
+      }
+      const res = await call(ctx, endpoint, payload)
+      expect(res?.status).toBe(202)
+      expect(await res?.json()).toEqual({ job })
+      expect(ctx.audit).toHaveBeenCalledWith(expect.objectContaining({ action, target: 'account:alice', outcome: 'ok' }))
+    }
+    await expect(call(ctx, '/host/software/one-click/deploy', {
+      accountId: '99999999-9999-4999-8999-999999999999', username: 'alice', domainId: domain.id, docRoot: domain.docRoot,
+      path: '', appId: 'sample', version: '1.0.0', expectedRevision: rev, expectedCatalogRevision: rev,
+    })).rejects.toMatchObject({ code: 'NOT_FOUND' })
+  })
 })

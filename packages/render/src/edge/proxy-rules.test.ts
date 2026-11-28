@@ -64,4 +64,34 @@ describe('reverse proxy rules at the nginx edge', () => {
     const suspended = renderNginxSite(account({ status: 'suspended' }), [domain()], settings(), null, { proxyRules: { [name]: [{ path: '/app', target: 'http://203.0.113.7:9080', options }] } })
     expect(suspended).not.toContain('203.0.113.7')
   })
+
+  it('admits owned runtime loopback ports explicitly while still refusing unowned loopback and panel ports', () => {
+    const name = domain().name
+    const server = settings()
+    expect(proxyRuleRefusal('http://127.0.0.1:4100', server, [4100])).toBeNull()
+    expect(proxyRuleRefusal('http://127.0.0.1:4101', server, [4100])).toBe('loopback')
+    expect(proxyRuleRefusal(`http://127.0.0.1:${server.panelPort}`, server, [server.panelPort])).toBe('panel_port')
+
+    const rendered = site({ [name]: [{ path: '/api', target: 'http://127.0.0.1:4100', options }] }, { allowedLoopbackPorts: new Set([4100]) })
+    expect(rendered).toContain('proxy_pass http://127.0.0.1:4100;')
+    expect(rendered).not.toContain('# proxy rule skipped: /api')
+  })
+
+  it('renders standalone proxy project sites into isolated server blocks with owned loopback ports', () => {
+    const rendered = renderNginxSite(account(), [domain()], settings(), null, {
+      allowedLoopbackPorts: [4200],
+      proxyProjects: [{
+        id: '55555555-5555-4555-8555-555555555555',
+        name: 'App Gateway',
+        domains: ['gateway.example.test', 'example.com'],
+        rules: [{ path: '/app', target: 'http://127.0.0.1:4200', options: { websocket: true, hostHeader: 'upstream', headers: [] } }],
+        cache: false,
+        gzip: true,
+        ssl: { enabled: false, certificateId: null },
+      }],
+    })
+    expect(rendered).toContain('server_name gateway.example.test;')
+    expect(rendered).toContain('proxy_pass http://127.0.0.1:4200;')
+    expect(rendered).toContain('gzip on;')
+  })
 })

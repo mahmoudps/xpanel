@@ -608,10 +608,15 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
     postActions.push(...dav.postActions)
 
     // Edge & backend vhosts + PHP-FPM pools
-    if (snapshot.server && accountDomains.length > 0) {
+    const ownedLoopbackPorts = new Set((runtime?.apps ?? []).filter(app => app.enabled && app.project?.port).map(app => app.project!.port))
+    const edgeSiteOpts = accountEdgeSiteOptions(opts.accountEdge, account.id)
+    if (snapshot.server && (accountDomains.length > 0 || (edgeSiteOpts.proxyProjects?.length ?? 0) > 0)) {
       const settings = snapshot.server.settings
       // sec: per-site WAF limits and ModSecurity switches
-      files.push(edge.nginxSiteFile(account, accountDomains, edgeSettings(settings), os, certs, { now, dedicatedAddresses, ...(opts.secEdge ? { waf: opts.secEdge.sites } : {}), ...(runtimeRender ? { appRoutes: runtimeRender.routes, ...(runtimeRender.compression ? { compression: runtimeRender.compression } : {}) } : {}), ...accountEdgeSiteOptions(opts.accountEdge, account.id), mailAutoconfig: mailAutoconfigOption(snapshot, account.id), calDavNames: dav.calDavNames, ...(opts.panelRedirects ? { panelRedirects: opts.panelRedirects } : {}), ...(opts.accountPages ? { pageScope: opts.accountPages.scopeOf.get(account.id) ?? '' } : {}) }))
+      files.push(edge.nginxSiteFile(account, accountDomains, edgeSettings(settings), os, certs, { now, dedicatedAddresses, ...(opts.secEdge ? { waf: opts.secEdge.sites } : {}), ...(runtimeRender ? { appRoutes: runtimeRender.routes, ...(runtimeRender.compression ? { compression: runtimeRender.compression } : {}) } : {}), ...(ownedLoopbackPorts.size ? { allowedLoopbackPorts: ownedLoopbackPorts } : {}), ...edgeSiteOpts, mailAutoconfig: mailAutoconfigOption(snapshot, account.id), calDavNames: dav.calDavNames, ...(opts.panelRedirects ? { panelRedirects: opts.panelRedirects } : {}), ...(opts.accountPages ? { pageScope: opts.accountPages.scopeOf.get(account.id) ?? '' } : {}) }))
+    }
+    if (snapshot.server && accountDomains.length > 0) {
+      const settings = snapshot.server.settings
 
       // Per-domain custom configuration drop-in files (cPanel userdata style) + .user.ini
       const customByDomain = new Map(

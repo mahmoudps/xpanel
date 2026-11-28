@@ -176,7 +176,7 @@ async function measure(page, selector) {
       check_states: [...parent.querySelectorAll('[data-check-state],[data-mail-card-status]')].map(element => element.dataset.checkState ?? element.dataset.state),
       installer_states: [...parent.querySelectorAll('[data-installer-state]')].map(element => element.dataset.installerState),
       installer_progress: [...parent.querySelectorAll('[data-installer-progress]')].map(element => element.dataset.installerProgress),
-      buttons: [...parent.querySelectorAll('button')].filter(visible).map(element => ({ disabled: element.disabled, type: element.type, read_only: [element.dataset.siteSoftwareAction, element.dataset.siteInstancesAction].includes('refresh') })),
+      buttons: [...parent.querySelectorAll('button')].filter(visible).map(element => ({ disabled: element.disabled, type: element.type, read_only: [element.dataset.siteSoftwareAction, element.dataset.siteInstancesAction].includes('refresh') || 'dpRefresh' in element.dataset || 'ocdRefresh' in element.dataset || 'aiRefresh' in element.dataset })),
       view_links: [...parent.querySelectorAll('nav a[data-nav-route]')].map(element => ({ route: element.dataset.navRoute, href: element.getAttribute('href'), current: element.getAttribute('aria-current') })),
       resource_state: parent.dataset.resourceReading ?? parent.querySelector('[data-resource-reading]')?.dataset.resourceReading ?? null,
       slice_identity: parent.textContent.includes('xpanel-20001.slice'),
@@ -209,7 +209,8 @@ function validateGeometry(observation, spec, width, locale, theme) {
     assert.ok(hit.width >= 43.5 && hit.height >= 43.5, `Interactive targets are at least 44px (${target.tag}: ${target.text})`)
   }
   if (spec.family === 'store') {
-    assert.deepEqual(observation.installer_states, ['unavailable'])
+    const whmLiveStore = spec.surface === 'xwhm' && !spec.route.endsWith('/activity')
+    assert.deepEqual(observation.installer_states, whmLiveStore ? [] : ['unavailable'])
     assert.ok(observation.installer_progress.every(state => state === 'unread'))
     assert.ok(observation.buttons.every(button => (button.disabled || button.read_only) && button.type === 'button'), 'Only a read stays enabled before anything was read')
     const expected = storeRouteSpecs.filter(row => row.surface === spec.surface).map(row => row.route)

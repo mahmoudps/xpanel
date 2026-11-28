@@ -15,7 +15,7 @@ import { WHM_DNS_TOOLS_CLIENT_BINDING } from './whm-dns-tools-client.ts'
 import { WHM_SSL_CLIENT_BINDING } from './whm-ssl-client.ts'
 import { WHM_SSL_INSTALL_CLIENT_BINDING } from './whm-ssl-install-client.ts'
 import { WHM_DATABASES_CLIENT_BINDING } from './whm-databases-client.ts'
-import { DB_TUNING_VARIABLES, DB_TUNING_STATUS, WHM_DATABASE_TUNING_CLIENT_BINDING } from './whm-database-tuning-client.ts'
+import { DB_TUNING_VARIABLES, DB_TUNING_STATUS, WHM_DB_TUNING_CLIENT_BINDING } from './whm-db-tuning-client.ts'
 import { buildDatabaseTuningView, type DatabaseTuningVariables, type DatabaseTuningStatus } from '../../agent/src/database-tuning.ts'
 import { renderAccountDatabases } from './board-port/extensions/account-databases.ts'
 import { renderAccountDatabaseInsightsWorkspace } from './board-port/account-database-insights-workspace.ts'
@@ -229,17 +229,26 @@ describe.each(['classic', 'v2'] as const)('%s database and service controller te
     expect(send.mock.calls).toHaveLength(1)
   })
 
-  it('renders tuning evidence as a read-only advisory plan without creating apply controls', async () => {
+  it('renders tuning evidence and editor controls while respecting read-only vs manage authority', async () => {
     const variables = Object.fromEntries(DB_TUNING_VARIABLES.map(name => [name, name === 'slow_query_log' ? 'OFF' : name === 'long_query_time' ? 0.5 : 128])) as DatabaseTuningVariables
     const counters = Object.fromEntries(DB_TUNING_STATUS.map(name => [name, 12])) as DatabaseTuningStatus
-    const payload = buildDatabaseTuningView({ engine: 'mariadb', state: 'read', observedAt: at, version: '10.11.8-MariaDB', variables, status: counters })
+    const payload = {
+      ...buildDatabaseTuningView({ engine: 'mariadb', state: 'read', observedAt: at, version: '10.11.8-MariaDB', variables, status: counters }),
+      capabilities: { apply: true as const },
+      dropIn: { path: '/etc/mysql/mariadb.conf.d/90-xpanel-tuning.cnf', present: false, revision, content: null, rollbackAvailable: false },
+    }
     const send = vi.fn(async () => payload)
-    const { document } = mount(choose(renderV2WhmDatabasePage({ ...whm, activeRoute: '/whm/databases/tuning' })!, renderWhmDatabaseTuningWorkspace({ locale: 'en', canRead: true })), WHM_DATABASE_TUNING_CLIENT_BINDING, send)
+    const { document } = mount(renderV2WhmDatabasePage({ ...whm, activeRoute: '/whm/databases/tuning' })!, WHM_DB_TUNING_CLIENT_BINDING, send)
     await settle()
     expect(document.querySelectorAll('[data-db-tuning-rows="variables"] tr')).toHaveLength(DB_TUNING_VARIABLES.length)
     expect(document.querySelectorAll('[data-db-tuning-plan] article[data-check]')).toHaveLength(payload.plan.checks.length)
-    expect(document.querySelector('[data-db-tuning-plan] input,[data-db-tuning-plan] button')).toBeNull()
+    expect(document.querySelectorAll('[data-db-tuning-editor] [data-db-tuning-input]').length).toBeGreaterThan(0)
+    expect(document.querySelector<HTMLButtonElement>('[data-db-tuning-apply]')?.disabled).toBe(false)
     expect(document.querySelector('[data-db-tuning-plan] [data-xp-slot="evidence"] dt')).not.toBeNull()
     expect(send.mock.calls).toHaveLength(1)
+
+    const ro = mount(renderV2WhmDatabasePage({ ...whm, dataAuthority: { canRead: true, canManage: false }, activeRoute: '/whm/databases/tuning' })!, WHM_DB_TUNING_CLIENT_BINDING, send)
+    await settle()
+    expect(ro.document.querySelector<HTMLButtonElement>('[data-db-tuning-apply]')?.disabled).toBe(true)
   })
 })

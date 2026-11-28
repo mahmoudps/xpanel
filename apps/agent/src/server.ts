@@ -74,7 +74,8 @@ import type { ReleasePackages } from './release-packages.ts'
 import { handlePhpManagerRoute } from './php-manager-routes.ts'
 import { PHP_STAGING_DIR } from './php-manager.ts'
 import { readBans, unbanAddresses, type BanRun } from './firewall-bans.ts'
-import { clearPersistedSshAutobanBans } from './ssh-autoban.ts'
+import { clearPersistedSshAutobanBans, readGlobalPhpDisabledFunctions } from './ssh-autoban.ts'
+import { readAccountPages } from './account-pages.ts'
 import { handleSwContainersRoute } from './sw-containers.ts'
 import { handleCtrRoute, resolveContainerTerminal } from './ctr-workspace.ts'
 import { createCtrCatalog } from './ctr-catalog.ts'
@@ -99,6 +100,8 @@ import type { ApplicationArtifactProvider, ApplicationInstallCoordinator } from 
 import type { HostJobPlan } from './host-job-contract.ts'
 import { handleMariadbAdminRoute, parseMariadbVersion } from './mariadb-admin.ts'
 import { handleDatabaseTuningRoute } from './database-tuning.ts'
+import { handleWebStackRoute } from './web-stack-builder.ts'
+import { handleOlsManagerRoute } from './ols-manager.ts'
 import { handleAccountDbMaintenanceRoute, handleDbMaintenanceRoute } from './db-maintenance.ts'
 import { handleDbAdminToolsRoute } from './db-admin-tools.ts'
 import type { HostAction } from '@xpanel/core'
@@ -1580,6 +1583,62 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         const svcResponse = await handleSvcRoute(req, url, method, svcRouteContext(deps, freshRoot('services'), secHostProfile(), linuxHost, caller.principalId))
         if (svcResponse) return svcResponse
       }
+      if (url.pathname.startsWith('/host/web-stack') || url.pathname.startsWith('/host/services/openlitespeed')) {
+        const osProfile = secHostProfile() ?? profileFor('ID=' + deps.os.id + '\nVERSION_ID=' + deps.os.versionId)
+        const webStackResponse = await handleWebStackRoute(req, url, method, {
+          assertRoot: freshRoot('web stack builder'),
+          os: osProfile,
+          stateRoot: deps.store.rootDir,
+          readServerSettings: () => deps.store.getServerSettings(),
+          updateServerSettings: async patch => {
+            const current = await deps.store.getServerSettings()
+            if (!current) return fail('PRECONDITION_FAILED', 'server settings not initialized', { stateChanged: false })
+            await deps.store.saveServerSettings({ ...current, engine: patch.engine, apacheMpm: patch.apacheMpm })
+          },
+          renderOlsConfig: async nextSettings => {
+            const snapshot = await deps.store.readSnapshot()
+            const plansById = new Map(snapshot.plans.map(plan => [plan.id, plan]))
+            const globalDisabledFunctions = await readGlobalPhpDisabledFunctions(deps.store.rootDir)
+            const accountPages = await readAccountPages(deps.store.rootDir, { accounts: snapshot.accounts, resellers: snapshot.resellers, settings: nextSettings })
+            const renders: edge.OlsAccountRender[] = []
+            for (const account of snapshot.accounts) {
+              if (account.status === 'terminating') continue
+              const rawPlan = plansById.get(account.planId)
+              const accountDomains = snapshot.domains.filter(d => d.accountId === account.id)
+              if (!rawPlan || accountDomains.length === 0) continue
+              const plan = effectivePlan(rawPlan, account)
+              const allowedFunctions = nextSettings.phpFunctionExceptions?.find(item => item.account === account.username)?.functions ?? []
+              renders.push(edge.renderOlsAccount(account, edge.servedDomains(accountDomains), nextSettings, osProfile, {
+                workerCap: plan.caps.phpWorkers,
+                globalDisabledFunctions,
+                allowedFunctions,
+                now: new Date(),
+                pageScope: accountPages.scopeOf.get(account.id) ?? '',
+              }))
+            }
+            const maps = renders.flatMap(r => r.maps)
+            return [
+              edge.renderOlsServerBase(nextSettings).trimEnd(),
+              edge.renderOlsListener(nextSettings, maps).trimEnd(),
+              ...renders.map(r => r.server.trimEnd()),
+              '',
+            ].join('\n\n')
+          },
+          ...(linuxHost ? { reconcile: actor => deps.reconciler.reconcile({ actor }) } : {}),
+          run: linuxHost ? argv => deps.executor!.runCommand([...argv]) : null,
+          audit: async entry => { await appendAudit(deps.db, { ...entry, principalId: caller.principalId }) },
+        })
+        if (webStackResponse) return webStackResponse
+        const olsManagerResponse = await handleOlsManagerRoute(req, url, method, {
+          assertRoot: freshRoot('OpenLiteSpeed manager'),
+          os: osProfile,
+          stateRoot: deps.store.rootDir,
+          readServerSettings: () => deps.store.getServerSettings(),
+          run: linuxHost ? argv => deps.executor!.runCommand([...argv]) : null,
+          audit: async entry => { await appendAudit(deps.db, { ...entry, principalId: caller.principalId }) },
+        })
+        if (olsManagerResponse) return olsManagerResponse
+      }
       const systemUpdates = await handleSystemUpdatesRoute(req, url, method, {
         assertRoot: freshRoot('system update'),
         family: linuxHost ? (deps.os.family === 'debian' ? 'debian' : deps.os.family === 'rhel' ? 'rhel' : null) : null,
@@ -1743,13 +1802,17 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
       const dbAdminNative = url.pathname === '/host/databases/access-hosts/push' ? await resolveDatabaseRemoteAccessNative() : undefined
       const dbAdminToolsResponse = await handleDbAdminToolsRoute(req, url, method, { caller, reauthenticate: () => authenticateCaller(req), assertRoot: assertRootCaller, audit: entry => appendAudit(deps.db, entry), store: deps.store, ...(deps.mariadbAdmin ? { mariadb: deps.mariadbAdmin } : {}), ...(dbAdminNative ? { native: dbAdminNative } : {}), ...(deps.executor instanceof LinuxHostExecutor ? { host: deps.executor, runAction: (action: HostAction) => deps.executor!.runAction(action) } : {}) })
       if (dbAdminToolsResponse) return dbAdminToolsResponse
+      const dbFamily = linuxHost ? (deps.os.family === 'debian' ? 'debian' as const : deps.os.family === 'rhel' ? 'rhel' as const : null) : null
+      const dbRun = linuxHost ? (argv: readonly string[]) => new LinuxHostExecutor({ timeoutMs: 180_000 }).runCommand([...argv]) : null
       const databaseTuningResponse = await handleDatabaseTuningRoute(req, url, method, {
         caller, reauthenticate: () => authenticateCaller(req), assertRoot: assertRootCaller,
+        ...(dbFamily ? { family: dbFamily } : {}),
+        ...(deps.executor instanceof LinuxHostExecutor ? { host: deps.executor } : {}),
+        ...(dbRun ? { run: dbRun } : {}),
+        stateRoot: deps.store.rootDir,
         ...(deps.mariadbAdmin ? { mariadb: deps.mariadbAdmin } : {}),
       })
       if (databaseTuningResponse) return databaseTuningResponse
-      const dbFamily = linuxHost ? (deps.os.family === 'debian' ? 'debian' as const : deps.os.family === 'rhel' ? 'rhel' as const : null) : null
-      const dbRun = linuxHost ? (argv: readonly string[]) => new LinuxHostExecutor({ timeoutMs: 180_000 }).runCommand([...argv]) : null
       const dbAccount = { caller, store: deps.store, currentPrincipal: () => getPrincipal(deps.db, caller.principalId) }
       const dbEnginesResponse = await handleDbEnginesRoute(req, url, method, { ...dbAccount, assertRoot: freshRoot('database engines'), family: dbFamily, run: dbRun, readFile: linuxHost ? nodeDbSignonFs.readFile : null,
         runPostgresql: linuxHost ? statements => deps.executor!.runAction({ kind: 'sql', engine: 'postgresql', statements }) : null })

@@ -44,6 +44,8 @@ describe('resumed workflows through the real agent app', () => {
     ['/host/databases/tuning', { state: 'unavailable', capabilities: { apply: false } }],
     ['/host/monitoring/benchmark', { history: { state: 'unavailable', results: [] }, jobsAvailable: false }],
     ['/host/monitoring/traffic', { interfaces: { state: 'unavailable', items: [] }, http: { state: 'unavailable' } }],
+    ['/host/services/openlitespeed', { state: 'not_installed', installed: false }],
+    ['/host/web-stack', { engine: 'apache', isolationPolicy: 'mpm_itk' }],
   ])('keeps absent native providers unavailable on %s', async (path, expected) => {
     const f = await fixture(), response = await f.request(path as string)
     expect(response.status).toBe(200); expect(await response.json()).toMatchObject(expected)

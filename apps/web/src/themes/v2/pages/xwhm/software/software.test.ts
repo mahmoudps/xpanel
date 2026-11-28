@@ -76,7 +76,8 @@ describe('V2 WHM software documents', () => {
     const html = render('/whm/software/addon-services', { dataAuthority: { canRead: true, canManage: false } })
     expect(node(html, 'data-sw-addons-refresh').attrs.has('disabled')).toBe(false)
     expect(html).toContain('data-sw-can-manage="false"')
-    expect(node(html, 'data-service-configuration-state').attrs.get('data-service-configuration-state')).toBe('unavailable')
+    expect(node(html, 'data-wc-addon-config-read').attrs.has('disabled')).toBe(false)
+    expect(node(html, 'data-wc-addon-config-apply').attrs.has('disabled')).toBe(true)
   })
 
   it('requires repository observation before deployment and keeps account-runner facts separate', () => {
