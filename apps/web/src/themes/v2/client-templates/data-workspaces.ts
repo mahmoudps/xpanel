@@ -75,7 +75,7 @@ export function sslInstallTemplates(): string {
  return '<template data-xp-template="ssl-install-name"><label><input type="checkbox" data-xp-slot="checkbox"><bdi dir="ltr" class="v2-mono" data-xp-slot="name"></bdi></label></template>'
 }
 export function dnsToolsTemplates(): string {
- const schemas:Readonly<Record<string,readonly string[]>>={zones:['select','zone','records','ttl'],jobs:['summary','zones','status','created','finished','actions'],results:['zone','state','records','errors','warnings','messages'],compare:['zone','saved','file','published','saved-ns','published-ns','drift'],nameservers:['zone','soa','host','addresses','result'],preview:['zone','records','changes','ttl','state'],applied:['zone','changes','state']}
+ const schemas:Readonly<Record<string,readonly string[]>>={zones:['select','zone','records','ttl'],jobs:['summary','zones','status','created','finished','actions'],results:['zone','state','records','errors','warnings','messages'],compare:['zone','saved','file','published','saved-ns','published-ns','drift'],nameservers:['zone','soa','host','addresses','result'],'ns-report':['zone','account','nameservers','expected','status'],preview:['zone','records','changes','ttl','state'],applied:['zone','changes','state']}
  return Object.entries(schemas).map(([name,slots])=>row('dns-tools-'+name+'-row',slots.map(slot=>value(slot)).join(''))+empty('dns-tools-'+name+'-empty',slots.length)).join('')
   +'<template data-xp-template="dns-tools-job-action">'+action('label','')+'</template><template data-xp-template="dns-tools-zone-select"><input type="checkbox" data-xp-slot="checkbox"></template>'
 }

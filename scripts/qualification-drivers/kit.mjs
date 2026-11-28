@@ -41,6 +41,7 @@ const FOLDED_SUBTAB_ROUTES = Object.freeze({
   'zone-ttl-bulk': '/whm/dns/more',
   'hostname-a-record': '/whm/dns/more',
   'dns-config-cleanup': '/whm/dns/more',
+  'nameserver-report': '/whm/dns/more',
   'service-manager': '/whm/services/more',
   'restart-php-fpm': '/whm/services/more',
   'restart-postgresql': '/whm/services/more',

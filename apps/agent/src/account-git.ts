@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { fail, isXpanelError } from '@xpanel/core'
 import type { Account, Plan, FeatureList } from '@xpanel/core'
 import { GIT_DEPLOY_FILE, GIT_DEPLOY_LIMITS, GIT_LIMITS, isGitPath, isGitBranch, isGitHttpsUrl } from '../../../packages/os/src/git-command.ts'
@@ -14,23 +14,25 @@ export const GIT_FEATURE = 'git-version-control'
 const REVISION = /^[0-9a-f]{64}$/
 const HASH = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/
 const unchanged = { stateChanged: false }
-export type GitRequest = { op: 'list' } | { op: 'inspect'; path: string } | { op: 'init'; path: string; branch: string; expectedRevision: string } | { op: 'clone'; path: string; url: string; expectedRevision: string } | { op: 'remove'; path: string; expectedRevision: string } | { op: 'deploy'; path: string; expectedRevision: string } | { op: 'checkout'; path: string; branch: string; expectedHead: string; expectedRevision: string } | { op: 'pull'; path: string; expectedHead: string; expectedRevision: string }
+export type GitRequest = { op: 'list' } | { op: 'inspect'; path: string } | { op: 'init'; path: string; branch: string; expectedRevision: string } | { op: 'clone'; path: string; url: string; expectedRevision: string } | { op: 'remove'; path: string; expectedRevision: string } | { op: 'deploy'; path: string; expectedRevision: string } | { op: 'rollback'; path: string; targetCommit: string; expectedRevision: string } | { op: 'webhook-rotate'; path: string; expectedRevision: string } | { op: 'checkout'; path: string; branch: string; expectedHead: string; expectedRevision: string } | { op: 'pull'; path: string; expectedHead: string; expectedRevision: string }
 export interface GitRepositoryView { path: string; branch: string; head: string | null; dirty: boolean; changedFiles: number; branches: { name: string; hash: string; current: boolean }[]; commits: { hash: string; at: string; subject: string }[]; remote: string | null }
-export interface GitDeployment { commit: string; at: string }
-export interface AccountGitView { context: { accountId: string; username: string }; revision: string; repositories: string[]; selected: GitRepositoryView | null; deployed: GitDeployment | null; nativeAvailable: boolean; application: { op: GitRequest['op']; state: 'read' | 'verified'; verificationRequired: false } }
+export interface GitDeployment { commit: string; at: string; op?: 'deploy' | 'rollback' }
+export interface GitWebhookView { configured: boolean; url: string | null; updatedAt: string | null }
+export interface AccountGitView { context: { accountId: string; username: string }; revision: string; repositories: string[]; selected: GitRepositoryView | null; deployed: GitDeployment | null; releases?: GitDeployment[]; webhook?: GitWebhookView | null; nativeAvailable: boolean; application: { op: GitRequest['op']; state: 'read' | 'verified'; verificationRequired: false } }
 type GitFiles = Pick<JailedFileManager, 'list' | 'readText' | 'writeTextChecked' | 'mkdir'>
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
 export function parseGitRequest(method: string, raw?: unknown): GitRequest {
   if (method === 'GET') return { op: 'list' }
   if (method !== 'POST') return fail('VALIDATION', 'unsupported Git method', unchanged)
   if (!object(raw) || typeof raw.op !== 'string') return fail('VALIDATION', 'a Git operation is required', unchanged)
-  const keys: Record<string, string[]> = { inspect: ['op', 'path'], init: ['op', 'path', 'branch', 'expectedRevision'], clone: ['op', 'path', 'url', 'expectedRevision'], remove: ['op', 'path', 'expectedRevision'], checkout: ['op', 'path', 'branch', 'expectedHead', 'expectedRevision'], pull: ['op', 'path', 'expectedHead', 'expectedRevision'], deploy: ['op', 'path', 'expectedRevision'] }
+  const keys: Record<string, string[]> = { inspect: ['op', 'path'], init: ['op', 'path', 'branch', 'expectedRevision'], clone: ['op', 'path', 'url', 'expectedRevision'], remove: ['op', 'path', 'expectedRevision'], checkout: ['op', 'path', 'branch', 'expectedHead', 'expectedRevision'], pull: ['op', 'path', 'expectedHead', 'expectedRevision'], deploy: ['op', 'path', 'expectedRevision'], rollback: ['op', 'path', 'targetCommit', 'expectedRevision'], 'webhook-rotate': ['op', 'path', 'expectedRevision'] }
   const expected = keys[raw.op]
   if (!expected || Object.keys(raw).length !== expected.length || expected.some(key => !Object.hasOwn(raw, key)) || !isGitPath(raw.path)) return fail('VALIDATION', 'invalid Git request fields or repository path', unchanged)
   if (raw.op !== 'inspect' && (typeof raw.expectedRevision !== 'string' || !REVISION.test(raw.expectedRevision))) return fail('VALIDATION', 'a current repository list revision is required', unchanged)
   if ((raw.op === 'init' || raw.op === 'checkout') && !isGitBranch(raw.branch)) return fail('VALIDATION', 'invalid branch name', unchanged)
   if (raw.op === 'clone' && !isGitHttpsUrl(raw.url)) return fail('VALIDATION', 'use a public HTTPS repository URL without credentials, port, query or fragment', unchanged)
   if ((raw.op === 'checkout' || raw.op === 'pull') && (typeof raw.expectedHead !== 'string' || !HASH.test(raw.expectedHead))) return fail('VALIDATION', 'a current commit is required', unchanged)
+  if (raw.op === 'rollback' && (typeof raw.targetCommit !== 'string' || !HASH.test(raw.targetCommit))) return fail('VALIDATION', 'a recorded target commit is required', unchanged)
   return raw as unknown as GitRequest
 }
 /** Only Git's own basic repository/remote/branch settings; includes, filters and executable configuration are refused. */
@@ -76,16 +78,42 @@ export function parseGitDeployTasks(text: string): string[] {
   const tasks = lines.slice(2).map(line => /^\s+- (.+)$/.exec(line)?.[1] ?? unsupported())
   return tasks.length && tasks.length <= GIT_DEPLOY_LIMITS.tasks ? tasks : unsupported()
 }
-async function deployLog(files: GitFiles): Promise<{ document: FileText | null; deployments: Record<string, GitDeployment> }> {
+interface StoredDeployRecord {
+  commit?: string
+  at?: string
+  op?: 'deploy' | 'rollback'
+  history?: GitDeployment[]
+  webhookId?: string
+  webhookTokenHash?: string
+  webhookUpdatedAt?: string
+}
+const DEPLOY_HISTORY_LIMIT = 20
+const validDeployment = (value: unknown): GitDeployment | null => {
+  if (!object(value) || typeof value.commit !== 'string' || !HASH.test(value.commit) || typeof value.at !== 'string' || !Number.isFinite(Date.parse(value.at))) return null
+  return value.op === 'rollback' || value.op === 'deploy' ? { commit: value.commit, at: value.at, op: value.op } : { commit: value.commit, at: value.at }
+}
+const normalizeDeployRecord = (raw: unknown): { current: GitDeployment | null; history: GitDeployment[]; webhook: { id: string; tokenHash: string; updatedAt: string | null } | null } => {
+  if (!object(raw)) return { current: null, history: [], webhook: null }
+  const current = validDeployment(raw)
+  const rawHistory = Array.isArray(raw.history) ? raw.history.map(validDeployment).filter((item): item is GitDeployment => item !== null) : []
+  const history = (rawHistory.length ? rawHistory : current ? [{ ...current, op: current.op ?? 'deploy' }] : []).slice(0, DEPLOY_HISTORY_LIMIT)
+  const webhook = typeof raw.webhookId === 'string' && /^[0-9a-f]{16,64}$/.test(raw.webhookId) && typeof raw.webhookTokenHash === 'string' && REVISION.test(raw.webhookTokenHash)
+    ? { id: raw.webhookId, tokenHash: raw.webhookTokenHash, updatedAt: typeof raw.webhookUpdatedAt === 'string' && Number.isFinite(Date.parse(raw.webhookUpdatedAt)) ? raw.webhookUpdatedAt : null }
+    : null
+  return { current, history, webhook }
+}
+const webhookSummary = (record: ReturnType<typeof normalizeDeployRecord>['webhook']): GitWebhookView => record
+  ? { configured: true, url: '/api/account/git/webhook/' + record.id, updatedAt: record.updatedAt }
+  : { configured: false, url: null, updatedAt: null }
+async function deployLog(files: GitFiles): Promise<{ document: FileText | null; deployments: Record<string, StoredDeployRecord> }> {
   const entry = (await files.list('', { showHidden: true })).find(item => item.name === GIT_DEPLOY_LOG)
-  if (entry && (entry.kind !== 'file' || entry.sizeBytes > 8192)) return fail('PRECONDITION_FAILED', 'deployment record is not a regular bounded file', unchanged)
+  if (entry && (entry.kind !== 'file' || entry.sizeBytes > 65536)) return fail('PRECONDITION_FAILED', 'deployment record is not a regular bounded file', unchanged)
   const document = entry ? await files.readText(GIT_DEPLOY_LOG) : null
-  try { const value: unknown = document ? JSON.parse(document.content) : {}; return { document, deployments: object(value) ? value as Record<string, GitDeployment> : {} } }
+  try { const value: unknown = document ? JSON.parse(document.content) : {}; return { document, deployments: object(value) ? value as Record<string, StoredDeployRecord> : {} } }
   catch { return fail('PRECONDITION_FAILED', 'deployment record is malformed', unchanged) }
 }
-const validDeployment = (value: GitDeployment | undefined): GitDeployment | null => value && HASH.test(value.commit) && typeof value.at === 'string' && Number.isFinite(Date.parse(value.at)) ? { commit: value.commit, at: value.at } : null
-async function deployHead(input: { account: Account; files: GitFiles; run: AccountGitRun; path: string; authorize(): Promise<void>; now?: () => Date }): Promise<{ selected: GitRepositoryView; deployed: GitDeployment }> {
-  const { account, files, run, path } = input
+async function executeDeployTasks(input: { account: Account; files: GitFiles; run: AccountGitRun; path: string; targetCommit?: string; authorize(): Promise<void>; now?: () => Date }): Promise<{ selected: GitRepositoryView; deployed: GitDeployment; releases: GitDeployment[]; webhook: GitWebhookView }> {
+  const { account, files, run, path, targetCommit } = input
   const selected = await inspect(account, path, files, run)
   if (selected.dirty) return fail('CONFLICT', 'commit or discard the working tree changes before deploying', { ...unchanged, reason: 'dirty_tree' })
   if (!selected.head) return fail('PRECONDITION_FAILED', 'deployment needs a branch with at least one commit', unchanged)
@@ -93,16 +121,62 @@ async function deployHead(input: { account: Account; files: GitFiles; run: Accou
   const entry = (await files.list(path, { showHidden: true })).find(item => item.name === GIT_DEPLOY_FILE)
   if (entry?.kind !== 'file') return fail('PRECONDITION_FAILED', 'this repository has no ' + GIT_DEPLOY_FILE + ' deployment file', unchanged)
   const tasks = parseGitDeployTasks((await files.readText(path + '/' + GIT_DEPLOY_FILE)).content), log = await deployLog(files)
+  const prior = normalizeDeployRecord(log.deployments[path])
+  if (targetCommit !== undefined && !prior.history.some(item => item.commit === targetCommit) && prior.current?.commit !== targetCommit) {
+    return fail('NOT_FOUND', 'the selected deployment release was not recorded for this repository', unchanged)
+  }
+  const commit = targetCommit ?? selected.head
+  const op: 'deploy' | 'rollback' = targetCommit !== undefined ? 'rollback' : 'deploy'
+  let script = tasks.join('\n')
+  if (targetCommit !== undefined) {
+    const lines = [`export XPANEL_DEPLOY_COMMIT=${commit}`, 'export XPANEL_DEPLOY_OP=rollback']
+    if (selected.head !== commit) {
+      lines.push(
+        `XPANEL_ORIG_BRANCH='${selected.branch}'`,
+        `trap '/usr/bin/git checkout --quiet --no-recurse-submodules "$XPANEL_ORIG_BRANCH" -- >/dev/null 2>&1 || true' EXIT`,
+        `/usr/bin/git checkout --quiet --detach --no-recurse-submodules ${commit} --`,
+      )
+    }
+    lines.push(...tasks)
+    if (selected.head !== commit) lines.push('/usr/bin/git checkout --quiet --no-recurse-submodules "$XPANEL_ORIG_BRANCH" --')
+    script = lines.join('\n')
+    if (Buffer.byteLength(script) > GIT_DEPLOY_LIMITS.scriptBytes) {
+      return fail('PRECONDITION_FAILED', 'deployment tasks exceed the safe script size limit', unchanged)
+    }
+  }
   await input.authorize()
   let finished = false
   try {
-    const result = await run(account, path, { op: 'deploy', script: tasks.join('\n') })
+    const result = await run(account, path, { op: 'deploy', script })
     finished = result.ok && result.code === 0
   } catch { /* the outcome stays unverified below */ }
   if (!finished) return fail('SERVICE_UNAVAILABLE', 'a deployment task failed or was not verified; review the site before retrying', { stateChanged: true, unknownOutcome: true, verificationRequired: true, path })
-  const deployed = { commit: selected.head, at: (input.now ?? (() => new Date()))().toISOString() }
-  await input.authorize(); await files.writeTextChecked(GIT_DEPLOY_LOG, JSON.stringify({ ...log.deployments, [path]: deployed }) + '\n', log.document, 0o600)
-  return { selected, deployed }
+  const deployed: GitDeployment = { commit, at: (input.now ?? (() => new Date()))().toISOString(), op }
+  const releases = [deployed, ...prior.history].slice(0, DEPLOY_HISTORY_LIMIT)
+  const nextRecord: StoredDeployRecord = {
+    ...deployed,
+    history: releases,
+    ...(prior.webhook ? { webhookId: prior.webhook.id, webhookTokenHash: prior.webhook.tokenHash, ...(prior.webhook.updatedAt ? { webhookUpdatedAt: prior.webhook.updatedAt } : {}) } : {}),
+  }
+  await input.authorize(); await files.writeTextChecked(GIT_DEPLOY_LOG, JSON.stringify({ ...log.deployments, [path]: nextRecord }) + '\n', log.document, 0o600)
+  return { selected, deployed, releases, webhook: webhookSummary(prior.webhook) }
+}
+async function rotateDeployWebhook(input: { account: Account; files: GitFiles; run: AccountGitRun; path: string; authorize(): Promise<void>; now?: () => Date }): Promise<{ selected: GitRepositoryView; deployed: GitDeployment | null; releases: GitDeployment[]; webhook: GitWebhookView }> {
+  const { account, files, run, path } = input
+  const selected = await inspect(account, path, files, run), log = await deployLog(files)
+  const prior = normalizeDeployRecord(log.deployments[path])
+  const webhookId = randomBytes(8).toString('hex'), token = randomBytes(24).toString('hex')
+  const webhookTokenHash = createHash('sha256').update(token).digest('hex')
+  const webhookUpdatedAt = (input.now ?? (() => new Date()))().toISOString()
+  const nextRecord: StoredDeployRecord = {
+    ...(prior.current ? { commit: prior.current.commit, at: prior.current.at, ...(prior.current.op ? { op: prior.current.op } : {}) } : {}),
+    ...(prior.history.length ? { history: prior.history } : {}),
+    webhookId,
+    webhookTokenHash,
+    webhookUpdatedAt,
+  }
+  await input.authorize(); await files.writeTextChecked(GIT_DEPLOY_LOG, JSON.stringify({ ...log.deployments, [path]: nextRecord }) + '\n', log.document, 0o600)
+  return { selected, deployed: prior.current, releases: prior.history, webhook: { configured: true, url: '/api/account/git/webhook/' + webhookId + '?token=' + token, updatedAt: webhookUpdatedAt } }
 }
 async function registry(files: GitFiles): Promise<{ document: FileText | null; paths: string[]; revision: string }> {
   const entry = (await files.list('', { showHidden: true })).find(item => item.name === GIT_REGISTRY)
@@ -159,18 +233,26 @@ export async function runGitRequest(input: { account: Account; files: GitFiles; 
   const { account, files, request, run } = input
   await input.authorize()
   const before = await registry(files)
-  const view = (data: typeof before, selected: GitRepositoryView | null, deployed: GitDeployment | null = null): AccountGitView => ({ context: { accountId: account.id, username: account.username }, revision: data.revision, repositories: data.paths, selected, deployed, nativeAvailable: !!run, application: { op: request.op, state: request.op === 'list' || request.op === 'inspect' ? 'read' : 'verified', verificationRequired: false } })
+  const view = (data: typeof before, selected: GitRepositoryView | null, deployed: GitDeployment | null = null, releases?: GitDeployment[], webhook?: GitWebhookView | null): AccountGitView => ({ context: { accountId: account.id, username: account.username }, revision: data.revision, repositories: data.paths, selected, deployed, ...(releases !== undefined ? { releases } : {}), ...(webhook !== undefined ? { webhook } : {}), nativeAvailable: !!run, application: { op: request.op, state: request.op === 'list' || request.op === 'inspect' ? 'read' : 'verified', verificationRequired: false } })
   if (request.op === 'list') { await input.authorize(); return view(before, null) }
   if (request.op === 'inspect') {
     if (!before.paths.includes(request.path)) return fail('NOT_FOUND', 'repository is not registered', unchanged)
     if (!run) return fail('PRECONDITION_FAILED', 'the isolated Git runner is unavailable', unchanged)
-    const selected = await inspect(account, request.path, files, run), deployed = validDeployment((await deployLog(files)).deployments[request.path]); await input.authorize(); return view(before, selected, deployed)
+    const selected = await inspect(account, request.path, files, run), record = normalizeDeployRecord((await deployLog(files)).deployments[request.path])
+    await input.authorize(); return view(before, selected, record.current, record.history, webhookSummary(record.webhook))
   }
   if (request.expectedRevision !== before.revision) return fail('CONFLICT', 'repository list changed; read it again', unchanged)
-  if (request.op === 'deploy') {
+  if (request.op === 'deploy' || request.op === 'rollback') {
     if (!before.paths.includes(request.path)) return fail('NOT_FOUND', 'repository is not registered', unchanged)
     if (!run) return fail('PRECONDITION_FAILED', 'the isolated Git runner is unavailable', unchanged)
-    const done = await deployHead({ account, files, run, path: request.path, authorize: input.authorize }); await input.authorize(); return view(before, done.selected, done.deployed)
+    const done = await executeDeployTasks({ account, files, run, path: request.path, ...(request.op === 'rollback' ? { targetCommit: request.targetCommit } : {}), authorize: input.authorize })
+    await input.authorize(); return view(before, done.selected, done.deployed, done.releases, done.webhook)
+  }
+  if (request.op === 'webhook-rotate') {
+    if (!before.paths.includes(request.path)) return fail('NOT_FOUND', 'repository is not registered', unchanged)
+    if (!run) return fail('PRECONDITION_FAILED', 'the isolated Git runner is unavailable', unchanged)
+    const done = await rotateDeployWebhook({ account, files, run, path: request.path, authorize: input.authorize })
+    await input.authorize(); return view(before, done.selected, done.deployed, done.releases, done.webhook)
   }
   if (request.op === 'remove') {
     if (!before.paths.includes(request.path)) return fail('NOT_FOUND', 'repository is not registered', unchanged)
