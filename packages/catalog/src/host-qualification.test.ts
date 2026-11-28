@@ -89,7 +89,8 @@ describe('host qualification', () => {
       'locale-xml-export', 'xwhm-api-shell', 'reserved-ips', 'ip-usage-report', 'reset-resellers', 'reseller-package-limits', 'manage-reseller-shared-ip',
       'advanced-settings-browser', 'tweak-system', 'tweak-security', 'tweak-stats-logs', 'tweak-logging', 'password-strength', 'security-policies', 'default-key-type', 'panel-change-log',
       'change-ownership-multiple-accounts', 'user-manager', 'locale-delete', 'tweak-notifications', 'tweak-development', 'disk-usage', 'webmail-filter-test',
-      'force-password-change', 'account-enhancements', 'tweak-packages', 'whm-home-favorites', 'whm-notifications', 'locale-copy']))
+      'force-password-change', 'account-enhancements', 'tweak-packages', 'whm-home-favorites', 'whm-notifications', 'locale-copy',
+      'reseller-acl-lists', 'remote-service-ips']))
     expect(qualified.has('create-account')).toBe(false)
     expect(qualified.has('file-manager')).toBe(false)
     expect(qualified.has('email-accounts')).toBe(false)
@@ -197,9 +198,7 @@ describe('host qualification', () => {
   it('keeps unimplemented pages and extra tools closed even when every probe passed', () => {
     const qualified = qualifyHostTools(acceptedTools, allPassed)
     for (const id of ['distro-packages',
-      'web-stack-builder', 'nameserver-report', 'connect-devices',
-      // Saved but never applied, unwired or refused on main: no host effect to prepare for.
-      'git-deployments', 'spam-quarantine', 'app-installer']) {
+      'web-stack-builder', 'tweak-panel-php', 'app-installer']) {
       expect(qualified.find(tool => tool.id === id)?.status, id).toBe('researched')
     }
     const dnsReseller: VisibilityContext = { principal: { kind: 'reseller', id: 'reseller', username: 'reseller' }, reseller: { acl: ['manage-dns'] } }
@@ -332,6 +331,16 @@ describe('host qualification', () => {
     'aapanel-mongodb': ['control-plane', 'packages', 'systemd', 'host-jobs'],
     'aapanel-redis-service': ['control-plane', 'packages', 'systemd', 'host-jobs'],
     'aapanel-mongodb-service': ['control-plane', 'packages', 'systemd'],
+    'reseller-acl-lists': ['control-plane'],
+    'remote-service-ips': ['control-plane'],
+    'nameserver-report': ['control-plane', 'pdns'],
+    'connect-devices': ['control-plane', 'mail'],
+    'webmail-dav-collections': ['control-plane', 'mail', 'dav'],
+    'webmail-dav-sharing': ['control-plane', 'mail', 'dav'],
+    'calendars-contacts-sharing': ['control-plane', 'mail', 'dav'],
+    'spam-quarantine': ['control-plane', 'mail'],
+    'traffic-monitor-account': ['control-plane', 'apache'],
+    'git-deployments': ['control-plane', 'files', 'systemd'],
   }
 
   it('declares the host needs of every implemented effect without an exception', () => {
