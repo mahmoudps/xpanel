@@ -36,6 +36,9 @@ const json = (value: unknown, status = 200): Response => Response.json(value, { 
 function items(raw: unknown, saved: readonly MailxCollectionItem[], field: string): RequestedItem[] {
   if (!Array.isArray(raw) || raw.length > MAILX_COLLECTION_LIMITS.items) return invalid(field)
   const list = raw.map(item => {
+    if (object(item) && Object.hasOwn(item, 'color') && item.color !== undefined && item.color !== null) {
+      return fail('LIMIT_EXCEEDED', 'color is only supported for calendars', { ...unchanged, reason: 'COLOR_NOT_SUPPORTED', field })
+    }
     if (!object(item) || Object.keys(item).length !== 4 || !['id', 'name', 'description', 'isDefault'].every(key => Object.hasOwn(item, key)) || !text(item.name, MAILX_COLLECTION_LIMITS.name)
       || !text(item.description, MAILX_COLLECTION_LIMITS.description, true) || typeof item.isDefault !== 'boolean') return invalid(field)
     // A new collection has no id yet; an existing id must name a collection of this mailbox.
@@ -111,12 +114,13 @@ export function createMailxCollectionsRoutes(helpers: MailxCollectionsHelpers) {
     const keys = ['mailbox', 'expectedRevision', 'defaultCalendar', 'descriptions', 'addressBooks', 'taskLists']
     if (!object(body) || Object.keys(body).length !== keys.length || keys.some(key => !Object.hasOwn(body, key)) || typeof body.mailbox !== 'string' || typeof body.expectedRevision !== 'string' || !/^[0-9a-f]{64}$/.test(body.expectedRevision))
       return fail('VALIDATION', 'the selected mailbox, its current revision and supported collection fields are required', unchanged)
-    const service = (await helpers.store.listServiceUsers(initial.account.id)).find(item => item.services.email && item.login.toLowerCase() === body.mailbox)
+    const requestedMailbox = body.mailbox.trim().toLowerCase()
+    const service = (await helpers.store.listServiceUsers(initial.account.id)).find(item => item.services.email && item.login.toLowerCase() === requestedMailbox)
     if (!service) return fail('NOT_FOUND', 'mailbox not found', unchanged)
     const release = await helpers.dav.lock(service.id)
-    let wrote = false, caller = initial.caller, counts = { addressBooks: 0, taskLists: 0 }
+    let wrote = false, caller = initial.caller, freshAccount = initial.account, counts = { addressBooks: 0, taskLists: 0 }
     try {
-      const fresh = await authorize(req, initial.caller); caller = fresh.caller
+      const fresh = await authorize(req, initial.caller); caller = fresh.caller; freshAccount = fresh.account
       const selected = (await capture(caller, fresh.account, service.id))[0]
       if (!selected) return fail('NOT_FOUND', 'mailbox not found', unchanged)
       if (selected.view.revision !== body.expectedRevision) return fail('CONFLICT', 'mailbox collections changed; reload before saving', unchanged)
@@ -157,8 +161,8 @@ export function createMailxCollectionsRoutes(helpers: MailxCollectionsHelpers) {
       if (wrote) return fail('SERVICE_UNAVAILABLE', 'collection save outcome requires inspection', review)
       throw error
     } finally { release() }
-    try { await helpers.emitAudit({ actor: caller.principal.username, principalId: caller.principal.id, action: 'account.collections.saved', target: 'mailbox:' + body.mailbox, outcome: 'ok', detail: counts }) }
+    try { await helpers.emitAudit({ actor: caller.principal.username, principalId: caller.principal.id, action: 'account.collections.saved', target: 'mailbox:' + requestedMailbox, outcome: 'ok', detail: counts }) }
     catch { return fail('SERVICE_UNAVAILABLE', 'saved collections require audit review', review) }
-    return json({ ...await view(initial.account), stateChanged: true })
+    return json({ ...await view(freshAccount), stateChanged: true })
   }
 }
