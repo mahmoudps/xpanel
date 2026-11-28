@@ -18,6 +18,6 @@ describe('v2 WHM SSL/TLS summary', () => {
   it('shows no count when no certificate list was supplied', () => {
     const html = renderV2WhmTlsPage({ principal: { kind: 'root', id: 'r', username: 'root' } }, authority)
     for (const label of ['All stored certificates', 'Expired', 'Expires within 30 days', 'Expires later']) expect(tile(html, label)).toBe('—')
-    expect(html.match(/class="v2-kpi__note v2-num">Not read</g)).toHaveLength(4)
+    expect(html.match(/class="v2-kpi__note v2-num">Loading...</g)).toHaveLength(4)
   })
 })

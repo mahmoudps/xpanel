@@ -158,7 +158,11 @@ function bindWhmBackupFiles(): void {
       body.replaceChildren(...(rows.length ? rows : [record('backup-files-empty' + columns, 'tr', { message: empty })]))
     }
     const fact = (name: string, value: Node | string): void => { find(name)?.replaceChildren(value) }
-    const step = (name: string): void => steps.querySelectorAll<HTMLElement>('li').forEach(item => { if (item.dataset.step === name) item.setAttribute('aria-current', 'step'); else item.removeAttribute('aria-current') })
+    const step = (name: string): void => {
+      steps.querySelectorAll<HTMLElement>('li').forEach(item => { if (item.dataset.step === name) item.setAttribute('aria-current', 'step'); else item.removeAttribute('aria-current') })
+      const wizardIndex = name === 'files' ? 1 : name === 'review' ? 2 : name === 'result' ? 3 : 0
+      root.querySelector<HTMLElement>('[data-ds-wizard]')?.dispatchEvent(new CustomEvent('xpanel:wizard-step', { detail: { step: wizardIndex } }))
+    }
     const covered = (path: string): boolean => [...selected].some(item => path.startsWith(item + '/'))
     const base = (): string => owner ? '/api/account/file-restoration' : '/api/backups/files/' + encodeURIComponent(username)
     const choice = (): string => { const value = destination.querySelector<HTMLInputElement>('input[type=radio]:checked')?.value; return value === 'in-place' || value === 'replace' ? value : 'new-folder' }
@@ -248,7 +252,7 @@ function bindWhmBackupFiles(): void {
       const current = reviewed, file = opened?.archive.file
       if (!current || !file) return
       const view = readBackupFilesReply('restore', await transport!('POST', base() + '/restore', { file, paths: current.paths, destination: current.destination, expectedRevision: current.revision }), { username, file, destination: current.destination, revision: current.revision })
-      renderResults(view); step('result')
+      renderResults(view); ack.checked = false; if (pending === 0) reviewed = null; step('result')
       const summary = t('{restored} restored, {skipped} skipped, {failed} failed, {notAttempted} not attempted.', { restored: view.counts.restored, skipped: view.counts['skipped-exists'], failed: view.counts.failed, notAttempted: view.counts['not-attempted'] })
       note(view.counts.failed || view.verificationRequired ? 'failed' : 'read', summary + (view.verificationRequired ? ' ' + t('Some results require inspection of the account home.') : view.complete ? '' : ' ' + t('Continue the restore for the remaining files.')))
     })

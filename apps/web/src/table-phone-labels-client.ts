@@ -21,7 +21,7 @@ export function bindTablePhoneLabels(): void {
       }
     }
   }
-  const sweep = (root: ParentNode): void => root.querySelectorAll<HTMLTableElement>('table[data-phone-labels]').forEach(label)
+  const sweep = (root: ParentNode): void => root.querySelectorAll<HTMLTableElement>('table[data-phone-labels],[data-phone-labels] table,[data-sc-groups] table').forEach(label)
   sweep(document)
   let queued = false
   new MutationObserver(() => {

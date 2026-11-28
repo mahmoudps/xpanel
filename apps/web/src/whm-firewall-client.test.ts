@@ -191,7 +191,7 @@ describe('approved firewall port columns', () => {
   it('renders the saved size of each v2 list as text before any read', () => {
     document.body.innerHTML = firewallMarkup('v2', 'en', [typedPortRule()])
     const count = (kind: string) => document.querySelector('[data-whm-firewall-panel="' + kind + '"] [data-firewall-rule-count]')?.textContent
-    expect([count('port'), count('ip'), count('banned')]).toEqual(['1', '0', 'Not read'])
+    expect([count('port'), count('ip'), count('banned')]).toEqual(['1', '0', 'Loading...'])
   })
 
   for (const theme of ['classic', 'v2'] as const) for (const locale of ['en', 'ar'] as const) {
@@ -199,12 +199,12 @@ describe('approved firewall port columns', () => {
       document.documentElement.lang = locale; document.documentElement.dir = locale === 'ar' ? 'rtl' : 'ltr'
       const saved = Object.assign(typedPortRule(), { purpose: 'not an authoritative purpose', origin: 'not an authoritative origin' }), before = JSON.stringify(saved)
       document.body.innerHTML = firewallMarkup(theme, locale, [saved])
-      const table = portTable(), header = table.tHead?.rows[0], row = table.tBodies[0]?.rows[0], t = translator(locale), unread = t('Not read')
+      const table = portTable(), header = table.tHead?.rows[0], row = table.tBodies[0]?.rows[0], t = translator(locale), unread = t('Not read'), ssrUnread = theme === 'v2' ? t('Loading...') : unread
       if (!header || !row) throw new Error('missing_test_port_rows')
       expect(header.cells).toHaveLength(9); expect(row.cells).toHaveLength(9)
       expect(header.cells[5]?.textContent).toBe(locale === 'en' ? 'Purpose' : 'الغرض')
       expect(header.cells[6]?.textContent).toBe(locale === 'en' ? 'Origin' : 'المنشأ'); expect(header.cells[6]?.textContent).not.toBe(header.cells[4]?.textContent); expect(header.cells[7]?.textContent).toBe(t('Note')); expect(header.cells[8]?.textContent).toBe(t('Manage'))
-      expect(row.cells[5]?.textContent).toBe(unread); expect(row.cells[6]?.textContent).toBe(unread); expect(row.cells[7]?.textContent).toBe(saved.comment)
+      expect(row.cells[5]?.textContent).toBe(ssrUnread); expect(row.cells[6]?.textContent).toBe(ssrUnread); expect(row.cells[7]?.textContent).toBe(saved.comment)
       expect(row.querySelector('img')).toBeNull()
       const manage = row.cells[8]?.querySelector('button')
       if (!manage) throw new Error('missing_test_manage_placeholder')

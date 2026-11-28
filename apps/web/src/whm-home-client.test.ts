@@ -46,4 +46,27 @@ describe('WHM home client reads', () => {
     expect(el('[data-whm-favorites-list]').children).toHaveLength(0)
     expect(el('[data-whm-favorites-empty]').hidden).toBe(false)
   })
+
+  it('groups identical inbox notifications with a count badge and marks all grouped ids in one request', async () => {
+    let inboxReads = 0
+    const request = boot(path => {
+      if (path === '/api/admin/favorites') return { routes: [], descriptions: true }
+      inboxReads++
+      if (inboxReads > 1) return { items: [], unread: 0 }
+      return {
+        unread: 2,
+        items: [
+          { id: 'n1', title: 'Backup failed', target: 'alice', at: '2026-11-27T01:00:00Z', read: false },
+          { id: 'n2', title: 'Backup failed', target: 'alice', at: '2026-11-27T00:50:00Z', read: false },
+        ],
+      }
+    })
+    await tick()
+    const rows = document.querySelectorAll('[data-whm-inbox-list] > li')
+    expect(rows).toHaveLength(1)
+    expect(rows[0]!.textContent).toContain('×2')
+    rows[0]!.querySelector('button')!.click()
+    await tick()
+    expect(request).toHaveBeenCalledWith('POST', '/api/admin/notifications/read', { ids: ['n1', 'n2'] })
+  })
 })

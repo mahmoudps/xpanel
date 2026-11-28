@@ -87,7 +87,7 @@ describe.each(['classic', 'v2'])('%s complete services workspace', theme => {
     q<HTMLButtonElement>('[data-service-select]').click()
     expect(q('[data-host-detail="unit"]').textContent).toBe('apache2.service')
     expect(q('[data-host-detail="version"]').textContent).toBe('2.4.63')
-    expect(q('[data-host-detail="boot"]').textContent).toBe('Not read')
+    expect(q('[data-host-detail="boot"]').textContent).toBe(theme === 'v2' ? 'Loading...' : 'Not read')
   })
   it.each(['missing', 'duplicate'])('does not borrow%s metadata by matching a label or sharing a unit', async kind => {
     mount(theme, 'en', { services: kind === 'duplicate' ? [health, { ...health, version: 'conflict' }] : [{ ...health, unit: 'httpd.service' }] })
