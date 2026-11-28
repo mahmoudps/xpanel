@@ -26,13 +26,20 @@ const panelPorts = (settings: ServerSettings): number[] => [settings.panelPort, 
  * loopback would publish a local service, and a panel port is refused on every host because the server's own public
  * address is also a host. A named target needs a resolver, since nginx resolves it per request.
  */
-export const proxyRuleRefusal = (target: unknown, settings: ServerSettings): ProxyRuleRefusal | null => {
+export const proxyRuleRefusal = (
+  target: unknown,
+  settings: ServerSettings,
+  allowedLoopbackPorts?: ReadonlySet<number> | readonly number[],
+): ProxyRuleRefusal | null => {
   let upstream: ReturnType<typeof parseUpstream>
   try { upstream = parseUpstream(target, 'proxy rule target') } catch { return 'invalid' }
   if (upstream.path) return 'invalid'
-  if (upstream.addressClass === 'loopback') return 'loopback'
   if (upstream.addressClass === 'forbidden') return 'forbidden_range'
   if (panelPorts(settings).includes(upstream.port)) return 'panel_port'
+  if (upstream.addressClass === 'loopback') {
+    const allowed = allowedLoopbackPorts instanceof Set ? allowedLoopbackPorts : new Set(allowedLoopbackPorts ?? [])
+    return allowed.has(upstream.port) ? null : 'loopback'
+  }
   return upstream.hostKind === 'name' && !usableResolvers(settings).length ? 'resolver_unavailable' : null
 }
 
@@ -49,12 +56,19 @@ const ruleTarget = (rule: ProxyRule, settings: ServerSettings): ProxyRuleTarget 
  * Adds a site's rules to its application locations. A rule the server no longer admits, or a path something else
  * already answers, is left out with a comment: a duplicate location would fail the configuration test of every site.
  */
-export const withProxyRules = (apps: Locations, served: readonly string[], rules: readonly ProxyRule[] | undefined, settings: ServerSettings, locate: (target: ProxyRuleTarget, at: string) => string[]): Locations => {
+export const withProxyRules = (
+  apps: Locations,
+  served: readonly string[],
+  rules: readonly ProxyRule[] | undefined,
+  settings: ServerSettings,
+  locate: (target: ProxyRuleTarget, at: string) => string[],
+  allowedLoopbackPorts?: ReadonlySet<number> | readonly number[],
+): Locations => {
   const taken = new Set([...served, ...apps.paths].map(line => line.trim()))
   let root = apps.root
   const paths = [...apps.paths]
   for (const rule of rules ?? []) {
-    const refusal = PROXY_RULE_PATH.test(rule.path) ? proxyRuleRefusal(rule.target, settings) : 'invalid'
+    const refusal = PROXY_RULE_PATH.test(rule.path) ? proxyRuleRefusal(rule.target, settings, allowedLoopbackPorts) : 'invalid'
     const heads = [`location = ${rule.path} {`, `location ^~ ${rule.path}/ {`]
     if (refusal || (rule.path === '/' ? root : heads.some(head => taken.has(head)))) { paths.push(`# proxy rule skipped: ${PROXY_RULE_PATH.test(rule.path) ? rule.path : 'invalid path'} (${refusal ?? 'path already served'})`); continue }
     if (rule.path === '/') root = locate(ruleTarget(rule, settings), '/')

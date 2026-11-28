@@ -57,6 +57,7 @@ export const UNIT_FAMILIES: readonly UnitFamily[] = Object.freeze([
   family('panel-restart', 'host', String.raw`xpanel-panel-restart\.(?:service|timer)`, ['xpanel-panel-restart.timer', 'xpanel-panel-restart.service']),
   family('host-task', 'host', String.raw`xpanel-task-[a-z0-9]{12}\.(?:service|timer)`, ['xpanel-task-a1b2c3d4e5f6.service', 'xpanel-task-a1b2c3d4e5f6.timer']),
   family('host-daemon', 'host', String.raw`xpanel-daemon-[a-z][a-z0-9-]{0,30}\.service`, ['xpanel-daemon-worker.service']),
+  family('cron-notify', 'host', String.raw`xpanel-cron-notify@(?:xpanel-cron-${USER}-${SHORT})?\.service`, ['xpanel-cron-notify@.service']),
   family('host-service', 'host', String.raw`xpanel-(?:frps|frpc|ip-aliases|container-guard|ftp-anonymous-auth|phpmyadmin-fpm|source-build)\.service`,
     ['xpanel-frps.service', 'xpanel-frpc.service', 'xpanel-ip-aliases.service', 'xpanel-container-guard.service', 'xpanel-ftp-anonymous-auth.service', 'xpanel-phpmyadmin-fpm.service', 'xpanel-source-build.service']),
 ])

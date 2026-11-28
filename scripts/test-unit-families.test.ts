@@ -66,6 +66,7 @@ describe('unit family registry', () => {
       [system.hostTaskUnit('a1b2c3d4e5f6'), 'host-task'], [system.hostTaskTimer('a1b2c3d4e5f6'), 'host-task'],
       [system.hostDaemonUnit('w'), 'host-daemon'], [system.hostDaemonUnit('a' + 'b-'.repeat(15)), 'host-daemon'],
       [system.FRP_UNITS.server, 'host-service'], [system.FRP_UNITS.client, 'host-service'], [system.CONTAINER_GUARD_UNIT, 'host-service'],
+      [system.CRON_NOTIFY_TEMPLATE_UNIT, 'cron-notify'],
       [IP_ALIASES_UNIT, 'host-service'], [FTP_ANONYMOUS_UNIT, 'host-service'], [PMA_UNIT, 'host-service'],
       [RESTART_API.find(arg => arg.startsWith('--unit='))!.slice(7) + '.timer', 'panel-restart'],
     ]

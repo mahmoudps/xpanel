@@ -95,12 +95,69 @@ export function renderV2WhmWebServer(input: WhmDataPageInput): string {
     + text('web.includes.nginxHttp', t(msgid('Nginx, in the http block')), w?.includes.nginxHttp, t(msgid('Before the site server blocks.')))
     + `<div class="v2-whm-data__actions"><button class="v2-btn v2-btn--primary" type="${off ? 'button' : 'submit'}"${off ? ' disabled' : ''}>${esc(t(msgctxt('theme:v2', 'Test and apply')))}</button></div>` + status('', { 'data-web-directives-status': true }, true)
     + `</${off ? 'div' : 'form'}>`
+  const stackModuleCheckboxes = ([
+    ['mod_rewrite', 'mod_rewrite'],
+    ['mod_ssl', 'mod_ssl'],
+    ['mod_headers', 'mod_headers'],
+    ['mod_proxy_fcgi', 'mod_proxy_fcgi'],
+    ['mod_remoteip', 'mod_remoteip'],
+    ['mod_security2', 'mod_security2'],
+    ['mod_evasive', 'mod_evasive'],
+  ] as const).map(([val, label]) => `<label class="v2-whm-data__check"><input type="checkbox" name="webStackModule" value="${esc(val)}" data-web-stack-module="true"${locked ? ' disabled' : ''}${val !== 'mod_security2' && val !== 'mod_evasive' ? ' checked' : ''}><span><bdi dir="ltr">${esc(label)}</bdi></span></label>`).join('')
+  const stackPhpCheckboxes = ['7.4', '8.0', '8.1', '8.2', '8.3', '8.4'].map(ver => `<label class="v2-whm-data__check"><input type="checkbox" name="webStackPhp" value="${esc(ver)}" data-web-stack-php="true"${locked ? ' disabled' : ''}${ver === '8.3' ? ' checked' : ''}><span><bdi dir="ltr">PHP ${esc(ver)}</bdi></span></label>`).join('')
+  const webStackBuilder = section('web-stack-builder', t(msgid('Web Stack Builder')), `<div class="v2-whm-data__stack" data-web-stack-builder data-web-stack-can-read="${canRead}" data-web-stack-can-manage="${canManage}">`
+    + actions(button(t(msgid('Read web stack')), { 'data-web-stack-refresh': true }, !canRead))
+    + status(t(msgid('Web stack profile has not been read.')), { 'data-web-stack-status': true })
+    + `<dl class="v2-whm-data__facts"><div><dt>${esc(t(msgid('Active engine')))}</dt><dd data-web-stack-active-engine>${saved ? technical(saved.engine) : esc(unread)}</dd></div><div><dt>${esc(t(msgid('Apache MPM')))}</dt><dd data-web-stack-active-mpm>${saved ? technical(saved.apacheMpm === 'itk' ? 'mpm_itk' : saved.apacheMpm) : esc(unread)}</dd></div><div><dt>${esc(t(msgid('Process isolation')))}</dt><dd data-web-stack-isolation>${esc(t(msgid('Enforced (mpm_itk)')))}</dd></div><div><dt>${esc(t(msgid('Stack revision')))}</dt><dd data-web-stack-revision>${esc(unread)}</dd></div></dl>`
+    + fields(
+      field('whm-web-stack-profile', t(msgid('Web stack profile')), {
+        kind: 'select', name: 'webStackProfile', dir: 'ltr', disabled: locked, hooks: { 'data-web-stack-profile': true },
+        options: [
+          { value: 'apache-itk-fpm', label: 'Nginx Edge + Apache mpm_itk + PHP-FPM', selected: !saved || saved.engine === 'apache' },
+          { value: 'apache-itk-hardened', label: 'Nginx Edge + Hardened Apache mpm_itk + PHP-FPM' },
+          { value: 'openlitespeed-lsphp', label: 'Nginx Edge + OpenLiteSpeed + LSPHP', selected: saved?.engine === 'openlitespeed' },
+        ],
+      })
+      + field('whm-web-stack-mpm', t(msgid('Apache MPM isolation policy')), {
+        kind: 'select', name: 'webStackMpm', dir: 'ltr', disabled: locked, hooks: { 'data-web-stack-mpm': true },
+        options: [{ value: 'itk', label: 'mpm_itk', selected: true }],
+      }),
+    )
+    + note(t(msgid('Per-account process isolation via mpm_itk is mandatory. Non-isolated MPMs (prefork, worker) and multi-MPM combinations are refused.')))
+    + `<fieldset><legend>${esc(t(msgid('Apache modules')))}</legend><div class="v2-whm-data__fields">${stackModuleCheckboxes}</div></fieldset>`
+    + `<fieldset><legend>${esc(t(msgid('PHP versions')))}</legend><div class="v2-whm-data__fields">${stackPhpCheckboxes}</div></fieldset>`
+    + actions(button(t(msgid('Preview web stack')), { 'data-web-stack-preview': true }, locked) + button(t(msgid('Test and apply stack')), { 'data-web-stack-apply': true }, locked, true))
+    + `<pre class="v2-whm-web__code v2-mono" role="region" tabindex="0" aria-label="${esc(t(msgid('Web stack configuration preview')))}" dir="ltr" data-web-stack-preview-output><code>${esc(unread)}</code></pre>`
+    + `</div>`, { 'data-whm-detail-section': 'web-stack-builder' })
+  const olsActions = [
+    ['start', msgid('Start')],
+    ['stop', msgid('Stop')],
+    ['restart', msgid('Restart')],
+    ['enable', msgid('Enable at boot')],
+    ['disable', msgid('Disable at boot')],
+  ] as const
+  const openLiteSpeedManager = section('openlitespeed-manager', t(msgid('OpenLiteSpeed Manager')), `<div class="v2-whm-data__stack" data-ols-manager data-ols-can-read="${canRead}" data-ols-can-manage="${canManage}">`
+    + actions(button(t(msgid('Read OpenLiteSpeed status')), { 'data-ols-refresh': true }, !canRead) + button(t(msgid('Toggle configuration editor')), { 'data-ols-config-toggle': true }, !canRead))
+    + status(t(msgid('OpenLiteSpeed state has not been read.')), { 'data-ols-status': true })
+    + `<dl class="v2-whm-data__facts"><div><dt>${esc(t(msgid('Service state')))}</dt><dd data-ols-state>${esc(unread)}</dd></div><div><dt>${esc(t(msgid('Service unit')))}</dt><dd data-ols-unit>${esc(unread)}</dd></div><div><dt>${esc(t(msgid('Configuration path')))}</dt><dd><bdi class="v2-mono" dir="ltr" data-ols-config-path>/usr/local/lsws/conf/httpd_config.conf</bdi></dd></div><div><dt>${esc(t(msgid('Config revision')))}</dt><dd data-ols-revision>${esc(unread)}</dd></div></dl>`
+    + actions(olsActions.map(([act, label]) => button(t(label), { 'data-ols-action': act }, locked)).join(''))
+    + `<div class="v2-whm-data__stack" data-ols-config-editor hidden>`
+    + field('whm-ols-config-text', 'httpd_config.conf', { kind: 'textarea', name: 'olsConfigText', dir: 'ltr', mono: true, disabled: locked, rows: 10, value: '', hooks: { 'data-ols-config-text': true } }, t(msgid('Directives are validated before apply. Shell metacharacters and out-of-root includes are rejected, and a failed restart restores the previous file.')))
+    + actions(button(t(msgid('Preview OpenLiteSpeed config')), { 'data-ols-config-preview': true }, locked) + button(t(msgid('Apply OpenLiteSpeed config')), { 'data-ols-config-apply': true }, locked, true))
+    + field('whm-ols-backup-select', t(msgid('Configuration backup to restore')), { kind: 'select', name: 'olsBackupId', dir: 'ltr', disabled: locked, hooks: { 'data-ols-backup-select': true }, options: [{ value: 'latest', label: t(msgid('No saved backups')), selected: true }] })
+    + actions(button(t(msgid('Rollback configuration')), { 'data-ols-config-rollback': true }, locked))
+    + `<pre class="v2-whm-web__code v2-mono" role="region" tabindex="0" aria-label="${esc(t(msgid('OpenLiteSpeed preview output')))}" dir="ltr" data-ols-preview-output><code>${esc(unread)}</code></pre>`
+    + `</div>`
+    + `<pre class="v2-whm-web__code v2-mono" role="region" tabindex="0" aria-label="${esc(t(msgid('OpenLiteSpeed error log tail')))}" dir="ltr" data-ols-log-tail><code>${esc(unread)}</code></pre>`
+    + `</div>`, { 'data-whm-detail-section': 'openlitespeed-manager' })
   return page(input, '/whm/services/web', t(msgctxt('theme:v2', 'Web server')), t(msgctxt('theme:v2', 'One reviewed web stack, per-account process identity and tested configuration changes.')),
     kpis + architecture + split(section('web-settings', t(msgctxt('theme:v2', 'Engine and workers')), form, { 'data-whm-detail-section': 'web-stack' }), section('web-backend', t(msgctxt('theme:v2', 'Backend connection')), `<dl class="v2-whm-data__facts"><div><dt>${esc(t(msgctxt('theme:v2', 'Saved HTTP port')))}</dt><dd>${saved ? technical(saved.backendPort) : esc(t(msgid('Loading...')))}</dd></div><div><dt>${esc(t(msgctxt('theme:v2', 'Saved TLS port')))}</dt><dd>${saved ? technical(saved.backendTlsPort) : esc(t(msgid('Loading...')))}</dd></div></dl>` + readback) + proxy + gate)
     + section('web-directives', t(msgid('Global configuration and includes')), directives, { 'data-whm-detail-section': 'web-directives' })
     + comparison
     + section('web-pending', t(msgctxt('theme:v2', 'Pending change')), table(t, t(msgctxt('theme:v2', 'Pending configuration difference')), [msgctxt('theme:v2', 'Setting'), msgctxt('theme:v2', 'Current'), msgctxt('theme:v2', 'Proposed'), msgid('State')], {}, t(msgctxt('theme:v2', 'No reviewed configuration difference has been read.'))) + actions(button(t(msgctxt('theme:v2', 'Discard pending change')), { 'data-server-settings-discard': true }, !canManage || !saved)) + note(t(msgctxt('theme:v2', 'The server reads the complete current document, preserves unrelated settings, checks syntax and reports the actual reconcile result.'))), { 'data-whm-detail-section': 'web-pending' })
-    + section('web-generations', t(msgctxt('theme:v2', 'Generations')), generations + field('whm-web-restore-generation', t(msgctxt('theme:v2', 'Generation to restore')), { kind: 'select', name: 'web-restore-generation', dir: 'ltr', disabled: true, hooks: { 'data-whm-web-generation': true }, options: [{ value: '', label: t(msgid('Loading...')) }] }) + actions(button(t(msgctxt('theme:v2', 'Restore selected generation')), { 'data-whm-web-rollback': true })) + status(t(msgctxt('theme:v2', 'Guarded generation restore needs qualified server admission. Reading history does not qualify restoration.')), { 'data-whm-web-rollback-admission': true }), { 'data-whm-detail-section': 'web-generations' }), undefined, `<a class="v2-btn" href="#v2-whm-data-web-pending">${esc(t(msgctxt('theme:v2', 'Review pending change')))}</a>`)
+    + section('web-generations', t(msgctxt('theme:v2', 'Generations')), generations + field('whm-web-restore-generation', t(msgctxt('theme:v2', 'Generation to restore')), { kind: 'select', name: 'web-restore-generation', dir: 'ltr', disabled: true, hooks: { 'data-whm-web-generation': true }, options: [{ value: '', label: t(msgid('Loading...')) }] }) + actions(button(t(msgctxt('theme:v2', 'Restore selected generation')), { 'data-whm-web-rollback': true })) + status(t(msgctxt('theme:v2', 'Guarded generation restore needs qualified server admission. Reading history does not qualify restoration.')), { 'data-whm-web-rollback-admission': true }), { 'data-whm-detail-section': 'web-generations' })
+    + webStackBuilder
+    + openLiteSpeedManager, undefined, `<a class="v2-btn" href="#v2-whm-data-web-pending">${esc(t(msgctxt('theme:v2', 'Review pending change')))}</a>`)
 }
 
 

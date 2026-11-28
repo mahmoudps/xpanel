@@ -21,16 +21,17 @@ const unchanged = { stateChanged: false }
 const json = (body: unknown): Response => new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } })
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
 const exact = (value: Record<string, unknown>, keys: readonly string[]): boolean => Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key))
-const ROUTE = /^\/api\/server\/databases\/services\/(redis|mongodb|postgresql)(?:\/([a-z-]{1,24}))?$/
+const ROUTE = /^\/api\/server\/databases\/services\/(redis|mongodb|postgresql|mysql)(?:\/([a-z-]{1,24}))?$/
 /** Read routes, and the audit action of each change. A key page is a read that needs a body; its values never reach the audit log. */
-const READS: Readonly<Record<string, readonly string[]>> = { redis: ['', 'config', 'versions'], mongodb: ['', 'config', 'log'], postgresql: ['', 'config', 'hba', 'log', 'versions'] }
+const READS: Readonly<Record<string, readonly string[]>> = { redis: ['', 'config', 'versions'], mongodb: ['', 'config', 'log'], postgresql: ['', 'config', 'hba', 'log', 'versions'], mysql: ['', 'config', 'log'] }
 const SHARED: Readonly<Record<string, string>> = { control: 'server.databases.service_control', settings: 'server.databases.service_settings', config: 'server.databases.service_config' }
 const WRITES: Readonly<Record<string, Readonly<Record<string, string | null>>>> = {
   redis: { ...SHARED, password: 'server.databases.service_password', keys: null, key: 'server.databases.redis_key_saved', 'key-delete': 'server.databases.redis_key_deleted', flush: 'server.databases.redis_flushed', backup: 'server.databases.service_backup', restore: 'server.databases.service_restore', 'backup-delete': 'server.databases.service_backup_deleted', version: 'server.databases.service_version' },
   mongodb: { ...SHARED, auth: 'server.databases.mongodb_auth', database: 'server.databases.mongodb_created', 'database-delete': 'server.databases.mongodb_deleted', 'user-password': 'server.databases.service_password', backup: 'server.databases.service_backup', restore: 'server.databases.service_restore', 'backup-delete': 'server.databases.service_backup_deleted' },
   postgresql: { ...SHARED, hba: 'server.databases.postgresql_client_auth', version: 'server.databases.service_version', 'data-directory': 'server.databases.postgresql_data_directory' },
+  mysql: { ...SHARED, preview: null },
 }
-const SAFE_DETAIL = ['action', 'db', 'name', 'names', 'database', 'enabled', 'version', 'major', 'target'] as const
+const SAFE_DETAIL = ['action', 'db', 'name', 'names', 'database', 'enabled', 'version', 'major', 'target', 'port', 'bindAddress', 'maxConnections', 'skipNetworking'] as const
 const auditDetail = (engine: string, op: string, body: Record<string, unknown>): Record<string, unknown> => ({ engine, op, ...Object.fromEntries(SAFE_DETAIL.filter(key => Object.hasOwn(body, key)).map(key => [key, body[key]])) })
 
 async function engineRoute(request: Request, method: string, match: RegExpExecArray, caller: AuthenticatedCaller, helpers: WhmDbServicesHelpers): Promise<Response> {

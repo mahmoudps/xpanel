@@ -637,4 +637,24 @@ describe('sites on a dedicated address', () => {
     expect(c).toContain('listen [::]:80;')
     expect(c).not.toContain('default_server')
   })
+
+  it('prevents a second account proxy project from emitting a competing server block when claimedNames is shared', () => {
+    const sharedClaimed = new Set(['example.com'])
+    const project = {
+      id: 'proj-1',
+      name: 'Gateway',
+      domains: ['shared-gateway.test'],
+      rules: [{ path: '/', target: 'https://203.0.113.50:8443', options: { websocket: false, hostHeader: 'client' as const, headers: [] } }],
+      cache: true,
+      gzip: true,
+      ssl: { enabled: false, certificateId: null },
+    }
+    const first = renderNginxSite(account(), [domain()], settings(), null, { proxyProjects: [project], claimedNames: sharedClaimed })
+    const second = renderNginxSite(account({ id: 'acc-2', username: 'bob', uid: 1002, gid: 1002, home: '/home/bob' }), [], settings(), null, {
+      proxyProjects: [project],
+      claimedNames: sharedClaimed,
+    })
+    expect(first).toContain('server_name shared-gateway.test;')
+    expect(second).not.toContain('server_name shared-gateway.test;')
+  })
 })

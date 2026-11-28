@@ -193,7 +193,11 @@ async function mockSession(page,model,{reverseProxy=false}={}){
     Object.defineProperty(window,'xpanelSessionRequest',{get:()=>transport,set:()=>{},configurable:false})
   })
   await page.route('**/api/domains',handle);await page.route('**/api/domains/*',handle)
-  if(reverseProxy)await page.route('**/api/domains/*/reverse-proxy',handle)
+  if(reverseProxy){
+    await page.route('**/api/domains/*/reverse-proxy',handle)
+    await page.route('**/api/account/domains/proxy-rules',r=>r.fulfill({status:200,json:{state:'default',revision:'a'.repeat(64),limit:16,runtimePorts:[],domains:[],rules:[]}}))
+    await page.route('**/api/account/proxy-projects',r=>r.fulfill({status:200,json:{state:'default',revision:'a'.repeat(64),limit:32,projects:[]}}))
+  }
   async function handle(route){try{await model.route(route)}catch(error){model.errors.push(String(error));await route.fulfill({status:500,json:{type:'about:blank',title:'Synthetic mock failure',status:500,code:'mock_contract_failure',details:{unknownOutcome:true,verificationRequired:true}}})}}
 }
 async function state(page,wanted){
@@ -335,7 +339,7 @@ async function proxyGeometry(page){
 function assertProxyGeometry(g,lang,width){
   const near=(actual,expected,label)=>assert.ok(Math.abs(actual-expected)<=1,label+': '+actual)
   assert.equal(g.direction,lang==='ar'?'rtl':'ltr');assert.ok(g.scrollWidth<=width+1,'Proxy document stays contained');assert.equal(g.asciiDigits,true)
-  near(g.headingGap,8,'Proxy heading/lede');near(g.majorGap,32,'Proxy header/body');assert.equal(g.cards.length,3)
+  near(g.headingGap,8,'Proxy heading/lede');near(g.majorGap,32,'Proxy header/body');assert.equal(g.cards.length,5)
   for(const section of g.sections)near(section.gap,32,'Proxy major section')
   for(const group of g.stackGroups)near(group.gap,24,'Proxy stack group')
   for(const card of g.cards){const expected=width<=600?16:24;for(const padding of [card.top,card.bottom,card.inlineStart,...card.computedPadding])near(padding,expected,'Proxy card padding '+card.heading);for(const [edge,inset]of Object.entries(card.paintInsets))assert.ok(inset>=expected-1,'Proxy painted '+edge+' content inset '+card.heading+': '+inset);for(const group of card.headBodyGap)near(group.gap,16,'Proxy card head/body gap '+card.heading)}
@@ -435,8 +439,8 @@ try{
     assert.equal(await page.locator('[data-domain-rows] [data-domain-id]').count(),model.records.size)
     assert.equal(await page.locator('[data-domain-primary-rename]').count(),1)
     assert.ok((await page.locator('[data-domain-advanced-unavailable]').textContent()).trim().length>0)
-    assert.equal(await page.locator('[data-domain-primary-rename]').evaluate(card=>{const controls=[...card.querySelectorAll('input,select,button')];return controls.length>=3&&controls.every(control=>control.disabled||control.readOnly)}),true,'Primary rename components remain explicitly unavailable')
-    assert.equal(await page.locator('[data-domain-native-options]').evaluate(card=>{const controls=[...card.querySelectorAll('input,select,button')];const unavailable=controls.filter(control=>control.name!=='autoDns');return controls.length>=2&&unavailable.length>0&&unavailable.every(control=>control.disabled||control.readOnly)}),true,'Native options without a handler stay unavailable')
+    assert.equal(await page.locator('[data-domain-primary-rename]').evaluate(card=>{const cur=card.querySelector('[data-domain-primary-name]');const submit=card.querySelector('[data-wc-domain-rename-submit]');return !!cur&&cur.disabled&&!!submit&&!submit.disabled}),true,'Primary rename current domain stays read-only while rename action is enabled')
+    assert.equal(await page.locator('[data-domain-native-options]').evaluate(card=>{const autoDns=card.querySelector('input[name="autoDns"]');const https=card.querySelector('[data-wc-domain-create-https]');return !!autoDns&&!autoDns.disabled&&!!https&&!https.disabled}),true,'Create native options (Auto DNS and Force HTTPS) are both enabled when editable')
     assert.equal(await remove(page,primaryId).count()===0||await remove(page,primaryId).isDisabled(),true)
     assert.equal(await remove(page,'mail-domain').count()===0||await remove(page,'mail-domain').isDisabled(),true)
     checkpoint=lang+'-'+width+':geometry'

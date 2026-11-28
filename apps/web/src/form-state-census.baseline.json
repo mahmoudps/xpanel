@@ -85,7 +85,7 @@
     "v2-domain-create-php vV",
     "v2-domain-create-root vV",
     "v2-domain-primary-confirm vV",
-    "v2-domain-primary-current vV",
+    "v2-domain-primary-current v",
     "v2-domain-primary-new vV"
   ],
   "/domains/dynamic-dns": [
@@ -97,7 +97,14 @@
     "v2-ddns-zone vV"
   ],
   "/domains/reverse-proxy": [
+    "pp-domains vV",
+    "pp-name vV",
+    "pp-note vV",
+    "pp-target vV",
     "rp-upstream cC",
+    "spr-domain vV",
+    "spr-path vV",
+    "spr-target vV",
     "v2-rp-upstream vV"
   ],
   "/domains/site-settings": [
@@ -724,17 +731,7 @@
     "add-ip-ptr CvV"
   ],
   "/whm/server/setup": [
-    "v2-setup-default-pm vV",
-    "v2-setup-default-pm-max_children vV",
-    "v2-setup-default-pm-max_requests vV",
-    "v2-setup-default-pm-process_idle_timeout vV",
-    "v2-setup-lsphp-0 vV",
-    "v2-setup-lsphp-1 vV",
-    "v2-setup-lsphp-2 vV",
-    "v2-setup-ns1-address vV",
-    "v2-setup-ns2-address vV",
     "v2-setup-primaryIpv4 v",
-    "v2-setup-quotaFilesystem vV",
     "whm-detail-quotaFilesystem cC",
     "whm-detail-setup-fpm-idle-timeout cC",
     "whm-detail-setup-fpm-max-children cC",

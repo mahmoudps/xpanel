@@ -47,11 +47,6 @@ msgctxt "theme:v2"
 msgid "A feature list changes tool admission for its assigned plans. It does not remove existing resources or establish a host operation outcome."
 msgstr "تغيّر قائمة الميزات إتاحة الأدوات للخطط المرتبطة بها. لا تزيل الموارد الموجودة ولا تثبت نتيجة عملية على الخادم."
 
-#: apps/web/src/themes/v2/pages/xpanel/software/php.ts
-msgctxt "theme:v2"
-msgid "A generated pool or .user.ini file has not been read."
-msgstr "لم يُقرأ ملف مجمع مولّد أو ملف .user.ini."
-
 #: apps/web/src/themes/v2/pages/xpanel/operations/backup.ts
 msgctxt "theme:v2"
 msgid "A host archive is not an off-server disaster recovery copy."
@@ -476,6 +471,11 @@ msgstr "تطبيق الكل"
 msgctxt "theme:v2"
 msgid "Apply changes"
 msgstr "تطبيق التغييرات"
+
+#: apps/web/src/themes/v2/pages/xwhm/software/containers.ts
+msgctxt "theme:v2"
+msgid "Apply drop-in"
+msgstr "تطبيق ملف الإدراج"
 
 #: apps/web/src/themes/v2/pages/xwhm/software/updates.ts
 msgctxt "theme:v2"
@@ -1075,7 +1075,7 @@ msgstr "اضبط النسخ وراجع أدلة التشغيل الفعلية، 
 #: apps/web/src/themes/v2/pages/xwhm/security/overview.ts
 msgctxt "theme:v2"
 msgid "Configure edge rate limits, request body limits, deny lists and ModSecurity on the dedicated WAF page."
-msgstr "اضبط حدود المعدّل على الحافة وحدود حجم الطلب وقوائم الحظر وModSecurity في صفحة جدار الحماية (WAF) المخصّصة."
+msgstr "اضبط حدود معدل الحافة وحدود حجم الطلب وقوائم المنع وModSecurity في صفحة جدار تطبيقات الويب المخصصة."
 
 #: apps/web/src/themes/v2/pages/xwhm/accounts/create.ts
 msgctxt "theme:v2"
@@ -1581,6 +1581,11 @@ msgstr "الاختلاف"
 msgctxt "theme:v2"
 msgid "Driver"
 msgstr "برنامج التشغيل"
+
+#: apps/web/src/themes/v2/pages/xwhm/software/containers.ts
+msgctxt "theme:v2"
+msgid "Drop-in configuration preview"
+msgstr "معاينة إعدادات ملف الإدراج"
 
 #: apps/web/src/themes/v2/pages/xwhm/host/php.ts
 msgctxt "theme:v2"
@@ -2557,6 +2562,11 @@ msgctxt "theme:v2"
 msgid "Live summary of the form."
 msgstr "ملخص مباشر لما في النموذج."
 
+#: apps/web/src/themes/v2/pages/xwhm/software/containers.ts
+msgctxt "theme:v2"
+msgid "Load or preview an add-on drop-in configuration."
+msgstr "حمّل أو عاين إعدادات ملف الإدراج للخدمة الملحقة."
+
 #: apps/web/src/themes/v2/pages/xwhm/overview/index.ts
 msgctxt "theme:v2"
 msgid "Load {load} on {cores} cores"
@@ -2782,11 +2792,6 @@ msgctxt "theme:v2"
 msgid "Memory limit"
 msgstr "حد الذاكرة"
 
-#: apps/web/src/themes/v2/pages/xwhm/software/containers.ts
-msgctxt "theme:v2"
-msgid "Memory limits, listeners and users require a reviewed configuration writer with a restart check. Nothing is changed here."
-msgstr "تتطلب حدود الذاكرة وإعدادات الاستماع والمستخدمون أداة إعدادات مراجعة مع فحص لإعادة التشغيل. لا يتغير شيء هنا."
-
 #: apps/web/src/themes/v2/pages/xpanel/resources.ts
 msgctxt "theme:v2"
 msgid "Memory usage"
@@ -3006,11 +3011,6 @@ msgstr "لا يُنشأ حساب في الوجهة قبل تأكيد المرا�
 msgctxt "theme:v2"
 msgid "No diagnostic output was supplied."
 msgstr "لم تتوفر مخرجات تشخيصية."
-
-#: apps/web/src/themes/v2/pages/xpanel/resources.ts
-msgctxt "theme:v2"
-msgid "No directory-size observation was supplied. A file listing is not a recursive quota measurement."
-msgstr "لم يتوفر قياس لأحجام المجلدات. عرض قائمة الملفات لا يقيس الحصة في المجلدات الفرعية."
 
 #: apps/web/src/themes/v2/pages/xwhm/service-tools/details.ts
 msgctxt "theme:v2"
@@ -3285,7 +3285,7 @@ msgstr "بيئة تشغيل OCI"
 #: apps/web/src/themes/v2/pages/xwhm/security/overview.ts
 msgctxt "theme:v2"
 msgid "OWASP Core Rule Set on Nginx"
-msgstr "مجموعة قواعد OWASP Core على Nginx"
+msgstr "مجموعة قواعد OWASP الأساسية على Nginx"
 
 #: apps/web/src/themes/v2/pages/xpanel/observations/health.ts
 msgctxt "theme:v2"
@@ -3297,7 +3297,7 @@ msgctxt "theme:v2"
 msgid "Observe scheduled host work without reading cron contents or starting commands."
 msgstr "راقب مهام الخادم المجدولة دون قراءة محتويات cron أو بدء أوامر."
 
-#: apps/web/src/themes/v2/pages/xwhm/databases/index.ts apps/web/src/themes/v2/pages/xwhm/service-tools/details.ts apps/web/src/themes/v2/pages/xwhm/service-tools/ftp-log.ts apps/web/src/themes/v2/pages/xwhm/software/catalog.ts apps/web/src/themes/v2/pages/xwhm/software/containers.ts apps/web/src/themes/v2/pages/xwhm/software/projects.ts apps/web/src/themes/v2/pages/xwhm/software/updates.ts
+#: apps/web/src/themes/v2/pages/xwhm/databases/index.ts apps/web/src/themes/v2/pages/xwhm/server/setup.ts apps/web/src/themes/v2/pages/xwhm/service-tools/details.ts apps/web/src/themes/v2/pages/xwhm/service-tools/ftp-log.ts apps/web/src/themes/v2/pages/xwhm/software/catalog.ts apps/web/src/themes/v2/pages/xwhm/software/containers.ts apps/web/src/themes/v2/pages/xwhm/software/projects.ts apps/web/src/themes/v2/pages/xwhm/software/updates.ts
 msgctxt "theme:v2"
 msgid "Observed at (UTC)"
 msgstr "وقت الرصد (UTC)"
@@ -3436,11 +3436,6 @@ msgstr "تُعرض التفويضات المحفوظة فقط. لم يُرصد �
 msgctxt "theme:v2"
 msgid "Only the first zones were read. Counts cover the shown zones only."
 msgstr "قُرئت المناطق الأولى فقط. تشمل الأعداد المناطق المعروضة فقط."
-
-#: apps/web/src/themes/v2/pages/xpanel/software/php.ts
-msgctxt "theme:v2"
-msgid "Only the four enabled INI overrides are submitted. Additional saved values remain visible and are preserved by the existing update operation."
-msgstr "تُرسل تجاوزات INI الأربعة المفعّلة فقط. تبقى القيم الإضافية المحفوظة ظاهرة وتحافظ عليها عملية التحديث الحالية."
 
 #: apps/web/src/themes/v2/pages/xwhm/recovery-tools/convert.ts
 msgctxt "theme:v2"
@@ -3782,10 +3777,20 @@ msgctxt "theme:v2"
 msgid "Preview directives"
 msgstr "معاينة التوجيهات"
 
+#: apps/web/src/themes/v2/pages/xwhm/software/containers.ts
+msgctxt "theme:v2"
+msgid "Preview drop-in"
+msgstr "معاينة ملف الإدراج"
+
 #: apps/web/src/themes/v2/pages/xwhm/service-tools/details.ts
 msgctxt "theme:v2"
 msgid "Preview is not a native syntax check. Saved configuration does not verify the page served externally; overrides and rewrites may change it."
 msgstr "المعاينة ليست فحص صياغة على الخادم. لا تتحقق الإعدادات المحفوظة من الصفحة المقدمة خارجيًا؛ فقد تغيّرها التجاوزات وقواعد إعادة الكتابة."
+
+#: apps/web/src/themes/v2/pages/xwhm/host/php.ts
+msgctxt "theme:v2"
+msgid "Preview or save INI overrides to inspect the managed php.ini directives."
+msgstr "عاين تخصيصات INI أو احفظها لفحص توجيهات php.ini المُدارة."
 
 #: apps/web/src/themes/v2/pages/xwhm/domains/index.ts
 msgctxt "theme:v2"
@@ -3905,7 +3910,7 @@ msgstr "الحصة (MiB)"
 #: apps/web/src/themes/v2/pages/xwhm/security/overview.ts
 msgctxt "theme:v2"
 msgid "Rate limits, body cap and deny lists"
-msgstr "حدود المعدّل وسقف حجم الطلب وقوائم الحظر"
+msgstr "حدود المعدل، وحد حجم الطلب، وقوائم المنع"
 
 #: apps/web/src/themes/v2/pages/xwhm/service-tools/ftp-log.ts
 msgctxt "theme:v2"
@@ -3976,6 +3981,11 @@ msgstr "اقرأ نهايات سجلات الوصول والأخطاء ضمن ح
 msgctxt "theme:v2"
 msgid "Read bounded checks for your sites without changing DNS, services or saved configuration."
 msgstr "راجع فحوص مواقعك المحدودة النطاق دون تغيير DNS أو الخدمات أو الإعدادات المحفوظة."
+
+#: apps/web/src/themes/v2/pages/xwhm/software/containers.ts
+msgctxt "theme:v2"
+msgid "Read config"
+msgstr "قراءة الإعدادات"
 
 #: apps/web/src/themes/v2/pages/xwhm/service-tools/details.ts
 msgctxt "theme:v2"
@@ -4372,6 +4382,11 @@ msgctxt "theme:v2"
 msgid "Review and apply"
 msgstr "مراجعة وتطبيق"
 
+#: apps/web/src/themes/v2/pages/xwhm/software/containers.ts
+msgctxt "theme:v2"
+msgid "Review and apply bounded systemd drop-in memory limits and bind addresses for listed add-on services."
+msgstr "راجع وطبّق حدود ذاكرة ملفات الإدراج في systemd وعناوين الربط للخدمات الملحقة المدرجة."
+
 #: apps/web/src/themes/v2/layouts/common.ts
 msgctxt "theme:v2"
 msgid "Review and save"
@@ -4416,11 +4431,6 @@ msgstr "مراجعة مهام المضيف"
 msgctxt "theme:v2"
 msgid "Review job"
 msgstr "مراجعة المهمة"
-
-#: apps/web/src/themes/v2/pages/xwhm/databases/index.ts
-msgctxt "theme:v2"
-msgid "Review observed MariaDB counters before planning changes. No settings are applied here."
-msgstr "راجع عدادات MariaDB المرصودة قبل التخطيط للتغييرات. لا تُطبّق إعدادات هنا."
 
 #: apps/web/src/themes/v2/pages/xwhm/software/catalog.ts
 msgctxt "theme:v2"
@@ -4506,11 +4516,6 @@ msgstr "يجب أن تبقى إعادة الكتابة مفعّلة. يجب أل
 msgctxt "theme:v2"
 msgid "Role limit"
 msgstr "حد الأدوار"
-
-#: apps/web/src/themes/v2/pages/xwhm/software/catalog.ts
-msgctxt "theme:v2"
-msgid "Roll back"
-msgstr "التراجع"
 
 #: apps/web/src/themes/v2/pages/xwhm/panel/data.ts
 msgctxt "theme:v2"
@@ -4947,6 +4952,11 @@ msgctxt "theme:v2"
 msgid "Security updates"
 msgstr "تحديثات الأمان"
 
+#: apps/web/src/themes/v2/pages/xpanel/software/php.ts
+msgctxt "theme:v2"
+msgid "Select Preview INI to render the validated directives."
+msgstr "اختر معاينة INI لعرض التوجيهات المتحقَّق منها."
+
 #: apps/web/src/themes/v2/pages/xwhm/lifecycle/transfers.ts
 msgctxt "theme:v2"
 msgid "Select accounts"
@@ -5266,6 +5276,11 @@ msgstr "المكدس"
 msgctxt "theme:v2"
 msgid "Staged by {actor}: {current} current rules -> {proposed} proposed rules (+{added} / ~{changed} / -{removed})."
 msgstr "جهّزها {actor}: {current} قواعد حالية -> {proposed} قواعد مقترحة (+{added} / ~{changed} / -{removed})."
+
+#: apps/web/src/themes/v2/pages/xpanel/software/php.ts
+msgctxt "theme:v2"
+msgid "Standard runtime fields save via the form bar; Preview INI and Apply INI overrides validate and persist the full extended INI allowlist."
+msgstr "تُحفظ حقول وقت التشغيل القياسية عبر شريط النموذج؛ وتتحقق أزرار معاينة INI وتطبيق تخصيصات INI من كامل القائمة الموسعة المسموحة وتحفظها."
 
 #: apps/web/src/themes/v2/pages/xwhm/software/containers.ts
 msgctxt "theme:v2"
@@ -5951,11 +5966,6 @@ msgstr "التراجع عن تغيير {field}"
 msgctxt "theme:v2"
 msgid "Unified diff"
 msgstr "الفروقات الموحدة"
-
-#: apps/web/src/themes/v2/pages/xwhm/software/catalog.ts
-msgctxt "theme:v2"
-msgid "Uninstall"
-msgstr "إلغاء التثبيت"
 
 #: apps/web/src/themes/v2/pages/xwhm/software/containers.ts
 msgctxt "theme:v2"

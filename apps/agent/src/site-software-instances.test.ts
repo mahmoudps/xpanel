@@ -1,6 +1,8 @@
+import { generateKeyPairSync, sign } from 'node:crypto'
 import { describe, expect, it, vi } from 'vitest'
 import type { Account, Domain, FeatureList, Plan } from '@xpanel/core'
 import { applicationDigest } from '../../../packages/os/src/application-artifact.ts'
+import { applicationCatalogSigningBytes, verifyApplicationCatalog } from './application-catalog.ts'
 import { applicationInstanceKey } from './application-provider.ts'
 import type { ApplicationInstanceRecord } from './application-provider.ts'
 import { handleSiteSoftwareInstancesRoute } from './site-software-instances.ts'
@@ -41,5 +43,90 @@ describe('host site software instances', () => {
     await expect(call(ctx, '/host/site-software/artifacts', { ...body, version: '9.9.9' })).rejects.toMatchObject({ code: 'NOT_FOUND', detail: { reason: 'application_not_in_catalog' } })
     await expect(call(ctx, '/host/site-software/artifacts', { ...body, contentBase64: 'AQ' })).rejects.toMatchObject({ code: 'VALIDATION' })
     await expect(call(ctx, '/host/site-software/artifacts', { ...body, offset: -1 })).rejects.toMatchObject({ code: 'VALIDATION' })
+  })
+
+  it('dispatches one-click deploy and app-installer install jobs through the real coordinator', async () => {
+    const rev = 'e'.repeat(64)
+    const job = { id: '44444444-4444-4444-8444-444444444444', kind: 'application.install', accountId: account.id, status: 'queued' }
+    const submitJob = vi.fn(async () => job)
+    const coordinator = { prepare: vi.fn(async () => ({ plan: { kind: 'application.install' }, discardUnstarted: () => true })) } as unknown as NonNullable<SiteSoftwareInstancesContext['coordinator']>
+    const provider = {
+      admission: {
+        descriptorConfinement: true, accountLifetimeFence: true, durablePreimages: true,
+        scopedWrites: true, digestReadback: true, boundedDeadlines: true, contentAddressedEgress: true,
+      },
+      readArtifact: vi.fn(),
+      openTarget: vi.fn(),
+      pendingTransactions: vi.fn(),
+    } as unknown as NonNullable<SiteSoftwareInstancesContext['provider']>
+    const ctx = context({ coordinator, provider, submitJob: submitJob as unknown as NonNullable<SiteSoftwareInstancesContext['submitJob']> })
+
+    for (const [endpoint, action] of [['/host/software/one-click/deploy', 'server.one_click.job_submitted'], ['/host/software/app-installer/install', 'server.app_installer.job_submitted']] as const) {
+      const payload = {
+        accountId: account.id, username: 'alice', domainId: domain.id, docRoot: domain.docRoot, path: 'blog',
+        appId: 'sample', version: '1.0.0', expectedRevision: rev, expectedCatalogRevision: rev,
+      }
+      const res = await call(ctx, endpoint, payload)
+      expect(res?.status).toBe(202)
+      expect(await res?.json()).toEqual({ job })
+      expect(ctx.audit).toHaveBeenCalledWith(expect.objectContaining({ action, target: 'account:alice', outcome: 'ok' }))
+    }
+    await expect(call(ctx, '/host/software/one-click/deploy', {
+      accountId: '99999999-9999-4999-8999-999999999999', username: 'alice', domainId: domain.id, docRoot: domain.docRoot,
+      path: '', appId: 'sample', version: '1.0.0', expectedRevision: rev, expectedCatalogRevision: rev,
+    })).rejects.toMatchObject({ code: 'NOT_FOUND' })
+  })
+
+  it('reads observed application target revision on GET /host/site-software/target', async () => {
+    const TARGET_REV = 'f'.repeat(64)
+    const { privateKey, publicKey } = generateKeyPairSync('ed25519')
+    const publicKeyPem = publicKey.export({ type: 'spki', format: 'pem' }).toString()
+    const payload = JSON.stringify({
+      schemaVersion: 1,
+      sequence: 1,
+      issuedAt: '2026-11-01T00:00:00.000Z',
+      expiresAt: '2026-11-25T00:00:00.000Z',
+      applications: [{ id: 'sample', name: 'Sample', releases: [{ version: '1.0.0', minimumPanelVersion: '1.0.0', artifact: descriptor }] }],
+    })
+    const signature = sign(null, applicationCatalogSigningBytes(payload), privateKey).toString('hex')
+    const policy = { now: new Date('2026-11-10T00:00:00.000Z'), minimumSequence: 1, panelVersion: '1.0.0' }
+    const verifiedCatalog = verifyApplicationCatalog({ keyId: 'test-key', payload, signature }, [{ keyId: 'test-key', publicKeyPem }], policy)
+    const provider = {
+      admission: {
+        descriptorConfinement: true, accountLifetimeFence: true, durablePreimages: true,
+        scopedWrites: true, digestReadback: true, boundedDeadlines: true, contentAddressedEgress: true,
+      },
+      readArtifact: vi.fn(),
+      openTarget: vi.fn(async (target: unknown) => ({
+        target,
+        observe: vi.fn(async () => ({
+          empty: true,
+          managedClean: true,
+          recoveryRequired: false,
+          installation: null,
+          unmanagedRevision: TARGET_REV,
+          revision: TARGET_REV,
+        })),
+        close: vi.fn(async () => undefined),
+      })),
+      pendingTransactions: vi.fn(async () => []),
+    } as unknown as NonNullable<SiteSoftwareInstancesContext['provider']>
+    const coordinator = { prepare: vi.fn() } as unknown as NonNullable<SiteSoftwareInstancesContext['coordinator']>
+    const source = {
+      catalog: async () => verifiedCatalog,
+      removalCatalog: async () => verifiedCatalog,
+      policy: () => policy,
+    } as unknown as NonNullable<SiteSoftwareInstancesContext['source']>
+    const ctx = context({ source, provider, coordinator, submitJob: vi.fn() as unknown as NonNullable<SiteSoftwareInstancesContext['submitJob']> })
+    const res = await call(ctx, `/host/site-software/target?username=alice&domainId=${domain.id}&path=blog`)
+    expect(res?.status).toBe(200)
+    expect(await res?.json()).toEqual({
+      state: 'read',
+      reason: null,
+      revision: TARGET_REV,
+      catalogRevision: verifiedCatalog.revision,
+      installation: null,
+      writesAvailable: true,
+    })
   })
 })
