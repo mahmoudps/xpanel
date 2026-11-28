@@ -61,6 +61,7 @@ import { createHostBackupRunController, readBackupConfigFiles, readSavedBackupDe
 import { createHostDnsClusterSync } from './dns-cluster-routes.ts'
 import { createAgentApp, listenAgentSocket, loadAgentCredentialFile } from './server.ts'
 import { revertExpiredPanelTrial } from './panel-access.ts'
+import { enforceSshAutoban } from './ssh-autoban.ts'
 import { createDbQuotaEnforcer } from './db-quota.ts'
 import { loadPostgresqlPort } from './db-postgresql-service.ts'
 import { createNodeSwApplicationCatalogFiles, createSwApplicationCatalogSource, readInstalledPanelVersion } from './sw-application-catalog-store.ts'
@@ -540,7 +541,7 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
           onError: error => { process.stderr.write(`xpanel-agent source builds: ${error instanceof Error ? error.message : String(error)}\n`) } }) : null
         const hostWatch = process.platform === 'linux' ? createNativeHostWatch({ store, executor, os }) : null
         const siteExpiry = createSiteExpiryMonitor({ root: store.rootDir, listDomains: () => store.listDomains(), reconcile: () => reconciler.reconcile({ actor: 'system:site-expiry' }), sendAlert: async (to, subject, text) => { await sendmailAlert('xpanel@' + (await store.getServerSettings())!.hostname, to, subject, text) } })
-        if (!resourcesFenced) { backupTimer = setInterval(() => { void backupRuns!.tick(); void updater.tick(); void releasePackages.tick(); void sourceBuilds?.tick(); if (process.platform === 'linux') { void bandwidthMeter!.collect(); void svcBackground!.tick(); void dnsCluster!.tick().catch(() => undefined); void revertExpiredPanelTrial(executor).catch(() => undefined); void siteExpiry.tick().catch(() => undefined) }; if (hostWatch) void withLifecycleWriterAdmission(() => hostWatch.tick()).catch(() => undefined); if (leechMonitor) void withLifecycleWriterAdmission(() => leechMonitor!.tick()).catch(() => undefined) ; void withLifecycleWriterAdmission(() => dbQuota.tick()).catch(() => undefined) }, 60_000); backupTimer.unref() }
+        if (!resourcesFenced) { backupTimer = setInterval(() => { void backupRuns!.tick(); void updater.tick(); void releasePackages.tick(); void sourceBuilds?.tick(); if (process.platform === 'linux') { void bandwidthMeter!.collect(); void svcBackground!.tick(); void dnsCluster!.tick().catch(() => undefined); void revertExpiredPanelTrial(executor).catch(() => undefined); void siteExpiry.tick().catch(() => undefined); void withLifecycleWriterAdmission(() => enforceSshAutoban({ rootDir: store.rootDir, executor, os, getWriterLock: () => store.getWriterLock() })).catch(() => undefined) }; if (hostWatch) void withLifecycleWriterAdmission(() => hostWatch.tick()).catch(() => undefined); if (leechMonitor) void withLifecycleWriterAdmission(() => leechMonitor!.tick()).catch(() => undefined) ; void withLifecycleWriterAdmission(() => dbQuota.tick()).catch(() => undefined) }, 60_000); backupTimer.unref() }
         return { app, socketPath, close: closeNormal, recoveryRequired, quarantined: false as const }
       } catch (error) {
         try { await closeResources() } catch (cleanup) { throw new AggregateError([error, cleanup], 'agent startup cleanup requires inspection') }

@@ -1463,7 +1463,7 @@ msgstr "الوصول محجوب؛ احفظ هذا المستلم صراحة مر
 msgid "Accessible feature lists and membership have not been read. Copying is unavailable until the authorized operation and saved list are available."
 msgstr "لم تُقرأ قوائم الميزات المتاحة وعضويتها. النسخ غير متاح حتى تتوافر العملية المصرّح بها والقائمة المحفوظة."
 
-#: apps/web/src/board-canvas.ts apps/web/src/board-port/account-database-remote-workspace.ts apps/web/src/board-port/acct-backup-runs-workspace.ts apps/web/src/board-port/acct-restore-workspace.ts apps/web/src/board-port/approved-whm-backups.ts apps/web/src/board-port/approved-whm-plan-components.ts apps/web/src/board-port/approved-whm-resellers.ts apps/web/src/board-port/approved-xpanel-bindings.ts apps/web/src/board-port/approved-xpanel-pages.ts apps/web/src/board-port/approved-xwhm.ts apps/web/src/board-port/composed/render.ts apps/web/src/board-port/composed/sections/xwhm-accounts.ts apps/web/src/board-port/ctr-workspace.ts apps/web/src/board-port/db-engines-workspace.ts apps/web/src/board-port/extensions/email-accounts.ts apps/web/src/board-port/file-share-links-workspace.ts apps/web/src/board-port/identity-workspaces.ts apps/web/src/board-port/mailing-list-admin-sections.ts apps/web/src/board-port/ops-terminal-workspace.ts apps/web/src/board-port/sec-workspace.ts apps/web/src/board-port/ssl-store-workspace.ts apps/web/src/board-port/sw-deployments-workspace.ts apps/web/src/board-port/whm-account-repair-workspace.ts apps/web/src/board-port/whm-backup-files-workspace.ts apps/web/src/board-port/whm-composer-workspace.ts apps/web/src/board-port/whm-databases-workspace.ts apps/web/src/board-port/whm-db-tools-workspace.ts apps/web/src/board-port/whm-domains-workspace.ts apps/web/src/board-port/whm-extend-workspace.ts apps/web/src/board-port/whm-ftp-log-workspace.ts apps/web/src/board-port/whm-ip-tools.ts apps/web/src/board-port/whm-mail-quality-workspace.ts apps/web/src/board-port/whm-mail-server-workspace.ts apps/web/src/board-port/whm-mailbox-maintenance-workspace.ts apps/web/src/board-port/whm-metering-workspace.ts apps/web/src/board-port/whm-monitoring-workspace.ts apps/web/src/board-port/whm-nginx-proxy-workspace.ts apps/web/src/board-port/whm-php-workspace.ts apps/web/src/board-port/whm-security-tools-workspace.ts apps/web/src/board-port/whm-server-health-workspace.ts apps/web/src/board-port/whm-ssl-workspace.ts apps/web/src/board-port/whm-traffic-workspace.ts apps/web/src/board-port/whm-whmcs-workspace.ts apps/web/src/board-port/xpanel-home.ts apps/web/src/charts.ts apps/web/src/chrome.ts apps/web/src/design-board.ts apps/web/src/mail-cards.ts apps/web/src/models/db-services.ts apps/web/src/models/mail-cert-panels.ts apps/web/src/models/svc-panels.ts apps/web/src/models/tool-cards.ts apps/web/src/surfaces/xwhm.ts apps/web/src/themes/v2/pages/identity.ts apps/web/src/themes/v2/pages/xpanel/domains/domains.ts apps/web/src/themes/v2/pages/xpanel/email-tools/list-admin.ts apps/web/src/themes/v2/pages/xpanel/email/accounts.ts apps/web/src/themes/v2/pages/xpanel/observations/health.ts apps/web/src/themes/v2/pages/xpanel/operations/backup.ts apps/web/src/themes/v2/pages/xpanel/operations/terminal.ts apps/web/src/themes/v2/pages/xpanel/security/certificates.ts apps/web/src/themes/v2/pages/xpanel/settings/preferences.ts apps/web/src/themes/v2/pages/xwhm/account-tools/pages.ts apps/web/src/themes/v2/pages/xwhm/account-tools/repair.ts apps/web/src/themes/v2/pages/xwhm/accounts/admin.ts apps/web/src/themes/v2/pages/xwhm/accounts/list.ts apps/web/src/themes/v2/pages/xwhm/databases/index.ts apps/web/src/themes/v2/pages/xwhm/dns/index.ts apps/web/src/themes/v2/pages/xwhm/dns/providers.ts apps/web/src/themes/v2/pages/xwhm/domains/index.ts apps/web/src/themes/v2/pages/xwhm/host/php.ts apps/web/src/themes/v2/pages/xwhm/lifecycle/backups.ts apps/web/src/themes/v2/pages/xwhm/lifecycle/destinations.ts apps/web/src/themes/v2/pages/xwhm/lifecycle/transfers.ts apps/web/src/themes/v2/pages/xwhm/mail/operations.ts apps/web/src/themes/v2/pages/xwhm/mail/server.ts apps/web/src/themes/v2/pages/xwhm/monitoring/health.ts apps/web/src/themes/v2/pages/xwhm/monitoring/resources.ts apps/web/src/themes/v2/pages/xwhm/monitoring/snapshots.ts apps/web/src/themes/v2/pages/xwhm/monitoring/web-stats-engines.ts apps/web/src/themes/v2/pages/xwhm/panel/whmcs.ts apps/web/src/themes/v2/pages/xwhm/plans/plans.ts apps/web/src/themes/v2/pages/xwhm/recovery-tools/restore.ts apps/web/src/themes/v2/pages/xwhm/resellers/index.ts apps/web/src/themes/v2/pages/xwhm/security/overview.ts apps/web/src/themes/v2/pages/xwhm/security/tools.ts apps/web/src/themes/v2/pages/xwhm/server/file-share-links.ts apps/web/src/themes/v2/pages/xwhm/server/ip-tools.ts apps/web/src/themes/v2/pages/xwhm/service-tools/ftp-log.ts apps/web/src/themes/v2/pages/xwhm/service-tools/nginx-proxy.ts apps/web/src/themes/v2/pages/xwhm/software/catalog.ts apps/web/src/themes/v2/pages/xwhm/software/ctr-sections.ts apps/web/src/themes/v2/pages/xwhm/software/projects.ts apps/web/src/themes/v2/pages/xwhm/tls/index.ts apps/web/src/themes/v2/pages/xwhm/tls/store.ts apps/web/src/themes/v2/shell/shell.ts apps/web/src/whm-domains-client.ts apps/web/src/whm-ftp-log-client.ts apps/web/src/whm-ssl-client.ts
+#: apps/web/src/board-canvas.ts apps/web/src/board-port/account-database-remote-workspace.ts apps/web/src/board-port/acct-backup-runs-workspace.ts apps/web/src/board-port/acct-restore-workspace.ts apps/web/src/board-port/approved-whm-backups.ts apps/web/src/board-port/approved-whm-plan-components.ts apps/web/src/board-port/approved-whm-resellers.ts apps/web/src/board-port/approved-xpanel-bindings.ts apps/web/src/board-port/approved-xpanel-pages.ts apps/web/src/board-port/approved-xwhm.ts apps/web/src/board-port/composed/render.ts apps/web/src/board-port/composed/sections/xwhm-accounts.ts apps/web/src/board-port/ctr-workspace.ts apps/web/src/board-port/db-engines-workspace.ts apps/web/src/board-port/extensions/email-accounts.ts apps/web/src/board-port/file-share-links-workspace.ts apps/web/src/board-port/identity-workspaces.ts apps/web/src/board-port/mailing-list-admin-sections.ts apps/web/src/board-port/ops-terminal-workspace.ts apps/web/src/board-port/sec-workspace.ts apps/web/src/board-port/ssl-store-workspace.ts apps/web/src/board-port/sw-deployments-workspace.ts apps/web/src/board-port/whm-account-repair-workspace.ts apps/web/src/board-port/whm-backup-files-workspace.ts apps/web/src/board-port/whm-composer-workspace.ts apps/web/src/board-port/whm-databases-workspace.ts apps/web/src/board-port/whm-db-tools-workspace.ts apps/web/src/board-port/whm-domains-workspace.ts apps/web/src/board-port/whm-extend-workspace.ts apps/web/src/board-port/whm-ftp-log-workspace.ts apps/web/src/board-port/whm-ip-tools.ts apps/web/src/board-port/whm-mail-quality-workspace.ts apps/web/src/board-port/whm-mail-server-workspace.ts apps/web/src/board-port/whm-mailbox-maintenance-workspace.ts apps/web/src/board-port/whm-metering-workspace.ts apps/web/src/board-port/whm-monitoring-workspace.ts apps/web/src/board-port/whm-nginx-proxy-workspace.ts apps/web/src/board-port/whm-php-workspace.ts apps/web/src/board-port/whm-security-tools-workspace.ts apps/web/src/board-port/whm-server-health-workspace.ts apps/web/src/board-port/whm-ssl-workspace.ts apps/web/src/board-port/whm-traffic-workspace.ts apps/web/src/board-port/whm-whmcs-workspace.ts apps/web/src/board-port/xpanel-home.ts apps/web/src/charts.ts apps/web/src/chrome.ts apps/web/src/design-board.ts apps/web/src/mail-cards.ts apps/web/src/models/db-services.ts apps/web/src/models/mail-cert-panels.ts apps/web/src/models/svc-panels.ts apps/web/src/models/tool-cards.ts apps/web/src/surfaces/xwhm.ts apps/web/src/themes/v2/pages/identity.ts apps/web/src/themes/v2/pages/xpanel/domains/domains.ts apps/web/src/themes/v2/pages/xpanel/email-tools/list-admin.ts apps/web/src/themes/v2/pages/xpanel/email/accounts.ts apps/web/src/themes/v2/pages/xpanel/observations/health.ts apps/web/src/themes/v2/pages/xpanel/operations/backup.ts apps/web/src/themes/v2/pages/xpanel/operations/terminal.ts apps/web/src/themes/v2/pages/xpanel/security/certificates.ts apps/web/src/themes/v2/pages/xpanel/settings/preferences.ts apps/web/src/themes/v2/pages/xwhm/account-tools/pages.ts apps/web/src/themes/v2/pages/xwhm/account-tools/repair.ts apps/web/src/themes/v2/pages/xwhm/accounts/admin.ts apps/web/src/themes/v2/pages/xwhm/accounts/list.ts apps/web/src/themes/v2/pages/xwhm/databases/index.ts apps/web/src/themes/v2/pages/xwhm/dns/index.ts apps/web/src/themes/v2/pages/xwhm/dns/providers.ts apps/web/src/themes/v2/pages/xwhm/dns/tools.ts apps/web/src/themes/v2/pages/xwhm/domains/index.ts apps/web/src/themes/v2/pages/xwhm/host/php.ts apps/web/src/themes/v2/pages/xwhm/lifecycle/backups.ts apps/web/src/themes/v2/pages/xwhm/lifecycle/destinations.ts apps/web/src/themes/v2/pages/xwhm/lifecycle/transfers.ts apps/web/src/themes/v2/pages/xwhm/mail/operations.ts apps/web/src/themes/v2/pages/xwhm/mail/server.ts apps/web/src/themes/v2/pages/xwhm/monitoring/health.ts apps/web/src/themes/v2/pages/xwhm/monitoring/resources.ts apps/web/src/themes/v2/pages/xwhm/monitoring/snapshots.ts apps/web/src/themes/v2/pages/xwhm/monitoring/web-stats-engines.ts apps/web/src/themes/v2/pages/xwhm/panel/whmcs.ts apps/web/src/themes/v2/pages/xwhm/plans/plans.ts apps/web/src/themes/v2/pages/xwhm/recovery-tools/restore.ts apps/web/src/themes/v2/pages/xwhm/resellers/index.ts apps/web/src/themes/v2/pages/xwhm/security/overview.ts apps/web/src/themes/v2/pages/xwhm/security/tools.ts apps/web/src/themes/v2/pages/xwhm/server/file-share-links.ts apps/web/src/themes/v2/pages/xwhm/server/ip-tools.ts apps/web/src/themes/v2/pages/xwhm/service-tools/ftp-log.ts apps/web/src/themes/v2/pages/xwhm/service-tools/nginx-proxy.ts apps/web/src/themes/v2/pages/xwhm/software/catalog.ts apps/web/src/themes/v2/pages/xwhm/software/ctr-sections.ts apps/web/src/themes/v2/pages/xwhm/software/projects.ts apps/web/src/themes/v2/pages/xwhm/tls/index.ts apps/web/src/themes/v2/pages/xwhm/tls/store.ts apps/web/src/themes/v2/shell/shell.ts apps/web/src/whm-domains-client.ts apps/web/src/whm-ftp-log-client.ts apps/web/src/whm-ssl-client.ts
 msgid "Account"
 msgstr "الحساب"
 
@@ -1535,7 +1535,7 @@ msgctxt "approved-xwhm"
 msgid "Account contact"
 msgstr "جهة اتصال الحساب"
 
-#: apps/api/src/notification-templates.ts apps/web/src/whm-extend-client.ts
+#: apps/api/src/notification-templates.ts apps/web/src/whm-extend-client.ts apps/web/src/ws-client.ts
 msgid "Account created"
 msgstr "إنشاء حساب"
 
@@ -1856,7 +1856,7 @@ msgstr "فشل إعادة تفعيل الحساب على المضيف"
 msgid "Account update failed on the host"
 msgstr "فشل تحديث الحساب على المضيف"
 
-#: apps/web/src/board-port/extensions/resources-board.ts apps/web/src/themes/v2/pages/xpanel/resources.ts
+#: apps/web/src/board-port/extensions/resources-board.ts apps/web/src/panel-resources-client.ts apps/web/src/themes/v2/pages/xpanel/resources.ts
 msgid "Account usage sample"
 msgstr "عينة استخدام الحساب"
 
@@ -2041,7 +2041,7 @@ msgstr "نفّذ إجراءً على قائمة انتظار BoxTrapper"
 msgid "Acted on the BoxTrapper queue from webmail"
 msgstr "نفّذ إجراءً على قائمة انتظار BoxTrapper من البريد عبر الويب"
 
-#: apps/web/src/account-filters-client.ts apps/web/src/board-canvas.ts apps/web/src/board-port/account-file-restoration-workspace.ts apps/web/src/board-port/account-htaccess-workspace.ts apps/web/src/board-port/account-reverse-proxy-workspace.ts apps/web/src/board-port/account-site-settings-workspace.ts apps/web/src/board-port/account-team-audit-card.ts apps/web/src/board-port/acct-restore-workspace.ts apps/web/src/board-port/approved-whm-operations-components.ts apps/web/src/board-port/approved-xpanel-bindings.ts apps/web/src/board-port/approved-xpanel-pages.ts apps/web/src/board-port/approved-xpanel-workspaces.ts apps/web/src/board-port/approved-xwhm.ts apps/web/src/board-port/dnssec-section.ts apps/web/src/board-port/extensions/account-mailing-lists.ts apps/web/src/board-port/ftp-tools-workspace.ts apps/web/src/board-port/identity-workspaces.ts apps/web/src/board-port/list-moderation-section.ts apps/web/src/board-port/whm-backup-files-workspace.ts apps/web/src/board-port/whm-composer-workspace.ts apps/web/src/board-port/whm-databases-workspace.ts apps/web/src/board-port/whm-monitoring-workspace.ts apps/web/src/board-port/whm-panel-tokens-workspace.ts apps/web/src/board-port/whm-security-components.ts apps/web/src/board-port/whm-software-center-workspace.ts apps/web/src/board-port/whm-whmcs-workspace.ts apps/web/src/board-port/xmail-mailbox-forwarders.ts apps/web/src/board-port/xwhm-dashboard.ts apps/web/src/design-board.ts apps/web/src/surfaces/xpanel.ts apps/web/src/surfaces/xwhm.ts apps/web/src/themes/v2/pages/identity.ts apps/web/src/themes/v2/pages/xmail/compose.ts apps/web/src/themes/v2/pages/xmail/workspaces/settings.ts apps/web/src/themes/v2/pages/xpanel/domains/reverse-proxy.ts apps/web/src/themes/v2/pages/xpanel/domains/site-settings.ts apps/web/src/themes/v2/pages/xpanel/email-tools/list-moderation.ts apps/web/src/themes/v2/pages/xpanel/email-tools/mailing-lists.ts apps/web/src/themes/v2/pages/xpanel/operations/file-restoration.ts apps/web/src/themes/v2/pages/xpanel/operations/ftp.ts apps/web/src/themes/v2/pages/xpanel/security/account.ts apps/web/src/themes/v2/pages/xpanel/software/htaccess.ts apps/web/src/themes/v2/pages/xwhm/activity/audit.ts apps/web/src/themes/v2/pages/xwhm/databases/index.ts apps/web/src/themes/v2/pages/xwhm/dns/index.ts apps/web/src/themes/v2/pages/xwhm/host/firewall.ts apps/web/src/themes/v2/pages/xwhm/host/php.ts apps/web/src/themes/v2/pages/xwhm/monitoring/snapshots.ts apps/web/src/themes/v2/pages/xwhm/panel/tokens.ts apps/web/src/themes/v2/pages/xwhm/panel/whmcs.ts apps/web/src/themes/v2/pages/xwhm/recovery-tools/restore.ts apps/web/src/themes/v2/pages/xwhm/security/ssh.ts apps/web/src/themes/v2/pages/xwhm/software/catalog.ts apps/web/src/themes/v2/pages/xwhm/software/projects.ts apps/web/src/themes/v2/pages/xwhm/tls/index.ts apps/web/src/whm-firewall-client.ts
+#: apps/web/src/account-filters-client.ts apps/web/src/board-canvas.ts apps/web/src/board-port/account-file-restoration-workspace.ts apps/web/src/board-port/account-htaccess-workspace.ts apps/web/src/board-port/account-reverse-proxy-workspace.ts apps/web/src/board-port/account-site-settings-workspace.ts apps/web/src/board-port/account-team-audit-card.ts apps/web/src/board-port/acct-restore-workspace.ts apps/web/src/board-port/approved-whm-operations-components.ts apps/web/src/board-port/approved-xpanel-bindings.ts apps/web/src/board-port/approved-xpanel-pages.ts apps/web/src/board-port/approved-xpanel-workspaces.ts apps/web/src/board-port/approved-xwhm.ts apps/web/src/board-port/dnssec-section.ts apps/web/src/board-port/extensions/account-mailing-lists.ts apps/web/src/board-port/ftp-tools-workspace.ts apps/web/src/board-port/identity-workspaces.ts apps/web/src/board-port/list-moderation-section.ts apps/web/src/board-port/whm-backup-files-workspace.ts apps/web/src/board-port/whm-composer-workspace.ts apps/web/src/board-port/whm-databases-workspace.ts apps/web/src/board-port/whm-monitoring-workspace.ts apps/web/src/board-port/whm-panel-tokens-workspace.ts apps/web/src/board-port/whm-security-components.ts apps/web/src/board-port/whm-software-center-workspace.ts apps/web/src/board-port/whm-whmcs-workspace.ts apps/web/src/board-port/xmail-mailbox-forwarders.ts apps/web/src/board-port/xwhm-dashboard.ts apps/web/src/design-board.ts apps/web/src/surfaces/xpanel.ts apps/web/src/surfaces/xwhm.ts apps/web/src/themes/v2/pages/identity.ts apps/web/src/themes/v2/pages/xmail/compose.ts apps/web/src/themes/v2/pages/xmail/workspaces/settings.ts apps/web/src/themes/v2/pages/xpanel/domains/reverse-proxy.ts apps/web/src/themes/v2/pages/xpanel/domains/site-settings.ts apps/web/src/themes/v2/pages/xpanel/email-tools/list-moderation.ts apps/web/src/themes/v2/pages/xpanel/email-tools/mailing-lists.ts apps/web/src/themes/v2/pages/xpanel/observations/traffic.ts apps/web/src/themes/v2/pages/xpanel/operations/file-restoration.ts apps/web/src/themes/v2/pages/xpanel/operations/ftp.ts apps/web/src/themes/v2/pages/xpanel/operations/git.ts apps/web/src/themes/v2/pages/xpanel/security/account.ts apps/web/src/themes/v2/pages/xpanel/software/htaccess.ts apps/web/src/themes/v2/pages/xwhm/activity/audit.ts apps/web/src/themes/v2/pages/xwhm/databases/index.ts apps/web/src/themes/v2/pages/xwhm/dns/index.ts apps/web/src/themes/v2/pages/xwhm/host/firewall.ts apps/web/src/themes/v2/pages/xwhm/host/php.ts apps/web/src/themes/v2/pages/xwhm/monitoring/snapshots.ts apps/web/src/themes/v2/pages/xwhm/panel/tokens.ts apps/web/src/themes/v2/pages/xwhm/panel/whmcs.ts apps/web/src/themes/v2/pages/xwhm/recovery-tools/restore.ts apps/web/src/themes/v2/pages/xwhm/security/ssh.ts apps/web/src/themes/v2/pages/xwhm/software/catalog.ts apps/web/src/themes/v2/pages/xwhm/software/projects.ts apps/web/src/themes/v2/pages/xwhm/tls/index.ts apps/web/src/whm-firewall-client.ts
 msgid "Action"
 msgstr "الإجراء"
 
@@ -2251,7 +2251,7 @@ msgstr "دعم نشط"
 msgid "Activity"
 msgstr "النشاط"
 
-#: apps/web/src/chrome.ts apps/web/src/themes/v2/shell/activity-control.ts apps/web/src/themes/v2/shell/overlays.ts
+#: apps/web/src/chrome.ts apps/web/src/themes/v2/shell/activity-control.ts apps/web/src/themes/v2/shell/overlays.ts apps/web/src/themes/v2/shell/shell.ts
 msgid "Activity & Jobs"
 msgstr "سجل النشاط والمهام"
 
@@ -4468,7 +4468,7 @@ msgstr "طُبّق: {applied}. موجود مسبقًا: {unchanged}. فشل: {fa
 msgid "Applies to"
 msgstr "ينطبق على"
 
-#: apps/web/src/board-canvas.ts apps/web/src/board-port/approved-xwhm.ts apps/web/src/board-port/composed/layout.ts apps/web/src/themes/v2/pages/xwhm/lifecycle/transfers.ts apps/web/src/themes/v2/pages/xwhm/plans/editor.ts apps/web/src/whm-db-tools-client.ts apps/web/src/whm-domain-bulk-client.ts apps/web/src/whm-server-ops-client.ts
+#: apps/web/src/board-canvas.ts apps/web/src/board-port/approved-xwhm.ts apps/web/src/board-port/composed/layout.ts apps/web/src/themes/v2/pages/xwhm/lifecycle/transfers.ts apps/web/src/themes/v2/pages/xwhm/plans/editor.ts apps/web/src/themes/v2/pages/xwhm/server/observations.ts apps/web/src/whm-db-tools-client.ts apps/web/src/whm-domain-bulk-client.ts apps/web/src/whm-server-ops-client.ts
 msgid "Apply"
 msgstr "التطبيق"
 
@@ -5069,7 +5069,7 @@ msgstr "يمكن تشغيل 10 فحوص بحد أقصى في الدقيقة. ح�
 msgid "At most 1000 blocks per account. Loopback addresses that the server uses to reach its own sites cannot be blocked."
 msgstr "1000 كتلة كحد أقصى لكل حساب. لا يمكن حظر عناوين الاسترجاع التي يستخدمها الخادم للوصول إلى مواقعه."
 
-#: apps/web/src/mail-connect-devices-client.ts
+#: apps/web/src/account-connect-devices-client.ts apps/web/src/mail-connect-devices-client.ts
 msgid "At most 5 instruction messages can be sent per hour. Nothing was sent."
 msgstr "يمكن إرسال 5 رسائل تعليمات كحد أقصى في الساعة. لم يُرسل شيء."
 
@@ -5221,7 +5221,7 @@ msgstr "تُستبدل قيم Authorization وProxy-Authorization حتى نها�
 msgid "Authorization is no longer valid. Nothing further was sent."
 msgstr "لم يعد التفويض صالحًا. لم يُرسل شيء آخر."
 
-#: apps/web/src/sec-security-client.ts apps/web/src/sign-in-policy-client.ts apps/web/src/svc-panels-client.ts apps/web/src/whm-dns-tools-client.ts apps/web/src/whm-extend-client.ts apps/web/src/whm-mailbox-maintenance-client.ts apps/web/src/whm-security-tools-client.ts
+#: apps/web/src/sec-security-client.ts apps/web/src/sign-in-policy-client.ts apps/web/src/svc-panels-client.ts apps/web/src/whm-dns-tools-client.ts apps/web/src/whm-extend-client.ts apps/web/src/whm-mailbox-maintenance-client.ts apps/web/src/whm-security-controls-client.ts apps/web/src/whm-security-tools-client.ts
 msgid "Authorization is no longer valid. Nothing was changed."
 msgstr "لم يعد التفويض صالحًا. لم يُغيّر شيء."
 
@@ -5403,7 +5403,7 @@ msgstr "الردود الآلية، مرّر جانبيًا للمزيد"
 msgid "Availability"
 msgstr "التوافر"
 
-#: apps/web/src/account-virus-scan-client.ts apps/web/src/acct-restore-client.ts apps/web/src/acct-team-client.ts apps/web/src/board-port/db-engines-workspace.ts apps/web/src/board-port/whm-whmcs-workspace.ts apps/web/src/ctr-client.ts apps/web/src/ops-file-sharing-client.ts apps/web/src/ops-integrations-client.ts apps/web/src/ops-nodes-client.ts apps/web/src/ops-terminal-client.ts apps/web/src/sw-deployments-client.ts apps/web/src/themes/v2/pages/xpanel/security/account.ts apps/web/src/themes/v2/pages/xwhm/databases/index.ts apps/web/src/themes/v2/pages/xwhm/lifecycle/upgrade.ts apps/web/src/themes/v2/pages/xwhm/panel/configuration.ts apps/web/src/whm-backup-files-client.ts
+#: apps/web/src/account-preflight-client.ts apps/web/src/account-virus-scan-client.ts apps/web/src/acct-restore-client.ts apps/web/src/acct-team-client.ts apps/web/src/board-port/db-engines-workspace.ts apps/web/src/board-port/whm-whmcs-workspace.ts apps/web/src/ctr-client.ts apps/web/src/ops-file-sharing-client.ts apps/web/src/ops-integrations-client.ts apps/web/src/ops-nodes-client.ts apps/web/src/ops-terminal-client.ts apps/web/src/sw-deployments-client.ts apps/web/src/themes/v2/pages/xpanel/security/account.ts apps/web/src/themes/v2/pages/xwhm/databases/index.ts apps/web/src/themes/v2/pages/xwhm/lifecycle/upgrade.ts apps/web/src/themes/v2/pages/xwhm/panel/configuration.ts apps/web/src/whm-backup-files-client.ts
 msgid "Available"
 msgstr "متاح"
 
@@ -6056,11 +6056,11 @@ msgstr "حظر النطاقات الشائعة"
 msgid "Block the address for, minutes"
 msgstr "حظر العنوان لمدة، بالدقائق"
 
-#: apps/web/src/models/svc-panels.ts apps/web/src/themes/v2/pages/xwhm/host/firewall.ts apps/web/src/whm-firewall-client.ts
+#: apps/web/src/account-traffic-monitor-client.ts apps/web/src/models/svc-panels.ts apps/web/src/themes/v2/pages/xwhm/host/firewall.ts apps/web/src/whm-firewall-client.ts
 msgid "Blocked"
 msgstr "محجوب"
 
-#: apps/web/src/board-port/approved-xpanel-pages.ts apps/web/src/themes/v2/pages/xpanel/security/account.ts
+#: apps/web/src/board-port/approved-xpanel-pages.ts apps/web/src/themes/v2/pages/xpanel/observations/traffic.ts apps/web/src/themes/v2/pages/xpanel/security/account.ts
 msgid "Blocked addresses"
 msgstr "العناوين المحظورة"
 
@@ -6405,7 +6405,7 @@ msgstr "قائمة نقطية"
 msgid "Bundler is not installed"
 msgstr "Bundler غير مثبّت"
 
-#: apps/web/src/board-port/approved-xwhm.ts apps/web/src/themes/v2/pages/xwhm/security/overview.ts
+#: apps/web/src/board-port/approved-xwhm.ts
 msgid "Burst"
 msgstr "الدفعة"
 
@@ -6872,7 +6872,7 @@ msgstr "لم تُقرأ إعدادات المرشح. لا تثبت المعاي�
 msgid "Candidate generation tests"
 msgstr "فحوص الجيل المرشح"
 
-#: apps/web/src/board-port/approved-whm-account-components.ts apps/web/src/themes/v2/pages/xwhm/accounts/create.ts
+#: apps/web/src/account-preflight-client.ts apps/web/src/board-port/approved-whm-account-components.ts apps/web/src/themes/v2/pages/xwhm/accounts/create.ts
 msgid "Candidate not read"
 msgstr "المرشح غير مقروء"
 
@@ -6985,7 +6985,7 @@ msgstr "نسخة"
 msgid "Center"
 msgstr "الوسط"
 
-#: apps/web/src/board-canvas.ts apps/web/src/board-port/approved-xpanel-bindings.ts apps/web/src/board-port/approved-xpanel-pages.ts apps/web/src/board-port/approved-xwhm.ts apps/web/src/board-port/ssl-store-workspace.ts apps/web/src/board-port/xmail-connect-devices.ts apps/web/src/design-board.ts apps/web/src/site-health-client.ts apps/web/src/surfaces/xpanel.ts apps/web/src/themes/v2/pages/xmail/workspaces/tools.ts apps/web/src/themes/v2/pages/xpanel/home.ts apps/web/src/themes/v2/pages/xpanel/security/certificates.ts apps/web/src/whm-domains-client.ts
+#: apps/web/src/board-canvas.ts apps/web/src/board-port/approved-xpanel-bindings.ts apps/web/src/board-port/approved-xpanel-pages.ts apps/web/src/board-port/approved-xwhm.ts apps/web/src/board-port/ssl-store-workspace.ts apps/web/src/board-port/xmail-connect-devices.ts apps/web/src/design-board.ts apps/web/src/site-health-client.ts apps/web/src/surfaces/xpanel.ts apps/web/src/themes/v2/pages/xmail/workspaces/tools.ts apps/web/src/themes/v2/pages/xpanel/email/accounts.ts apps/web/src/themes/v2/pages/xpanel/home.ts apps/web/src/themes/v2/pages/xpanel/security/certificates.ts apps/web/src/whm-domains-client.ts
 msgid "Certificate"
 msgstr "الشهادة"
 
@@ -9887,7 +9887,7 @@ msgstr "إعداد إصدار"
 msgid "Configure: {domain}"
 msgstr "ضبط {domain}"
 
-#: apps/web/src/domain-workspace-client.ts apps/web/src/mail-cards-client.ts
+#: apps/web/src/account-git-client.ts apps/web/src/domain-workspace-client.ts apps/web/src/mail-cards-client.ts
 msgid "Configured"
 msgstr "محفوظ"
 
@@ -10075,7 +10075,7 @@ msgstr "الاتصال"
 msgid "Connect and discover"
 msgstr "الاتصال والاكتشاف"
 
-#: apps/web/src/mail-home-groups.ts apps/web/src/shell.ts apps/web/src/surfaces/xmail.ts apps/web/src/themes/v2/pages/xmail/workspaces/tools.ts
+#: apps/web/src/mail-home-groups.ts apps/web/src/shell.ts apps/web/src/surfaces/xmail.ts apps/web/src/themes/v2/pages/xmail/workspaces/tools.ts apps/web/src/themes/v2/pages/xpanel/email/accounts.ts
 msgid "Connect devices"
 msgstr "ربط الأجهزة"
 
@@ -10902,7 +10902,7 @@ msgstr "إنشاء مستخدم لهذه القاعدة"
 msgid "Create a version"
 msgstr "إنشاء إصدار"
 
-#: apps/web/src/board-port/approved-xwhm.ts apps/web/src/board-port/xwhm-dashboard.ts apps/web/src/design-board.ts apps/web/src/shell.ts apps/web/src/themes/v2/pages/xwhm/accounts/create.ts apps/web/src/themes/v2/pages/xwhm/accounts/list.ts apps/web/src/themes/v2/pages/xwhm/overview/index.ts
+#: apps/web/src/board-port/approved-xwhm.ts apps/web/src/board-port/xwhm-dashboard.ts apps/web/src/design-board.ts apps/web/src/shell.ts apps/web/src/themes/v2/pages/xwhm/accounts/create.ts apps/web/src/themes/v2/pages/xwhm/accounts/list.ts apps/web/src/themes/v2/pages/xwhm/overview/index.ts apps/web/src/ws-client.ts
 msgid "Create account"
 msgstr "إنشاء حساب"
 
@@ -10938,7 +10938,7 @@ msgstr "إنشاء حساب آخر"
 msgid "Create application"
 msgstr "إنشاء تطبيق"
 
-#: apps/web/src/board-port/account-backup-workspace.ts apps/web/src/themes/v2/pages/xpanel/operations/backup.ts
+#: apps/web/src/board-port/account-backup-workspace.ts
 msgid "Create archive"
 msgstr "إنشاء الأرشيف"
 
@@ -11995,7 +11995,7 @@ msgstr "النسخ اليومية"
 msgid "Daily process log"
 msgstr "سجل العمليات اليومي"
 
-#: apps/web/src/board-port/approved-xpanel-pages.ts apps/web/src/themes/v2/pages/xpanel/observations/traffic.ts
+#: apps/web/src/board-port/approved-xpanel-pages.ts
 msgid "Daily visitor readings have not been read. Request totals do not establish a daily visitor series."
 msgstr "لم تُقرأ قراءات الزوار اليومية. إجمالي الطلبات لا يثبت سلسلة يومية للزوار."
 
@@ -12033,7 +12033,7 @@ msgstr "الوضع الداكن"
 msgid "Dark theme"
 msgstr "الوضع الداكن"
 
-#: apps/web/src/board-port/xwhm-dashboard.ts apps/web/src/design-board.ts apps/web/src/themes/v2/pages/xwhm/overview/index.ts
+#: apps/web/src/board-port/xwhm-dashboard.ts apps/web/src/design-board.ts
 msgid "Dashboard"
 msgstr "اللوحة"
 
@@ -12384,7 +12384,7 @@ msgctxt "xmail-calendar-view"
 msgid "Day"
 msgstr "يوم"
 
-#: apps/web/src/board-port/account-logs-workspace.ts apps/web/src/themes/v2/pages/xpanel/observations/logs.ts
+#: apps/web/src/board-port/account-logs-workspace.ts apps/web/src/themes/v2/pages/xpanel/observations/logs.ts apps/web/src/themes/v2/pages/xpanel/observations/traffic.ts
 msgid "Day (UTC)"
 msgstr "اليوم (التوقيت العالمي)"
 
@@ -13443,7 +13443,7 @@ msgctxt "audit"
 msgid "Denied"
 msgstr "مرفوض"
 
-#: apps/web/src/board-port/approved-xwhm.ts apps/web/src/themes/v2/pages/xwhm/security/overview.ts
+#: apps/web/src/board-port/approved-xwhm.ts
 msgid "Denied addresses and ranges"
 msgstr "العناوين والنطاقات المحظورة"
 
@@ -13506,7 +13506,7 @@ msgstr "تمنع السجلات التابعة الإزالة: {count}"
 msgid "Dependent records: {count}"
 msgstr "السجلات التابعة: {count}"
 
-#: apps/web/src/account-runtime-client.ts apps/web/src/sw-deployments-client.ts apps/web/src/themes/v2/pages/xpanel/operations/git.ts
+#: apps/web/src/account-git-client.ts apps/web/src/account-runtime-client.ts apps/web/src/sw-deployments-client.ts apps/web/src/themes/v2/pages/xpanel/operations/git.ts
 msgid "Deploy"
 msgstr "نشر"
 
@@ -14128,7 +14128,7 @@ msgstr "المستخدمون المعطَّلون: {users}"
 msgid "Disabled: the account or its plan does not allow shell access"
 msgstr "معطّل: لا يسمح الحساب أو خطته بالوصول إلى الصدفة"
 
-#: apps/web/src/acct-staging-client.ts apps/web/src/board-canvas.ts apps/web/src/board-port/approved-xwhm.ts apps/web/src/board-port/list-moderation-section.ts apps/web/src/board-port/whm-default-site-workspace.ts apps/web/src/board-port/xmail-compose.ts apps/web/src/list-moderation-client.ts apps/web/src/surfaces/xwhm.ts apps/web/src/themes/v2/components/change-review.ts apps/web/src/themes/v2/layouts/common.ts apps/web/src/themes/v2/layouts/editor-page.ts apps/web/src/themes/v2/pages/xmail/compose.ts apps/web/src/themes/v2/pages/xpanel/email-tools/list-moderation.ts apps/web/src/themes/v2/pages/xwhm/accounts/create.ts apps/web/src/themes/v2/pages/xwhm/domains/index.ts apps/web/src/themes/v2/pages/xwhm/host/php.ts apps/web/src/themes/v2/pages/xwhm/tls/index.ts
+#: apps/web/src/acct-staging-client.ts apps/web/src/board-canvas.ts apps/web/src/board-port/approved-xwhm.ts apps/web/src/board-port/list-moderation-section.ts apps/web/src/board-port/whm-default-site-workspace.ts apps/web/src/board-port/xmail-compose.ts apps/web/src/list-moderation-client.ts apps/web/src/surfaces/xwhm.ts apps/web/src/themes/v2/components/change-review.ts apps/web/src/themes/v2/layouts/common.ts apps/web/src/themes/v2/layouts/editor-page.ts apps/web/src/themes/v2/pages/xmail/compose.ts apps/web/src/themes/v2/pages/xpanel/email-tools/list-moderation.ts apps/web/src/themes/v2/pages/xwhm/accounts/create.ts apps/web/src/themes/v2/pages/xwhm/domains/index.ts apps/web/src/themes/v2/pages/xwhm/host/php.ts apps/web/src/themes/v2/pages/xwhm/tls/index.ts apps/web/src/workspace-runtime-client.ts
 msgid "Discard"
 msgstr "تجاهل"
 
@@ -14700,7 +14700,7 @@ msgctxt "whm-server-health-client"
 msgid "Disk write rate"
 msgstr "معدل الكتابة إلى القرص"
 
-#: apps/web/src/board-port/account-announcements-banner-client.ts apps/web/src/board-port/account-announcements-banner.ts apps/web/src/themes/v2/components/notice.ts apps/web/src/themes/v2/pages/xwhm/account-tools/pages.ts
+#: apps/web/src/board-port/account-announcements-banner-client.ts apps/web/src/board-port/account-announcements-banner.ts apps/web/src/themes/v2/components/notice.ts apps/web/src/themes/v2/pages/xwhm/account-tools/pages.ts apps/web/src/workspace-runtime-client.ts
 msgid "Dismiss"
 msgstr "إخفاء"
 
@@ -14931,7 +14931,7 @@ msgstr "نطاقات بها فحوص غير متاحة"
 msgid "Domains, DNS & SSL"
 msgstr "النطاقات وDNS وSSL"
 
-#: apps/web/src/board-port/acct-team-workspace.ts apps/web/src/board-port/approved-xpanel-pages.ts apps/web/src/board-port/approved-xpanel-workspaces.ts apps/web/src/board-port/whm-panel-tokens-workspace.ts apps/web/src/board-port/whm-whmcs-workspace.ts apps/web/src/themes/v2/pages/xpanel/security/account.ts apps/web/src/themes/v2/pages/xpanel/settings/team.ts apps/web/src/themes/v2/pages/xwhm/panel/tokens.ts apps/web/src/themes/v2/pages/xwhm/panel/whmcs.ts
+#: apps/web/src/board-port/acct-team-workspace.ts apps/web/src/board-port/approved-xpanel-pages.ts apps/web/src/board-port/approved-xpanel-workspaces.ts apps/web/src/board-port/whm-panel-tokens-workspace.ts apps/web/src/board-port/whm-whmcs-workspace.ts apps/web/src/themes/v2/pages/xpanel/security/account.ts apps/web/src/themes/v2/pages/xpanel/settings/team.ts apps/web/src/themes/v2/pages/xwhm/panel/tokens.ts apps/web/src/themes/v2/pages/xwhm/panel/whmcs.ts apps/web/src/workspace-runtime-client.ts
 msgid "Done"
 msgstr "تم"
 
@@ -14994,7 +14994,7 @@ msgstr "إضافة فهرس البحث في Dovecot"
 msgid "Down"
 msgstr "متوقف"
 
-#: apps/web/src/account-logs-client.ts apps/web/src/board-port/account-logs-workspace.ts apps/web/src/board-port/approved-xpanel-pages.ts apps/web/src/board-port/whm-extend-workspace.ts apps/web/src/board-port/whm-metering-workspace.ts apps/web/src/board-port/xmail-inbox.ts apps/web/src/file-workspace-client.ts apps/web/src/mail-cards-client.ts apps/web/src/models/tool-cards.ts apps/web/src/themes/v2/pages/xpanel/observations/logs.ts apps/web/src/themes/v2/pages/xpanel/operations/backup.ts apps/web/src/themes/v2/pages/xwhm/monitoring/snapshots.ts apps/web/src/themes/v2/pages/xwhm/panel/configuration.ts apps/web/src/themes/v2/pages/xwhm/panel/integrations-developer.ts apps/web/src/whm-metering-client.ts
+#: apps/web/src/account-logs-client.ts apps/web/src/board-port/account-logs-workspace.ts apps/web/src/board-port/approved-xpanel-pages.ts apps/web/src/board-port/whm-extend-workspace.ts apps/web/src/board-port/whm-metering-workspace.ts apps/web/src/board-port/xmail-inbox.ts apps/web/src/file-workspace-client.ts apps/web/src/mail-cards-client.ts apps/web/src/models/tool-cards.ts apps/web/src/themes/v2/pages/xpanel/observations/logs.ts apps/web/src/themes/v2/pages/xwhm/monitoring/snapshots.ts apps/web/src/themes/v2/pages/xwhm/panel/configuration.ts apps/web/src/themes/v2/pages/xwhm/panel/integrations-developer.ts apps/web/src/whm-metering-client.ts
 msgid "Download"
 msgstr "تنزيل"
 
@@ -15007,7 +15007,7 @@ msgstr "التنزيل"
 msgid "Download (simulated)"
 msgstr "التنزيل (محاكاة)"
 
-#: apps/web/src/board-port/xmail-connect-devices.ts apps/web/src/themes/v2/pages/xmail/workspaces/tools.ts
+#: apps/web/src/board-port/xmail-connect-devices.ts apps/web/src/themes/v2/pages/xmail/workspaces/tools.ts apps/web/src/themes/v2/pages/xpanel/email/accounts.ts
 msgid "Download Apple profile (iPhone, iPad, Mac)"
 msgstr "تنزيل ملف تعريف Apple (iPhone وiPad وMac)"
 
@@ -15019,7 +15019,7 @@ msgstr "تنزيل تحديثات تواقيع ClamAV"
 msgid "Download OpenAPI"
 msgstr "تنزيل OpenAPI"
 
-#: apps/web/src/board-port/xmail-connect-devices.ts apps/web/src/themes/v2/pages/xmail/workspaces/tools.ts
+#: apps/web/src/board-port/xmail-connect-devices.ts apps/web/src/themes/v2/pages/xmail/workspaces/tools.ts apps/web/src/themes/v2/pages/xpanel/email/accounts.ts
 msgid "Download Thunderbird setup (XML)"
 msgstr "تنزيل إعداد Thunderbird (XML)"
 
@@ -16579,7 +16579,7 @@ msgstr "أدخل اسم نطاق صالحًا للحساب للمنطقة الج
 msgid "Enter a valid contact email without surrounding spaces."
 msgstr "أدخل بريد تواصل صالحًا دون مسافات محيطة."
 
-#: apps/web/src/mail-connect-devices-client.ts
+#: apps/web/src/account-connect-devices-client.ts apps/web/src/mail-connect-devices-client.ts
 msgid "Enter a valid email address. Nothing was sent."
 msgstr "أدخل عنوان بريد إلكتروني صالحًا. لم يُرسل شيء."
 
@@ -16655,7 +16655,7 @@ msgstr "أدخل عنوانًا."
 msgid "Enter an authenticator code or one recovery code."
 msgstr "أدخل رمز التحقق أو رمز استرداد واحدًا."
 
-#: apps/web/src/mail-connect-devices-client.ts
+#: apps/web/src/account-connect-devices-client.ts apps/web/src/mail-connect-devices-client.ts
 msgid "Enter an email address."
 msgstr "أدخل عنوان بريد إلكتروني."
 
@@ -17416,7 +17416,7 @@ msgstr "المفاتيح الموجودة ومفاتيح الأسطول محمي
 msgid "Existing branch"
 msgstr "فرع موجود"
 
-#: apps/web/src/board-port/approved-xpanel-pages.ts
+#: apps/web/src/board-port/approved-xpanel-pages.ts apps/web/src/themes/v2/pages/xpanel/security/certificates.ts
 msgid "Existing certificate"
 msgstr "الشهادة الموجودة"
 
@@ -17943,7 +17943,7 @@ msgstr "لا يبلّغ Fail2ban عن أي سجون."
 msgid "Fail2ban status read from the server."
 msgstr "قُرئت حالة Fail2ban من الخادم."
 
-#: apps/web/src/account-runtime-client.ts apps/web/src/account-team-audit-client.ts apps/web/src/account-virus-scan-client.ts apps/web/src/acct-backup-runs-client.ts apps/web/src/acct-restore-client.ts apps/web/src/acct-staging-client.ts apps/web/src/approved-host-services-client.ts apps/web/src/board-port/acct-restore-workspace.ts apps/web/src/board-port/xwhm-dashboard.ts apps/web/src/ctr-client.ts apps/web/src/mail-cards-client.ts apps/web/src/mail-cards.ts apps/web/src/models/mail-cert-panels.ts apps/web/src/models/release-packages-panel.ts apps/web/src/node-cluster-client.ts apps/web/src/ops-integrations-client.ts apps/web/src/panel-tools-client.ts apps/web/src/surfaces/xwhm.ts apps/web/src/sw-addon-services-client.ts apps/web/src/themes/v2/pages/xwhm/activity/audit.ts apps/web/src/themes/v2/pages/xwhm/activity/jobs.ts apps/web/src/themes/v2/pages/xwhm/panel/data.ts apps/web/src/themes/v2/pages/xwhm/recovery-tools/restore.ts apps/web/src/themes/v2/surfaces/slots.ts apps/web/src/whm-backup-files-client.ts apps/web/src/whm-backups-client.ts apps/web/src/whm-db-services-client.ts apps/web/src/whm-host-tools-client.ts apps/web/src/whm-server-ops-client.ts apps/web/src/whm-transfer-client.ts apps/web/src/whm-upgrade-client.ts apps/web/src/whm-web-server-client.ts apps/web/src/whm-whmcs-client.ts
+#: apps/web/src/account-runtime-client.ts apps/web/src/account-team-audit-client.ts apps/web/src/account-virus-scan-client.ts apps/web/src/acct-backup-runs-client.ts apps/web/src/acct-restore-client.ts apps/web/src/acct-staging-client.ts apps/web/src/approved-host-services-client.ts apps/web/src/board-port/acct-restore-workspace.ts apps/web/src/board-port/xwhm-dashboard.ts apps/web/src/ctr-client.ts apps/web/src/mail-cards-client.ts apps/web/src/mail-cards.ts apps/web/src/models/mail-cert-panels.ts apps/web/src/models/release-packages-panel.ts apps/web/src/node-cluster-client.ts apps/web/src/ops-integrations-client.ts apps/web/src/panel-tools-client.ts apps/web/src/surfaces/xwhm.ts apps/web/src/sw-addon-services-client.ts apps/web/src/themes/v2/pages/xwhm/activity/audit.ts apps/web/src/themes/v2/pages/xwhm/activity/jobs.ts apps/web/src/themes/v2/pages/xwhm/panel/data.ts apps/web/src/themes/v2/pages/xwhm/recovery-tools/restore.ts apps/web/src/themes/v2/surfaces/slots.ts apps/web/src/whm-backup-files-client.ts apps/web/src/whm-backups-client.ts apps/web/src/whm-db-services-client.ts apps/web/src/whm-host-tools-client.ts apps/web/src/whm-server-ops-client.ts apps/web/src/whm-transfer-client.ts apps/web/src/whm-upgrade-client.ts apps/web/src/whm-web-server-client.ts apps/web/src/whm-whmcs-client.ts apps/web/src/workspace-runtime-client.ts
 msgid "Failed"
 msgstr "فشل"
 
@@ -18160,7 +18160,7 @@ msgstr "حالات الفشل فقط"
 msgid "Failures, warnings and deferrals"
 msgstr "حالات الفشل والتحذيرات والتأجيل"
 
-#: apps/web/src/whm-db-root-password-client.ts
+#: apps/web/src/whm-db-root-password-client.ts apps/web/src/workspace-runtime-client.ts
 msgid "Fair"
 msgstr "مقبولة"
 
@@ -18436,7 +18436,7 @@ msgstr "الملفات المتغيرة منذ التحويل"
 msgid "Files checked"
 msgstr "الملفات المفحوصة"
 
-#: apps/web/src/mail-connect-devices-client.ts
+#: apps/web/src/account-connect-devices-client.ts apps/web/src/mail-connect-devices-client.ts
 msgid "Files contain the server, ports and username only. Your password is never included."
 msgstr "تحتوي الملفات على الخادم والمنافذ واسم المستخدم فقط، ولا تتضمن كلمة المرور أبدًا."
 
@@ -19359,7 +19359,7 @@ msgctxt "mail-calendar-view-client"
 msgid "Fri"
 msgstr "ج"
 
-#: apps/web/src/mail-calendar-view-client.ts packages/core/src/host-tool-cards.ts
+#: apps/web/src/mail-calendar-view-client.ts apps/web/src/workspace-runtime-client.ts packages/core/src/host-tool-cards.ts
 msgid "Friday"
 msgstr "الجمعة"
 
@@ -19661,10 +19661,6 @@ msgstr "مستودع Git"
 msgid "Git version control"
 msgstr "إدارة إصدارات Git"
 
-#: apps/web/src/themes/v2/pages/xpanel/operations/git.ts
-msgid "Git web access is unavailable."
-msgstr "الوصول إلى Git عبر الويب غير متاح."
-
 #: apps/web/src/whm-whmcs-client.ts
 msgid "Give every mapping row a package name of up to 64 characters and a plan."
 msgstr "حدد لكل صف ربط اسم باقة لا يتجاوز 64 حرفًا وخطة."
@@ -19704,7 +19700,7 @@ msgstr "الإعدادات العامة والتضمينات"
 msgid "Global draft discard is unavailable. The reset control in a duplicate form discards only that unsent copy draft and does not change saved lists."
 msgstr "تجاهل جميع المسودات غير متاح. يعيد زر الضبط في نموذج النسخة مسودتها غير المرسلة فقط ولا يغير القوائم المحفوظة."
 
-#: apps/web/src/board-port/approved-xwhm.ts apps/web/src/themes/v2/pages/xwhm/security/overview.ts
+#: apps/web/src/board-port/approved-xwhm.ts
 msgid "Global function policy and per-account exceptions have not been read. A listed function is not a verified prohibition."
 msgstr "لم تُقرأ سياسة الدوال العامة أو استثناءات الحسابات. لا يثبت إدراج الدالة أنها محظورة بالفعل."
 
@@ -21560,7 +21556,7 @@ msgstr "عُدّلت المكوّنات المشمولة"
 msgid "Incoming"
 msgstr "الوارد"
 
-#: apps/web/src/mail-connect-devices-client.ts
+#: apps/web/src/account-connect-devices-client.ts apps/web/src/mail-connect-devices-client.ts
 msgid "Incoming (IMAP)"
 msgstr "الوارد (IMAP)"
 
@@ -21572,7 +21568,7 @@ msgstr "SMTP الوارد (المنفذ 25)"
 msgid "Incoming SMTP TLS"
 msgstr "TLS لبروتوكول SMTP الوارد"
 
-#: apps/web/src/board-port/xmail-connect-devices.ts apps/web/src/themes/v2/pages/xmail/workspaces/tools.ts
+#: apps/web/src/board-port/xmail-connect-devices.ts apps/web/src/themes/v2/pages/xmail/workspaces/tools.ts apps/web/src/themes/v2/pages/xpanel/email/accounts.ts
 msgid "Incoming and outgoing mail servers"
 msgstr "خوادم البريد الوارد والصادر"
 
@@ -22248,7 +22244,7 @@ msgstr "حالة المثبّت"
 msgid "Installer unavailable"
 msgstr "المثبّت غير متاح"
 
-#: apps/web/src/mail-connect-devices-client.ts
+#: apps/web/src/account-connect-devices-client.ts apps/web/src/mail-connect-devices-client.ts
 msgid "Instructions sent to {address}. Delivery is not confirmed."
 msgstr "أُرسلت التعليمات إلى {address}. لم يتأكد التسليم."
 
@@ -22281,7 +22277,7 @@ msgctxt "account-backup-workspace"
 msgid "Integrity"
 msgstr "سلامة الأرشيف"
 
-#: apps/web/src/board-port/whm-extend-workspace.ts apps/web/src/board-port/whm-panel-branding-workspace.ts apps/web/src/board-port/whm-server-observation-workspace.ts apps/web/src/board-port/whm-traffic-workspace.ts apps/web/src/themes/v2/pages/xwhm/monitoring/resources.ts apps/web/src/themes/v2/pages/xwhm/panel/configuration.ts apps/web/src/themes/v2/pages/xwhm/panel/integrations-developer.ts apps/web/src/themes/v2/pages/xwhm/server/ips.ts apps/web/src/themes/v2/pages/xwhm/server/observations.ts
+#: apps/web/src/board-port/whm-extend-workspace.ts apps/web/src/board-port/whm-panel-branding-workspace.ts apps/web/src/board-port/whm-server-observation-workspace.ts apps/web/src/board-port/whm-traffic-workspace.ts apps/web/src/themes/v2/pages/xwhm/monitoring/resources.ts apps/web/src/themes/v2/pages/xwhm/panel/configuration.ts apps/web/src/themes/v2/pages/xwhm/panel/integrations-developer.ts apps/web/src/themes/v2/pages/xwhm/server/ips.ts apps/web/src/themes/v2/pages/xwhm/server/observations.ts apps/web/src/themes/v2/shell/overlays.ts
 msgid "Interface"
 msgstr "الواجهة"
 
@@ -23244,7 +23240,7 @@ msgstr "وسم مجلد البيانات الجديد"
 msgid "Labels (name=value, comma separated)"
 msgstr "الوسوم (name=value مفصولة بفواصل)"
 
-#: apps/web/src/board-port/extensions/account-pages.ts apps/web/src/board-port/whm-languages-workspace.ts apps/web/src/board-port/whm-preferences-workspace.ts apps/web/src/board-port/xpanel-home.ts apps/web/src/models/mail-cert-panels.ts apps/web/src/themes/v2/pages/xpanel/home.ts apps/web/src/themes/v2/pages/xpanel/settings/preferences.ts apps/web/src/themes/v2/pages/xwhm/panel/locales-preferences.ts apps/web/src/whm-developer-client.ts
+#: apps/web/src/board-port/extensions/account-pages.ts apps/web/src/board-port/whm-languages-workspace.ts apps/web/src/board-port/whm-preferences-workspace.ts apps/web/src/board-port/xpanel-home.ts apps/web/src/models/mail-cert-panels.ts apps/web/src/themes/v2/pages/xpanel/home.ts apps/web/src/themes/v2/pages/xpanel/settings/preferences.ts apps/web/src/themes/v2/pages/xwhm/panel/locales-preferences.ts apps/web/src/themes/v2/shell/overlays.ts apps/web/src/whm-developer-client.ts
 msgid "Language"
 msgstr "اللغة"
 
@@ -23292,7 +23288,7 @@ msgstr "تتلقى عمليات الرفع الأكبر الرمز 413."
 msgid "Largest request body"
 msgstr "أكبر جسم طلب"
 
-#: apps/web/src/board-port/approved-xwhm.ts apps/web/src/themes/v2/pages/xwhm/security/overview.ts
+#: apps/web/src/board-port/approved-xwhm.ts
 msgctxt "approved-xwhm"
 msgid "Largest request body"
 msgstr "أكبر جسم للطلب"
@@ -25122,7 +25118,7 @@ msgstr "البريد المكتوب منذ التحويل"
 msgid "Mail: SMTP, IMAP and POP3"
 msgstr "البريد: SMTP وIMAP وPOP3"
 
-#: apps/web/src/board-port/account-collaboration-workspace.ts apps/web/src/board-port/acct-restore-workspace.ts apps/web/src/board-port/approved-xpanel-pages.ts apps/web/src/board-port/boxtrapper-section.ts apps/web/src/board-port/email-disk-usage-workspace.ts apps/web/src/board-port/extensions/account-quarantine.ts apps/web/src/board-port/mailx-collections-workspace.ts apps/web/src/board-port/mailx-mail-tools-workspace.ts apps/web/src/board-port/xmail-compose.ts apps/web/src/board-port/xmail-disk-usage.ts apps/web/src/board-port/xmail-folders.ts apps/web/src/board-port/xmail-inbox.ts apps/web/src/board-port/xmail-track-delivery.ts apps/web/src/models/mail-cert-panels.ts apps/web/src/themes/v2/pages/xmail/workspaces/tools.ts apps/web/src/themes/v2/pages/xpanel/email-tools/boxtrapper.ts apps/web/src/themes/v2/pages/xpanel/email-tools/collaboration.ts apps/web/src/themes/v2/pages/xpanel/email-tools/disk-usage.ts apps/web/src/themes/v2/pages/xpanel/email-tools/quarantine.ts apps/web/src/themes/v2/pages/xpanel/email-tools/spam.ts apps/web/src/themes/v2/pages/xwhm/recovery-tools/restore.ts
+#: apps/web/src/board-port/account-collaboration-workspace.ts apps/web/src/board-port/acct-restore-workspace.ts apps/web/src/board-port/approved-xpanel-pages.ts apps/web/src/board-port/boxtrapper-section.ts apps/web/src/board-port/email-disk-usage-workspace.ts apps/web/src/board-port/extensions/account-quarantine.ts apps/web/src/board-port/mailx-collections-workspace.ts apps/web/src/board-port/mailx-mail-tools-workspace.ts apps/web/src/board-port/xmail-compose.ts apps/web/src/board-port/xmail-disk-usage.ts apps/web/src/board-port/xmail-folders.ts apps/web/src/board-port/xmail-inbox.ts apps/web/src/board-port/xmail-track-delivery.ts apps/web/src/models/mail-cert-panels.ts apps/web/src/themes/v2/pages/xmail/workspaces/tools.ts apps/web/src/themes/v2/pages/xpanel/email-tools/boxtrapper.ts apps/web/src/themes/v2/pages/xpanel/email-tools/collaboration.ts apps/web/src/themes/v2/pages/xpanel/email-tools/disk-usage.ts apps/web/src/themes/v2/pages/xpanel/email-tools/quarantine.ts apps/web/src/themes/v2/pages/xpanel/email-tools/spam.ts apps/web/src/themes/v2/pages/xpanel/email/accounts.ts apps/web/src/themes/v2/pages/xwhm/recovery-tools/restore.ts
 msgid "Mailbox"
 msgstr "صندوق البريد"
 
@@ -26320,7 +26316,7 @@ msgstr "تتطابق إصدارات البيانات"
 msgid "Metering requires an authorized root administrator on a qualified host."
 msgstr "يتطلب القياس مسؤول جذر مخوّلًا على خادم مؤهَّل."
 
-#: apps/web/src/board-port/whm-security-components.ts apps/web/src/themes/v2/pages/xpanel/advanced/tools.ts apps/web/src/themes/v2/pages/xwhm/panel/integrations-developer.ts apps/web/src/themes/v2/pages/xwhm/security/ssh.ts
+#: apps/web/src/board-port/whm-security-components.ts apps/web/src/themes/v2/pages/xpanel/advanced/tools.ts apps/web/src/themes/v2/pages/xpanel/observations/traffic.ts apps/web/src/themes/v2/pages/xwhm/panel/integrations-developer.ts apps/web/src/themes/v2/pages/xwhm/security/ssh.ts
 msgid "Method"
 msgstr "الطريقة"
 
@@ -26467,7 +26463,7 @@ msgstr "غير موجود: أنشئ صندوق البريد مجددًا قبل 
 msgid "Mixed AND/OR expressions, regular expressions and program execution are unavailable. A test explains the rules; it does not prove delivery."
 msgstr "التعبيرات المختلطة (و/أو) والتعابير النمطية وتشغيل البرامج غير متاحة. يشرح الاختبار القواعد ولا يثبت التسليم."
 
-#: apps/web/src/board-port/sec-workspace.ts apps/web/src/themes/v2/pages/xpanel/security/tools.ts
+#: apps/web/src/board-port/sec-workspace.ts apps/web/src/themes/v2/pages/xpanel/security/tools.ts apps/web/src/themes/v2/pages/xwhm/security/overview.ts
 msgid "ModSecurity"
 msgstr "ModSecurity"
 
@@ -26581,7 +26577,7 @@ msgctxt "mail-calendar-view-client"
 msgid "Mon"
 msgstr "ن"
 
-#: apps/web/src/mail-calendar-view-client.ts packages/core/src/host-tool-cards.ts
+#: apps/web/src/mail-calendar-view-client.ts apps/web/src/workspace-runtime-client.ts packages/core/src/host-tool-cards.ts
 msgid "Monday"
 msgstr "الاثنين"
 
@@ -26713,15 +26709,15 @@ msgstr "لم تُقرأ بيانات أدوات DNS إضافية. تبقى ال�
 msgid "More addresses are published than this site uses; some visitors may reach another server: {addresses}"
 msgstr "العناوين المنشورة أكثر مما يستخدمه هذا الموقع؛ قد يصل بعض الزوار إلى خادم آخر: {addresses}"
 
-#: apps/web/src/board-port/xmail-tools.ts apps/web/src/themes/v2/pages/xmail/workspaces/tools.ts
+#: apps/web/src/board-port/xmail-tools.ts
 msgid "More mail tools"
 msgstr "أدوات بريد إضافية"
 
-#: apps/web/src/board-port/approved-xwhm.ts apps/web/src/board-port/composed/sections/xwhm-resellers.ts apps/web/src/themes/v2/pages/xwhm/resellers/records.ts
+#: apps/web/src/board-port/approved-xwhm.ts apps/web/src/board-port/composed/sections/xwhm-resellers.ts
 msgid "More reseller tools"
 msgstr "أدوات الموزعين الإضافية"
 
-#: apps/web/src/board-port/approved-xwhm.ts apps/web/src/board-port/composed/sections/xwhm-backups.ts apps/web/src/themes/v2/pages/xwhm/recovery-tools/restore.ts
+#: apps/web/src/board-port/approved-xwhm.ts apps/web/src/board-port/composed/sections/xwhm-backups.ts
 msgid "More restore tools"
 msgstr "أدوات استعادة إضافية"
 
@@ -27165,7 +27161,7 @@ msgstr "العقد على وشك النفاد، لذا قد يفشل إنشاء 
 msgid "Needs a certificate"
 msgstr "يحتاج إلى شهادة"
 
-#: apps/web/src/board-port/whm-service-detail-workspace.ts apps/web/src/board-port/whm-service-manager-workspace.ts apps/web/src/themes/v2/pages/xwhm/host/services.ts
+#: apps/web/src/board-port/whm-service-detail-workspace.ts apps/web/src/board-port/whm-service-manager-workspace.ts apps/web/src/themes/v2/pages/xwhm/host/services.ts apps/web/src/themes/v2/pages/xwhm/overview/index.ts
 msgid "Needs attention"
 msgstr "تحتاج إلى مراجعة"
 
@@ -27613,7 +27609,7 @@ msgstr "الأحدث أولًا. يمكن أن يكون حتى 50 إعلانًا
 msgid "Newest messages"
 msgstr "أحدث الرسائل"
 
-#: apps/web/src/account-list.ts apps/web/src/board-port/approved-xwhm.ts apps/web/src/board-port/whm-db-tools-workspace.ts apps/web/src/board-port/whm-metering-workspace.ts apps/web/src/board-port/xmail-calendar-view.ts apps/web/src/themes/v2/pages/xmail/workspaces/organizer.ts apps/web/src/themes/v2/pages/xpanel/databases/wizard.ts apps/web/src/themes/v2/pages/xwhm/account-tools/pages.ts apps/web/src/themes/v2/pages/xwhm/accounts/list.ts apps/web/src/themes/v2/pages/xwhm/domains/index.ts apps/web/src/themes/v2/pages/xwhm/server/setup.ts apps/web/src/whm-db-tools-client.ts
+#: apps/web/src/account-list.ts apps/web/src/board-port/approved-xwhm.ts apps/web/src/board-port/whm-db-tools-workspace.ts apps/web/src/board-port/whm-metering-workspace.ts apps/web/src/board-port/xmail-calendar-view.ts apps/web/src/themes/v2/pages/xmail/workspaces/organizer.ts apps/web/src/themes/v2/pages/xpanel/databases/wizard.ts apps/web/src/themes/v2/pages/xwhm/account-tools/pages.ts apps/web/src/themes/v2/pages/xwhm/accounts/create.ts apps/web/src/themes/v2/pages/xwhm/accounts/list.ts apps/web/src/themes/v2/pages/xwhm/databases/index.ts apps/web/src/themes/v2/pages/xwhm/domains/index.ts apps/web/src/themes/v2/pages/xwhm/server/setup.ts apps/web/src/whm-db-tools-client.ts apps/web/src/workspace-runtime-client.ts
 msgid "Next"
 msgstr "التالي"
 
@@ -28328,7 +28324,7 @@ msgstr "لا توجد نسخ احتياطية بعد."
 msgid "No bandwidth has been read."
 msgstr "لم يُقرأ أي عرض نطاق بعد."
 
-#: apps/web/src/board-port/whm-security-tools-workspace.ts apps/web/src/themes/v2/pages/xwhm/security/tools.ts apps/web/src/whm-security-tools-client.ts
+#: apps/web/src/board-port/whm-security-tools-workspace.ts apps/web/src/themes/v2/pages/xwhm/security/ssh.ts apps/web/src/themes/v2/pages/xwhm/security/tools.ts apps/web/src/whm-security-tools-client.ts
 msgid "No banned addresses have been read."
 msgstr "لم تُقرأ أي عناوين محظورة."
 
@@ -28905,7 +28901,7 @@ msgstr "لا يوجد منح محفوظ"
 msgid "No expiry"
 msgstr "بلا تاريخ انتهاء"
 
-#: apps/web/src/board-port/approved-xwhm.ts apps/web/src/themes/v2/pages/xwhm/security/overview.ts
+#: apps/web/src/board-port/approved-xwhm.ts
 msgctxt "approved-xwhm"
 msgid "No expiry"
 msgstr "بدون انتهاء"
@@ -30492,7 +30488,7 @@ msgstr "لا تقرير خدمات بعد"
 msgid "No service state is available."
 msgstr "لا تتوفر حالة للخدمات."
 
-#: apps/web/src/board-port/extensions/email-accounts.ts apps/web/src/themes/v2/pages/xpanel/email/accounts.ts
+#: apps/web/src/account-connect-devices-client.ts apps/web/src/board-port/extensions/email-accounts.ts apps/web/src/themes/v2/pages/xpanel/email/accounts.ts
 msgid "No service users were returned."
 msgstr "لم تُرجع القراءة أي مستخدم خدمة."
 
@@ -31416,7 +31412,7 @@ msgstr "لم تتم المقارنة"
 msgid "Not completed"
 msgstr "لم يكتمل"
 
-#: apps/web/src/account-ssh-client.ts apps/web/src/db-engines-client.ts apps/web/src/mail-cards-client.ts apps/web/src/sw-applications-client.ts
+#: apps/web/src/account-git-client.ts apps/web/src/account-ssh-client.ts apps/web/src/db-engines-client.ts apps/web/src/mail-cards-client.ts apps/web/src/sw-applications-client.ts
 msgid "Not configured"
 msgstr "غير مضبوط"
 
@@ -31658,7 +31654,7 @@ msgstr "غير مُدار؛ صلاحيات التوزيعة دون تغيير"
 msgid "Not mapped"
 msgstr "غير مرتبط"
 
-#: apps/web/src/board-port/extensions/resources-board.ts apps/web/src/themes/v2/pages/xpanel/observations/health.ts apps/web/src/themes/v2/pages/xpanel/resources.ts apps/web/src/themes/v2/pages/xpanel/software/php.ts apps/web/src/whm-metering-client.ts apps/web/src/whm-server-health-client.ts
+#: apps/web/src/board-port/extensions/resources-board.ts apps/web/src/panel-resources-client.ts apps/web/src/themes/v2/pages/xpanel/observations/health.ts apps/web/src/themes/v2/pages/xpanel/resources.ts apps/web/src/themes/v2/pages/xpanel/software/php.ts apps/web/src/whm-metering-client.ts apps/web/src/whm-server-health-client.ts
 msgid "Not measured"
 msgstr "غير مقاس"
 
@@ -31694,7 +31690,7 @@ msgstr "غير مطلوب ما دامت المترجمات مفعّلة لجمي
 msgid "Not needed: this list has no posting rules"
 msgstr "غير مطلوب: لا توجد قواعد نشر لهذه القائمة"
 
-#: apps/web/src/account-cron-client.ts apps/web/src/board-port/approved-whm-account-components.ts apps/web/src/themes/v2/pages/xwhm/accounts/create.ts apps/web/src/whm-configuration-health-client.ts apps/web/src/whm-databases-client.ts apps/web/src/whm-security-client.ts apps/web/src/whm-service-manager-client.ts apps/web/src/whm-ssh-client.ts
+#: apps/web/src/account-cron-client.ts apps/web/src/account-preflight-client.ts apps/web/src/board-port/approved-whm-account-components.ts apps/web/src/whm-configuration-health-client.ts apps/web/src/whm-databases-client.ts apps/web/src/whm-security-client.ts apps/web/src/whm-service-manager-client.ts apps/web/src/whm-ssh-client.ts
 msgid "Not observed"
 msgstr "غير مرصود"
 
@@ -31772,7 +31768,7 @@ msgstr "لم يُدرج"
 msgid "Not reached"
 msgstr "لم تُبلغ"
 
-#: apps/web/src/account-edge-client.ts apps/web/src/account-owner-tools-client.ts apps/web/src/account-runtime-client.ts apps/web/src/account-sessions-client.ts apps/web/src/account-ssh-client.ts apps/web/src/account-ssl-client.ts apps/web/src/acct-backup-runs-client.ts apps/web/src/acct-convert-addon-client.ts apps/web/src/acct-enhancements-client.ts apps/web/src/acct-restore-client.ts apps/web/src/acct-staging-client.ts apps/web/src/acct-team-client.ts apps/web/src/approved-host-services-client.ts apps/web/src/board-canvas.ts apps/web/src/board-port/account-cron-workspace.ts apps/web/src/board-port/account-edge-workspace.ts apps/web/src/board-port/account-file-restoration-workspace.ts apps/web/src/board-port/account-owner-tools-cards.ts apps/web/src/board-port/account-runtime-workspace.ts apps/web/src/board-port/account-site-settings-workspace.ts apps/web/src/board-port/acct-backup-runs-workspace.ts apps/web/src/board-port/acct-convert-addon.ts apps/web/src/board-port/acct-enhancements-workspace.ts apps/web/src/board-port/acct-restore-workspace.ts apps/web/src/board-port/acct-staging-workspace.ts apps/web/src/board-port/acct-team-workspace.ts apps/web/src/board-port/acct-templates-workspace.ts apps/web/src/board-port/acct-transfer-server.ts apps/web/src/board-port/approved-whm-account-components.ts apps/web/src/board-port/approved-whm-backups.ts apps/web/src/board-port/approved-whm-operations-components.ts apps/web/src/board-port/approved-whm-plan-components.ts apps/web/src/board-port/approved-whm-resellers.ts apps/web/src/board-port/approved-xpanel-bindings.ts apps/web/src/board-port/approved-xwhm.ts apps/web/src/board-port/classic-file-templates.ts apps/web/src/board-port/ctr-workspace.ts apps/web/src/board-port/db-engines-workspace.ts apps/web/src/board-port/db-profiles-card.ts apps/web/src/board-port/dns-cluster-section.ts apps/web/src/board-port/dnssec-section.ts apps/web/src/board-port/ftp-tools-workspace.ts apps/web/src/board-port/identity-workspaces.ts apps/web/src/board-port/list-moderation-section.ts apps/web/src/board-port/mailx-archive-workspace.ts apps/web/src/board-port/mailx-mail-tools-workspace.ts apps/web/src/board-port/mailx-whm-workspace.ts apps/web/src/board-port/ops-file-sharing-workspace.ts apps/web/src/board-port/ops-integrations-workspace.ts apps/web/src/board-port/ops-nodes-workspace.ts apps/web/src/board-port/ops-terminal-workspace.ts apps/web/src/board-port/sec-workspace.ts apps/web/src/board-port/sw-applications-workspace.ts apps/web/src/board-port/sw-deployments-workspace.ts apps/web/src/board-port/sw-optimize-workspace.ts apps/web/src/board-port/whm-account-health-workspace.ts apps/web/src/board-port/whm-announcements-workspace.ts apps/web/src/board-port/whm-backup-destinations-workspace.ts apps/web/src/board-port/whm-backup-files-workspace.ts apps/web/src/board-port/whm-benchmark-workspace.ts apps/web/src/board-port/whm-composer-workspace.ts apps/web/src/board-port/whm-configuration-health-workspace.ts apps/web/src/board-port/whm-databases-workspace.ts apps/web/src/board-port/whm-db-services-workspace.ts apps/web/src/board-port/whm-db-tools-workspace.ts apps/web/src/board-port/whm-developer-workspace.ts apps/web/src/board-port/whm-dns-tools-workspace.ts apps/web/src/board-port/whm-extend-workspace.ts apps/web/src/board-port/whm-ftp-log-workspace.ts apps/web/src/board-port/whm-host-tools-workspace.ts apps/web/src/board-port/whm-ip-tools.ts apps/web/src/board-port/whm-jobs-workspace.ts apps/web/src/board-port/whm-languages-workspace.ts apps/web/src/board-port/whm-log-tools-workspace.ts apps/web/src/board-port/whm-mail-log-workspace.ts apps/web/src/board-port/whm-mail-quality-workspace.ts apps/web/src/board-port/whm-mail-queue-workspace.ts apps/web/src/board-port/whm-mail-server-workspace.ts apps/web/src/board-port/whm-mailbox-maintenance-workspace.ts apps/web/src/board-port/whm-metering-workspace.ts apps/web/src/board-port/whm-monitoring-alerts-workspace.ts apps/web/src/board-port/whm-monitoring-workspace.ts apps/web/src/board-port/whm-nginx-proxy-workspace.ts apps/web/src/board-port/whm-panel-branding-workspace.ts apps/web/src/board-port/whm-panel-notifications-workspace.ts apps/web/src/board-port/whm-panel-settings-workspace.ts apps/web/src/board-port/whm-php-workspace.ts apps/web/src/board-port/whm-preferences-workspace.ts apps/web/src/board-port/whm-repair-workspace.ts apps/web/src/board-port/whm-security-components.ts apps/web/src/board-port/whm-security-tools-workspace.ts apps/web/src/board-port/whm-server-health-workspace.ts apps/web/src/board-port/whm-server-observation-workspace.ts apps/web/src/board-port/whm-server-ops-workspace.ts apps/web/src/board-port/whm-service-detail-workspace.ts apps/web/src/board-port/whm-service-manager-workspace.ts apps/web/src/board-port/whm-software-center-workspace.ts apps/web/src/board-port/whm-ssl-install-workspace.ts apps/web/src/board-port/whm-ssl-workspace.ts apps/web/src/board-port/whm-support-workspace.ts apps/web/src/board-port/whm-traffic-workspace.ts apps/web/src/board-port/whm-trusted-proxies-workspace.ts apps/web/src/board-port/whm-updates-workspace.ts apps/web/src/board-port/whm-upgrade-workspace.ts apps/web/src/board-port/whm-web-server-workspace.ts apps/web/src/board-port/whm-whmcs-workspace.ts apps/web/src/board-port/xmail-calendar.ts apps/web/src/board-port/xmail-connect-devices.ts apps/web/src/board-port/xmail-disk-usage.ts apps/web/src/board-port/xmail-folders.ts apps/web/src/board-port/xmail-mailbox-forwarders.ts apps/web/src/board-port/xmail-track-delivery.ts apps/web/src/ctr-client.ts apps/web/src/db-engines-client.ts apps/web/src/dnssec-client.ts apps/web/src/domain-workspace-client.ts apps/web/src/file-workspace-client.ts apps/web/src/list-moderation-client.ts apps/web/src/mail-cards-client.ts apps/web/src/mail-disk-usage-client.ts apps/web/src/mail-folders-client.ts apps/web/src/mail-track-delivery-client.ts apps/web/src/mail-vacation-workspace-client.ts apps/web/src/mailx-archive-client.ts apps/web/src/mailx-mail-tools-client.ts apps/web/src/mailx-whm-client.ts apps/web/src/models/db-services.ts apps/web/src/models/reseller-usage.ts apps/web/src/models/svc-panels.ts apps/web/src/models/tool-cards.ts apps/web/src/ops-terminal-client.ts apps/web/src/panel-tools-client.ts apps/web/src/plan-editor.ts apps/web/src/sec-security-client.ts apps/web/src/surfaces/xpanel.ts apps/web/src/surfaces/xwhm.ts apps/web/src/svc-panels-client.ts apps/web/src/sw-addon-services-client.ts apps/web/src/sw-applications-client.ts apps/web/src/sw-containers-client.ts apps/web/src/sw-deployments-client.ts apps/web/src/sw-optimize-client.ts apps/web/src/themes/v2/pages/identity.ts apps/web/src/themes/v2/pages/xmail/workspaces/organizer.ts apps/web/src/themes/v2/pages/xmail/workspaces/settings.ts apps/web/src/themes/v2/pages/xmail/workspaces/tools.ts apps/web/src/themes/v2/pages/xpanel/advanced/directives.ts apps/web/src/themes/v2/pages/xpanel/advanced/tools.ts apps/web/src/themes/v2/pages/xpanel/domains/cloudflare.ts apps/web/src/themes/v2/pages/xpanel/domains/domains.ts apps/web/src/themes/v2/pages/xpanel/domains/publisher.ts apps/web/src/themes/v2/pages/xpanel/domains/redirects.ts apps/web/src/themes/v2/pages/xpanel/domains/reverse-proxy.ts apps/web/src/themes/v2/pages/xpanel/domains/site-settings.ts apps/web/src/themes/v2/pages/xpanel/domains/staging.ts apps/web/src/themes/v2/pages/xpanel/email-tools/archive-deliverability.ts apps/web/src/themes/v2/pages/xpanel/email-tools/filters.ts apps/web/src/themes/v2/pages/xpanel/email-tools/list-moderation.ts apps/web/src/themes/v2/pages/xpanel/email-tools/mailing-lists.ts apps/web/src/themes/v2/pages/xpanel/email-tools/quarantine.ts apps/web/src/themes/v2/pages/xpanel/email-tools/spam.ts apps/web/src/themes/v2/pages/xpanel/email/accounts.ts apps/web/src/themes/v2/pages/xpanel/email/forwarders.ts apps/web/src/themes/v2/pages/xpanel/files/index.ts apps/web/src/themes/v2/pages/xpanel/files/templates.ts apps/web/src/themes/v2/pages/xpanel/files/web-disk.ts apps/web/src/themes/v2/pages/xpanel/home.ts apps/web/src/themes/v2/pages/xpanel/observations/health.ts apps/web/src/themes/v2/pages/xpanel/observations/traffic.ts apps/web/src/themes/v2/pages/xpanel/observations/web-stats.ts apps/web/src/themes/v2/pages/xpanel/operations/backup.ts apps/web/src/themes/v2/pages/xpanel/operations/file-restoration.ts apps/web/src/themes/v2/pages/xpanel/operations/git.ts apps/web/src/themes/v2/pages/xpanel/operations/owner-tools.ts apps/web/src/themes/v2/pages/xpanel/operations/runtime.ts apps/web/src/themes/v2/pages/xpanel/operations/terminal.ts apps/web/src/themes/v2/pages/xpanel/resources.ts apps/web/src/themes/v2/pages/xpanel/security/account.ts apps/web/src/themes/v2/pages/xpanel/security/certificates.ts apps/web/src/themes/v2/pages/xpanel/security/ip-blocker.ts apps/web/src/themes/v2/pages/xpanel/security/tools.ts apps/web/src/themes/v2/pages/xpanel/services/dnssec.ts apps/web/src/themes/v2/pages/xpanel/settings/preferences.ts apps/web/src/themes/v2/pages/xpanel/settings/team.ts apps/web/src/themes/v2/pages/xpanel/software/htaccess.ts apps/web/src/themes/v2/pages/xpanel/software/optimize.ts apps/web/src/themes/v2/pages/xpanel/software/php.ts apps/web/src/themes/v2/pages/xpanel/store/index.ts apps/web/src/themes/v2/pages/xwhm/account-tools/pages.ts apps/web/src/themes/v2/pages/xwhm/accounts/create.ts apps/web/src/themes/v2/pages/xwhm/accounts/list.ts apps/web/src/themes/v2/pages/xwhm/activity/audit.ts apps/web/src/themes/v2/pages/xwhm/activity/jobs.ts apps/web/src/themes/v2/pages/xwhm/databases/index.ts apps/web/src/themes/v2/pages/xwhm/dns/cluster-members.ts apps/web/src/themes/v2/pages/xwhm/dns/index.ts apps/web/src/themes/v2/pages/xwhm/dns/providers.ts apps/web/src/themes/v2/pages/xwhm/dns/tools.ts apps/web/src/themes/v2/pages/xwhm/domains/index.ts apps/web/src/themes/v2/pages/xwhm/host/firewall.ts apps/web/src/themes/v2/pages/xwhm/host/php.ts apps/web/src/themes/v2/pages/xwhm/host/services.ts apps/web/src/themes/v2/pages/xwhm/lifecycle/backups.ts apps/web/src/themes/v2/pages/xwhm/lifecycle/client-templates.ts apps/web/src/themes/v2/pages/xwhm/lifecycle/destination-manager.ts apps/web/src/themes/v2/pages/xwhm/lifecycle/destinations.ts apps/web/src/themes/v2/pages/xwhm/lifecycle/shared.ts apps/web/src/themes/v2/pages/xwhm/lifecycle/transfers.ts apps/web/src/themes/v2/pages/xwhm/lifecycle/upgrade.ts apps/web/src/themes/v2/pages/xwhm/mail/common.ts apps/web/src/themes/v2/pages/xwhm/mail/logs.ts apps/web/src/themes/v2/pages/xwhm/mail/operations.ts apps/web/src/themes/v2/pages/xwhm/mail/server.ts apps/web/src/themes/v2/pages/xwhm/monitoring/common.ts apps/web/src/themes/v2/pages/xwhm/monitoring/log-tools.ts apps/web/src/themes/v2/pages/xwhm/monitoring/resources.ts apps/web/src/themes/v2/pages/xwhm/monitoring/snapshots.ts apps/web/src/themes/v2/pages/xwhm/monitoring/web-stats-engines.ts apps/web/src/themes/v2/pages/xwhm/monitoring/workflows.ts apps/web/src/themes/v2/pages/xwhm/overview/index.ts apps/web/src/themes/v2/pages/xwhm/panel/configuration.ts apps/web/src/themes/v2/pages/xwhm/panel/integrations-developer.ts apps/web/src/themes/v2/pages/xwhm/panel/locales-preferences.ts apps/web/src/themes/v2/pages/xwhm/panel/notifications.ts apps/web/src/themes/v2/pages/xwhm/panel/tokens.ts apps/web/src/themes/v2/pages/xwhm/panel/whmcs.ts apps/web/src/themes/v2/pages/xwhm/plans/editor.ts apps/web/src/themes/v2/pages/xwhm/plans/enhancements.ts apps/web/src/themes/v2/pages/xwhm/plans/features.ts apps/web/src/themes/v2/pages/xwhm/plans/plans.ts apps/web/src/themes/v2/pages/xwhm/recovery-tools/convert.ts apps/web/src/themes/v2/pages/xwhm/recovery-tools/restore.ts apps/web/src/themes/v2/pages/xwhm/resellers/index.ts apps/web/src/themes/v2/pages/xwhm/resellers/records.ts apps/web/src/themes/v2/pages/xwhm/resellers/tools.ts apps/web/src/themes/v2/pages/xwhm/security/overview.ts apps/web/src/themes/v2/pages/xwhm/security/policies.ts apps/web/src/themes/v2/pages/xwhm/security/ssh.ts apps/web/src/themes/v2/pages/xwhm/server/common.ts apps/web/src/themes/v2/pages/xwhm/server/host-tools.ts apps/web/src/themes/v2/pages/xwhm/server/ip-tools.ts apps/web/src/themes/v2/pages/xwhm/server/ips.ts apps/web/src/themes/v2/pages/xwhm/server/server-ops.ts apps/web/src/themes/v2/pages/xwhm/server/setup.ts apps/web/src/themes/v2/pages/xwhm/server/terminal.ts apps/web/src/themes/v2/pages/xwhm/server/trusted-proxies.ts apps/web/src/themes/v2/pages/xwhm/service-tools/details.ts apps/web/src/themes/v2/pages/xwhm/service-tools/nginx-proxy.ts apps/web/src/themes/v2/pages/xwhm/service-tools/web.ts apps/web/src/themes/v2/pages/xwhm/software/catalog.ts apps/web/src/themes/v2/pages/xwhm/software/common.ts apps/web/src/themes/v2/pages/xwhm/software/containers.ts apps/web/src/themes/v2/pages/xwhm/software/ctr-sections.ts apps/web/src/themes/v2/pages/xwhm/software/projects.ts apps/web/src/themes/v2/pages/xwhm/tls/index.ts apps/web/src/themes/v2/pages/xwhm/tls/install.ts apps/web/src/themes/v2/tool-card-view.ts apps/web/src/whm-account-health-client.ts apps/web/src/whm-backup-files-client.ts apps/web/src/whm-backups-client.ts apps/web/src/whm-composer-client.ts apps/web/src/whm-configuration-health-client.ts apps/web/src/whm-db-root-password-client.ts apps/web/src/whm-db-services-client.ts apps/web/src/whm-db-tools-client.ts apps/web/src/whm-developer-client.ts apps/web/src/whm-dns-client.ts apps/web/src/whm-dns-tools-client.ts apps/web/src/whm-extend-client.ts apps/web/src/whm-firewall-client.ts apps/web/src/whm-host-tools-client.ts apps/web/src/whm-jobs-client.ts apps/web/src/whm-log-tools-client.ts apps/web/src/whm-mail-log-client.ts apps/web/src/whm-mail-quality-client.ts apps/web/src/whm-mail-queue-client.ts apps/web/src/whm-mail-server-client.ts apps/web/src/whm-mailbox-maintenance-client.ts apps/web/src/whm-metering-client.ts apps/web/src/whm-network-client.ts apps/web/src/whm-nginx-proxy-client.ts apps/web/src/whm-php-client.ts apps/web/src/whm-security-tools-client.ts apps/web/src/whm-server-health-client.ts apps/web/src/whm-server-observation-client.ts apps/web/src/whm-service-detail-client.ts apps/web/src/whm-service-manager-client.ts apps/web/src/whm-software-center-client.ts apps/web/src/whm-ssh-policy-client.ts apps/web/src/whm-ssl-client.ts apps/web/src/whm-ssl-install-client.ts apps/web/src/whm-ssl-observations-client.ts apps/web/src/whm-support-client.ts apps/web/src/whm-updates-client.ts apps/web/src/whm-upgrade-client.ts apps/web/src/whm-web-server-client.ts
+#: apps/web/src/account-edge-client.ts apps/web/src/account-owner-tools-client.ts apps/web/src/account-runtime-client.ts apps/web/src/account-sessions-client.ts apps/web/src/account-ssh-client.ts apps/web/src/account-ssl-client.ts apps/web/src/acct-backup-runs-client.ts apps/web/src/acct-convert-addon-client.ts apps/web/src/acct-enhancements-client.ts apps/web/src/acct-restore-client.ts apps/web/src/acct-staging-client.ts apps/web/src/acct-team-client.ts apps/web/src/approved-host-services-client.ts apps/web/src/board-canvas.ts apps/web/src/board-port/account-cron-workspace.ts apps/web/src/board-port/account-edge-workspace.ts apps/web/src/board-port/account-file-restoration-workspace.ts apps/web/src/board-port/account-owner-tools-cards.ts apps/web/src/board-port/account-runtime-workspace.ts apps/web/src/board-port/account-site-settings-workspace.ts apps/web/src/board-port/acct-backup-runs-workspace.ts apps/web/src/board-port/acct-convert-addon.ts apps/web/src/board-port/acct-enhancements-workspace.ts apps/web/src/board-port/acct-restore-workspace.ts apps/web/src/board-port/acct-staging-workspace.ts apps/web/src/board-port/acct-team-workspace.ts apps/web/src/board-port/acct-templates-workspace.ts apps/web/src/board-port/acct-transfer-server.ts apps/web/src/board-port/approved-whm-account-components.ts apps/web/src/board-port/approved-whm-backups.ts apps/web/src/board-port/approved-whm-operations-components.ts apps/web/src/board-port/approved-whm-plan-components.ts apps/web/src/board-port/approved-whm-resellers.ts apps/web/src/board-port/approved-xpanel-bindings.ts apps/web/src/board-port/approved-xwhm.ts apps/web/src/board-port/classic-file-templates.ts apps/web/src/board-port/ctr-workspace.ts apps/web/src/board-port/db-engines-workspace.ts apps/web/src/board-port/db-profiles-card.ts apps/web/src/board-port/dns-cluster-section.ts apps/web/src/board-port/dnssec-section.ts apps/web/src/board-port/ftp-tools-workspace.ts apps/web/src/board-port/identity-workspaces.ts apps/web/src/board-port/list-moderation-section.ts apps/web/src/board-port/mailx-archive-workspace.ts apps/web/src/board-port/mailx-mail-tools-workspace.ts apps/web/src/board-port/mailx-whm-workspace.ts apps/web/src/board-port/ops-file-sharing-workspace.ts apps/web/src/board-port/ops-integrations-workspace.ts apps/web/src/board-port/ops-nodes-workspace.ts apps/web/src/board-port/ops-terminal-workspace.ts apps/web/src/board-port/sec-workspace.ts apps/web/src/board-port/sw-applications-workspace.ts apps/web/src/board-port/sw-deployments-workspace.ts apps/web/src/board-port/sw-optimize-workspace.ts apps/web/src/board-port/whm-account-health-workspace.ts apps/web/src/board-port/whm-announcements-workspace.ts apps/web/src/board-port/whm-backup-destinations-workspace.ts apps/web/src/board-port/whm-backup-files-workspace.ts apps/web/src/board-port/whm-benchmark-workspace.ts apps/web/src/board-port/whm-composer-workspace.ts apps/web/src/board-port/whm-configuration-health-workspace.ts apps/web/src/board-port/whm-databases-workspace.ts apps/web/src/board-port/whm-db-services-workspace.ts apps/web/src/board-port/whm-db-tools-workspace.ts apps/web/src/board-port/whm-developer-workspace.ts apps/web/src/board-port/whm-dns-tools-workspace.ts apps/web/src/board-port/whm-extend-workspace.ts apps/web/src/board-port/whm-ftp-log-workspace.ts apps/web/src/board-port/whm-host-tools-workspace.ts apps/web/src/board-port/whm-ip-tools.ts apps/web/src/board-port/whm-jobs-workspace.ts apps/web/src/board-port/whm-languages-workspace.ts apps/web/src/board-port/whm-log-tools-workspace.ts apps/web/src/board-port/whm-mail-log-workspace.ts apps/web/src/board-port/whm-mail-quality-workspace.ts apps/web/src/board-port/whm-mail-queue-workspace.ts apps/web/src/board-port/whm-mail-server-workspace.ts apps/web/src/board-port/whm-mailbox-maintenance-workspace.ts apps/web/src/board-port/whm-metering-workspace.ts apps/web/src/board-port/whm-monitoring-alerts-workspace.ts apps/web/src/board-port/whm-monitoring-workspace.ts apps/web/src/board-port/whm-nginx-proxy-workspace.ts apps/web/src/board-port/whm-panel-branding-workspace.ts apps/web/src/board-port/whm-panel-notifications-workspace.ts apps/web/src/board-port/whm-panel-settings-workspace.ts apps/web/src/board-port/whm-php-workspace.ts apps/web/src/board-port/whm-preferences-workspace.ts apps/web/src/board-port/whm-repair-workspace.ts apps/web/src/board-port/whm-security-components.ts apps/web/src/board-port/whm-security-tools-workspace.ts apps/web/src/board-port/whm-server-health-workspace.ts apps/web/src/board-port/whm-server-observation-workspace.ts apps/web/src/board-port/whm-server-ops-workspace.ts apps/web/src/board-port/whm-service-detail-workspace.ts apps/web/src/board-port/whm-service-manager-workspace.ts apps/web/src/board-port/whm-software-center-workspace.ts apps/web/src/board-port/whm-ssl-install-workspace.ts apps/web/src/board-port/whm-ssl-workspace.ts apps/web/src/board-port/whm-support-workspace.ts apps/web/src/board-port/whm-traffic-workspace.ts apps/web/src/board-port/whm-trusted-proxies-workspace.ts apps/web/src/board-port/whm-updates-workspace.ts apps/web/src/board-port/whm-upgrade-workspace.ts apps/web/src/board-port/whm-web-server-workspace.ts apps/web/src/board-port/whm-whmcs-workspace.ts apps/web/src/board-port/xmail-calendar.ts apps/web/src/board-port/xmail-connect-devices.ts apps/web/src/board-port/xmail-disk-usage.ts apps/web/src/board-port/xmail-folders.ts apps/web/src/board-port/xmail-mailbox-forwarders.ts apps/web/src/board-port/xmail-track-delivery.ts apps/web/src/ctr-client.ts apps/web/src/db-engines-client.ts apps/web/src/dnssec-client.ts apps/web/src/domain-workspace-client.ts apps/web/src/file-workspace-client.ts apps/web/src/list-moderation-client.ts apps/web/src/mail-cards-client.ts apps/web/src/mail-disk-usage-client.ts apps/web/src/mail-folders-client.ts apps/web/src/mail-track-delivery-client.ts apps/web/src/mail-vacation-workspace-client.ts apps/web/src/mailx-archive-client.ts apps/web/src/mailx-mail-tools-client.ts apps/web/src/mailx-whm-client.ts apps/web/src/models/db-services.ts apps/web/src/models/reseller-usage.ts apps/web/src/models/svc-panels.ts apps/web/src/models/tool-cards.ts apps/web/src/ops-terminal-client.ts apps/web/src/panel-tools-client.ts apps/web/src/plan-editor.ts apps/web/src/sec-security-client.ts apps/web/src/surfaces/xpanel.ts apps/web/src/surfaces/xwhm.ts apps/web/src/svc-panels-client.ts apps/web/src/sw-addon-services-client.ts apps/web/src/sw-applications-client.ts apps/web/src/sw-containers-client.ts apps/web/src/sw-deployments-client.ts apps/web/src/sw-optimize-client.ts apps/web/src/whm-account-health-client.ts apps/web/src/whm-backup-files-client.ts apps/web/src/whm-backups-client.ts apps/web/src/whm-composer-client.ts apps/web/src/whm-configuration-health-client.ts apps/web/src/whm-db-root-password-client.ts apps/web/src/whm-db-services-client.ts apps/web/src/whm-db-tools-client.ts apps/web/src/whm-developer-client.ts apps/web/src/whm-dns-client.ts apps/web/src/whm-dns-tools-client.ts apps/web/src/whm-extend-client.ts apps/web/src/whm-firewall-client.ts apps/web/src/whm-host-tools-client.ts apps/web/src/whm-jobs-client.ts apps/web/src/whm-log-tools-client.ts apps/web/src/whm-mail-log-client.ts apps/web/src/whm-mail-quality-client.ts apps/web/src/whm-mail-queue-client.ts apps/web/src/whm-mail-server-client.ts apps/web/src/whm-mailbox-maintenance-client.ts apps/web/src/whm-metering-client.ts apps/web/src/whm-network-client.ts apps/web/src/whm-nginx-proxy-client.ts apps/web/src/whm-php-client.ts apps/web/src/whm-security-tools-client.ts apps/web/src/whm-server-health-client.ts apps/web/src/whm-server-observation-client.ts apps/web/src/whm-service-detail-client.ts apps/web/src/whm-service-manager-client.ts apps/web/src/whm-software-center-client.ts apps/web/src/whm-ssh-policy-client.ts apps/web/src/whm-ssl-client.ts apps/web/src/whm-ssl-install-client.ts apps/web/src/whm-ssl-observations-client.ts apps/web/src/whm-support-client.ts apps/web/src/whm-updates-client.ts apps/web/src/whm-upgrade-client.ts apps/web/src/whm-web-server-client.ts
 msgid "Not read"
 msgstr "غير مقروء"
 
@@ -31816,7 +31812,7 @@ msgctxt "account-domains"
 msgid "Not read"
 msgstr "لم تُقرأ البيانات"
 
-#: apps/web/src/board-port/extensions/account-filters.ts apps/web/src/themes/v2/pages/xmail/workspaces/settings.ts
+#: apps/web/src/board-port/extensions/account-filters.ts
 msgctxt "account-filters"
 msgid "Not read"
 msgstr "لم تُقرأ البيانات"
@@ -31944,7 +31940,7 @@ msgctxt "email-accounts"
 msgid "Not read"
 msgstr "لم تُقرأ البيانات"
 
-#: apps/web/src/board-port/extensions/resources-board.ts apps/web/src/themes/v2/pages/xpanel/home.ts apps/web/src/themes/v2/pages/xpanel/resources.ts
+#: apps/web/src/board-port/extensions/resources-board.ts
 msgctxt "resources-board"
 msgid "Not read"
 msgstr "لم تُقرأ البيانات"
@@ -31969,22 +31965,22 @@ msgctxt "whm-transfer-workspace"
 msgid "Not read"
 msgstr "لم تُقرأ البيانات"
 
-#: apps/web/src/board-port/xmail-compose.ts apps/web/src/themes/v2/pages/xmail/compose.ts
+#: apps/web/src/board-port/xmail-compose.ts
 msgctxt "xmail-compose"
 msgid "Not read"
 msgstr "لم تُقرأ البيانات"
 
-#: apps/web/src/board-port/xmail-contact-groups.ts apps/web/src/themes/v2/pages/xmail/workspaces/organizer.ts
+#: apps/web/src/board-port/xmail-contact-groups.ts
 msgctxt "xmail-contact-groups"
 msgid "Not read"
 msgstr "لم تُقرأ البيانات"
 
-#: apps/web/src/board-port/xmail-contacts.ts apps/web/src/themes/v2/pages/xmail/workspaces/organizer.ts
+#: apps/web/src/board-port/xmail-contacts.ts
 msgctxt "xmail-contacts"
 msgid "Not read"
 msgstr "لم تُقرأ البيانات"
 
-#: apps/web/src/board-port/xmail-spam.ts apps/web/src/themes/v2/pages/xmail/workspaces/settings.ts
+#: apps/web/src/board-port/xmail-spam.ts
 msgctxt "xmail-spam"
 msgid "Not read"
 msgstr "لم تُقرأ"
@@ -31994,22 +31990,22 @@ msgctxt "xmail-spam:3"
 msgid "Not read"
 msgstr "لم يُقرأ"
 
-#: apps/web/src/board-port/xmail-tools.ts apps/web/src/themes/v2/pages/xmail/workspaces/tools.ts
+#: apps/web/src/board-port/xmail-tools.ts
 msgctxt "xmail-tools"
 msgid "Not read"
 msgstr "لم تُقرأ"
 
-#: apps/web/src/board-port/xmail-tools.ts apps/web/src/themes/v2/pages/xmail/workspaces/tools.ts
+#: apps/web/src/board-port/xmail-tools.ts
 msgctxt "xmail-tools:3"
 msgid "Not read"
 msgstr "لم يُقرأ"
 
-#: apps/web/src/board-port/xmail-vacation.ts apps/web/src/themes/v2/pages/xmail/vacation.ts apps/web/src/themes/v2/pages/xmail/workspaces/settings.ts
+#: apps/web/src/board-port/xmail-vacation.ts
 msgctxt "xmail-vacation"
 msgid "Not read"
 msgstr "لم تُقرأ البيانات"
 
-#: apps/web/src/account-edge-client.ts apps/web/src/account-leech-client.ts apps/web/src/board-port/account-edge-workspace.ts apps/web/src/board-port/account-leech-workspace.ts apps/web/src/board-port/sw-optimize-workspace.ts apps/web/src/board-port/whm-nginx-proxy-workspace.ts apps/web/src/sw-optimize-client.ts apps/web/src/themes/v2/pages/xpanel/files/leech.ts apps/web/src/themes/v2/pages/xpanel/security/ip-blocker.ts apps/web/src/themes/v2/pages/xpanel/software/optimize.ts apps/web/src/whm-nginx-proxy-client.ts
+#: apps/web/src/account-edge-client.ts apps/web/src/account-leech-client.ts apps/web/src/board-port/account-edge-workspace.ts apps/web/src/board-port/account-leech-workspace.ts apps/web/src/board-port/sw-optimize-workspace.ts apps/web/src/board-port/whm-nginx-proxy-workspace.ts apps/web/src/sw-optimize-client.ts apps/web/src/whm-nginx-proxy-client.ts
 msgid "Not read."
 msgstr "لم تُقرأ."
 
@@ -32089,7 +32085,7 @@ msgstr "لم يُشغَّل بعد"
 msgid "Not run yet."
 msgstr "لم يُشغَّل بعد."
 
-#: apps/web/src/mail-connect-devices-client.ts apps/web/src/mailx-archive-client.ts apps/web/src/whm-mail-quality-client.ts apps/web/src/whm-server-observation-client.ts
+#: apps/web/src/account-connect-devices-client.ts apps/web/src/mail-connect-devices-client.ts apps/web/src/mailx-archive-client.ts apps/web/src/whm-mail-quality-client.ts apps/web/src/whm-server-observation-client.ts
 msgid "Not saved"
 msgstr "غير محفوظ"
 
@@ -32309,7 +32305,7 @@ msgctxt "whm-server-observation-client"
 msgid "Not verified"
 msgstr "لم يُتحقق"
 
-#: apps/web/src/board-port/xmail-connect-devices.ts apps/web/src/themes/v2/pages/xmail/workspaces/tools.ts
+#: apps/web/src/board-port/xmail-connect-devices.ts apps/web/src/themes/v2/pages/xmail/workspaces/tools.ts apps/web/src/themes/v2/pages/xpanel/email/accounts.ts
 msgid "Not verified by this page"
 msgstr "لم تتحقق منها هذه الصفحة"
 
@@ -32732,7 +32728,7 @@ msgstr "ما رُصد هنا منذ التحويل"
 msgid "Observed interface"
 msgstr "الواجهة المرصودة"
 
-#: apps/web/src/board-port/extensions/resources-board.ts apps/web/src/themes/v2/pages/xpanel/home.ts apps/web/src/themes/v2/pages/xpanel/resources.ts
+#: apps/web/src/board-port/extensions/resources-board.ts apps/web/src/panel-resources-client.ts apps/web/src/themes/v2/pages/xpanel/home.ts apps/web/src/themes/v2/pages/xpanel/resources.ts
 msgid "Observed mismatch"
 msgstr "عدم تطابق مرصود"
 
@@ -33924,7 +33920,7 @@ msgstr "نظام التشغيل مدعوم"
 msgid "Operating systems"
 msgstr "أنظمة التشغيل"
 
-#: apps/web/src/board-port/approved-xpanel-pages.ts apps/web/src/board-port/whm-databases-workspace.ts apps/web/src/board-port/whm-developer-workspace.ts apps/web/src/themes/v2/pages/xpanel/advanced/tools.ts apps/web/src/themes/v2/pages/xwhm/databases/index.ts apps/web/src/themes/v2/pages/xwhm/panel/integrations-developer.ts
+#: apps/web/src/board-port/approved-xpanel-pages.ts apps/web/src/board-port/whm-databases-workspace.ts apps/web/src/board-port/whm-developer-workspace.ts apps/web/src/themes/v2/pages/xpanel/advanced/tools.ts apps/web/src/themes/v2/pages/xwhm/databases/index.ts apps/web/src/themes/v2/pages/xwhm/panel/integrations-developer.ts apps/web/src/workspace-runtime-client.ts
 msgid "Operation"
 msgstr "العملية"
 
@@ -34171,7 +34167,7 @@ msgstr "النتيجة غير معروفة؛ راجع هذه المنطقة"
 msgid "Outgoing"
 msgstr "الصادر"
 
-#: apps/web/src/mail-connect-devices-client.ts
+#: apps/web/src/account-connect-devices-client.ts apps/web/src/mail-connect-devices-client.ts
 msgid "Outgoing (SMTP)"
 msgstr "الصادر (SMTP)"
 
@@ -35432,7 +35428,7 @@ msgstr "المسار على هذا الموقع"
 msgid "Path or record"
 msgstr "المسار أو السجل"
 
-#: apps/web/src/board-canvas.ts apps/web/src/board-port/approved-xwhm.ts apps/web/src/board-port/sec-workspace.ts apps/web/src/themes/v2/pages/xwhm/security/overview.ts apps/web/src/themes/v2/pages/xwhm/security/policies.ts
+#: apps/web/src/board-canvas.ts apps/web/src/board-port/approved-xwhm.ts apps/web/src/board-port/sec-workspace.ts apps/web/src/themes/v2/pages/xwhm/security/policies.ts
 msgid "Path patterns"
 msgstr "أنماط المسارات"
 
@@ -36159,7 +36155,7 @@ msgstr "المجمعات"
 msgid "Pools that hit max children"
 msgstr "المجمعات التي بلغت الحد الأقصى للعمليات"
 
-#: apps/web/src/account-network-tools-client.ts apps/web/src/board-canvas.ts apps/web/src/board-port/account-network-tools-workspace.ts apps/web/src/board-port/account-ssh-workspace.ts apps/web/src/board-port/approved-whm-backups.ts apps/web/src/board-port/approved-whm-operations-components.ts apps/web/src/board-port/approved-xpanel-pages.ts apps/web/src/board-port/approved-xwhm.ts apps/web/src/board-port/db-engines-workspace.ts apps/web/src/board-port/db-profiles-card.ts apps/web/src/board-port/dns-cluster-section.ts apps/web/src/board-port/mailx-whm-workspace.ts apps/web/src/board-port/whm-databases-workspace.ts apps/web/src/board-port/xmail-connect-devices.ts apps/web/src/design-board.ts apps/web/src/models/db-services.ts apps/web/src/models/tool-cards.ts apps/web/src/themes/v2/pages/xmail/workspaces/tools.ts apps/web/src/themes/v2/pages/xpanel/advanced/tools.ts apps/web/src/themes/v2/pages/xpanel/security/tools.ts apps/web/src/themes/v2/pages/xwhm/databases/index.ts apps/web/src/themes/v2/pages/xwhm/dns/cluster-members.ts apps/web/src/themes/v2/pages/xwhm/host/firewall.ts apps/web/src/themes/v2/pages/xwhm/lifecycle/destination-manager.ts apps/web/src/themes/v2/pages/xwhm/mail/policy.ts apps/web/src/themes/v2/pages/xwhm/security/ssh.ts packages/core/src/host-tool-cards.ts
+#: apps/web/src/account-network-tools-client.ts apps/web/src/board-canvas.ts apps/web/src/board-port/account-network-tools-workspace.ts apps/web/src/board-port/account-ssh-workspace.ts apps/web/src/board-port/approved-whm-backups.ts apps/web/src/board-port/approved-whm-operations-components.ts apps/web/src/board-port/approved-xpanel-pages.ts apps/web/src/board-port/approved-xwhm.ts apps/web/src/board-port/db-engines-workspace.ts apps/web/src/board-port/db-profiles-card.ts apps/web/src/board-port/dns-cluster-section.ts apps/web/src/board-port/mailx-whm-workspace.ts apps/web/src/board-port/whm-databases-workspace.ts apps/web/src/board-port/xmail-connect-devices.ts apps/web/src/design-board.ts apps/web/src/models/db-services.ts apps/web/src/models/tool-cards.ts apps/web/src/themes/v2/pages/xmail/workspaces/tools.ts apps/web/src/themes/v2/pages/xpanel/advanced/tools.ts apps/web/src/themes/v2/pages/xpanel/email/accounts.ts apps/web/src/themes/v2/pages/xpanel/security/tools.ts apps/web/src/themes/v2/pages/xwhm/databases/index.ts apps/web/src/themes/v2/pages/xwhm/dns/cluster-members.ts apps/web/src/themes/v2/pages/xwhm/host/firewall.ts apps/web/src/themes/v2/pages/xwhm/lifecycle/destination-manager.ts apps/web/src/themes/v2/pages/xwhm/mail/policy.ts apps/web/src/themes/v2/pages/xwhm/security/ssh.ts packages/core/src/host-tool-cards.ts
 msgid "Port"
 msgstr "المنفذ"
 
@@ -36754,7 +36750,7 @@ msgstr "جارٍ معاينة تغيير TTL…"
 msgid "Previewing the repair without changing the host…"
 msgstr "جارٍ معاينة الإصلاح دون تغيير المضيف…"
 
-#: apps/web/src/account-list.ts apps/web/src/board-port/approved-xwhm.ts apps/web/src/board-port/whm-metering-workspace.ts apps/web/src/board-port/xmail-calendar-view.ts apps/web/src/themes/v2/pages/xmail/workspaces/organizer.ts apps/web/src/themes/v2/pages/xwhm/account-tools/pages.ts apps/web/src/themes/v2/pages/xwhm/accounts/list.ts apps/web/src/themes/v2/pages/xwhm/domains/index.ts apps/web/src/themes/v2/pages/xwhm/server/setup.ts
+#: apps/web/src/account-list.ts apps/web/src/board-port/approved-xwhm.ts apps/web/src/board-port/whm-metering-workspace.ts apps/web/src/board-port/xmail-calendar-view.ts apps/web/src/themes/v2/pages/xmail/workspaces/organizer.ts apps/web/src/themes/v2/pages/xwhm/account-tools/pages.ts apps/web/src/themes/v2/pages/xwhm/accounts/create.ts apps/web/src/themes/v2/pages/xwhm/accounts/list.ts apps/web/src/themes/v2/pages/xwhm/databases/index.ts apps/web/src/themes/v2/pages/xwhm/domains/index.ts apps/web/src/themes/v2/pages/xwhm/server/setup.ts apps/web/src/workspace-runtime-client.ts
 msgid "Previous"
 msgstr "السابق"
 
@@ -39117,7 +39113,7 @@ msgstr "جارٍ قراءة الاحتفاظ بالسجلات…"
 msgid "Reading login limits…"
 msgstr "جارٍ قراءة حدود تسجيل الدخول…"
 
-#: apps/web/src/mail-connect-devices-client.ts
+#: apps/web/src/account-connect-devices-client.ts apps/web/src/mail-connect-devices-client.ts
 msgid "Reading mail client settings…"
 msgstr "جارٍ قراءة إعدادات تطبيقات البريد…"
 
@@ -39641,7 +39637,7 @@ msgstr "إعادة البناء"
 msgid "Rebuild failed"
 msgstr "فشلت إعادة البناء"
 
-#: apps/web/src/mail-cards.ts apps/web/src/surfaces/xwhm.ts apps/web/src/themes/v2/pages/xwhm/panel/data.ts
+#: apps/web/src/mail-cards.ts apps/web/src/surfaces/xwhm.ts apps/web/src/themes/v2/pages/xwhm/panel/data.ts apps/web/src/whm-panel-data-client.ts
 msgid "Rebuild index"
 msgstr "إعادة بناء الفهرس"
 
@@ -39665,6 +39661,7 @@ msgstr "إعادة بناء فهارس الصندوق: {mailbox}"
 msgid "Rebuild pending"
 msgstr "إعادة البناء معلّقة"
 
+#: apps/web/src/whm-panel-data-client.ts
 msgid "Rebuild search index"
 msgstr "إعادة بناء فهرس البحث"
 
@@ -40250,7 +40247,7 @@ msgstr "المُحيل"
 msgid "Referring pages"
 msgstr "الصفحات المُحيلة"
 
-#: apps/web/src/board-port/account-database-remote-workspace.ts apps/web/src/board-port/account-dynamic-dns-workspace.ts apps/web/src/board-port/account-virus-scan-workspace.ts apps/web/src/board-port/acct-convert-addon.ts apps/web/src/board-port/acct-enhancements-workspace.ts apps/web/src/board-port/acct-staging-workspace.ts apps/web/src/board-port/acct-team-workspace.ts apps/web/src/board-port/acct-templates-workspace.ts apps/web/src/board-port/acct-transfer-server.ts apps/web/src/board-port/approved-xpanel-pages.ts apps/web/src/board-port/approved-xpanel-workspaces.ts apps/web/src/board-port/approved-xwhm.ts apps/web/src/board-port/db-engines-workspace.ts apps/web/src/board-port/db-profiles-card.ts apps/web/src/board-port/dns-cluster-section.ts apps/web/src/board-port/dnssec-section.ts apps/web/src/board-port/extensions/account-forwarders.ts apps/web/src/board-port/identity-workspaces.ts apps/web/src/board-port/mailx-archive-workspace.ts apps/web/src/board-port/mailx-collections-workspace.ts apps/web/src/board-port/mailx-mail-tools-workspace.ts apps/web/src/board-port/mailx-whm-workspace.ts apps/web/src/board-port/sec-workspace.ts apps/web/src/board-port/whm-announcements-workspace.ts apps/web/src/board-port/whm-dns-tools-workspace.ts apps/web/src/board-port/whm-extend-workspace.ts apps/web/src/board-port/whm-jobs-workspace.ts apps/web/src/board-port/whm-mail-server-workspace.ts apps/web/src/board-port/whm-mailbox-maintenance-workspace.ts apps/web/src/board-port/whm-panel-tokens-workspace.ts apps/web/src/board-port/whm-security-tools-workspace.ts apps/web/src/board-port/whm-service-detail-workspace.ts apps/web/src/board-port/whm-whmcs-workspace.ts apps/web/src/board-port/xmail-mailbox-forwarders.ts apps/web/src/design-board.ts apps/web/src/models/mail-cert-panels.ts apps/web/src/models/release-packages-panel.ts apps/web/src/models/svc-panels.ts apps/web/src/models/tool-cards.ts apps/web/src/themes/v2/pages/identity.ts apps/web/src/themes/v2/pages/xmail/workspaces/settings.ts apps/web/src/themes/v2/pages/xpanel/domains/cloudflare.ts apps/web/src/themes/v2/pages/xpanel/domains/dynamic-dns.ts apps/web/src/themes/v2/pages/xpanel/domains/staging.ts apps/web/src/themes/v2/pages/xpanel/email-tools/archive-deliverability.ts apps/web/src/themes/v2/pages/xpanel/email-tools/collaboration.ts apps/web/src/themes/v2/pages/xpanel/email-tools/mailing-lists.ts apps/web/src/themes/v2/pages/xpanel/email-tools/spam.ts apps/web/src/themes/v2/pages/xpanel/email/forwarders.ts apps/web/src/themes/v2/pages/xpanel/security/account.ts apps/web/src/themes/v2/pages/xpanel/security/tools.ts apps/web/src/themes/v2/pages/xpanel/services/dnssec.ts apps/web/src/themes/v2/pages/xpanel/settings/team.ts apps/web/src/themes/v2/pages/xwhm/account-tools/pages.ts apps/web/src/themes/v2/pages/xwhm/activity/jobs.ts apps/web/src/themes/v2/pages/xwhm/databases/index.ts apps/web/src/themes/v2/pages/xwhm/dns/cluster-members.ts apps/web/src/themes/v2/pages/xwhm/dns/providers.ts apps/web/src/themes/v2/pages/xwhm/dns/tools.ts apps/web/src/themes/v2/pages/xwhm/lifecycle/client-templates.ts apps/web/src/themes/v2/pages/xwhm/mail/operations.ts apps/web/src/themes/v2/pages/xwhm/mail/policy.ts apps/web/src/themes/v2/pages/xwhm/mail/server.ts apps/web/src/themes/v2/pages/xwhm/panel/configuration.ts apps/web/src/themes/v2/pages/xwhm/panel/integrations-developer.ts apps/web/src/themes/v2/pages/xwhm/panel/tokens.ts apps/web/src/themes/v2/pages/xwhm/panel/whmcs.ts apps/web/src/themes/v2/pages/xwhm/plans/enhancements.ts apps/web/src/themes/v2/pages/xwhm/recovery-tools/convert.ts apps/web/src/themes/v2/pages/xwhm/security/overview.ts apps/web/src/themes/v2/pages/xwhm/security/panel-access.ts apps/web/src/themes/v2/pages/xwhm/security/policies.ts apps/web/src/themes/v2/pages/xwhm/security/tools.ts apps/web/src/themes/v2/pages/xwhm/server/setup.ts apps/web/src/themes/v2/pages/xwhm/service-tools/details.ts apps/web/src/themes/v2/pages/xwhm/software/catalog.ts
+#: apps/web/src/board-port/account-database-remote-workspace.ts apps/web/src/board-port/account-dynamic-dns-workspace.ts apps/web/src/board-port/account-virus-scan-workspace.ts apps/web/src/board-port/acct-convert-addon.ts apps/web/src/board-port/acct-enhancements-workspace.ts apps/web/src/board-port/acct-staging-workspace.ts apps/web/src/board-port/acct-team-workspace.ts apps/web/src/board-port/acct-templates-workspace.ts apps/web/src/board-port/acct-transfer-server.ts apps/web/src/board-port/approved-xpanel-pages.ts apps/web/src/board-port/approved-xpanel-workspaces.ts apps/web/src/board-port/approved-xwhm.ts apps/web/src/board-port/db-engines-workspace.ts apps/web/src/board-port/db-profiles-card.ts apps/web/src/board-port/dns-cluster-section.ts apps/web/src/board-port/dnssec-section.ts apps/web/src/board-port/extensions/account-forwarders.ts apps/web/src/board-port/identity-workspaces.ts apps/web/src/board-port/mailx-archive-workspace.ts apps/web/src/board-port/mailx-collections-workspace.ts apps/web/src/board-port/mailx-mail-tools-workspace.ts apps/web/src/board-port/mailx-whm-workspace.ts apps/web/src/board-port/sec-workspace.ts apps/web/src/board-port/whm-announcements-workspace.ts apps/web/src/board-port/whm-dns-tools-workspace.ts apps/web/src/board-port/whm-extend-workspace.ts apps/web/src/board-port/whm-jobs-workspace.ts apps/web/src/board-port/whm-mail-server-workspace.ts apps/web/src/board-port/whm-mailbox-maintenance-workspace.ts apps/web/src/board-port/whm-panel-tokens-workspace.ts apps/web/src/board-port/whm-security-tools-workspace.ts apps/web/src/board-port/whm-service-detail-workspace.ts apps/web/src/board-port/whm-whmcs-workspace.ts apps/web/src/board-port/xmail-mailbox-forwarders.ts apps/web/src/design-board.ts apps/web/src/models/mail-cert-panels.ts apps/web/src/models/release-packages-panel.ts apps/web/src/models/svc-panels.ts apps/web/src/models/tool-cards.ts apps/web/src/themes/v2/pages/identity.ts apps/web/src/themes/v2/pages/xmail/workspaces/settings.ts apps/web/src/themes/v2/pages/xpanel/domains/cloudflare.ts apps/web/src/themes/v2/pages/xpanel/domains/dynamic-dns.ts apps/web/src/themes/v2/pages/xpanel/domains/staging.ts apps/web/src/themes/v2/pages/xpanel/email-tools/archive-deliverability.ts apps/web/src/themes/v2/pages/xpanel/email-tools/collaboration.ts apps/web/src/themes/v2/pages/xpanel/email-tools/mailing-lists.ts apps/web/src/themes/v2/pages/xpanel/email-tools/spam.ts apps/web/src/themes/v2/pages/xpanel/email/forwarders.ts apps/web/src/themes/v2/pages/xpanel/resources.ts apps/web/src/themes/v2/pages/xpanel/security/account.ts apps/web/src/themes/v2/pages/xpanel/security/tools.ts apps/web/src/themes/v2/pages/xpanel/services/dnssec.ts apps/web/src/themes/v2/pages/xpanel/settings/team.ts apps/web/src/themes/v2/pages/xwhm/account-tools/pages.ts apps/web/src/themes/v2/pages/xwhm/activity/jobs.ts apps/web/src/themes/v2/pages/xwhm/databases/index.ts apps/web/src/themes/v2/pages/xwhm/dns/cluster-members.ts apps/web/src/themes/v2/pages/xwhm/dns/providers.ts apps/web/src/themes/v2/pages/xwhm/dns/tools.ts apps/web/src/themes/v2/pages/xwhm/lifecycle/client-templates.ts apps/web/src/themes/v2/pages/xwhm/mail/operations.ts apps/web/src/themes/v2/pages/xwhm/mail/policy.ts apps/web/src/themes/v2/pages/xwhm/mail/server.ts apps/web/src/themes/v2/pages/xwhm/monitoring/resources.ts apps/web/src/themes/v2/pages/xwhm/panel/configuration.ts apps/web/src/themes/v2/pages/xwhm/panel/integrations-developer.ts apps/web/src/themes/v2/pages/xwhm/panel/tokens.ts apps/web/src/themes/v2/pages/xwhm/panel/whmcs.ts apps/web/src/themes/v2/pages/xwhm/plans/enhancements.ts apps/web/src/themes/v2/pages/xwhm/recovery-tools/convert.ts apps/web/src/themes/v2/pages/xwhm/security/overview.ts apps/web/src/themes/v2/pages/xwhm/security/panel-access.ts apps/web/src/themes/v2/pages/xwhm/security/policies.ts apps/web/src/themes/v2/pages/xwhm/security/ssh.ts apps/web/src/themes/v2/pages/xwhm/security/tools.ts apps/web/src/themes/v2/pages/xwhm/server/setup.ts apps/web/src/themes/v2/pages/xwhm/service-tools/details.ts apps/web/src/themes/v2/pages/xwhm/software/catalog.ts
 msgid "Refresh"
 msgstr "تحديث"
 
@@ -40719,7 +40716,7 @@ msgstr "أعفى حسابًا من حد النطاق الترددي حتى ال�
 msgid "Relieved through {day} (UTC)"
 msgstr "مُعفى حتى نهاية {day} (التوقيت العالمي)"
 
-#: apps/web/src/approved-host-services-client.ts apps/web/src/board-port/approved-whm-operations-components.ts apps/web/src/board-port/whm-languages-workspace.ts apps/web/src/board-port/whm-monitoring-alerts-workspace.ts apps/web/src/board-port/whm-panel-branding-workspace.ts apps/web/src/board-port/whm-panel-notifications-workspace.ts apps/web/src/board-port/whm-panel-settings-workspace.ts apps/web/src/board-port/whm-preferences-workspace.ts apps/web/src/board-port/whm-trusted-proxies-workspace.ts apps/web/src/board-port/whm-whmcs-workspace.ts apps/web/src/chrome.ts apps/web/src/themes/v2/pages/xwhm/host/services.ts apps/web/src/themes/v2/pages/xwhm/monitoring/workflows.ts apps/web/src/themes/v2/pages/xwhm/panel/configuration.ts apps/web/src/themes/v2/pages/xwhm/panel/locales-preferences.ts apps/web/src/themes/v2/pages/xwhm/panel/notifications.ts apps/web/src/themes/v2/pages/xwhm/panel/whmcs.ts apps/web/src/themes/v2/pages/xwhm/server/trusted-proxies.ts apps/web/src/themes/v2/shell/shell.ts
+#: apps/web/src/approved-host-services-client.ts apps/web/src/board-port/approved-whm-operations-components.ts apps/web/src/board-port/whm-languages-workspace.ts apps/web/src/board-port/whm-monitoring-alerts-workspace.ts apps/web/src/board-port/whm-panel-branding-workspace.ts apps/web/src/board-port/whm-panel-notifications-workspace.ts apps/web/src/board-port/whm-panel-settings-workspace.ts apps/web/src/board-port/whm-preferences-workspace.ts apps/web/src/board-port/whm-trusted-proxies-workspace.ts apps/web/src/board-port/whm-whmcs-workspace.ts apps/web/src/chrome.ts apps/web/src/themes/v2/pages/xwhm/host/services.ts apps/web/src/themes/v2/pages/xwhm/monitoring/workflows.ts apps/web/src/themes/v2/pages/xwhm/panel/configuration.ts apps/web/src/themes/v2/pages/xwhm/panel/locales-preferences.ts apps/web/src/themes/v2/pages/xwhm/panel/notifications.ts apps/web/src/themes/v2/pages/xwhm/panel/whmcs.ts apps/web/src/themes/v2/pages/xwhm/server/trusted-proxies.ts apps/web/src/themes/v2/shell/overlays.ts apps/web/src/themes/v2/shell/shell.ts
 msgid "Reload"
 msgstr "إعادة التحميل"
 
@@ -42429,7 +42426,7 @@ msgstr "تصل الطلبات من هذه العناوين إلى مواقعك �
 msgid "Requests over the burst get 429. Each site gets its own per-address zone."
 msgstr "تتلقى الطلبات التي تتجاوز الدفعة الرمز 429. ولكل موقع منطقة خاصة به لكل عنوان."
 
-#: apps/web/src/board-port/approved-xwhm.ts apps/web/src/themes/v2/pages/xwhm/security/overview.ts
+#: apps/web/src/board-port/approved-xwhm.ts
 msgid "Requests per address"
 msgstr "الطلبات لكل عنوان"
 
@@ -43016,7 +43013,7 @@ msgstr "استعادة MongoDB"
 msgid "Restore a server generation"
 msgstr "استعادة جيل للخادم"
 
-#: apps/web/src/board-port/composed/sections/xwhm-backups.ts apps/web/src/themes/v2/pages/xwhm/lifecycle/backups.ts
+#: apps/web/src/board-port/composed/sections/xwhm-backups.ts apps/web/src/themes/v2/pages/xwhm/lifecycle/backups.ts apps/web/src/themes/v2/pages/xwhm/recovery-tools/restore.ts
 msgid "Restore accounts"
 msgstr "استعادة الحسابات"
 
@@ -44178,7 +44175,7 @@ msgstr "إرجاع {app} إلى {version}؟"
 msgid "Roll over"
 msgstr "تبديل"
 
-#: apps/web/src/board-port/whm-upgrade-workspace.ts apps/web/src/surfaces/xwhm.ts apps/web/src/themes/v2/pages/xwhm/lifecycle/upgrade.ts apps/web/src/themes/v2/pages/xwhm/panel/data.ts
+#: apps/web/src/account-git-client.ts apps/web/src/board-port/whm-upgrade-workspace.ts apps/web/src/surfaces/xwhm.ts apps/web/src/themes/v2/pages/xwhm/lifecycle/upgrade.ts apps/web/src/themes/v2/pages/xwhm/panel/data.ts
 msgid "Rollback"
 msgstr "التراجع"
 
@@ -45162,7 +45159,7 @@ msgstr "قُرئ مخزن SSL من ~/ssl لهذا الحساب."
 msgid "SSL storage read. Only the first items of each kind are listed."
 msgstr "قُرئ مخزن SSL. تُعرض العناصر الأولى فقط من كل نوع."
 
-#: apps/web/src/board-port/xpanel-home.ts apps/web/src/mail-connect-devices-client.ts apps/web/src/themes/v2/pages/xpanel/home.ts apps/web/src/themes/v2/pages/xwhm/overview/index.ts packages/core/src/tweaks/settings-index.ts
+#: apps/web/src/account-connect-devices-client.ts apps/web/src/board-port/xpanel-home.ts apps/web/src/mail-connect-devices-client.ts apps/web/src/themes/v2/pages/xpanel/home.ts apps/web/src/themes/v2/pages/xwhm/overview/index.ts packages/core/src/tweaks/settings-index.ts
 msgid "SSL/TLS"
 msgstr "SSL/TLS"
 
@@ -45179,7 +45176,7 @@ msgstr "شهادات SSL/TLS"
 msgid "SSL/TLS mode"
 msgstr "وضع SSL/TLS"
 
-#: apps/web/src/mail-connect-devices-client.ts
+#: apps/web/src/account-connect-devices-client.ts apps/web/src/mail-connect-devices-client.ts
 msgid "STARTTLS"
 msgstr "STARTTLS"
 
@@ -45227,7 +45224,7 @@ msgctxt "mail-calendar-view-client"
 msgid "Sat"
 msgstr "س"
 
-#: apps/web/src/mail-calendar-view-client.ts packages/core/src/host-tool-cards.ts
+#: apps/web/src/mail-calendar-view-client.ts apps/web/src/workspace-runtime-client.ts packages/core/src/host-tool-cards.ts
 msgid "Saturday"
 msgstr "السبت"
 
@@ -45375,7 +45372,7 @@ msgstr "حفظ الحملة"
 msgid "Save chained task"
 msgstr "حفظ المهمة المتسلسلة"
 
-#: apps/web/src/account-dav-client.ts apps/web/src/acct-team-client.ts apps/web/src/acct-templates-client.ts apps/web/src/board-port/account-owner-tools-cards.ts apps/web/src/board-port/account-runtime-workspace.ts apps/web/src/board-port/account-web-directives-workspace.ts apps/web/src/service-users-client.ts apps/web/src/themes/v2/layouts/editor-page.ts apps/web/src/themes/v2/layouts/matrix-page.ts apps/web/src/themes/v2/layouts/settings-page.ts apps/web/src/themes/v2/pages/xpanel/advanced/directives.ts apps/web/src/themes/v2/pages/xpanel/domains/redirects.ts apps/web/src/themes/v2/pages/xpanel/operations/owner-tools.ts apps/web/src/themes/v2/pages/xpanel/operations/runtime.ts apps/web/src/whm-announcements-client.ts
+#: apps/web/src/account-dav-client.ts apps/web/src/acct-team-client.ts apps/web/src/acct-templates-client.ts apps/web/src/board-port/account-owner-tools-cards.ts apps/web/src/board-port/account-runtime-workspace.ts apps/web/src/board-port/account-web-directives-workspace.ts apps/web/src/service-users-client.ts apps/web/src/themes/v2/layouts/editor-page.ts apps/web/src/themes/v2/layouts/matrix-page.ts apps/web/src/themes/v2/layouts/settings-page.ts apps/web/src/themes/v2/pages/xpanel/advanced/directives.ts apps/web/src/themes/v2/pages/xpanel/domains/redirects.ts apps/web/src/themes/v2/pages/xpanel/operations/owner-tools.ts apps/web/src/themes/v2/pages/xpanel/operations/runtime.ts apps/web/src/whm-announcements-client.ts apps/web/src/workspace-runtime-client.ts
 msgid "Save changes"
 msgstr "حفظ التغييرات"
 
@@ -46108,7 +46105,7 @@ msgstr "نقطة تحقق محفوظة"
 msgid "Saved commands"
 msgstr "الأوامر المحفوظة"
 
-#: apps/web/src/board-port/whm-server-observation-workspace.ts apps/web/src/board-port/whm-web-server-workspace.ts apps/web/src/themes/v2/pages/xpanel/domains/domains.ts apps/web/src/themes/v2/pages/xwhm/server/observations.ts apps/web/src/whm-security-client.ts apps/web/src/whm-ssl-install-client.ts
+#: apps/web/src/board-port/whm-server-observation-workspace.ts apps/web/src/board-port/whm-web-server-workspace.ts apps/web/src/themes/v2/pages/xpanel/domains/domains.ts apps/web/src/themes/v2/pages/xwhm/server/observations.ts apps/web/src/whm-security-client.ts apps/web/src/whm-ssl-install-client.ts apps/web/src/whm-web-server-client.ts
 msgid "Saved configuration"
 msgstr "الإعداد المحفوظ"
 
@@ -47939,7 +47936,7 @@ msgctxt "password-generate-client"
 msgid "Secure generation is unavailable. Enter a password yourself."
 msgstr "تعذر التوليد الآمن. أدخل كلمة المرور بنفسك."
 
-#: apps/web/src/board-port/composed/sections/xpanel-security.ts apps/web/src/board-port/db-engines-workspace.ts apps/web/src/board-port/whm-panel-tokens-workspace.ts apps/web/src/board-port/whm-software-center-workspace.ts apps/web/src/board-port/xmail-connect-devices.ts apps/web/src/board-port/xpanel-home.ts apps/web/src/board-port/xwhm-dashboard.ts apps/web/src/chrome.ts apps/web/src/design-board.ts apps/web/src/mail-home-groups.ts apps/web/src/surfaces/xmail.ts apps/web/src/themes/v2/pages/xmail/workspaces/tools.ts apps/web/src/themes/v2/pages/xpanel/domains/site-settings.ts apps/web/src/themes/v2/pages/xpanel/home.ts apps/web/src/themes/v2/pages/xwhm/databases/index.ts apps/web/src/themes/v2/pages/xwhm/panel/tokens.ts apps/web/src/themes/v2/pages/xwhm/software/catalog.ts apps/web/src/themes/v2/shell/shell.ts packages/core/src/tweaks/settings-index.ts
+#: apps/web/src/board-port/composed/sections/xpanel-security.ts apps/web/src/board-port/db-engines-workspace.ts apps/web/src/board-port/whm-panel-tokens-workspace.ts apps/web/src/board-port/whm-software-center-workspace.ts apps/web/src/board-port/xmail-connect-devices.ts apps/web/src/board-port/xpanel-home.ts apps/web/src/board-port/xwhm-dashboard.ts apps/web/src/chrome.ts apps/web/src/design-board.ts apps/web/src/mail-home-groups.ts apps/web/src/surfaces/xmail.ts apps/web/src/themes/v2/pages/xmail/workspaces/tools.ts apps/web/src/themes/v2/pages/xpanel/domains/site-settings.ts apps/web/src/themes/v2/pages/xpanel/email/accounts.ts apps/web/src/themes/v2/pages/xpanel/home.ts apps/web/src/themes/v2/pages/xwhm/databases/index.ts apps/web/src/themes/v2/pages/xwhm/panel/tokens.ts apps/web/src/themes/v2/pages/xwhm/software/catalog.ts apps/web/src/themes/v2/shell/shell.ts packages/core/src/tweaks/settings-index.ts
 msgid "Security"
 msgstr "الأمان"
 
@@ -48231,7 +48228,7 @@ msgstr "اختر تثبيتًا"
 msgid "Select an owned contact"
 msgstr "اختر جهة اتصال مملوكة"
 
-#: apps/web/src/board-port/account-backup-workspace.ts apps/web/src/themes/v2/pages/xpanel/operations/backup.ts
+#: apps/web/src/board-port/account-backup-workspace.ts
 msgid "Select archive"
 msgstr "اختيار الأرشيف"
 
@@ -48508,7 +48505,7 @@ msgstr "إرسال تنبيه عند كل تسجيل دخول عبر SSH"
 msgid "Send at (UTC)"
 msgstr "وقت الإرسال (UTC)"
 
-#: apps/web/src/board-port/xmail-connect-devices.ts apps/web/src/themes/v2/pages/xmail/workspaces/tools.ts
+#: apps/web/src/board-port/xmail-connect-devices.ts apps/web/src/themes/v2/pages/xmail/workspaces/tools.ts apps/web/src/themes/v2/pages/xpanel/email/accounts.ts
 msgid "Send instructions"
 msgstr "إرسال التعليمات"
 
@@ -48569,7 +48566,7 @@ msgstr "هل تُرسل هذه الرسالة؟"
 msgid "Send through the local mail server."
 msgstr "أرسل عبر خادم البريد المحلي."
 
-#: apps/web/src/board-port/xmail-connect-devices.ts apps/web/src/models/mail-cert-panels.ts apps/web/src/themes/v2/pages/xmail/workspaces/tools.ts
+#: apps/web/src/board-port/xmail-connect-devices.ts apps/web/src/models/mail-cert-panels.ts apps/web/src/themes/v2/pages/xmail/workspaces/tools.ts apps/web/src/themes/v2/pages/xpanel/email/accounts.ts
 msgid "Send to"
 msgstr "إرسال إلى"
 
@@ -48700,7 +48697,7 @@ msgstr "جارٍ إرسال الطلب إلى الخدمة…"
 msgid "Sending upload"
 msgstr "جار رفع الملف"
 
-#: apps/web/src/mail-connect-devices-client.ts apps/web/src/mail-send-client.ts apps/web/src/whm-account-admin-client.ts apps/web/src/whm-network-client.ts
+#: apps/web/src/account-connect-devices-client.ts apps/web/src/mail-connect-devices-client.ts apps/web/src/mail-send-client.ts apps/web/src/whm-account-admin-client.ts apps/web/src/whm-network-client.ts
 msgid "Sending…"
 msgstr "جار الإرسال…"
 
@@ -48871,7 +48868,7 @@ msgstr "عُرضت صفحة حد النطاق الترددي لحساب تجاو
 msgid "Served with serial {serial}"
 msgstr "يُخدم بالتسلسل {serial}"
 
-#: apps/web/src/board-port/account-dav-workspace.ts apps/web/src/board-port/approved-xpanel-pages.ts apps/web/src/board-port/composed/sections/xwhm-server.ts apps/web/src/board-port/db-engines-workspace.ts apps/web/src/board-port/db-profiles-card.ts apps/web/src/board-port/whm-upgrade-workspace.ts apps/web/src/board-port/xmail-connect-devices.ts apps/web/src/board-port/xwhm-dashboard.ts apps/web/src/design-board.ts apps/web/src/surfaces/xwhm.ts apps/web/src/themes/v2/pages/xmail/workspaces/tools.ts apps/web/src/themes/v2/pages/xpanel/files/dav-connection.ts apps/web/src/themes/v2/pages/xwhm/databases/index.ts apps/web/src/themes/v2/pages/xwhm/lifecycle/upgrade.ts packages/core/src/tweaks/settings-index.ts
+#: apps/web/src/board-port/account-dav-workspace.ts apps/web/src/board-port/approved-xpanel-pages.ts apps/web/src/board-port/composed/sections/xwhm-server.ts apps/web/src/board-port/db-engines-workspace.ts apps/web/src/board-port/db-profiles-card.ts apps/web/src/board-port/whm-upgrade-workspace.ts apps/web/src/board-port/xmail-connect-devices.ts apps/web/src/board-port/xwhm-dashboard.ts apps/web/src/design-board.ts apps/web/src/surfaces/xwhm.ts apps/web/src/themes/v2/pages/xmail/workspaces/tools.ts apps/web/src/themes/v2/pages/xpanel/email/accounts.ts apps/web/src/themes/v2/pages/xpanel/files/dav-connection.ts apps/web/src/themes/v2/pages/xwhm/databases/index.ts apps/web/src/themes/v2/pages/xwhm/lifecycle/upgrade.ts apps/web/src/whm-dns-tools-client.ts packages/core/src/tweaks/settings-index.ts
 msgid "Server"
 msgstr "الخادم"
 
@@ -49007,7 +49004,7 @@ msgctxt "whm-service-detail-workspace"
 msgid "Server hostname"
 msgstr "اسم المضيف للخادم"
 
-#: apps/web/src/mail-connect-devices-client.ts
+#: apps/web/src/account-connect-devices-client.ts apps/web/src/mail-connect-devices-client.ts
 msgid "Server hostname not saved"
 msgstr "لم يُحفظ اسم مضيف الخادم"
 
@@ -49183,7 +49180,7 @@ msgstr "لم يُحمّل سجل عمليات الخادم أو فروق الا�
 msgid "Server-wide settings for the xPanel, xWHM and xMail panels themselves."
 msgstr "إعدادات على مستوى الخادم للوحات xPanel وxWHM وxMail نفسها."
 
-#: apps/web/src/board-canvas.ts apps/web/src/board-port/account-owner-tools-cards.ts apps/web/src/board-port/account-runtime-workspace.ts apps/web/src/board-port/acct-convert-addon.ts apps/web/src/board-port/approved-whm-operations-components.ts apps/web/src/board-port/approved-xwhm.ts apps/web/src/board-port/ssl-store-workspace.ts apps/web/src/board-port/sw-addon-services-workspace.ts apps/web/src/board-port/whm-databases-workspace.ts apps/web/src/board-port/whm-db-tools-workspace.ts apps/web/src/board-port/whm-mail-server-workspace.ts apps/web/src/board-port/whm-security-tools-workspace.ts apps/web/src/board-port/whm-server-observation-workspace.ts apps/web/src/board-port/whm-service-detail-workspace.ts apps/web/src/board-port/whm-support-workspace.ts apps/web/src/board-port/whm-web-server-workspace.ts apps/web/src/board-port/xmail-connect-devices.ts apps/web/src/design-board.ts apps/web/src/models/db-services.ts apps/web/src/themes/v2/pages/xmail/workspaces/tools.ts apps/web/src/themes/v2/pages/xpanel/operations/owner-tools.ts apps/web/src/themes/v2/pages/xpanel/operations/runtime.ts apps/web/src/themes/v2/pages/xwhm/activity/support.ts apps/web/src/themes/v2/pages/xwhm/databases/index.ts apps/web/src/themes/v2/pages/xwhm/host/services.ts apps/web/src/themes/v2/pages/xwhm/mail/server.ts apps/web/src/themes/v2/pages/xwhm/recovery-tools/convert.ts apps/web/src/themes/v2/pages/xwhm/security/ssh.ts apps/web/src/themes/v2/pages/xwhm/security/tools.ts apps/web/src/themes/v2/pages/xwhm/server/observations.ts apps/web/src/themes/v2/pages/xwhm/service-tools/details.ts apps/web/src/themes/v2/pages/xwhm/service-tools/web.ts apps/web/src/themes/v2/pages/xwhm/software/containers.ts apps/web/src/themes/v2/pages/xwhm/tls/store.ts packages/core/src/host-tool-cards.ts
+#: apps/web/src/board-canvas.ts apps/web/src/board-port/account-owner-tools-cards.ts apps/web/src/board-port/account-runtime-workspace.ts apps/web/src/board-port/acct-convert-addon.ts apps/web/src/board-port/approved-whm-operations-components.ts apps/web/src/board-port/approved-xwhm.ts apps/web/src/board-port/ssl-store-workspace.ts apps/web/src/board-port/sw-addon-services-workspace.ts apps/web/src/board-port/whm-databases-workspace.ts apps/web/src/board-port/whm-db-tools-workspace.ts apps/web/src/board-port/whm-mail-server-workspace.ts apps/web/src/board-port/whm-security-tools-workspace.ts apps/web/src/board-port/whm-server-observation-workspace.ts apps/web/src/board-port/whm-service-detail-workspace.ts apps/web/src/board-port/whm-support-workspace.ts apps/web/src/board-port/whm-web-server-workspace.ts apps/web/src/board-port/xmail-connect-devices.ts apps/web/src/design-board.ts apps/web/src/models/db-services.ts apps/web/src/themes/v2/pages/xmail/workspaces/tools.ts apps/web/src/themes/v2/pages/xpanel/email/accounts.ts apps/web/src/themes/v2/pages/xpanel/operations/owner-tools.ts apps/web/src/themes/v2/pages/xpanel/operations/runtime.ts apps/web/src/themes/v2/pages/xwhm/activity/support.ts apps/web/src/themes/v2/pages/xwhm/databases/index.ts apps/web/src/themes/v2/pages/xwhm/host/services.ts apps/web/src/themes/v2/pages/xwhm/mail/server.ts apps/web/src/themes/v2/pages/xwhm/recovery-tools/convert.ts apps/web/src/themes/v2/pages/xwhm/security/ssh.ts apps/web/src/themes/v2/pages/xwhm/security/tools.ts apps/web/src/themes/v2/pages/xwhm/server/observations.ts apps/web/src/themes/v2/pages/xwhm/service-tools/details.ts apps/web/src/themes/v2/pages/xwhm/service-tools/web.ts apps/web/src/themes/v2/pages/xwhm/software/containers.ts apps/web/src/themes/v2/pages/xwhm/tls/store.ts packages/core/src/host-tool-cards.ts
 msgid "Service"
 msgstr "الخدمة"
 
@@ -49540,11 +49537,11 @@ msgstr "الإعدادات"
 msgid "Settings are read from the server before saving. The full current settings document is preserved, candidate syntax is checked, and the actual reconcile result is shown."
 msgstr "تُقرأ الإعدادات من الخادم قبل الحفظ. تُحفظ بقية وثيقة الإعدادات الحالية وتُفحص صياغة المرشح وتُعرض نتيجة المواءمة الفعلية."
 
-#: apps/web/src/mail-connect-devices-client.ts
+#: apps/web/src/account-connect-devices-client.ts apps/web/src/mail-connect-devices-client.ts
 msgid "Settings could not be read or verified. Nothing is shown."
 msgstr "تعذرت قراءة الإعدادات أو التحقق منها. لا يُعرض شيء."
 
-#: apps/web/src/mail-connect-devices-client.ts
+#: apps/web/src/account-connect-devices-client.ts apps/web/src/mail-connect-devices-client.ts
 msgid "Settings could not be read. Nothing is shown."
 msgstr "تعذرت قراءة الإعدادات. لا يُعرض شيء."
 
@@ -49552,7 +49549,7 @@ msgstr "تعذرت قراءة الإعدادات. لا يُعرض شيء."
 msgid "Settings could not be read. Nothing was changed."
 msgstr "تعذّرت قراءة الإعدادات. لم يتغيّر شيء."
 
-#: apps/web/src/board-port/account-logs-workspace.ts apps/web/src/board-port/xmail-connect-devices.ts apps/web/src/board-port/xmail-mailbox-preferences.ts apps/web/src/themes/v2/pages/xmail/workspaces/settings.ts apps/web/src/themes/v2/pages/xmail/workspaces/tools.ts apps/web/src/themes/v2/pages/xpanel/observations/logs.ts
+#: apps/web/src/board-port/account-logs-workspace.ts apps/web/src/board-port/xmail-connect-devices.ts apps/web/src/board-port/xmail-mailbox-preferences.ts apps/web/src/themes/v2/pages/xmail/workspaces/settings.ts apps/web/src/themes/v2/pages/xmail/workspaces/tools.ts apps/web/src/themes/v2/pages/xpanel/email/accounts.ts apps/web/src/themes/v2/pages/xpanel/observations/logs.ts
 msgid "Settings have not been read."
 msgstr "لم تُقرأ الإعدادات."
 
@@ -49560,7 +49557,7 @@ msgstr "لم تُقرأ الإعدادات."
 msgid "Settings on other pages"
 msgstr "إعدادات في صفحات أخرى"
 
-#: apps/web/src/mail-connect-devices-client.ts
+#: apps/web/src/account-connect-devices-client.ts apps/web/src/mail-connect-devices-client.ts
 msgid "Settings read from the server configuration."
 msgstr "قُرئت الإعدادات من تهيئة الخادم."
 
@@ -49624,11 +49621,11 @@ msgstr "اكتمال الإعداد (UTC)"
 msgid "Setup configuration was recorded. Filesystem quotas and host activation are not verified by this acknowledgement."
 msgstr "سُجلت إعدادات التهيئة. هذا الإقرار لا يثبت تطبيق حصص الملفات أو تفعيل إعدادات المضيف."
 
-#: apps/web/src/board-port/xmail-connect-devices.ts apps/web/src/themes/v2/pages/xmail/workspaces/tools.ts
+#: apps/web/src/board-port/xmail-connect-devices.ts apps/web/src/themes/v2/pages/xmail/workspaces/tools.ts apps/web/src/themes/v2/pages/xpanel/email/accounts.ts
 msgid "Setup files are available after the settings are read."
 msgstr "تتوفر ملفات الإعداد بعد قراءة الإعدادات."
 
-#: apps/web/src/mail-connect-devices-client.ts
+#: apps/web/src/account-connect-devices-client.ts apps/web/src/mail-connect-devices-client.ts
 msgid "Setup files need a saved server hostname. Ask your provider to save it."
 msgstr "تتطلب ملفات الإعداد اسم مضيف محفوظًا للخادم. اطلب من مزودك حفظه."
 
@@ -51440,7 +51437,7 @@ msgstr "الخطوة 2: اسم المستخدم"
 msgid "Step 3: Access"
 msgstr "الخطوة 3: الوصول"
 
-#: apps/web/src/board-port/whm-jobs-workspace.ts apps/web/src/models/mail-cert-panels.ts apps/web/src/themes/v2/layouts/wizard-page.ts apps/web/src/themes/v2/pages/xpanel/operations/backup.ts apps/web/src/themes/v2/pages/xwhm/lifecycle/transfers.ts apps/web/src/themes/v2/pages/xwhm/lifecycle/upgrade.ts
+#: apps/web/src/board-port/whm-jobs-workspace.ts apps/web/src/models/mail-cert-panels.ts apps/web/src/themes/v2/layouts/wizard-page.ts apps/web/src/themes/v2/pages/xwhm/lifecycle/transfers.ts apps/web/src/themes/v2/pages/xwhm/lifecycle/upgrade.ts
 msgid "Steps"
 msgstr "الخطوات"
 
@@ -51851,7 +51848,7 @@ msgstr "نص"
 msgid "Strings"
 msgstr "النصوص"
 
-#: apps/web/src/whm-db-root-password-client.ts
+#: apps/web/src/whm-db-root-password-client.ts apps/web/src/workspace-runtime-client.ts
 msgid "Strong"
 msgstr "قوية"
 
@@ -52083,7 +52080,7 @@ msgctxt "mail-calendar-view-client"
 msgid "Sun"
 msgstr "ح"
 
-#: apps/web/src/mail-calendar-view-client.ts packages/core/src/host-tool-cards.ts
+#: apps/web/src/mail-calendar-view-client.ts apps/web/src/workspace-runtime-client.ts packages/core/src/host-tool-cards.ts
 msgid "Sunday"
 msgstr "الأحد"
 
@@ -55577,7 +55574,7 @@ msgstr "لم يعد الإصدار المثبت في أي مستودع، فلا 
 msgid "The installer is running…"
 msgstr "المثبت قيد التشغيل…"
 
-#: apps/web/src/mail-connect-devices-client.ts
+#: apps/web/src/account-connect-devices-client.ts apps/web/src/mail-connect-devices-client.ts
 msgid "The instructions were refused. Nothing was sent."
 msgstr "رُفضت التعليمات. لم يُرسل شيء."
 
@@ -56905,7 +56902,7 @@ msgstr "حُفظت الصفحة لكن الخادم لم ينشرها. طبّق 
 msgid "The panel TLS unit stays settled when the management hosts are read during an upgrade."
 msgstr "تبقى وحدة TLS للوحة مستقرة عند قراءة مضيفي الإدارة أثناء الترقية."
 
-#: apps/web/src/surfaces/xwhm.ts apps/web/src/themes/v2/pages/xwhm/panel/data.ts
+#: apps/web/src/surfaces/xwhm.ts
 msgid "The panel cannot rebuild the index. An administrator can run the reindex command on the server; nothing runs from this page."
 msgstr "لا تستطيع اللوحة إعادة بناء الفهرس. يمكن للمسؤول تشغيل الأمر reindex على الخادم؛ لا يُنفَّذ شيء من هذه الصفحة."
 
@@ -57808,7 +57805,7 @@ msgstr "نتيجة الاستعادة تحتاج إلى مراجعة. اقرأ �
 msgid "The restore started."
 msgstr "بدأت الاستعادة."
 
-#: apps/web/src/mail-connect-devices-client.ts
+#: apps/web/src/account-connect-devices-client.ts apps/web/src/mail-connect-devices-client.ts
 msgid "The result could not be confirmed. Check the mailbox before sending again."
 msgstr "تعذر تأكيد النتيجة. تحقق من صندوق البريد قبل الإرسال مرة أخرى."
 
@@ -58645,7 +58642,7 @@ msgstr "لا يسمح الخادم بـ FTP المجهول. يفعّله الم�
 msgid "The server enforces the current plan and names the exhausted cap. Remove an eligible saved domain or ask your host about a different plan."
 msgstr "يفرض الخادم الخطة الحالية ويحدد الحد المستنفد. أزل نطاقًا محفوظًا مؤهلًا أو استفسر من المضيف عن خطة أخرى."
 
-#: apps/web/src/mail-connect-devices-client.ts
+#: apps/web/src/account-connect-devices-client.ts apps/web/src/mail-connect-devices-client.ts
 msgid "The server hostname has not been saved, so the server name is unavailable."
 msgstr "لم يُحفظ اسم مضيف الخادم، لذا اسم الخادم غير متاح."
 
@@ -59989,7 +59986,7 @@ msgstr "تُحذف أسئلته المحفوظة، ولن تُطرح عند أي
 msgid "Their websites are served again today. From 00:00 UTC they are evaluated again and limited if still over their limit."
 msgstr "تُخدَم مواقعها مجددًا اليوم. ومن الساعة 00:00 بالتوقيت العالمي تُقيَّم من جديد وتُقيَّد إن ظلت متجاوزة حدها."
 
-#: apps/web/src/board-port/whm-extend-workspace.ts apps/web/src/board-port/whm-panel-branding-workspace.ts apps/web/src/themes/v2/pages/xwhm/panel/configuration.ts apps/web/src/whm-developer-client.ts
+#: apps/web/src/board-port/whm-extend-workspace.ts apps/web/src/board-port/whm-panel-branding-workspace.ts apps/web/src/themes/v2/pages/xwhm/panel/configuration.ts apps/web/src/themes/v2/shell/overlays.ts apps/web/src/whm-developer-client.ts
 msgid "Theme"
 msgstr "السمة"
 
@@ -60943,7 +60940,7 @@ msgstr "تدير هذه الصفحة المفاتيح فقط. لا يوقّع xM
 msgid "This page manages the document root .htaccess file only. Per-folder settings need that folder's own file and are unavailable here."
 msgstr "تدير هذه الصفحة ملف .htaccess في جذر المستندات فقط. تحتاج إعدادات كل مجلد إلى ملفه الخاص وهي غير متاحة هنا."
 
-#: apps/web/src/board-port/approved-xwhm.ts apps/web/src/board-port/dns-cluster-section.ts apps/web/src/board-port/identity-workspaces.ts apps/web/src/board-port/sec-workspace.ts apps/web/src/board-port/whm-extend-workspace.ts apps/web/src/themes/v2/pages/identity.ts apps/web/src/themes/v2/pages/xwhm/account-tools/pages.ts apps/web/src/themes/v2/pages/xwhm/panel/configuration.ts apps/web/src/themes/v2/pages/xwhm/panel/integrations-developer.ts apps/web/src/themes/v2/pages/xwhm/security/overview.ts apps/web/src/themes/v2/pages/xwhm/security/panel-access.ts apps/web/src/themes/v2/pages/xwhm/security/policies.ts apps/web/src/themes/v2/pages/xwhm/server/setup.ts apps/web/src/themes/v2/pages/xwhm/software/catalog.ts
+#: apps/web/src/board-port/approved-xwhm.ts apps/web/src/board-port/dns-cluster-section.ts apps/web/src/board-port/identity-workspaces.ts apps/web/src/board-port/sec-workspace.ts apps/web/src/board-port/whm-extend-workspace.ts apps/web/src/themes/v2/pages/identity.ts apps/web/src/themes/v2/pages/xwhm/account-tools/pages.ts apps/web/src/themes/v2/pages/xwhm/panel/configuration.ts apps/web/src/themes/v2/pages/xwhm/panel/integrations-developer.ts apps/web/src/themes/v2/pages/xwhm/security/overview.ts apps/web/src/themes/v2/pages/xwhm/security/panel-access.ts apps/web/src/themes/v2/pages/xwhm/security/policies.ts apps/web/src/themes/v2/pages/xwhm/security/ssh.ts apps/web/src/themes/v2/pages/xwhm/server/setup.ts apps/web/src/themes/v2/pages/xwhm/software/catalog.ts
 msgid "This page requires an authorized administrator. Nothing was read or changed."
 msgstr "تتطلب هذه الصفحة مسؤولًا مفوّضًا. لم يُقرأ أو يُغيَّر شيء."
 
@@ -61216,7 +61213,7 @@ msgstr "لا يمكن لهذه الجلسة تغيير هذا الموقع."
 msgid "This session has not qualified this workspace. Its controls remain unavailable."
 msgstr "لم تؤهّل هذه الجلسة مساحة العمل. تبقى عناصر التحكم غير متاحة."
 
-#: apps/web/src/board-port/approved-xwhm.ts apps/web/src/themes/v2/pages/xwhm/security/overview.ts
+#: apps/web/src/board-port/approved-xwhm.ts
 msgid "This setting has no connected host operation. No changes have been applied."
 msgstr "لا ترتبط هذه الإعدادات بعملية مضيف موصولة. لم تُطبّق أي تغييرات."
 
@@ -61433,7 +61430,7 @@ msgstr "Thunderbird"
 msgid "Thunderbird: open the downloaded XML from the account setup when asked, or enter the manual settings above."
 msgstr "Thunderbird: افتح ملف XML المنزَّل من إعداد الحساب عند الطلب، أو أدخل الإعدادات اليدوية أعلاه."
 
-#: apps/web/src/mail-calendar-view-client.ts packages/core/src/host-tool-cards.ts
+#: apps/web/src/mail-calendar-view-client.ts apps/web/src/workspace-runtime-client.ts packages/core/src/host-tool-cards.ts
 msgid "Thursday"
 msgstr "الخميس"
 
@@ -61449,7 +61446,7 @@ msgstr "دليل التذاكر مملوك للمستخدم root بالأذون�
 msgid "Time"
 msgstr "الوقت"
 
-#: apps/web/src/board-port/account-owner-tools-cards.ts apps/web/src/board-port/account-team-audit-card.ts apps/web/src/board-port/approved-xpanel-pages.ts apps/web/src/board-port/whm-ftp-log-workspace.ts apps/web/src/board-port/whm-log-tools-workspace.ts apps/web/src/board-port/whm-metering-workspace.ts apps/web/src/board-port/whm-monitoring-alerts-workspace.ts apps/web/src/board-port/whm-monitoring-workspace.ts apps/web/src/board-port/whm-security-components.ts apps/web/src/board-port/whm-whmcs-workspace.ts apps/web/src/models/svc-panels.ts apps/web/src/themes/v2/pages/xpanel/operations/owner-tools.ts apps/web/src/themes/v2/pages/xpanel/security/account.ts apps/web/src/themes/v2/pages/xwhm/activity/audit.ts apps/web/src/themes/v2/pages/xwhm/monitoring/log-tools.ts apps/web/src/themes/v2/pages/xwhm/monitoring/snapshots.ts apps/web/src/themes/v2/pages/xwhm/monitoring/workflows.ts apps/web/src/themes/v2/pages/xwhm/panel/whmcs.ts apps/web/src/themes/v2/pages/xwhm/security/ssh.ts
+#: apps/web/src/board-port/account-owner-tools-cards.ts apps/web/src/board-port/account-team-audit-card.ts apps/web/src/board-port/approved-xpanel-pages.ts apps/web/src/board-port/whm-ftp-log-workspace.ts apps/web/src/board-port/whm-log-tools-workspace.ts apps/web/src/board-port/whm-metering-workspace.ts apps/web/src/board-port/whm-monitoring-alerts-workspace.ts apps/web/src/board-port/whm-monitoring-workspace.ts apps/web/src/board-port/whm-security-components.ts apps/web/src/board-port/whm-whmcs-workspace.ts apps/web/src/models/svc-panels.ts apps/web/src/themes/v2/pages/xpanel/observations/traffic.ts apps/web/src/themes/v2/pages/xpanel/operations/owner-tools.ts apps/web/src/themes/v2/pages/xpanel/security/account.ts apps/web/src/themes/v2/pages/xwhm/activity/audit.ts apps/web/src/themes/v2/pages/xwhm/monitoring/log-tools.ts apps/web/src/themes/v2/pages/xwhm/monitoring/snapshots.ts apps/web/src/themes/v2/pages/xwhm/monitoring/workflows.ts apps/web/src/themes/v2/pages/xwhm/panel/whmcs.ts apps/web/src/themes/v2/pages/xwhm/security/ssh.ts
 msgid "Time (UTC)"
 msgstr "الوقت (UTC)"
 
@@ -61481,7 +61478,7 @@ msgstr "مدة البقاء بالثواني (فارغ لبلا انتهاء)"
 msgid "Time window"
 msgstr "النافذة الزمنية"
 
-#: apps/web/src/board-port/account-collaboration-workspace.ts apps/web/src/board-port/mailx-collections-workspace.ts apps/web/src/themes/v2/pages/xpanel/email-tools/collaboration.ts packages/core/src/host-tool-cards.ts
+#: apps/web/src/board-port/account-collaboration-workspace.ts apps/web/src/board-port/mailx-collections-workspace.ts apps/web/src/themes/v2/pages/xpanel/email-tools/collaboration.ts apps/web/src/themes/v2/shell/shell.ts packages/core/src/host-tool-cards.ts
 msgid "Time zone"
 msgstr "المنطقة الزمنية"
 
@@ -62194,7 +62191,7 @@ msgctxt "mail-calendar-view-client"
 msgid "Tue"
 msgstr "ث"
 
-#: apps/web/src/mail-calendar-view-client.ts packages/core/src/host-tool-cards.ts
+#: apps/web/src/mail-calendar-view-client.ts apps/web/src/workspace-runtime-client.ts packages/core/src/host-tool-cards.ts
 msgid "Tuesday"
 msgstr "الثلاثاء"
 
@@ -62596,7 +62593,7 @@ msgstr "غير مخصصة (الخادم)"
 msgid "Unauthenticated response"
 msgstr "الرد على غير الموثقين"
 
-#: apps/web/src/account-collaboration-client.ts apps/web/src/account-forwarders-client.ts apps/web/src/account-list.ts apps/web/src/account-pgp-client.ts apps/web/src/account-quarantine-client.ts apps/web/src/account-ssh-client.ts apps/web/src/account-virus-scan-client.ts apps/web/src/acct-convert-addon-client.ts apps/web/src/acct-restore-client.ts apps/web/src/acct-team-client.ts apps/web/src/acct-templates-client.ts apps/web/src/approved-host-services-client.ts apps/web/src/board-canvas.ts apps/web/src/board-port/account-logs-workspace.ts apps/web/src/board-port/approved-xpanel-bindings.ts apps/web/src/board-port/approved-xpanel-workspaces.ts apps/web/src/board-port/extensions/resources-board.ts apps/web/src/board-port/ops-terminal-workspace.ts apps/web/src/board-port/whm-developer-workspace.ts apps/web/src/board-port/whm-software-center-workspace.ts apps/web/src/board-port/xpanel-home.ts apps/web/src/board-port/xwhm-dashboard.ts apps/web/src/charts.ts apps/web/src/design-board.ts apps/web/src/dnssec-client.ts apps/web/src/mail-calendar-client.ts apps/web/src/mail-calendar-view-client.ts apps/web/src/mail-cards-client.ts apps/web/src/mail-contacts-tools-client.ts apps/web/src/mail-contacts-workspace-client.ts apps/web/src/mail-folder-workspace-client.ts apps/web/src/mail-mailbox-preferences-client.ts apps/web/src/mail-tools-client.ts apps/web/src/mail-vacation-workspace-client.ts apps/web/src/mailx-archive-client.ts apps/web/src/mailx-mail-tools-client.ts apps/web/src/mailx-whm-client.ts apps/web/src/models/action-state.ts apps/web/src/models/mail-cert-panels.ts apps/web/src/models/svc-panels.ts apps/web/src/node-cluster-client.ts apps/web/src/ops-file-sharing-client.ts apps/web/src/ops-integrations-client.ts apps/web/src/ops-nodes-client.ts apps/web/src/ops-terminal-client.ts apps/web/src/plan-editor.ts apps/web/src/sec-security-client.ts apps/web/src/surfaces/xwhm.ts apps/web/src/sw-app-projects-client.ts apps/web/src/sw-applications-client.ts apps/web/src/sw-deployments-client.ts apps/web/src/sw-optimize-client.ts apps/web/src/themes/v2/pages/xpanel/advanced/tools.ts apps/web/src/themes/v2/pages/xpanel/domains/common.ts apps/web/src/themes/v2/pages/xpanel/email-tools/common.ts apps/web/src/themes/v2/pages/xpanel/home.ts apps/web/src/themes/v2/pages/xpanel/observations/logs.ts apps/web/src/themes/v2/pages/xpanel/operations/terminal.ts apps/web/src/themes/v2/pages/xpanel/resources.ts apps/web/src/themes/v2/pages/xpanel/security/account.ts apps/web/src/themes/v2/pages/xpanel/security/tools.ts apps/web/src/themes/v2/pages/xpanel/settings/common.ts apps/web/src/themes/v2/pages/xpanel/settings/preferences.ts apps/web/src/themes/v2/pages/xwhm/overview/index.ts apps/web/src/themes/v2/pages/xwhm/panel/configuration.ts apps/web/src/themes/v2/pages/xwhm/plans/editor.ts apps/web/src/themes/v2/pages/xwhm/security/overview.ts apps/web/src/themes/v2/pages/xwhm/security/ssh.ts apps/web/src/themes/v2/pages/xwhm/server/terminal.ts apps/web/src/themes/v2/pages/xwhm/software/catalog.ts apps/web/src/themes/v2/shell/activity-control.ts apps/web/src/themes/v2/surfaces/unavailable.ts apps/web/src/tokens.ts apps/web/src/whm-announcements-client.ts apps/web/src/whm-backups-client.ts apps/web/src/whm-benchmark-client.ts apps/web/src/whm-composer-client.ts apps/web/src/whm-configuration-health-client.ts apps/web/src/whm-database-tuning-client.ts apps/web/src/whm-developer-client.ts apps/web/src/whm-firewall-client.ts apps/web/src/whm-ftp-log-client.ts apps/web/src/whm-jobs-client.ts apps/web/src/whm-mail-log-client.ts apps/web/src/whm-mail-quality-client.ts apps/web/src/whm-mail-queue-client.ts apps/web/src/whm-mail-server-client.ts apps/web/src/whm-mailbox-maintenance-client.ts apps/web/src/whm-metering-client.ts apps/web/src/whm-monitoring-client.ts apps/web/src/whm-panel-branding-client.ts apps/web/src/whm-panel-data-client.ts apps/web/src/whm-panel-notifications-client.ts apps/web/src/whm-panel-tokens-client.ts apps/web/src/whm-php-client.ts apps/web/src/whm-preferences-client.ts apps/web/src/whm-security-client.ts apps/web/src/whm-security-tools-client.ts apps/web/src/whm-server-info-client.ts apps/web/src/whm-service-detail-client.ts apps/web/src/whm-service-manager-client.ts apps/web/src/whm-software-center-client.ts apps/web/src/whm-ssh-client.ts apps/web/src/whm-ssh-policy-client.ts apps/web/src/whm-support-client.ts apps/web/src/whm-traffic-client.ts apps/web/src/whm-transfer-client.ts apps/web/src/whm-trusted-proxies-client.ts apps/web/src/whm-updates-client.ts apps/web/src/whm-whmcs-client.ts
+#: apps/web/src/account-collaboration-client.ts apps/web/src/account-forwarders-client.ts apps/web/src/account-list.ts apps/web/src/account-pgp-client.ts apps/web/src/account-quarantine-client.ts apps/web/src/account-ssh-client.ts apps/web/src/account-virus-scan-client.ts apps/web/src/acct-convert-addon-client.ts apps/web/src/acct-restore-client.ts apps/web/src/acct-team-client.ts apps/web/src/acct-templates-client.ts apps/web/src/approved-host-services-client.ts apps/web/src/board-canvas.ts apps/web/src/board-port/account-logs-workspace.ts apps/web/src/board-port/approved-xpanel-bindings.ts apps/web/src/board-port/approved-xpanel-workspaces.ts apps/web/src/board-port/extensions/resources-board.ts apps/web/src/board-port/ops-terminal-workspace.ts apps/web/src/board-port/whm-developer-workspace.ts apps/web/src/board-port/whm-software-center-workspace.ts apps/web/src/board-port/xpanel-home.ts apps/web/src/board-port/xwhm-dashboard.ts apps/web/src/charts.ts apps/web/src/design-board.ts apps/web/src/dnssec-client.ts apps/web/src/mail-calendar-client.ts apps/web/src/mail-calendar-view-client.ts apps/web/src/mail-cards-client.ts apps/web/src/mail-contacts-tools-client.ts apps/web/src/mail-contacts-workspace-client.ts apps/web/src/mail-folder-workspace-client.ts apps/web/src/mail-mailbox-preferences-client.ts apps/web/src/mail-tools-client.ts apps/web/src/mail-vacation-workspace-client.ts apps/web/src/mailx-archive-client.ts apps/web/src/mailx-mail-tools-client.ts apps/web/src/mailx-whm-client.ts apps/web/src/models/action-state.ts apps/web/src/models/mail-cert-panels.ts apps/web/src/models/svc-panels.ts apps/web/src/node-cluster-client.ts apps/web/src/ops-file-sharing-client.ts apps/web/src/ops-integrations-client.ts apps/web/src/ops-nodes-client.ts apps/web/src/ops-terminal-client.ts apps/web/src/panel-resources-client.ts apps/web/src/plan-editor.ts apps/web/src/sec-security-client.ts apps/web/src/surfaces/xwhm.ts apps/web/src/sw-app-projects-client.ts apps/web/src/sw-applications-client.ts apps/web/src/sw-deployments-client.ts apps/web/src/sw-optimize-client.ts apps/web/src/themes/v2/pages/xpanel/advanced/tools.ts apps/web/src/themes/v2/pages/xpanel/domains/common.ts apps/web/src/themes/v2/pages/xpanel/email-tools/common.ts apps/web/src/themes/v2/pages/xpanel/home.ts apps/web/src/themes/v2/pages/xpanel/observations/logs.ts apps/web/src/themes/v2/pages/xpanel/operations/terminal.ts apps/web/src/themes/v2/pages/xpanel/resources.ts apps/web/src/themes/v2/pages/xpanel/security/account.ts apps/web/src/themes/v2/pages/xpanel/security/tools.ts apps/web/src/themes/v2/pages/xpanel/settings/common.ts apps/web/src/themes/v2/pages/xpanel/settings/preferences.ts apps/web/src/themes/v2/pages/xwhm/overview/index.ts apps/web/src/themes/v2/pages/xwhm/panel/configuration.ts apps/web/src/themes/v2/pages/xwhm/plans/editor.ts apps/web/src/themes/v2/pages/xwhm/security/overview.ts apps/web/src/themes/v2/pages/xwhm/security/ssh.ts apps/web/src/themes/v2/pages/xwhm/server/terminal.ts apps/web/src/themes/v2/pages/xwhm/software/catalog.ts apps/web/src/themes/v2/pages/xwhm/tls/install.ts apps/web/src/themes/v2/shell/activity-control.ts apps/web/src/themes/v2/surfaces/unavailable.ts apps/web/src/tokens.ts apps/web/src/whm-announcements-client.ts apps/web/src/whm-backups-client.ts apps/web/src/whm-benchmark-client.ts apps/web/src/whm-composer-client.ts apps/web/src/whm-configuration-health-client.ts apps/web/src/whm-database-tuning-client.ts apps/web/src/whm-developer-client.ts apps/web/src/whm-firewall-client.ts apps/web/src/whm-ftp-log-client.ts apps/web/src/whm-jobs-client.ts apps/web/src/whm-mail-log-client.ts apps/web/src/whm-mail-quality-client.ts apps/web/src/whm-mail-queue-client.ts apps/web/src/whm-mail-server-client.ts apps/web/src/whm-mailbox-maintenance-client.ts apps/web/src/whm-metering-client.ts apps/web/src/whm-monitoring-client.ts apps/web/src/whm-panel-branding-client.ts apps/web/src/whm-panel-data-client.ts apps/web/src/whm-panel-notifications-client.ts apps/web/src/whm-panel-tokens-client.ts apps/web/src/whm-php-client.ts apps/web/src/whm-preferences-client.ts apps/web/src/whm-security-client.ts apps/web/src/whm-security-tools-client.ts apps/web/src/whm-server-info-client.ts apps/web/src/whm-service-detail-client.ts apps/web/src/whm-service-manager-client.ts apps/web/src/whm-software-center-client.ts apps/web/src/whm-ssh-client.ts apps/web/src/whm-ssh-policy-client.ts apps/web/src/whm-support-client.ts apps/web/src/whm-traffic-client.ts apps/web/src/whm-transfer-client.ts apps/web/src/whm-trusted-proxies-client.ts apps/web/src/whm-updates-client.ts apps/web/src/whm-whmcs-client.ts
 msgid "Unavailable"
 msgstr "غير متاح"
 
@@ -62734,7 +62731,7 @@ msgstr "غير متاح؛ يلزم مدخل مخصص ومحمي وإمكانية
 msgid "Unavailable; saved policy is not evidence of active trust"
 msgstr "غير متاحة؛ السياسة المحفوظة ليست دليلًا على الثقة النشطة"
 
-#: apps/web/src/board-port/approved-whm-operations-components.ts apps/web/src/board-port/whm-security-tools-workspace.ts apps/web/src/themes/v2/pages/xwhm/host/firewall.ts apps/web/src/themes/v2/pages/xwhm/security/tools.ts apps/web/src/whm-firewall-client.ts apps/web/src/whm-security-tools-client.ts
+#: apps/web/src/board-port/approved-whm-operations-components.ts apps/web/src/board-port/whm-security-tools-workspace.ts apps/web/src/themes/v2/pages/xwhm/host/firewall.ts apps/web/src/themes/v2/pages/xwhm/security/tools.ts apps/web/src/whm-firewall-client.ts apps/web/src/whm-security-controls-client.ts apps/web/src/whm-security-tools-client.ts
 msgid "Unban"
 msgstr "رفع الحظر"
 
@@ -62794,7 +62791,7 @@ msgstr "لم تُقرأ ملاحظات الطلبات غير المرتبطة."
 msgid "Unbound requests"
 msgstr "الطلبات غير المرتبطة"
 
-#: apps/web/src/account-backup-client.ts apps/web/src/board-canvas.ts apps/web/src/board-port/account-backup-workspace.ts apps/web/src/board-port/approved-whm-backups.ts apps/web/src/board-port/approved-xpanel-pages.ts apps/web/src/board-port/dns-cluster-section.ts apps/web/src/themes/v2/pages/xpanel/operations/backup.ts apps/web/src/themes/v2/pages/xwhm/dns/cluster-members.ts
+#: apps/web/src/account-backup-client.ts apps/web/src/board-canvas.ts apps/web/src/board-port/account-backup-workspace.ts apps/web/src/board-port/approved-whm-backups.ts apps/web/src/board-port/approved-xpanel-pages.ts apps/web/src/board-port/dns-cluster-section.ts apps/web/src/themes/v2/pages/xpanel/operations/backup.ts apps/web/src/themes/v2/pages/xwhm/dns/cluster-members.ts apps/web/src/whm-web-server-client.ts
 msgid "Unchanged"
 msgstr "دون تغيير"
 
@@ -62802,7 +62799,7 @@ msgstr "دون تغيير"
 msgid "Unchanged since registration"
 msgstr "لم يتغير منذ التسجيل"
 
-#: apps/web/src/themes/v2/pages/xwhm/host/firewall.ts apps/web/src/whm-firewall-client.ts
+#: apps/web/src/themes/v2/pages/xwhm/host/firewall.ts apps/web/src/themes/v2/pages/xwhm/host/services.ts apps/web/src/whm-firewall-client.ts
 msgid "Unchecked"
 msgstr "غير مفحوص"
 
@@ -62948,7 +62945,7 @@ msgstr "غير معروف: تعذرت قراءة إعداد خادم البري�
 msgid "Unknown; {count, plural, one {# database is} other {# databases are}} removed with the copy"
 msgstr "غير معروفة؛ {count, plural, one {تُزال قاعدة بيانات واحدة} two {تُزال قاعدتا بيانات} few {تُزال # قواعد بيانات} many {تُزال # قاعدة بيانات} other {تُزال # قاعدة بيانات}} مع النسخة"
 
-#: apps/web/src/account-list.ts apps/web/src/account-runtime-client.ts apps/web/src/acct-enhancements-client.ts apps/web/src/board-canvas.ts apps/web/src/board-port/account-cron-workspace.ts apps/web/src/board-port/approved-whm-account-components.ts apps/web/src/board-port/approved-whm-resellers.ts apps/web/src/board-port/approved-xwhm.ts apps/web/src/board-port/extensions/resources-board.ts apps/web/src/board-port/sec-workspace.ts apps/web/src/domain-workspace-client.ts apps/web/src/plan-editor.ts apps/web/src/sec-security-client.ts apps/web/src/surfaces/xwhm.ts apps/web/src/themes/v2/pages/xpanel/email/accounts.ts apps/web/src/themes/v2/pages/xpanel/home.ts apps/web/src/themes/v2/pages/xwhm/accounts/create.ts apps/web/src/themes/v2/pages/xwhm/accounts/list.ts apps/web/src/themes/v2/pages/xwhm/plans/editor.ts apps/web/src/themes/v2/pages/xwhm/plans/plans.ts apps/web/src/themes/v2/pages/xwhm/resellers/index.ts apps/web/src/themes/v2/pages/xwhm/resellers/records.ts apps/web/src/themes/v2/pages/xwhm/resellers/tools.ts apps/web/src/tokens.ts apps/web/src/whm-domains-client.ts apps/web/src/whm-mailbox-maintenance-client.ts apps/web/src/whm-metering-client.ts apps/web/src/whm-server-health-client.ts
+#: apps/web/src/account-list.ts apps/web/src/account-preflight-client.ts apps/web/src/account-runtime-client.ts apps/web/src/acct-enhancements-client.ts apps/web/src/board-canvas.ts apps/web/src/board-port/account-cron-workspace.ts apps/web/src/board-port/approved-whm-account-components.ts apps/web/src/board-port/approved-whm-resellers.ts apps/web/src/board-port/approved-xwhm.ts apps/web/src/board-port/extensions/resources-board.ts apps/web/src/board-port/sec-workspace.ts apps/web/src/domain-workspace-client.ts apps/web/src/plan-editor.ts apps/web/src/sec-security-client.ts apps/web/src/surfaces/xwhm.ts apps/web/src/themes/v2/pages/xpanel/email/accounts.ts apps/web/src/themes/v2/pages/xpanel/home.ts apps/web/src/themes/v2/pages/xwhm/accounts/create.ts apps/web/src/themes/v2/pages/xwhm/accounts/list.ts apps/web/src/themes/v2/pages/xwhm/plans/editor.ts apps/web/src/themes/v2/pages/xwhm/plans/plans.ts apps/web/src/themes/v2/pages/xwhm/resellers/index.ts apps/web/src/themes/v2/pages/xwhm/resellers/records.ts apps/web/src/themes/v2/pages/xwhm/resellers/tools.ts apps/web/src/tokens.ts apps/web/src/whm-domains-client.ts apps/web/src/whm-mailbox-maintenance-client.ts apps/web/src/whm-metering-client.ts apps/web/src/whm-server-health-client.ts
 msgid "Unlimited"
 msgstr "غير محدود"
 
@@ -62982,11 +62979,11 @@ msgstr "حصة بريد غير محدودة"
 msgid "Unlimited path quota"
 msgstr "حصة مسار غير محدودة"
 
-#: apps/web/src/board-port/approved-xwhm.ts apps/web/src/board-port/sec-workspace.ts apps/web/src/themes/v2/pages/xwhm/security/overview.ts apps/web/src/themes/v2/pages/xwhm/security/policies.ts
+#: apps/web/src/board-port/approved-xwhm.ts apps/web/src/board-port/sec-workspace.ts apps/web/src/themes/v2/pages/xwhm/security/policies.ts
 msgid "Unlimited request body"
 msgstr "جسم طلب غير محدود"
 
-#: apps/web/src/board-port/approved-xwhm.ts apps/web/src/board-port/sec-workspace.ts apps/web/src/themes/v2/pages/xwhm/security/overview.ts apps/web/src/themes/v2/pages/xwhm/security/policies.ts
+#: apps/web/src/board-port/approved-xwhm.ts apps/web/src/board-port/sec-workspace.ts apps/web/src/themes/v2/pages/xwhm/security/policies.ts
 msgid "Unlimited request rate"
 msgstr "معدل طلبات غير محدود"
 
@@ -64173,7 +64170,7 @@ msgstr "استخدم اسم مستخدم التحديث وكلمة المرور 
 msgid "Use the workspace language control to change the interface language."
 msgstr "استخدم عنصر اللغة في مساحة العمل لتغيير لغة الواجهة."
 
-#: apps/web/src/board-port/xmail-connect-devices.ts apps/web/src/themes/v2/pages/xmail/workspaces/tools.ts
+#: apps/web/src/board-port/xmail-connect-devices.ts apps/web/src/themes/v2/pages/xmail/workspaces/tools.ts apps/web/src/themes/v2/pages/xpanel/email/accounts.ts
 msgid "Use these settings in desktop and mobile mail apps. Your password is the mailbox password; it is never shown here or included in setup files."
 msgstr "استخدم هذه الإعدادات في تطبيقات البريد على الحاسوب والهاتف. كلمة المرور هي كلمة مرور صندوق البريد، ولا تُعرض هنا ولا تُضمَّن في ملفات الإعداد."
 
@@ -64229,6 +64226,7 @@ msgstr "يُستخدم عندما لا تحدد الحزمة الجديدة ال
 msgid "User"
 msgstr "المستخدم"
 
+#: apps/web/src/themes/v2/pages/xpanel/observations/traffic.ts
 msgid "User agent"
 msgstr "وكيل المستخدم"
 
@@ -64271,12 +64269,12 @@ msgstr "المستخدم المراد إعادة ضبطه"
 msgid "User-agent patterns"
 msgstr "أنماط وكلاء المستخدم"
 
-#: apps/web/src/board-port/approved-xwhm.ts apps/web/src/themes/v2/pages/xwhm/security/overview.ts
+#: apps/web/src/board-port/approved-xwhm.ts
 msgctxt "approved-xwhm"
 msgid "User-agent patterns"
 msgstr "أنماط وكيل المستخدم"
 
-#: apps/web/src/acct-team-client.ts apps/web/src/app.ts apps/web/src/board-port/account-dav-workspace.ts apps/web/src/board-port/account-ssh-workspace.ts apps/web/src/board-port/acct-team-workspace.ts apps/web/src/board-port/approved-xpanel-bindings.ts apps/web/src/board-port/approved-xpanel-pages.ts apps/web/src/board-port/approved-xwhm.ts apps/web/src/board-port/mailx-whm-workspace.ts apps/web/src/board-port/service-users-workspace.ts apps/web/src/board-port/whm-security-components.ts apps/web/src/board-port/xmail-connect-devices.ts apps/web/src/board-port/xpanel-home.ts apps/web/src/design-board.ts apps/web/src/directory-privacy-client.ts apps/web/src/surfaces/login-layout.ts apps/web/src/surfaces/login.ts apps/web/src/surfaces/xwhm.ts apps/web/src/themes/v2/pages/xmail/workspaces/tools.ts apps/web/src/themes/v2/pages/xpanel/files/privacy.ts apps/web/src/themes/v2/pages/xpanel/files/web-disk.ts apps/web/src/themes/v2/pages/xpanel/home.ts apps/web/src/themes/v2/pages/xpanel/security/account.ts apps/web/src/themes/v2/pages/xpanel/security/tools.ts apps/web/src/themes/v2/pages/xpanel/settings/preferences.ts apps/web/src/themes/v2/pages/xpanel/settings/team.ts apps/web/src/themes/v2/pages/xwhm/accounts/create.ts apps/web/src/themes/v2/pages/xwhm/mail/policy.ts apps/web/src/themes/v2/pages/xwhm/resellers/index.ts apps/web/src/themes/v2/pages/xwhm/security/panel-access.ts apps/web/src/themes/v2/pages/xwhm/security/ssh.ts apps/web/src/themes/v2/surfaces/login.ts apps/web/src/whm-developer-client.ts
+#: apps/web/src/acct-team-client.ts apps/web/src/app.ts apps/web/src/board-port/account-dav-workspace.ts apps/web/src/board-port/account-ssh-workspace.ts apps/web/src/board-port/acct-team-workspace.ts apps/web/src/board-port/approved-xpanel-bindings.ts apps/web/src/board-port/approved-xpanel-pages.ts apps/web/src/board-port/approved-xwhm.ts apps/web/src/board-port/mailx-whm-workspace.ts apps/web/src/board-port/service-users-workspace.ts apps/web/src/board-port/whm-security-components.ts apps/web/src/board-port/xmail-connect-devices.ts apps/web/src/board-port/xpanel-home.ts apps/web/src/design-board.ts apps/web/src/directory-privacy-client.ts apps/web/src/surfaces/login-layout.ts apps/web/src/surfaces/login.ts apps/web/src/surfaces/xwhm.ts apps/web/src/themes/v2/pages/xmail/workspaces/tools.ts apps/web/src/themes/v2/pages/xpanel/email/accounts.ts apps/web/src/themes/v2/pages/xpanel/files/privacy.ts apps/web/src/themes/v2/pages/xpanel/files/web-disk.ts apps/web/src/themes/v2/pages/xpanel/home.ts apps/web/src/themes/v2/pages/xpanel/security/account.ts apps/web/src/themes/v2/pages/xpanel/security/tools.ts apps/web/src/themes/v2/pages/xpanel/settings/preferences.ts apps/web/src/themes/v2/pages/xpanel/settings/team.ts apps/web/src/themes/v2/pages/xwhm/accounts/create.ts apps/web/src/themes/v2/pages/xwhm/mail/policy.ts apps/web/src/themes/v2/pages/xwhm/resellers/index.ts apps/web/src/themes/v2/pages/xwhm/security/panel-access.ts apps/web/src/themes/v2/pages/xwhm/security/ssh.ts apps/web/src/themes/v2/surfaces/login.ts apps/web/src/whm-developer-client.ts
 msgid "Username"
 msgstr "اسم المستخدم"
 
@@ -64515,7 +64513,7 @@ msgstr "متحقق منها ومفعّلة"
 msgid "Verified copies"
 msgstr "النسخ المتحقق منها"
 
-#: apps/web/src/board-port/extensions/resources-board.ts apps/web/src/themes/v2/pages/xpanel/home.ts apps/web/src/themes/v2/pages/xpanel/resources.ts
+#: apps/web/src/board-port/extensions/resources-board.ts apps/web/src/panel-resources-client.ts apps/web/src/themes/v2/pages/xpanel/home.ts apps/web/src/themes/v2/pages/xpanel/resources.ts
 msgid "Verified for this sample"
 msgstr "تم التحقق لهذه العينة"
 
@@ -64902,7 +64900,7 @@ msgstr "المهمة المراقبة"
 msgid "Watch this service"
 msgstr "مراقبة هذه الخدمة"
 
-#: apps/web/src/whm-db-root-password-client.ts
+#: apps/web/src/whm-db-root-password-client.ts apps/web/src/workspace-runtime-client.ts
 msgid "Weak"
 msgstr "ضعيفة"
 
@@ -65156,7 +65154,7 @@ msgctxt "mail-calendar-view-client"
 msgid "Wed"
 msgstr "ر"
 
-#: apps/web/src/mail-calendar-view-client.ts packages/core/src/host-tool-cards.ts
+#: apps/web/src/mail-calendar-view-client.ts apps/web/src/workspace-runtime-client.ts packages/core/src/host-tool-cards.ts
 msgid "Wednesday"
 msgstr "الأربعاء"
 
@@ -68536,7 +68534,7 @@ msgstr "اسحب الملفات إلى هنا لرفعها إلى هذا الم�
 msgid "Unread only"
 msgstr "غير المقروءة فقط"
 
-#: apps/web/src/themes/v2/pages/xwhm/accounts/create.ts
+#: apps/web/src/themes/v2/pages/xwhm/accounts/create.ts apps/web/src/workspace-runtime-client.ts
 msgid "Step-by-step mode"
 msgstr "وضع خطوة بخطوة"
 
@@ -68648,72 +68646,95 @@ msgstr "تنقل صفحات الجدول"
 msgid "Showing {start}–{end} of {total}"
 msgstr "عرض {start}–{end} من {total}"
 
+#: apps/web/src/themes/v2/pages/xmail/workspaces/tools.ts
 msgid "Mailbox utilities"
 msgstr "أدوات صندوق البريد"
 
+#: apps/web/src/themes/v2/pages/xwhm/dns/tools.ts
 msgid "DNS diagnostics & TTL"
 msgstr "تشخيص DNS ومدة التخزين TTL"
 
+#: apps/web/src/themes/v2/pages/xwhm/host/services.ts
 msgid "Service manager & watchdog"
 msgstr "إدارة الخدمات والمراقب التلقائي"
 
+#: apps/web/src/themes/v2/pages/xwhm/lifecycle/backups.ts apps/web/src/themes/v2/pages/xwhm/recovery-tools/restore.ts
 msgid "Mail & partial restore"
 msgstr "استعادة البريد والاستعادة الجزئية"
 
+#: apps/web/src/themes/v2/pages/xwhm/resellers/index.ts apps/web/src/themes/v2/pages/xwhm/resellers/records.ts
 msgid "Reseller usage & mail"
 msgstr "استهلاك ومراسلة الموزعين"
 
+#: apps/web/src/themes/v2/shell/overlays.ts
 msgid "Toggle dark or light theme"
 msgstr "تبديل المظهر الداكن أو الفاتح"
 
+#: apps/web/src/themes/v2/shell/overlays.ts
 msgid "Switch interface language"
 msgstr "تبديل لغة الواجهة"
 
+#: apps/web/src/themes/v2/shell/overlays.ts apps/web/src/themes/v2/shell/shell.ts
 msgid "Toggle sidebar"
 msgstr "طي أو توسيع القائمة الجانبية"
 
+#: apps/web/src/themes/v2/shell/overlays.ts
 msgid "Refresh current page"
 msgstr "تحديث الصفحة الحالية"
 
+#: apps/web/src/themes/v2/shell/shell.ts
 msgid "Server time (UTC)"
 msgstr "توقيت الخادم (UTC)"
 
+#: apps/web/src/themes/v2/shell/shell.ts
 msgid "Browser local time"
 msgstr "التوقيت المحلي للمتصفح"
 
+#: apps/web/src/panel-resources-client.ts
 msgid "Account usage updated from host observation."
 msgstr "تم تحديث استهلاك الحساب من قراءة الخادم الحية."
 
+#: apps/web/src/panel-resources-client.ts
 msgid "Host usage metrics are currently unavailable; stored plan limits remain shown."
 msgstr "مقاييس استهلاك الخادم غير متاحة حالياً؛ تبقى حدود الخطة المحفوظة معروضة."
 
+#: apps/web/src/panel-resources-client.ts
 msgid "Reading live resource usage..."
 msgstr "جارٍ قراءة استهلاك الموارد الحية..."
 
+#: apps/web/src/panel-resources-client.ts
 msgid "Could not refresh resource usage. Try again."
 msgstr "تعذّر تحديث استهلاك الموارد. حاول مرة أخرى."
 
+#: apps/web/src/account-preflight-client.ts
 msgid "Checking..."
 msgstr "جارٍ التحقق..."
 
+#: apps/web/src/account-preflight-client.ts
 msgid "Username already taken"
 msgstr "اسم المستخدم محجوز مسبقاً"
 
+#: apps/web/src/account-preflight-client.ts
 msgid "Invalid username format"
 msgstr "صيغة اسم المستخدم غير صالحة"
 
+#: apps/web/src/account-preflight-client.ts
 msgid "Checked when submitted"
 msgstr "يُتحقّق منه عند الإرسال"
 
+#: apps/web/src/account-preflight-client.ts
 msgid "Domain already exists"
 msgstr "النطاق موجود مسبقاً"
 
+#: apps/web/src/account-preflight-client.ts
 msgid "Invalid domain name"
 msgstr "اسم النطاق غير صالح"
 
+#: apps/web/src/account-preflight-client.ts
 msgid "Fits owner capacity"
 msgstr "ضمن سعة المالك المتاحة"
 
+#: apps/web/src/account-preflight-client.ts
 msgid "Exceeds owner capacity"
 msgstr "يتجاوز سعة المالك المتاحة"
 
@@ -68759,9 +68780,11 @@ msgstr "ملخص الجدولة"
 msgid "Technical cron expression"
 msgstr "تعبير الجدولة التقني"
 
+#: apps/web/src/account-traffic-monitor-client.ts apps/web/src/themes/v2/pages/identity.ts apps/web/src/themes/v2/pages/xmail/compose.ts apps/web/src/themes/v2/pages/xmail/vacation.ts apps/web/src/themes/v2/pages/xmail/workspaces/organizer.ts apps/web/src/themes/v2/pages/xmail/workspaces/settings.ts apps/web/src/themes/v2/pages/xmail/workspaces/tools.ts apps/web/src/themes/v2/pages/xpanel/advanced/directives.ts apps/web/src/themes/v2/pages/xpanel/advanced/tools.ts apps/web/src/themes/v2/pages/xpanel/domains/cloudflare.ts apps/web/src/themes/v2/pages/xpanel/domains/domains.ts apps/web/src/themes/v2/pages/xpanel/domains/publisher.ts apps/web/src/themes/v2/pages/xpanel/domains/redirects.ts apps/web/src/themes/v2/pages/xpanel/domains/reverse-proxy.ts apps/web/src/themes/v2/pages/xpanel/domains/site-settings.ts apps/web/src/themes/v2/pages/xpanel/domains/staging.ts apps/web/src/themes/v2/pages/xpanel/email-tools/archive-deliverability.ts apps/web/src/themes/v2/pages/xpanel/email-tools/filters.ts apps/web/src/themes/v2/pages/xpanel/email-tools/list-moderation.ts apps/web/src/themes/v2/pages/xpanel/email-tools/mailing-lists.ts apps/web/src/themes/v2/pages/xpanel/email-tools/quarantine.ts apps/web/src/themes/v2/pages/xpanel/email-tools/spam.ts apps/web/src/themes/v2/pages/xpanel/email/accounts.ts apps/web/src/themes/v2/pages/xpanel/email/forwarders.ts apps/web/src/themes/v2/pages/xpanel/files/index.ts apps/web/src/themes/v2/pages/xpanel/files/leech.ts apps/web/src/themes/v2/pages/xpanel/files/templates.ts apps/web/src/themes/v2/pages/xpanel/files/web-disk.ts apps/web/src/themes/v2/pages/xpanel/home.ts apps/web/src/themes/v2/pages/xpanel/observations/health.ts apps/web/src/themes/v2/pages/xpanel/observations/traffic.ts apps/web/src/themes/v2/pages/xpanel/observations/web-stats.ts apps/web/src/themes/v2/pages/xpanel/operations/backup.ts apps/web/src/themes/v2/pages/xpanel/operations/file-restoration.ts apps/web/src/themes/v2/pages/xpanel/operations/git.ts apps/web/src/themes/v2/pages/xpanel/operations/owner-tools.ts apps/web/src/themes/v2/pages/xpanel/operations/runtime.ts apps/web/src/themes/v2/pages/xpanel/operations/terminal.ts apps/web/src/themes/v2/pages/xpanel/resources.ts apps/web/src/themes/v2/pages/xpanel/security/account.ts apps/web/src/themes/v2/pages/xpanel/security/certificates.ts apps/web/src/themes/v2/pages/xpanel/security/ip-blocker.ts apps/web/src/themes/v2/pages/xpanel/security/tools.ts apps/web/src/themes/v2/pages/xpanel/services/dnssec.ts apps/web/src/themes/v2/pages/xpanel/settings/preferences.ts apps/web/src/themes/v2/pages/xpanel/settings/team.ts apps/web/src/themes/v2/pages/xpanel/software/htaccess.ts apps/web/src/themes/v2/pages/xpanel/software/optimize.ts apps/web/src/themes/v2/pages/xpanel/software/php.ts apps/web/src/themes/v2/pages/xpanel/store/index.ts apps/web/src/themes/v2/pages/xwhm/account-tools/pages.ts apps/web/src/themes/v2/pages/xwhm/accounts/create.ts apps/web/src/themes/v2/pages/xwhm/accounts/list.ts apps/web/src/themes/v2/pages/xwhm/activity/audit.ts apps/web/src/themes/v2/pages/xwhm/activity/jobs.ts apps/web/src/themes/v2/pages/xwhm/databases/index.ts apps/web/src/themes/v2/pages/xwhm/dns/cluster-members.ts apps/web/src/themes/v2/pages/xwhm/dns/index.ts apps/web/src/themes/v2/pages/xwhm/dns/providers.ts apps/web/src/themes/v2/pages/xwhm/dns/tools.ts apps/web/src/themes/v2/pages/xwhm/domains/index.ts apps/web/src/themes/v2/pages/xwhm/host/firewall.ts apps/web/src/themes/v2/pages/xwhm/host/php.ts apps/web/src/themes/v2/pages/xwhm/host/services.ts apps/web/src/themes/v2/pages/xwhm/lifecycle/backups.ts apps/web/src/themes/v2/pages/xwhm/lifecycle/client-templates.ts apps/web/src/themes/v2/pages/xwhm/lifecycle/destination-manager.ts apps/web/src/themes/v2/pages/xwhm/lifecycle/destinations.ts apps/web/src/themes/v2/pages/xwhm/lifecycle/shared.ts apps/web/src/themes/v2/pages/xwhm/lifecycle/transfers.ts apps/web/src/themes/v2/pages/xwhm/lifecycle/upgrade.ts apps/web/src/themes/v2/pages/xwhm/mail/common.ts apps/web/src/themes/v2/pages/xwhm/mail/logs.ts apps/web/src/themes/v2/pages/xwhm/mail/operations.ts apps/web/src/themes/v2/pages/xwhm/mail/server.ts apps/web/src/themes/v2/pages/xwhm/monitoring/common.ts apps/web/src/themes/v2/pages/xwhm/monitoring/log-tools.ts apps/web/src/themes/v2/pages/xwhm/monitoring/resources.ts apps/web/src/themes/v2/pages/xwhm/monitoring/snapshots.ts apps/web/src/themes/v2/pages/xwhm/monitoring/web-stats-engines.ts apps/web/src/themes/v2/pages/xwhm/monitoring/workflows.ts apps/web/src/themes/v2/pages/xwhm/overview/index.ts apps/web/src/themes/v2/pages/xwhm/panel/configuration.ts apps/web/src/themes/v2/pages/xwhm/panel/integrations-developer.ts apps/web/src/themes/v2/pages/xwhm/panel/locales-preferences.ts apps/web/src/themes/v2/pages/xwhm/panel/notifications.ts apps/web/src/themes/v2/pages/xwhm/panel/tokens.ts apps/web/src/themes/v2/pages/xwhm/panel/whmcs.ts apps/web/src/themes/v2/pages/xwhm/plans/editor.ts apps/web/src/themes/v2/pages/xwhm/plans/enhancements.ts apps/web/src/themes/v2/pages/xwhm/plans/features.ts apps/web/src/themes/v2/pages/xwhm/plans/plans.ts apps/web/src/themes/v2/pages/xwhm/recovery-tools/convert.ts apps/web/src/themes/v2/pages/xwhm/recovery-tools/restore.ts apps/web/src/themes/v2/pages/xwhm/resellers/index.ts apps/web/src/themes/v2/pages/xwhm/resellers/records.ts apps/web/src/themes/v2/pages/xwhm/resellers/tools.ts apps/web/src/themes/v2/pages/xwhm/security/overview.ts apps/web/src/themes/v2/pages/xwhm/security/policies.ts apps/web/src/themes/v2/pages/xwhm/security/ssh.ts apps/web/src/themes/v2/pages/xwhm/server/common.ts apps/web/src/themes/v2/pages/xwhm/server/host-tools.ts apps/web/src/themes/v2/pages/xwhm/server/ip-tools.ts apps/web/src/themes/v2/pages/xwhm/server/ips.ts apps/web/src/themes/v2/pages/xwhm/server/server-ops.ts apps/web/src/themes/v2/pages/xwhm/server/setup.ts apps/web/src/themes/v2/pages/xwhm/server/terminal.ts apps/web/src/themes/v2/pages/xwhm/server/trusted-proxies.ts apps/web/src/themes/v2/pages/xwhm/service-tools/details.ts apps/web/src/themes/v2/pages/xwhm/service-tools/nginx-proxy.ts apps/web/src/themes/v2/pages/xwhm/service-tools/web.ts apps/web/src/themes/v2/pages/xwhm/software/catalog.ts apps/web/src/themes/v2/pages/xwhm/software/common.ts apps/web/src/themes/v2/pages/xwhm/software/containers.ts apps/web/src/themes/v2/pages/xwhm/software/ctr-sections.ts apps/web/src/themes/v2/pages/xwhm/software/projects.ts apps/web/src/themes/v2/pages/xwhm/tls/index.ts apps/web/src/themes/v2/pages/xwhm/tls/install.ts apps/web/src/themes/v2/tool-card-view.ts
 msgid "Loading..."
 msgstr "جاري القراءة..."
 
+#: apps/web/src/themes/v2/pages/xwhm/monitoring/resources.ts
 msgid "Enable service"
 msgstr "تفعيل الخدمة"
 
@@ -68798,132 +68821,174 @@ msgstr "تعذر التحقق"
 msgid "Enter a valid cron expression"
 msgstr "أدخل تعبير جدولة صالحاً"
 
+#: apps/web/src/themes/v2/pages/xpanel/home.ts
 msgid "Quick actions"
 msgstr "إجراءات سريعة"
 
+#: apps/web/src/themes/v2/pages/xwhm/resellers/index.ts apps/web/src/themes/v2/pages/xwhm/resellers/records.ts
 msgid "Reseller views"
 msgstr "عروض الموزعين"
 
 msgid "DNS views"
 msgstr "عروض DNS"
 
+#: apps/web/src/themes/v2/pages/xwhm/host/services.ts
 msgid "Service views"
 msgstr "عروض الخدمات"
 
+#: apps/web/src/themes/v2/pages/xwhm/lifecycle/backups.ts apps/web/src/themes/v2/pages/xwhm/recovery-tools/restore.ts
 msgid "Restore views"
 msgstr "عروض الاستعادة"
 
+#: apps/web/src/account-preflight-client.ts
 msgid "Validating on input..."
 msgstr "جارٍ التحقق عند الإدخال..."
 
+#: apps/web/src/themes/v2/pages/xpanel/domains/publisher.ts
 msgid "Recovery archive"
 msgstr "أرشيف الاسترداد"
 
+#: apps/web/src/themes/v2/pages/xpanel/domains/publisher.ts
 msgid "Current files"
 msgstr "الملفات الحالية"
 
+#: apps/web/src/themes/v2/pages/xpanel/domains/publisher.ts
 msgid "30-day home backup before overwrite"
 msgstr "نسخة احتياطية للمجلد الرئيسي لمدة 30 يومًا قبل الاستبدال"
 
+#: apps/web/src/themes/v2/pages/xpanel/domains/publisher.ts
 msgid "Static index"
 msgstr "صفحة الفهرس الثابتة"
 
+#: apps/web/src/themes/v2/pages/xpanel/domains/publisher.ts
 msgid "Previewed template HTML"
 msgstr "قالب HTML المعاين"
 
+#: apps/web/src/themes/v2/pages/xpanel/domains/publisher.ts
 msgid "Template and content"
 msgstr "القالب والمحتوى"
 
+#: apps/web/src/themes/v2/pages/xpanel/operations/backup.ts
 msgid "Current home folder"
 msgstr "المجلد الرئيسي الحالي"
 
+#: apps/web/src/themes/v2/pages/xpanel/operations/backup.ts
 msgid "Reviewed archive entries"
 msgstr "عناصر الأرشيف المُراجعة"
 
+#: apps/web/src/themes/v2/pages/xpanel/operations/backup.ts
 msgid "Safety copy"
 msgstr "نسخة أمان"
 
+#: apps/web/src/themes/v2/pages/xpanel/operations/backup.ts
 msgid "Recovery archive preserved separately"
 msgstr "أرشيف استرداد محفوظ بشكل منفصل"
 
+#: apps/web/src/themes/v2/pages/xpanel/security/certificates.ts
 msgid "Domain selected for ACME validation"
 msgstr "تم اختيار النطاق للتحقق عبر ACME"
 
+#: apps/web/src/themes/v2/pages/xpanel/security/certificates.ts
 msgid "Select an owned domain"
 msgstr "اختر نطاقًا مملوكًا"
 
+#: apps/web/src/themes/v2/pages/xwhm/lifecycle/backups.ts
 msgid "Target account"
 msgstr "الحساب المستهدف"
 
+#: apps/web/src/themes/v2/pages/xwhm/lifecycle/backups.ts
 msgid "Current disk files & databases"
 msgstr "الملفات وقواعد البيانات الحالية على القرص"
 
+#: apps/web/src/themes/v2/pages/xwhm/lifecycle/backups.ts
 msgid "Selected archive parts only"
 msgstr "أجزاء الأرشيف المحددة فقط"
 
+#: apps/web/src/themes/v2/pages/xwhm/lifecycle/transfers.ts
 msgid "Source accounts"
 msgstr "حسابات المصدر"
 
+#: apps/web/src/themes/v2/pages/xwhm/lifecycle/transfers.ts
 msgid "New local UID, slice, vhost, zones, mail"
 msgstr "معرف مستخدم محلي جديد وشريحة ومضيف افتراضي ومناطق وبريد"
 
+#: apps/web/src/themes/v2/pages/xwhm/recovery-tools/convert.ts
 msgid "Domains & Mail"
 msgstr "النطاقات والبريد"
 
+#: apps/web/src/themes/v2/pages/xwhm/recovery-tools/convert.ts
 msgid "Addon domain under parent account"
 msgstr "نطاق إضافي تحت الحساب الأصلي"
 
+#: apps/web/src/themes/v2/pages/xwhm/recovery-tools/convert.ts
 msgid "Independent account with dedicated UID/slice"
 msgstr "حساب مستقل بمعرف مستخدم وشريحة مخصصين"
 
+#: apps/web/src/themes/v2/pages/xwhm/recovery-tools/convert.ts
 msgid "Parent account zone"
 msgstr "منطقة الحساب الأصلي"
 
+#: apps/web/src/themes/v2/pages/xwhm/recovery-tools/convert.ts
 msgid "New account zone ownership"
 msgstr "ملكية منطقة الحساب الجديد"
 
+#: apps/web/src/themes/v2/pages/xwhm/recovery-tools/restore.ts
 msgid "Target mailboxes"
 msgstr "صناديق البريد المستهدفة"
 
+#: apps/web/src/themes/v2/pages/xwhm/recovery-tools/restore.ts
 msgid "Current mailbox contents"
 msgstr "محتويات صندوق البريد الحالية"
 
+#: apps/web/src/themes/v2/pages/xwhm/recovery-tools/restore.ts
 msgid "Missing messages appended (no overwrites)"
 msgstr "إضافة الرسائل المفقودة دون استبدال"
 
+#: apps/web/src/themes/v2/pages/xwhm/recovery-tools/restore.ts
 msgid "Archive snapshot"
 msgstr "لقطة الأرشيف"
 
+#: apps/web/src/themes/v2/pages/xwhm/recovery-tools/restore.ts
 msgid "Selected files written without overwriting"
 msgstr "كتابة الملفات المحددة دون استبدال"
 
+#: apps/web/src/themes/v2/pages/xwhm/server/observations.ts
 msgid "Current saved profile"
 msgstr "الملف التعريفي المحفوظ حاليًا"
 
+#: apps/web/src/themes/v2/pages/xwhm/server/observations.ts
 msgid "Selected role profile"
 msgstr "ملف الدور المحدد"
 
+#: apps/web/src/themes/v2/pages/xwhm/server/observations.ts
 msgid "Role profile"
 msgstr "ملف الدور"
 
+#: apps/web/src/themes/v2/pages/xwhm/server/setup.ts
 msgid "Selected engine & MPM"
 msgstr "المحرك ونمط المعالجة المحددان"
 
+#: apps/web/src/themes/v2/pages/xwhm/server/setup.ts
 msgid "Configured nginx & Apache limits"
 msgstr "حدود Nginx وApache المُهيأة"
 
+#: apps/web/src/themes/v2/pages/xwhm/tls/install.ts
 msgid "Ready for validation"
 msgstr "جاهز للتحقق"
 
+#: apps/web/src/themes/v2/pages/xwhm/tls/install.ts
 msgid "Current certificate"
 msgstr "الشهادة الحالية"
 
+#: apps/web/src/themes/v2/pages/xwhm/tls/install.ts
 msgid "Uploaded PEM chain"
 msgstr "سلسلة PEM المرفوعة"
 
+#: apps/web/src/themes/v2/pages/xwhm/tls/install.ts
 msgid "Selected domain & SANs"
 msgstr "النطاق المحدد والأسماء البديلة"
 
+#: apps/web/src/themes/v2/pages/xwhm/tls/install.ts
 msgid "Root-only PEM key storage"
 msgstr "تخزين مفتاح PEM بصلاحية root فقط"
 
@@ -68989,3 +69054,419 @@ msgstr "فحص السلامة"
 
 msgid "Step {current} of {total}"
 msgstr "الخطوة {current} من {total}"
+
+#: apps/web/src/themes/v2/pages/xpanel/observations/traffic.ts
+msgid "Live visitor stream"
+msgstr "بث الزوار المباشر"
+
+#: apps/web/src/themes/v2/pages/xpanel/observations/traffic.ts
+msgid "Read live traffic"
+msgstr "قراءة حركة المرور المباشرة"
+
+#: apps/web/src/themes/v2/pages/xpanel/observations/traffic.ts
+msgid "Live traffic has not been read."
+msgstr "لم تُقرأ حركة المرور المباشرة."
+
+#: apps/web/src/account-traffic-monitor-client.ts apps/web/src/themes/v2/pages/xpanel/observations/traffic.ts
+msgid "Live traffic is unavailable here. Nothing was read."
+msgstr "حركة المرور المباشرة غير متاحة هنا. لم يُقرأ شيء."
+
+#: apps/web/src/themes/v2/pages/xpanel/observations/traffic.ts
+msgid "5xx errors"
+msgstr "أخطاء 5xx"
+
+#: apps/web/src/themes/v2/pages/xpanel/observations/traffic.ts
+msgid "Recent requests"
+msgstr "أحدث الطلبات"
+
+#: apps/web/src/themes/v2/pages/xpanel/observations/traffic.ts
+msgid "Client IP"
+msgstr "عنوان IP للعميل"
+
+#: apps/web/src/themes/v2/pages/xpanel/observations/traffic.ts
+msgid "Top user agents"
+msgstr "أبرز وكلاء المستخدم"
+
+#: apps/web/src/themes/v2/pages/xpanel/observations/traffic.ts
+msgid "Live client IP addresses"
+msgstr "عناوين IP المباشرة للعملاء"
+
+#: apps/web/src/account-traffic-monitor-client.ts
+msgid "No daily visitor records were observed in this bounded log window."
+msgstr "لم تُرصد سجلات زوار يومية ضمن نافذة السجل المحدودة هذه."
+
+#: apps/web/src/account-traffic-monitor-client.ts
+msgid "No recent requests were observed in this access log."
+msgstr "لم تُرصد طلبات حديثة في سجل الوصول هذا."
+
+#: apps/web/src/account-traffic-monitor-client.ts
+msgid "No user agents were recorded."
+msgstr "لم تُسجّل أي وكلاء مستخدم."
+
+#: apps/web/src/account-traffic-monitor-client.ts
+msgid "Block IP"
+msgstr "حظر IP"
+
+#: apps/web/src/account-traffic-monitor-client.ts
+msgid "No client addresses were recorded."
+msgstr "لم تُسجّل أي عناوين عملاء."
+
+#: apps/web/src/account-traffic-monitor-client.ts
+msgid "Reading live traffic telemetry…"
+msgstr "جارٍ قراءة قياسات حركة المرور المباشرة…"
+
+#: apps/web/src/account-traffic-monitor-client.ts
+msgid "This account has no domains to observe traffic for."
+msgstr "لا يملك هذا الحساب أي نطاقات لرصد حركة المرور لها."
+
+#: apps/web/src/account-traffic-monitor-client.ts
+msgid "Live traffic telemetry read from the access log."
+msgstr "تمت قراءة قياسات حركة المرور المباشرة من سجل الوصول."
+
+#: apps/web/src/account-traffic-monitor-client.ts
+msgid "Live traffic telemetry could not be read."
+msgstr "تعذرت قراءة قياسات حركة المرور المباشرة."
+
+#: apps/web/src/account-traffic-monitor-client.ts
+msgid "Block this IP address?"
+msgstr "حظر عنوان IP هذا؟"
+
+#: apps/web/src/account-traffic-monitor-client.ts
+msgid "Requests from these addresses get HTTP 403 on every website of this account."
+msgstr "تحصل الطلبات الواردة من هذه العناوين على HTTP 403 على كل مواقع هذا الحساب."
+
+#: apps/web/src/account-traffic-monitor-client.ts
+msgid "Blocking client IP address…"
+msgstr "جارٍ حظر عنوان IP للعميل…"
+
+#: apps/web/src/account-traffic-monitor-client.ts
+msgid "Client IP blocked and read back."
+msgstr "تم حظر عنوان IP للعميل وإعادة قراءته."
+
+#: apps/web/src/account-traffic-monitor-client.ts
+msgid "The IP block request was refused. Reload live traffic before retrying."
+msgstr "رُفض طلب حظر IP. أعد تحميل حركة المرور المباشرة قبل إعادة المحاولة."
+
+#: apps/web/src/account-traffic-monitor-client.ts
+msgid "The IP block outcome is uncertain. Reload live traffic before retrying."
+msgstr "نتيجة حظر IP غير مؤكدة. أعد تحميل حركة المرور المباشرة قبل إعادة المحاولة."
+
+#: apps/web/src/themes/v2/pages/xpanel/email/accounts.ts
+msgid "Read mail client settings"
+msgstr "قراءة إعدادات عميل البريد"
+
+#: apps/web/src/account-connect-devices-client.ts
+msgid "Mail client setup is unavailable here. Nothing was read."
+msgstr "إعداد عميل البريد غير متاح هنا. لم يُقرأ شيء."
+
+#: apps/web/src/account-connect-devices-client.ts
+msgid "Create an email mailbox to view client setup downloads."
+msgstr "أنشئ صندوق بريد إلكتروني لعرض تنزيلات إعداد العميل."
+
+#: apps/web/src/audit-labels.ts
+msgid "Deployed an account Git commit"
+msgstr "نشر التزام Git للحساب"
+
+#: apps/web/src/audit-labels.ts
+msgid "Rolled back an account Git deployment"
+msgstr "تراجع عن نشر Git للحساب"
+
+#: apps/web/src/audit-labels.ts
+msgid "Rotated a Git deployment webhook secret"
+msgstr "دوّر سر خطاف ويب نشر Git"
+
+#: apps/web/src/audit-labels.ts
+msgid "Triggered an account Git deployment via webhook"
+msgstr "فعّل نشر مستودع Git للحساب عبر خطاف الويب"
+
+#: apps/web/src/audit-labels.ts
+msgid "Sent mail client setup instructions for a mailbox"
+msgstr "أرسل تعليمات إعداد عميل البريد لصندوق بريد"
+
+#: apps/web/src/audit-labels.ts
+msgid "Rebuilt the panel search index"
+msgstr "أعاد بناء فهرس البحث في اللوحة"
+
+#: apps/web/src/audit-labels.ts
+msgid "Updated disabled PHP functions"
+msgstr "حدّث دوال PHP المعطّلة"
+
+#: apps/web/src/audit-labels.ts
+msgid "Updated the SSH auto-ban rule"
+msgstr "حدّث قاعدة الحظر التلقائي لـ SSH"
+
+#: apps/web/src/audit-labels.ts
+msgid "Unbanned an SSH address"
+msgstr "ألغى حظر عنوان SSH"
+
+#: apps/web/src/account-git-client.ts apps/web/src/themes/v2/pages/xpanel/operations/git.ts
+msgid "No deployments recorded yet."
+msgstr "لم تُسجّل عمليات نشر بعد."
+
+#: apps/web/src/account-git-client.ts
+msgid "Redeploy recorded commit {commit} using .cpanel.yml? They run as your account and can change your website."
+msgstr "هل تريد إعادة نشر الالتزام المسجّل {commit} باستخدام .cpanel.yml؟ تُنفّذ المهام بصلاحية حسابك وقد تغيّر موقعك."
+
+#: apps/web/src/account-git-client.ts
+msgid "Rotate the deploy webhook token? Any previous webhook URL stops working immediately."
+msgstr "هل تريد تدوير رمز خطاف ويب النشر؟ سيتوقف أي رابط خطاف ويب سابق فوراً."
+
+#: apps/web/src/account-git-client.ts
+msgid "Webhook token rotated. Copy the new URL now; the secret token is shown once."
+msgstr "تم تدوير رمز خطاف الويب. انسخ الرابط الجديد الآن؛ يُعرض الرمز السري مرة واحدة فقط."
+
+#: apps/web/src/themes/v2/pages/xpanel/operations/git.ts
+msgid "Deploy webhook"
+msgstr "خطاف ويب النشر"
+
+#: apps/web/src/themes/v2/pages/xpanel/operations/git.ts
+msgid "Rollback release"
+msgstr "التراجع عن الإصدار"
+
+#: apps/web/src/themes/v2/pages/xpanel/operations/git.ts
+msgid "Rotate webhook token"
+msgstr "تدوير رمز خطاف الويب"
+
+#: apps/web/src/themes/v2/pages/xpanel/operations/git.ts
+msgid "Recorded release"
+msgstr "الإصدار المسجّل"
+
+#: apps/web/src/themes/v2/pages/xpanel/operations/git.ts
+msgid "Deployment history"
+msgstr "سجل النشر"
+
+#: apps/web/src/themes/v2/pages/xwhm/dns/tools.ts
+msgid "Cross-zone nameserver report"
+msgstr "تقرير خوادم الأسماء عبر المناطق"
+
+#: apps/web/src/themes/v2/pages/xwhm/dns/tools.ts
+msgid "No nameserver delegation report has been read yet."
+msgstr "لم يُقرأ تقرير تفويض خوادم الأسماء بعد."
+
+#: apps/web/src/themes/v2/pages/xwhm/dns/tools.ts
+msgid "Summarizes saved apex NS targets for every zone against expected reseller or server nameservers."
+msgstr "يلخّص سجلات NS المحفوظة لكل منطقة مقارنة بخوادم أسماء الموزّع أو الخادم المتوقعة."
+
+#: apps/web/src/themes/v2/pages/xwhm/dns/tools.ts
+msgid "Cross-zone nameserver delegation report"
+msgstr "تقرير تفويض خوادم الأسماء عبر المناطق"
+
+#: apps/web/src/themes/v2/pages/xwhm/dns/tools.ts
+msgid "Apex NS targets"
+msgstr "أهداف NS للجذر"
+
+#: apps/web/src/themes/v2/pages/xwhm/dns/tools.ts
+msgid "Expected NS"
+msgstr "NS المتوقعة"
+
+#: apps/web/src/themes/v2/pages/xwhm/dns/tools.ts
+msgid "Load nameserver report"
+msgstr "تحميل تقرير خوادم الأسماء"
+
+#: apps/web/src/themes/v2/pages/xwhm/panel/data.ts
+msgid "Rebuilds the derived FTS and SQLite search index tables from the filesystem desired-state tree without changing operational tables."
+msgstr "يعيد بناء جداول فهرس البحث المشتقة FTS وSQLite من شجرة الحالة المطلوبة دون تعديل الجداول التشغيلية."
+
+#: apps/web/src/themes/v2/pages/xwhm/security/overview.ts
+msgid "Scope model"
+msgstr "نموذج النطاقات"
+
+#: apps/web/src/themes/v2/pages/xwhm/security/overview.ts
+msgid "Workspace"
+msgstr "مساحة العمل"
+
+#: apps/web/src/themes/v2/pages/xwhm/security/overview.ts
+msgid "Edge rules"
+msgstr "قواعد الحافة"
+
+#: apps/web/src/themes/v2/pages/xwhm/security/overview.ts
+msgid "Checked functions are disabled globally in PHP pools and wrappers unless an account holds an explicit exception."
+msgstr "الدوال المحددة معطّلة على مستوى الخادم في تجمعات PHP والمغلّفات ما لم يملك الحساب استثناءً صريحاً."
+
+#: apps/web/src/themes/v2/pages/xwhm/security/overview.ts
+msgid "Save PHP functions"
+msgstr "حفظ دوال PHP"
+
+#: apps/web/src/themes/v2/pages/xwhm/security/ssh.ts
+msgid "Save auto-ban rule"
+msgstr "حفظ قاعدة الحظر التلقائي"
+
+#: apps/web/src/themes/v2/pages/xwhm/security/ssh.ts
+msgid "Auto-ban policy and ban list have not been read."
+msgstr "لم تُقرأ سياسة الحظر التلقائي وقائمة المحظورين بعد."
+
+#: apps/web/src/themes/v2/pages/xwhm/security/ssh.ts
+msgid "Saves the SSH auto-ban rule and unbans individual IP addresses after a fresh read."
+msgstr "يحفظ قاعدة الحظر التلقائي لـ SSH ويلغي حظر عناوين IP فردية بعد قراءة حديثة."
+
+#: apps/web/src/whm-dns-tools-client.ts
+msgid "Matches expected"
+msgstr "يطابق المتوقع"
+
+#: apps/web/src/whm-dns-tools-client.ts
+msgid "Custom nameservers"
+msgstr "خوادم أسماء مخصّصة"
+
+#: apps/web/src/whm-dns-tools-client.ts
+msgid "Missing apex NS"
+msgstr "سجل NS للجذر مفقود"
+
+#: apps/web/src/whm-dns-tools-client.ts
+msgid "Loading cross-zone nameserver report…"
+msgstr "جارٍ تحميل تقرير خوادم الأسماء عبر المناطق…"
+
+#: apps/web/src/whm-dns-tools-client.ts
+msgid "No apex NS records"
+msgstr "لا توجد سجلات NS للجذر"
+
+#: apps/web/src/whm-dns-tools-client.ts
+msgid "Zones: {total}. Matched: {matched}. Custom: {custom}. Missing NS: {missing}"
+msgstr "المناطق: {total}. المطابقة: {matched}. المخصّصة: {custom}. المفقودة NS: {missing}"
+
+#: apps/web/src/whm-panel-data-client.ts
+msgid "Confirmation is required; nothing was sent."
+msgstr "التأكيد مطلوب؛ لم يُرسل شيء."
+
+#: apps/web/src/whm-panel-data-client.ts
+msgid "Rebuilds the derived FTS and SQLite search index tables from the desired-state tree without modifying operational tables."
+msgstr "يعيد بناء جداول فهرس البحث المشتقة FTS وSQLite من شجرة الحالة المطلوبة دون تعديل الجداول التشغيلية."
+
+#: apps/web/src/whm-panel-data-client.ts
+msgid "Rebuilding search index…"
+msgstr "جارٍ إعادة بناء فهرس البحث…"
+
+#: apps/web/src/whm-panel-data-client.ts
+msgid "Search index rebuilt ({count} indexed entries)."
+msgstr "تمت إعادة بناء فهرس البحث ({count} مدخل مفهرس)."
+
+#: apps/web/src/whm-panel-data-client.ts
+msgid "Search index rebuilt from the desired-state tree."
+msgstr "تمت إعادة بناء فهرس البحث من شجرة الحالة المطلوبة."
+
+#: apps/web/src/whm-panel-data-client.ts
+msgid "Search index rebuild failed. Review server status before retrying."
+msgstr "فشلت إعادة بناء فهرس البحث. راجع حالة الخادم قبل إعادة المحاولة."
+
+#: apps/web/src/whm-web-server-client.ts
+msgid "Host baseline not supplied"
+msgstr "لم يُزوّد خط الأساس للمضيف"
+
+#: apps/web/src/whm-web-server-client.ts
+msgid "Draft changed"
+msgstr "تغيّرت المسودة"
+
+#: apps/web/src/whm-web-server-client.ts
+msgid "No PHP-FPM observed"
+msgstr "لم يُرصد PHP-FPM"
+
+#: apps/web/src/whm-security-controls-client.ts
+msgid "The saved configuration changed before this save. Reload and review before retrying."
+msgstr "تغيّر التكوين المحفوظ قبل هذا الحفظ. أعد التحميل وراجع قبل إعادة المحاولة."
+
+#: apps/web/src/whm-security-controls-client.ts
+msgid "The server refused the submitted values. Nothing was changed."
+msgstr "رفض الخادم القيم المرسلة. لم يتغيّر شيء."
+
+#: apps/web/src/whm-security-controls-client.ts
+msgid "No per-account PHP function exceptions are saved."
+msgstr "لا توجد استثناءات محفوظة لدوال PHP لكل حساب."
+
+#: apps/web/src/whm-security-controls-client.ts
+msgid "Reading PHP function policy…"
+msgstr "جارٍ قراءة سياسة دوال PHP…"
+
+#: apps/web/src/whm-security-controls-client.ts
+msgid "The saved PHP function policy could not be verified. Editing is locked."
+msgstr "تعذّر التحقق من سياسة دوال PHP المحفوظة. التعديل مقفل."
+
+#: apps/web/src/whm-security-controls-client.ts
+msgid "PHP function policy read from the server."
+msgstr "تمت قراءة سياسة دوال PHP من الخادم."
+
+#: apps/web/src/whm-security-controls-client.ts
+msgid "PHP function policy could not be read. Nothing was changed."
+msgstr "تعذّرت قراءة سياسة دوال PHP. لم يتغيّر شيء."
+
+#: apps/web/src/whm-security-controls-client.ts
+msgid "Saving PHP function policy…"
+msgstr "جارٍ حفظ سياسة دوال PHP…"
+
+#: apps/web/src/whm-security-controls-client.ts
+msgid "Saved and read back. The server was asked to apply the updated PHP pools."
+msgstr "تم الحفظ وإعادة القراءة. طُلب من الخادم تطبيق تجمعات PHP المحدّثة."
+
+#: apps/web/src/whm-security-controls-client.ts
+msgid "PHP function policy saved and read back."
+msgstr "تم حفظ سياسة دوال PHP وإعادة قراءتها."
+
+#: apps/web/src/whm-security-controls-client.ts
+msgid "PHP function policy could not be saved. Nothing was changed."
+msgstr "تعذر حفظ سياسة دوال PHP. لم يتغيّر شيء."
+
+#: apps/web/src/whm-security-controls-client.ts
+msgid "PHP function controls are unavailable here. Nothing was read or changed."
+msgstr "عناصر تحكم دوال PHP غير متاحة هنا. لم يُقرأ أو يتغيّر شيء."
+
+#: apps/web/src/whm-security-controls-client.ts
+msgid "Unban {address}"
+msgstr "إلغاء حظر {address}"
+
+#: apps/web/src/whm-security-controls-client.ts
+msgid "No SSH addresses are currently banned."
+msgstr "لا توجد عناوين SSH محظورة حالياً."
+
+#: apps/web/src/whm-security-controls-client.ts
+msgid "Reading SSH auto-ban rule and ban list…"
+msgstr "جارٍ قراءة قاعدة الحظر التلقائي لـ SSH وقائمة المحظورين…"
+
+#: apps/web/src/whm-security-controls-client.ts
+msgid "The saved SSH auto-ban policy could not be verified. Editing is locked."
+msgstr "تعذّر التحقق من سياسة الحظر التلقائي لـ SSH المحفوظة. التعديل مقفل."
+
+#: apps/web/src/whm-security-controls-client.ts
+msgid "SSH auto-ban policy and ban list read."
+msgstr "تمت قراءة سياسة الحظر التلقائي لـ SSH وقائمة المحظورين."
+
+#: apps/web/src/whm-security-controls-client.ts
+msgid "SSH auto-ban settings could not be read. Nothing was changed."
+msgstr "تعذّرت قراءة إعدادات الحظر التلقائي لـ SSH. لم يتغيّر شيء."
+
+#: apps/web/src/whm-security-controls-client.ts
+msgid "Enter whole numbers for failures and window minutes."
+msgstr "أدخل أعداداً صحيحة للإخفاقات ودقائق النافذة."
+
+#: apps/web/src/whm-security-controls-client.ts
+msgid "Saving SSH auto-ban rule…"
+msgstr "جارٍ حفظ قاعدة الحظر التلقائي لـ SSH…"
+
+#: apps/web/src/whm-security-controls-client.ts
+msgid "SSH auto-ban rule saved and read back. Reconcile requested."
+msgstr "تم حفظ قاعدة الحظر التلقائي لـ SSH وإعادة قراءتها. طُلب تطبيق التكوين."
+
+#: apps/web/src/whm-security-controls-client.ts
+msgid "SSH auto-ban rule saved and read back."
+msgstr "تم حفظ قاعدة الحظر التلقائي لـ SSH وإعادة قراءتها."
+
+#: apps/web/src/whm-security-controls-client.ts
+msgid "SSH auto-ban rule could not be saved. Nothing was changed."
+msgstr "تعذر حفظ قاعدة الحظر التلقائي لـ SSH. لم يتغيّر شيء."
+
+#: apps/web/src/whm-security-controls-client.ts
+msgid "Unban IP address?"
+msgstr "هل تريد إلغاء حظر عنوان IP؟"
+
+#: apps/web/src/whm-security-controls-client.ts
+msgid "Unbanning address…"
+msgstr "جارٍ إلغاء حظر العنوان…"
+
+#: apps/web/src/whm-security-controls-client.ts
+msgid "Unbanned {address} and refreshed the ban list."
+msgstr "تم إلغاء حظر {address} وتحديث قائمة المحظورين."
+
+#: apps/web/src/whm-security-controls-client.ts
+msgid "The address could not be unbanned. Refresh and review."
+msgstr "تعذر إلغاء حظر العنوان. حدّث وراجع."
+
+#: apps/web/src/whm-security-controls-client.ts
+msgid "SSH auto-ban controls are unavailable here. Nothing was read or changed."
+msgstr "عناصر تحكم الحظر التلقائي لـ SSH غير متاحة هنا. لم يُقرأ أو يتغيّر شيء."

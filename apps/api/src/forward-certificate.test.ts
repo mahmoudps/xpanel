@@ -6,6 +6,7 @@ import { edge } from '@xpanel/render'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { readIssuedCertificate, recordForwardCertificate, renewForwardCertificates } from './forward-certificate.ts'
 import { observeDomainResolution } from './domain-resolution.ts'
+import { REMOTE_SERVICE_IPS_STATE } from '../../agent/src/remote-service-ips.ts'
 
 const CERT = '11111111-1111-4111-8111-111111111111'
 const forward = { domain: 'old.example.test', url: 'https://new.example.test/', ip: '192.0.2.9', createdAt: '2026-11-07T00:00:00.000Z' }
@@ -49,10 +50,46 @@ describe('forward certificates', () => {
 })
 
 describe('domain resolution', () => {
+  let rootDir: string
+  beforeEach(async () => { rootDir = await mkdtemp(join(tmpdir(), 'res-')) })
+  afterEach(() => rm(rootDir, { recursive: true, force: true }))
+
   it('tells here, elsewhere, unregistered and unknown apart', async () => {
     expect(await observeDomainResolution('a.test', ['192.0.2.1'], async () => ['192.0.2.1'])).toBe('here')
     expect(await observeDomainResolution('a.test', ['192.0.2.1'], async () => ['198.51.100.1'])).toBe('elsewhere')
     expect(await observeDomainResolution('a.test', [], async () => { throw Object.assign(new Error('x'), { code: 'ENOTFOUND' }) })).toBe('unregistered')
     expect(await observeDomainResolution('a.test', [], async () => { throw Object.assign(new Error('x'), { code: 'ETIMEOUT' }) })).toBe('unknown')
+  })
+
+  it('bypasses remote check when delegated to a nameserver IP saved in REMOTE_SERVICE_IPS_STATE', async () => {
+    const file = join(rootDir, REMOTE_SERVICE_IPS_STATE)
+    await mkdir(dirname(file), { recursive: true })
+    await writeFile(file, JSON.stringify({ smtp: [], nameservers: ['203.0.113.53', '198.51.100.0/24'] }))
+
+    const allowed = await observeDomainResolution('remote-addon.test', ['192.0.2.1'], async () => ['192.0.2.99'], {
+      rootDir,
+      resolveNs: async () => ['ns1.remote.test.'],
+      resolveNs4: async () => ['203.0.113.53'],
+      resolveNs6: async () => [],
+    })
+    expect(allowed).toBe('here')
+
+    const cidrAllowed = await observeDomainResolution('cidr-addon.test', ['192.0.2.1'], async () => {
+      throw Object.assign(new Error('nodata'), { code: 'ENODATA' })
+    }, {
+      rootDir,
+      resolveNs: async () => ['ns1.cidr.test'],
+      resolveNs4: async () => ['198.51.100.44'],
+      resolveNs6: async () => [],
+    })
+    expect(cidrAllowed).toBe('here')
+
+    const refused = await observeDomainResolution('other-addon.test', ['192.0.2.1'], async () => ['192.0.2.99'], {
+      rootDir,
+      resolveNs: async () => ['ns1.other.test'],
+      resolveNs4: async () => ['192.0.2.250'],
+      resolveNs6: async () => [],
+    })
+    expect(refused).toBe('elsewhere')
   })
 })
