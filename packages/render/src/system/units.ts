@@ -719,6 +719,10 @@ export interface CronJob {
   command: string
   /** optional cap on one run; infinity when omitted */
   maxRuntimeSec?: number
+  /** optional email recipient for cron output notifications */
+  mailto?: string | null
+  /** delivery policy when mailto is set */
+  mailMode?: 'failures' | 'always' | 'never'
 }
 
 export interface RenderedCron {
@@ -729,20 +733,73 @@ export interface RenderedCron {
   timer: RenderedFile
   /** Private account-readable source; never embedded in unit properties or executable argv. */
   commandFile: RenderedFile
+  /** Optional root-owned mail notification config read by xpanel-cron-notify@.service. */
+  mailConfigFile?: RenderedFile
 }
 
 export const CRON_COMMAND_ROOT = `${XPANEL_CONFIG_ROOT}/cron`
+export const CRON_NOTIFY_TEMPLATE_UNIT = 'xpanel-cron-notify@.service'
 export const cronCommandDir = (username: string): string => `${CRON_COMMAND_ROOT}/${assertUsername(username)}`
 export const cronCommandPath = (username: string, id: string): string => `${cronCommandDir(username)}/${assertShortName('cron job id', id)}.command`
+export const cronMailConfigPath = (username: string, id: string): string => `${cronCommandDir(username)}/${assertShortName('cron job id', id)}.mail`
 
 // The source is evaluated as a builtin after systemd applies User/Group. The sentinel preserves
 // trailing newlines; the temporary variable and trusted path argument are removed before evaluation.
 export const CRON_COMMAND_RUNNER = '_xpanel_cron_source=$(/bin/cat "$1" && printf .) || exit; _xpanel_cron_source=${_xpanel_cron_source%.}; shift; eval "unset _xpanel_cron_source; $_xpanel_cron_source"'
 
+export const CRON_NOTIFY_RUNNER = [
+  'unit="$1"',
+  'case "$unit" in xpanel-cron-*-*.service) ;; xpanel-cron-*-*) unit="${unit}.service" ;; *) exit 0 ;; esac',
+  'rest="${unit#xpanel-cron-}"; rest="${rest%.service}"',
+  'user="${rest%%-*}"; id="${rest#*-}"',
+  'case "$user" in *[!a-z0-9]*) exit 0 ;; esac',
+  'case "$id" in *[!a-zA-Z0-9_-]*) exit 0 ;; esac',
+  '[ -n "$user" ] && [ -n "$id" ] || exit 0',
+  `cfg="${CRON_COMMAND_ROOT}/$user/$id.mail"`,
+  '[ -f "$cfg" ] || exit 0',
+  'mailto=$(/bin/sed -n "s/^MAILTO=//p" "$cfg" | /usr/bin/head -n1)',
+  'mode=$(/bin/sed -n "s/^MODE=//p" "$cfg" | /usr/bin/head -n1)',
+  '[ -n "$mailto" ] && [ "$mode" != "never" ] || exit 0',
+  '[ -x /usr/sbin/sendmail ] || exit 0',
+  'meta=$(/usr/bin/systemctl show -p Result -p ExecMainStatus -p InvocationID --value -- "$unit" 2>/dev/null || true)',
+  'result=$(printf "%s\\n" "$meta" | /bin/sed -n "1p")',
+  'code=$(printf "%s\\n" "$meta" | /bin/sed -n "2p")',
+  'inv=$(printf "%s\\n" "$meta" | /bin/sed -n "3p")',
+  'if [ "$mode" = "failures" ] && [ "$result" = "success" ]; then exit 0; fi',
+  'body=""',
+  'if [ -n "$inv" ]; then body=$(/usr/bin/journalctl -u "$unit" "_SYSTEMD_INVOCATION_ID=$inv" --no-pager -o cat -n 200 2>/dev/null | /usr/bin/head -c 65536 || true); fi',
+  'if [ "$result" = "success" ] && [ -z "$body" ]; then exit 0; fi',
+  '{ printf "To: %s\\nSubject: Cron <%s@%s> %s (%s)\\nContent-Type: text/plain; charset=UTF-8\\nAuto-Submitted: auto-generated\\n\\nUnit: %s\\nResult: %s (exit %s)\\n\\n%s\\n" "$mailto" "$user" "$(/bin/hostname 2>/dev/null || echo localhost)" "$id" "$result" "$unit" "$result" "$code" "$body"; } | /usr/sbin/sendmail -i -- "$mailto"',
+].join('; ')
+
+const CRON_MAILTO_RE = /^[^\s@<>;"'\\]+@[^\s@<>;"'\\]+\.[^\s@<>;"'\\]+$/
+const assertCronMailto = (raw: string): string => {
+  const clean = assertNoControl('cron mailto', raw, 254).trim()
+  if (!clean || !CRON_MAILTO_RE.test(clean)) return invalid('cron mailto must be a single valid email address')
+  return clean
+}
+
 export const cronUnitNames = (username: string, id: string): { service: string; timer: string } => ({
   service: `xpanel-cron-${username}-${id}.service`,
   timer: `xpanel-cron-${username}-${id}.timer`,
 })
+
+export const renderCronNotifyTemplate = (os: OsProfile, opts: UnitOptions = {}): RenderedFile => {
+  const systemdDir = assertAbsPath('systemdDir', opts.systemdDir ?? os.paths.systemdDir)
+  return unitFile(`${systemdDir}/${CRON_NOTIFY_TEMPLATE_UNIT}`, [
+    header('cron notification template'),
+    '[Unit]',
+    'Description=xPanel cron output notification for %i',
+    '',
+    '[Service]',
+    'Type=oneshot',
+    `ExecStart=${SH_BINARY} -c ${quoteExecArg(CRON_NOTIFY_RUNNER)} ${quoteExecArg(SH_BINARY)} "%i"`,
+    'StandardInput=null',
+    'PrivateTmp=yes',
+    'ProtectHome=tmpfs',
+    'TimeoutStartSec=30s',
+  ])
+}
 
 export const renderCronUnits = (account: AccountRef, job: CronJob, os: OsProfile, opts: UnitOptions = {}): RenderedCron => {
   const ctx = context(account, os, opts)
@@ -751,13 +808,21 @@ export const renderCronUnits = (account: AccountRef, job: CronJob, os: OsProfile
   const command = assertNoControl('cron command', job.command, 4096)
   if (command.trim() === '') return invalid('cron command is empty')
   const timeout = job.maxRuntimeSec === undefined ? 'infinity' : `${assertInt('maxRuntimeSec', job.maxRuntimeSec, 1, 7 * 86400)}s`
+  const mailMode = job.mailMode ?? (job.mailto ? 'failures' : 'never')
+  const mailto = job.mailto ? assertCronMailto(job.mailto) : null
+  const notifyEnabled = mailto !== null && (mailMode === 'failures' || mailMode === 'always')
   const names = cronUnitNames(ctx.username, id)
   const commandFile: RenderedFile = { path: cronCommandPath(ctx.username, id), content: command, mode: 0o640, owner: 'root', group: ctx.username }
+  const mailConfigFile: RenderedFile | undefined = notifyEnabled
+    ? { path: cronMailConfigPath(ctx.username, id), content: `MAILTO=${mailto}\nMODE=${mailMode}\nJOB=${id}\nUSER=${ctx.username}\n`, mode: 0o600, owner: 'root', group: 'root' }
+    : undefined
 
   const service = unitFile(`${ctx.systemdDir}/${names.service}`, [
     header(`cron job ${id} for ${ctx.username}`),
     '[Unit]',
     `Description=xPanel cron job ${id} for ${ctx.username}`,
+    ...(notifyEnabled ? [`OnFailure=${CRON_NOTIFY_TEMPLATE_UNIT.replace('@.', '@%N.')}`] : []),
+    ...(notifyEnabled && mailMode === 'always' ? [`OnSuccess=${CRON_NOTIFY_TEMPLATE_UNIT.replace('@.', '@%N.')}`] : []),
     '',
     '[Service]',
     'Type=oneshot',
@@ -784,7 +849,7 @@ export const renderCronUnits = (account: AccountRef, job: CronJob, os: OsProfile
     '[Install]',
     'WantedBy=timers.target',
   ])
-  return { serviceName: names.service, timerName: names.timer, onCalendar, service, timer, commandFile }
+  return { serviceName: names.service, timerName: names.timer, onCalendar, service, timer, commandFile, ...(mailConfigFile ? { mailConfigFile } : {}) }
 }
 
 // ---------------------------------------------------------------- logind sessions

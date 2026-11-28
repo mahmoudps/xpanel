@@ -44,6 +44,8 @@ describe('resumed workflows through the real agent app', () => {
     ['/host/databases/tuning', { state: 'unavailable', capabilities: { apply: false } }],
     ['/host/monitoring/benchmark', { history: { state: 'unavailable', results: [] }, jobsAvailable: false }],
     ['/host/monitoring/traffic', { interfaces: { state: 'unavailable', items: [] }, http: { state: 'unavailable' } }],
+    ['/host/services/openlitespeed', { state: 'not_installed', installed: false }],
+    ['/host/web-stack', { engine: 'apache', isolationPolicy: 'mpm_itk' }],
   ])('keeps absent native providers unavailable on %s', async (path, expected) => {
     const f = await fixture(), response = await f.request(path as string)
     expect(response.status).toBe(200); expect(await response.json()).toMatchObject(expected)
@@ -107,5 +109,19 @@ describe('resumed workflows through the real agent app', () => {
   it.each(['/accounts/mountowner/git', '/accounts/mountowner/pgp'])('does not let root impersonate an account key/repository owner at %s', async path => {
     const f = await fixture()
     expect((await f.request(path)).status).toBe(403); expect(f.run).not.toHaveBeenCalled(); expect(f.read).not.toHaveBeenCalled()
+  })
+
+  it('fails closed on native workspace apply routes when host execution is unavailable', async () => {
+    const f = await fixture()
+    const phpRes = await f.request('/host/workspace/php-ini', { method: 'POST', body: { version: '8.3', ini: {} } })
+    expect(phpRes.status).toBe(412)
+    expect(await phpRes.json()).toMatchObject({ details: { stateChanged: false, reason: 'server_php_ini_apply_unavailable' } })
+
+    const addonRes = await f.request('/host/workspace/addon-service-config', {
+      method: 'POST',
+      body: { serviceId: 'memcached', memoryLimitMb: 512, bindAddress: '127.0.0.1', maxConnections: 1024 },
+    })
+    expect(addonRes.status).toBe(412)
+    expect(await addonRes.json()).toMatchObject({ details: { stateChanged: false, reason: 'addon_service_apply_unavailable' } })
   })
 })

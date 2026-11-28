@@ -1,6 +1,7 @@
 import { fail } from '@xpanel/core'
 import type { DbFamily, DbReadFile, DbRun } from './db-engines.ts'
 import { importMongodbArchive, backupMongodb, controlMongodb, createMongodbDatabase, deleteMongodbBackup, deleteMongodbDatabases, readMongodbConfig, readMongodbLog, readMongodbView, restoreMongodb, saveMongodbConfig, saveMongodbSettings, setMongodbAuth, setMongodbUserPassword } from './db-mongodb-service.ts'
+import { controlMysql, previewMysqlConfig, readMysqlConfig, readMysqlLog, readMysqlView, saveMysqlConfig, saveMysqlSettings } from './db-mysql-service.ts'
 import { controlPostgresql, readPostgresqlFile, readPostgresqlLog, readPostgresqlView, savePostgresqlFile, savePostgresqlSettings } from './db-postgresql-service.ts'
 import { backupRedis, controlRedis, deleteRedisBackup, deleteRedisKey, flushRedis, listRedisKeys, readRedisConfig, readRedisView, restoreRedis, saveRedisConfig, saveRedisSettings, setRedisKey, setRedisPassword } from './db-redis-service.ts'
 import { nodeDbServiceFs } from './db-service-files.ts'
@@ -32,13 +33,15 @@ const READS: Readonly<Record<string, Readonly<Record<string, (ctx: DbServiceCont
   redis: { '': readRedisView, config: readRedisConfig, versions: readRedisVersions },
   mongodb: { '': readMongodbView, config: readMongodbConfig, log: readMongodbLog },
   postgresql: { '': readPostgresqlView, config: ctx => readPostgresqlFile(ctx, 'config'), hba: ctx => readPostgresqlFile(ctx, 'hba'), log: readPostgresqlLog, versions: readPostgresqlVersions },
+  mysql: { '': readMysqlView, config: readMysqlConfig, log: readMysqlLog },
 }
 const WRITES: Readonly<Record<string, Readonly<Record<string, Op>>>> = {
   redis: { control: controlRedis, settings: saveRedisSettings, config: saveRedisConfig, password: setRedisPassword, keys: listRedisKeys, key: setRedisKey, 'key-delete': deleteRedisKey, flush: flushRedis, backup: ctx => backupRedis(ctx), restore: restoreRedis, 'backup-delete': deleteRedisBackup, version: switchRedisVersion },
   mongodb: { control: controlMongodb, settings: saveMongodbSettings, config: saveMongodbConfig, auth: setMongodbAuth, database: createMongodbDatabase, 'database-delete': deleteMongodbDatabases, 'user-password': setMongodbUserPassword, backup: backupMongodb, restore: restoreMongodb, 'backup-delete': deleteMongodbBackup, import: importMongodbArchive },
   postgresql: { control: controlPostgresql, settings: savePostgresqlSettings, config: (ctx, body) => savePostgresqlFile(ctx, 'config', body), hba: (ctx, body) => savePostgresqlFile(ctx, 'hba', body), version: switchPostgresqlVersion, 'data-directory': movePostgresqlData },
+  mysql: { control: controlMysql, settings: saveMysqlSettings, config: saveMysqlConfig, preview: previewMysqlConfig },
 }
-const ROUTE = /^\/host\/databases\/services\/(redis|mongodb|postgresql)(?:\/([a-z-]{1,24}))?$/
+const ROUTE = /^\/host\/databases\/services\/(redis|mongodb|postgresql|mysql)(?:\/([a-z-]{1,24}))?$/
 const MAX_BODY = 512 * 1024
 const json = (body: unknown, status = 200): Response => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } })
 

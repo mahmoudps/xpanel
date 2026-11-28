@@ -39,8 +39,10 @@ export const FRAME_READER_CLIENTS: Readonly<Record<string, string | readonly str
   'data-ssl-store-can-read': 'ssl-store-client.ts', 'data-network-can-read': 'whm-network-client.ts', 'data-web-directives-can-read': 'whm-web-directives-client.ts',
   'data-ssl-can-read': 'whm-ssl-client.ts', 'data-ssl-install-can-read': 'whm-ssl-install-client.ts', 'data-branding-can-read': 'whm-panel-branding-client.ts',
   'data-developer-can-read': 'whm-developer-client.ts', 'data-mailx-collections-can-read': 'mailx-collections-client.ts', 'data-transfer-can-read': 'whm-transfer-client.ts',
+  'data-quota-can-read': 'whm-quota-setup-client.ts',
+  'data-dp-can-read': 'whm-app-installer-client.ts', 'data-ocd-can-read': 'whm-app-installer-client.ts', 'data-ai-can-read': 'whm-app-installer-client.ts',
   // A shared read flag lists every client that reads through it; each one goes through the gate.
-  'data-db-can-read': ['whm-databases-client.ts', 'db-engines-client.ts'], 'data-can-read': ['whm-database-tuning-client.ts', 'whm-traffic-client.ts', 'whm-security-controls-client.ts'],
+  'data-db-can-read': ['whm-databases-client.ts', 'db-engines-client.ts'], 'data-can-read': ['whm-database-tuning-client.ts', 'whm-db-tuning-client.ts', 'whm-traffic-client.ts', 'whm-security-controls-client.ts'],
   'data-sw-can-read': ['sw-addon-services-client.ts', 'sw-app-projects-client.ts', 'sw-containers-client.ts', 'sw-deployments-client.ts', 'sw-optimize-client.ts'],
 })
 export const FRAME_READERS: readonly string[] = Object.freeze(Object.keys(FRAME_READER_CLIENTS))

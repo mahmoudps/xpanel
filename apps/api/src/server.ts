@@ -196,6 +196,11 @@ import { handleNameserverReportRoute } from './nameserver-report-workspace.ts'
 import { handleAccountConnectDevicesRoute } from './mail/account-device-setup.ts'
 import { handleAccountTrafficRoute } from './account-traffic-workspace.ts'
 import { handleWhmSecurityControlsRoute } from './whm-security-controls-routes.ts'
+import { handleWhmWebStackRoutes } from './whm-web-stack-routes.ts'
+import { handleAccountProxyProjectsRoute } from './account-proxy-projects-routes.ts'
+import { collectAllProxyProjectDomains } from '../../agent/src/proxy-rules.ts'
+import { handleWhmAppInstallerRoute } from './whm-app-installer-routes.ts'
+import { handleWorkspaceControlsRoute } from './workspace-controls-routes.ts'
 import { assertDnsZoneRevision, dnsExpectedRevision, dnsZoneRevision } from './dns-workspace.ts'
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { chmod, rm } from 'node:fs/promises'
@@ -3520,6 +3525,29 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
       }
       const accountEdgeResponse = await handleAccountEdgeRoute(req, url, method, { store: deps.store, requireCaller, emitAudit, triggerReconcile }); if (accountEdgeResponse) return accountEdgeResponse
       const nginxProxyResponse = await handleNginxProxyRoute(req, url, method, { store: deps.store, requireCaller, assertRoot, emitAudit, triggerReconcile }); if (nginxProxyResponse) return nginxProxyResponse
+      const proxyProjectsResponse = await handleAccountProxyProjectsRoute(req, url, method, { store: deps.store, requireCaller, assertRoot, assertCanAccessAccount, emitAudit, triggerReconcile }); if (proxyProjectsResponse) return proxyProjectsResponse
+      const workspaceControlsResponse = await handleWorkspaceControlsRoute(req, url, method, {
+        store: deps.store,
+        requireCaller,
+        assertRoot,
+        emitAudit,
+        triggerReconcile,
+        ...(deps.agentApp && deps.agentToken ? {
+          applyServerPhpIni: (caller, version, ini) =>
+            readNativeWorkspace(caller, '/host/workspace/php-ini', { version, ini }, true),
+          applyDatabaseCharset: async (caller, account, databaseName, charset, collation) => {
+            await readNativeWorkspace(caller, '/host/workspace/database-charset', { accountId: account.id, databaseName, charset, collation }, true)
+          },
+          applyAddonServiceConfig: (caller, serviceId, config) =>
+            readNativeWorkspace(caller, '/host/workspace/addon-service-config', {
+              serviceId,
+              memoryLimitMb: config.memoryLimitMb,
+              bindAddress: config.bindAddress,
+              maxConnections: config.maxConnections,
+            }, true),
+        } : {}),
+      })
+      if (workspaceControlsResponse) return workspaceControlsResponse
       const leechResponse = await handleLeechProtectionRoute(req, url, method, { store: deps.store, requireCaller, emitAudit, readAgent: deps.agentApp && deps.agentToken ? readNativeWorkspace : null }); if (leechResponse) return leechResponse
       if (pathname.startsWith('/api/account/sec/cloudflare')) {
         const response = await handleSecCloudflareRoute(req, url, method, { requireCaller, assertRoot, emitAudit, store: deps.store, fetch: globalThis.fetch })
@@ -3779,6 +3807,14 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         if (response) return response
       }
       if (pathname.startsWith('/api/server/software/')) {
+        const installerResponse = await handleWhmAppInstallerRoute(req, url, method, {
+          store: deps.store,
+          requireCaller,
+          assertRoot,
+          emitAudit,
+          ...(deps.agentApp && deps.agentToken ? { callHost: (caller, path, body, mutation = false) => readNativeWorkspace(caller, path, body, mutation) } : {}),
+        })
+        if (installerResponse) return installerResponse
         const callHost = (caller: AuthenticatedCaller, path: string, body?: unknown, mutation = false) => readNativeWorkspace(caller, path, body, mutation)
         const response = await handleSwContainersWorkspaceRoute(req, url, method, { requireCaller, assertRoot, emitAudit, callHost, streamHost: (caller, path) => callAgent(path, { caller }) })
           ?? await handleSwAddonServicesWorkspaceRoute(req, url, method, { requireCaller, assertRoot, emitAudit, callHost })
@@ -3788,8 +3824,13 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
       if (pathname.startsWith('/api/server/databases/')) {
         const engines = await handleDbWorkspaceRoute(req, url, method, { store: deps.store, requireCaller, assertRoot, readAgent: readNativeWorkspace })
         if (engines) return engines
-        const tuning = await handleDatabaseTuningWorkspaceRoute(req, url, method, { requireCaller, assertRoot,
-          readHost: (caller, path) => readNativeWorkspace(caller, path, undefined, false, 'GET') })
+        const tuning = await handleDatabaseTuningWorkspaceRoute(req, url, method, {
+          requireCaller,
+          assertRoot,
+          emitAudit,
+          readHost: (caller, path) => readNativeWorkspace(caller, path, undefined, false, 'GET'),
+          ...(deps.agentApp && deps.agentToken ? { callHost: (caller, path, body, mutation = true) => readNativeWorkspace(caller, path, body, mutation) } : {}),
+        })
         if (tuning) return tuning
         const dbAdmin = await handleWhmDbAdminRoute(req, url, method, { requireCaller, assertRoot, callHost: (caller, path, body) => readNativeWorkspace(caller, path, body, true), readHost: (caller, path) => readNativeWorkspace(caller, path, undefined, false, 'GET') })
         if (dbAdmin) return dbAdmin
@@ -3972,7 +4013,19 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         if (response) return response
       }
       if (pathname.startsWith('/api/server/panel-access')) { const response = await handlePanelAccessRoute(req, url, method, { ...secHelpers(), db: deps.db, serverSecret, ...(publicOrigin ? { publicOrigin } : {}), secureCookies: useSecureCookies, ...(deps.agentApp && deps.agentToken ? { callHostRelay: (caller, path, body) => readNativeWorkspace(caller, path, body, body !== undefined, 'POST', null, true) } : {}) }); if (response) return response }
-      if (pathname.startsWith('/api/server/sec/') || pathname.startsWith('/api/server/services/')) {
+      if (pathname.startsWith('/api/server/sec/') || pathname.startsWith('/api/server/services/') || pathname.startsWith('/api/server/web-stack')) {
+        const webStackResponse = await handleWhmWebStackRoutes(req, url, method, {
+          requireCaller,
+          assertRoot,
+          emitAudit,
+          store: deps.store,
+          triggerReconcile,
+          ...(deps.agentApp && deps.agentToken ? {
+            readHost: (caller, path) => readNativeWorkspace(caller, path, undefined, false, 'GET'),
+            callHost: (caller, path, body) => readNativeWorkspace(caller, path, body, body !== undefined),
+          } : {}),
+        })
+        if (webStackResponse) return webStackResponse
         const secControlsResponse = await handleWhmSecurityControlsRoute(req, url, method, {
           requireCaller,
           assertRoot,
@@ -4730,6 +4783,10 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         const existingDomains = await deps.store.listDomains({ accountId: account.id })
         const primaryDomain = existingDomains.find((d) => d.kind === 'primary')
         const name = validateDomainName(body.name)
+        const claimedByProject = (await collectAllProxyProjectDomains(deps.store.rootDir, await deps.store.listAccounts())).get(name)
+        if (claimedByProject && claimedByProject !== account.id) {
+          return fail('CONFLICT', `domain "${name}" is already claimed by another account proxy project`, { stateChanged: false })
+        }
         const parentId = body.parentId ?? body.parentDomainId ?? null
         const parent = parentId ? existingDomains.find(domain => domain.id === parentId) : undefined
         if (guarded && (body.kind === 'alias' || body.kind === 'subdomain') && (!parent || parent.kind === 'alias')) return fail('VALIDATION', 'an owned non-alias parent is required', { stateChanged: false })
@@ -4756,24 +4813,39 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
               return { id: randomUUID(), name, accountId: account.id, serial, records }
             })()
           : null
-        const result = await mutateDomainWorkspace(req, caller, account, body.expectedRevision, 'domain.created', options => deps.store.createDomain({
-          accountId: account.id,
-          name,
-          kind: effectiveKind,
-          parentId,
-          docRoot: (alias ? (guarded ? alias.docRoot : body.docRoot ?? alias.docRoot) : body.docRoot) ?? `${account.home}/domains/${name}/public_html`,
-          siteType: (alias ? (guarded ? alias.siteType : body.siteType ?? alias.siteType) : body.siteType) ?? 'php',
-          upstream: (alias ? (guarded ? alias.upstream : body.upstream ?? alias.upstream) : body.upstream) ?? null,
-          redirect: (alias ? (guarded ? alias.redirect : body.redirect ?? alias.redirect) : body.redirect) ?? null,
-          php: newDomainPhp,
-          wildcard: body.wildcard ?? false,
-          certificateId: body.certificateId ?? null,
-          suspended: body.suspended ?? false,
-          expiresAt: body.expiresAt ?? null,
-          pathQuotaMb: body.pathQuotaMb ?? 'unlimited',
-          ...(body.ipv4 !== undefined && { ipv4: body.ipv4 }),
-          ...(body.ipv6 !== undefined && { ipv6: body.ipv6 }),
-        }, defaultZone ? { ...options, defaultZone } : options), Boolean(body.certificateId))
+        const result = await mutateDomainWorkspace(req, caller, account, body.expectedRevision, 'domain.created', async options => {
+          const origGuard = options.domainGuard!
+          return deps.store.createDomain({
+            accountId: account.id,
+            name,
+            kind: effectiveKind,
+            parentId,
+            docRoot: (alias ? (guarded ? alias.docRoot : body.docRoot ?? alias.docRoot) : body.docRoot) ?? `${account.home}/domains/${name}/public_html`,
+            siteType: (alias ? (guarded ? alias.siteType : body.siteType ?? alias.siteType) : body.siteType) ?? 'php',
+            upstream: (alias ? (guarded ? alias.upstream : body.upstream ?? alias.upstream) : body.upstream) ?? null,
+            redirect: (alias ? (guarded ? alias.redirect : body.redirect ?? alias.redirect) : body.redirect) ?? null,
+            php: newDomainPhp,
+            wildcard: body.wildcard ?? false,
+            certificateId: body.certificateId ?? null,
+            suspended: body.suspended ?? false,
+            expiresAt: body.expiresAt ?? null,
+            pathQuotaMb: body.pathQuotaMb ?? 'unlimited',
+            ...(body.ipv4 !== undefined && { ipv4: body.ipv4 }),
+            ...(body.ipv6 !== undefined && { ipv6: body.ipv6 }),
+          }, {
+            ...(defaultZone ? { ...options, defaultZone } : options),
+            domainGuard: {
+              ...origGuard,
+              authorize: async (freshAccount, currentDomain) => {
+                await origGuard.authorize(freshAccount, currentDomain)
+                const claimed = (await collectAllProxyProjectDomains(deps.store.rootDir, await deps.store.listAccounts())).get(name)
+                if (claimed && claimed !== freshAccount.id) {
+                  fail('CONFLICT', `domain "${name}" is already claimed by another account proxy project`, { stateChanged: false })
+                }
+              },
+            },
+          })
+        }, Boolean(body.certificateId))
         const providerDns = (body as { autoDns?: unknown }).autoDns === true ? await publishSiteRecord({ store: deps.store, fetch: globalThis.fetch }, { domain: name, ipv4: result.value.ipv4 ?? account.ipv4 ?? null, ownDomains: existingDomains.map(domain => domain.name), root: caller.principal.kind === 'root' }) : undefined
         return jsonResponse({ domain: result.value, stateChanged: true, ...result.view, reconcile: result.reconcile, ...(providerDns ? { providerDns } : {}) }, 201)
       }

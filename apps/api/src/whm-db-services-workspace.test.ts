@@ -52,6 +52,26 @@ describe('database service routes', () => {
     await expect(send('/api/server/databases/services/mongodb/auth', 'POST', { enabled: true }, value)).rejects.toThrow('no')
     expect((audit.mock.calls[0] as unknown as [{ outcome: string }])[0].outcome).toBe('failed')
   })
+  it('routes mysql reads, control, settings, config and non-audited preview to the agent', async () => {
+    const { value, readHost, callHost, audit } = helpers()
+    await send('/api/server/databases/services/mysql', 'GET', undefined, value)
+    await send('/api/server/databases/services/mysql/config', 'GET', undefined, value)
+    await send('/api/server/databases/services/mysql/log', 'GET', undefined, value)
+    expect(readHost).toHaveBeenCalledWith(caller, '/host/databases/services/mysql')
+    expect(readHost).toHaveBeenCalledWith(caller, '/host/databases/services/mysql/config')
+    expect(readHost).toHaveBeenCalledWith(caller, '/host/databases/services/mysql/log')
+    await send('/api/server/databases/services/mysql/preview', 'POST', { port: 3306, bindAddress: '127.0.0.1', maxConnections: 200, skipNetworking: false }, value)
+    expect(audit).not.toHaveBeenCalled()
+    await send('/api/server/databases/services/mysql/control', 'POST', { action: 'restart' }, value)
+    await send('/api/server/databases/services/mysql/settings', 'POST', { port: 3306, bindAddress: '127.0.0.1', maxConnections: 200, skipNetworking: false }, value)
+    await send('/api/server/databases/services/mysql/config', 'POST', { text: '[mysqld]\nmax_connections = 200\n', expectedRevision: 'rev' }, value)
+    expect(callHost).toHaveBeenCalledWith(caller, '/host/databases/services/mysql/settings', { port: 3306, bindAddress: '127.0.0.1', maxConnections: 200, skipNetworking: false })
+    expect((audit.mock.calls as unknown as [{ action: string }][]).map(([entry]) => entry.action)).toEqual([
+      'server.databases.service_control',
+      'server.databases.service_settings',
+      'server.databases.service_config',
+    ])
+  })
 })
 
 describe('MongoDB archive upload', () => {

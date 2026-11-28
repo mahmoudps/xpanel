@@ -131,7 +131,7 @@ import { WHM_BACKUPS_CLIENT_BINDING } from './whm-backups-client.ts'
 import { WHM_BENCHMARK_CLIENT_BINDING } from './whm-benchmark-client.ts'
 import { WHM_COMPOSER_CLIENT_BINDING } from './whm-composer-client.ts'
 import { WHM_CONFIGURATION_HEALTH_CLIENT_BINDING } from './whm-configuration-health-client.ts'
-import { WHM_DATABASE_TUNING_CLIENT_BINDING } from './whm-database-tuning-client.ts'
+import { WHM_DB_TUNING_CLIENT_BINDING } from './whm-db-tuning-client.ts'
 import { WHM_DATABASES_CLIENT_BINDING } from './whm-databases-client.ts'
 import { WHM_DEFAULT_INDEX_CLIENT_BINDING } from './whm-default-index-client.ts'
 import { WHM_DEFAULT_SITE_CLIENT_BINDING } from './whm-default-site-client.ts'
@@ -192,7 +192,12 @@ import { WHM_UPDATES_CLIENT_BINDING } from './whm-updates-client.ts'
 import { WHM_UPGRADE_CLIENT_BINDING } from './whm-upgrade-client.ts'
 import { WHM_WEB_DIRECTIVES_CLIENT_BINDING } from './whm-web-directives-client.ts'
 import { WHM_WEB_SERVER_CLIENT_BINDING } from './whm-web-server-client.ts'
+import { WHM_WEB_STACK_CLIENT_BINDING } from './whm-web-stack-client.ts'
 import { WHM_WHMCS_CLIENT_BINDING } from './whm-whmcs-client.ts'
+import { WHM_APP_INSTALLER_CLIENT_BINDING } from './whm-app-installer-client.ts'
+import { WHM_QUOTA_SETUP_CLIENT_BINDING } from './whm-quota-setup-client.ts'
+import { ACCOUNT_PROXY_PROJECTS_CLIENT_BINDING } from './account-proxy-projects-client.ts'
+import { WORKSPACE_CONTROLS_CLIENT_BINDING } from './workspace-controls-client.ts'
 import { ZONE_EDITOR_CLIENT_BINDING } from './zone-editor-client.ts'
 
 export interface RouteClientChunk {
@@ -394,7 +399,7 @@ export const ROUTE_CLIENT_CHUNKS: readonly RouteClientChunk[] = Object.freeze([
   if(window.__xpRt&&Array.isArray(window.__xpRt.rebinders))window.__xpRt.rebinders.push(run);
   run();
 })();`),
-  chunk('panel-domains-1', 'any', ["data-web-directives","data-wd-domain","data-wd-status","data-wd-rows","data-wd-notice","data-wd-issues","data-wd-","data-wd-field","data-site-health","data-read-only","data-health-","data-domain-workspace","data-domain-create","data-domain-settings-form","data-domain-status","data-domain-","data-domain-parent-field","data-domain-alias-help","data-domain-root-help","data-reverse-proxy","data-rp-","data-rp-header","data-rp-header-empty","data-rp-header-field","data-site-settings","data-site-can-read","data-site-manage","data-site-","data-site-selector","data-site-deny-name","data-site-deny-directory","data-site-deny-extensions","data-dns-editor","data-whm-dns-workspace","data-dns-zone","data-dns-account","data-dns-new-name","data-dns-records","data-dns-status","data-dns-add-record"], false, `(function(){
+  chunk('panel-domains-1', 'any', ["data-web-directives","data-wd-domain","data-wd-status","data-wd-rows","data-wd-notice","data-wd-issues","data-wd-","data-wd-field","data-site-health","data-read-only","data-health-","data-domain-workspace","data-domain-create","data-domain-settings-form","data-domain-status","data-domain-","data-domain-parent-field","data-domain-alias-help","data-domain-root-help","data-reverse-proxy","data-rp-","data-rp-header","data-rp-header-empty","data-rp-header-field","data-site-proxy-rules","data-spr-","data-proxy-projects","data-pp-","data-site-settings","data-site-can-read","data-site-manage","data-site-","data-site-selector","data-site-deny-name","data-site-deny-directory","data-site-deny-extensions","data-dns-editor","data-whm-dns-workspace","data-dns-zone","data-dns-account","data-dns-new-name","data-dns-records","data-dns-status","data-dns-add-record"], false, `(function(){
   function run(){
     if(typeof window==='undefined'||typeof window.xpanelSessionRequest!=='function')return;
     var __rt=window.__xpRt;if(!__rt)return;
@@ -403,6 +408,7 @@ export const ROUTE_CLIENT_CHUNKS: readonly RouteClientChunk[] = Object.freeze([
     (${SITE_HEALTH_CLIENT_BINDING})(askDialog);
     (${DOMAIN_WORKSPACE_CLIENT_BINDING})(askDialog);
     (${ACCOUNT_REVERSE_PROXY_CLIENT_BINDING})(askDialog);
+    (${ACCOUNT_PROXY_PROJECTS_CLIENT_BINDING})(askDialog);
     (${ACCOUNT_SITE_SETTINGS_CLIENT_BINDING})(askDialog);
     (${ZONE_EDITOR_CLIENT_BINDING})(askDialog);
   }
@@ -637,13 +643,15 @@ export const ROUTE_CLIENT_CHUNKS: readonly RouteClientChunk[] = Object.freeze([
   if(window.__xpRt&&Array.isArray(window.__xpRt.rebinders))window.__xpRt.rebinders.push(run);
   run();
 })();`),
-  chunk('whm-server-2', 'xwhm', ["data-read-only","data-whm-server-health","data-whm-server-health-","data-whm-server-health-account","data-whm-web-readback","data-whm-web-status","data-whm-web-refresh","data-server-settings-form","data-whm-web-generation","data-whm-web-rollback","data-whm-detail-section","data-web-directives-form","data-web-directives-can-read","data-web-directives-can-manage","data-web-directives-status","data-tweak-settings","data-tweak-status","data-tweak-save","data-tweak-refresh","data-tweak-search","data-tweak-empty","data-setting-row","data-setting-group","data-server-ops","data-server-ops-status","data-server-ops-submit","data-server-ops-rows","data-server-ops-job","data-host-tool","data-host-tool-status","data-host-tool-submit","data-host-tool-cancel","data-host-tool-rows","data-host-tool-log","data-host-tool-reveal","data-host-tool-job","data-host-info","data-host-info-status","data-host-load","data-host-memory","data-host-disk"], false, `(function(){
+  chunk('whm-server-2', 'xwhm', ["data-read-only","data-whm-server-health","data-whm-server-health-","data-whm-server-health-account","data-whm-web-readback","data-whm-web-status","data-whm-web-refresh","data-server-settings-form","data-whm-web-generation","data-whm-web-rollback","data-whm-detail-section","data-web-stack-builder","data-ols-manager","data-quota-setup","data-setup-stepper","data-setup-diff-rows","data-web-directives-form","data-web-directives-can-read","data-web-directives-can-manage","data-web-directives-status","data-tweak-settings","data-tweak-status","data-tweak-save","data-tweak-refresh","data-tweak-search","data-tweak-empty","data-setting-row","data-setting-group","data-server-ops","data-server-ops-status","data-server-ops-submit","data-server-ops-rows","data-server-ops-job","data-host-tool","data-host-tool-status","data-host-tool-submit","data-host-tool-cancel","data-host-tool-rows","data-host-tool-log","data-host-tool-reveal","data-host-tool-job","data-host-info","data-host-info-status","data-host-load","data-host-memory","data-host-disk"], false, `(function(){
   function run(){
     if(typeof window==='undefined'||typeof window.xpanelSessionRequest!=='function')return;
     var __rt=window.__xpRt;if(!__rt)return;
     var askDialog=__rt.askDialog,rtl=document.documentElement.dir==='rtl',clientTemplate=__rt.clientTemplate,clientTemplateSlot=__rt.clientTemplateSlot,cloneClientTemplate=__rt.cloneClientTemplate,reload=__rt.reload;
     (${WHM_SERVER_HEALTH_CLIENT_BINDING})();
     (${WHM_WEB_SERVER_CLIENT_BINDING})(askDialog);
+    (${WHM_WEB_STACK_CLIENT_BINDING})(askDialog);
+    (${WHM_QUOTA_SETUP_CLIENT_BINDING})(askDialog);
     (${WHM_WEB_DIRECTIVES_CLIENT_BINDING})();
     (${WHM_TWEAK_SETTINGS_CLIENT_BINDING})();
     (${WHM_SERVER_OPS_CLIENT_BINDING})(askDialog);
@@ -719,7 +727,7 @@ export const ROUTE_CLIENT_CHUNKS: readonly RouteClientChunk[] = Object.freeze([
     var askDialog=__rt.askDialog,rtl=document.documentElement.dir==='rtl',clientTemplate=__rt.clientTemplate,clientTemplateSlot=__rt.clientTemplateSlot,cloneClientTemplate=__rt.cloneClientTemplate,reload=__rt.reload;
     (${WHM_DATABASES_CLIENT_BINDING})(askDialog);
     (${DB_FTP_CLIENT_BINDINGS})(askDialog);
-    (${WHM_DATABASE_TUNING_CLIENT_BINDING})();
+    (${WHM_DB_TUNING_CLIENT_BINDING})(askDialog);
     (${DB_ENGINES_CLIENT_BINDING})(askDialog, rtl);
   }
   if(window.__xpRt&&Array.isArray(window.__xpRt.rebinders))window.__xpRt.rebinders.push(run);
@@ -786,6 +794,24 @@ export const ROUTE_CLIENT_CHUNKS: readonly RouteClientChunk[] = Object.freeze([
   function run(){
     if(typeof window==='undefined'||typeof window.xpanelSessionRequest!=='function')return;
     ${ACCOUNT_CONNECT_DEVICES_CLIENT_BINDING};
+  }
+  if(window.__xpRt&&Array.isArray(window.__xpRt.rebinders))window.__xpRt.rebinders.push(run);
+  run();
+})();`),
+  chunk('whm-app-installer', 'any', ["data-whm-distro-packages","data-whm-one-click-deploy","data-whm-app-installer"], false, `(function(){
+  function run(){
+    if(typeof window==='undefined'||typeof window.xpanelSessionRequest!=='function')return;
+    var __rt=window.__xpRt;if(!__rt)return;
+    var askDialog=__rt.askDialog,rtl=document.documentElement.dir==='rtl',clientTemplate=__rt.clientTemplate,clientTemplateSlot=__rt.clientTemplateSlot,cloneClientTemplate=__rt.cloneClientTemplate,reload=__rt.reload;
+    (${WHM_APP_INSTALLER_CLIENT_BINDING})(askDialog);
+  }
+  if(window.__xpRt&&Array.isArray(window.__xpRt.rebinders))window.__xpRt.rebinders.push(run);
+  run();
+})();`),
+  chunk('workspace-controls', 'any', ["data-wc-whm-php-preview-region","data-wc-panel-php-preview-region","data-panel-resources-live","data-wc-resource-folders-refresh","data-wc-resource-io-dir","data-wc-cron-preview-btn","data-wc-cron-mailto-input","data-account-cron","data-domain-workspace","data-database-workspace","data-wc-history-refresh","data-wc-addon-config","data-wc-av-remediation"], false, `(function(){
+  function run(){
+    if(typeof window==='undefined'||typeof window.xpanelSessionRequest!=='function')return;
+    (${WORKSPACE_CONTROLS_CLIENT_BINDING})();
   }
   if(window.__xpRt&&Array.isArray(window.__xpRt.rebinders))window.__xpRt.rebinders.push(run);
   run();

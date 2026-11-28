@@ -7,7 +7,7 @@ import type { Account } from '@xpanel/core'
 import { edge } from '@xpanel/render'
 import { atomicWriteJson } from '@xpanel/state'
 import { leechStatePath, readLeechRecord, type LeechRecord } from './leech-protection.ts'
-import { proxyRulesByDomain, proxyRulesPath, readProxyRulesRecord, type ProxyRulesRecord } from './proxy-rules.ts'
+import { proxyProjectsPath, proxyRulesByDomain, proxyRulesPath, readProxyProjectsRecord, readProxyRulesRecord, type ProxyProjectRecord, type ProxyRulesRecord } from './proxy-rules.ts'
 
 /**
  * Per-account edge desired state: cPanel IP Blocker (addresses refused by every site of the account at the nginx
@@ -142,7 +142,25 @@ export const nextCacheEpoch = (now: Date, previous: string | null): string => {
   return epoch === previous ? (now.getTime() + 1).toString(36) : epoch
 }
 
-export interface AccountEdgeInput { policy: edge.AccountEdgePolicy; cache: boolean; proxyRules?: Record<string, edge.ProxyRule[]> }
+export interface AccountEdgeInput {
+  policy: edge.AccountEdgePolicy
+  cache: boolean
+  proxyRules?: Record<string, edge.ProxyRule[]>
+  proxyProjects?: edge.ProxyProjectSite[]
+}
+const mapProxyProjects = (projects: readonly ProxyProjectRecord[]): edge.ProxyProjectSite[] => projects.map(project => ({
+  id: project.id,
+  name: project.name,
+  domains: [...project.domains],
+  rules: project.rules.map(rule => ({
+    path: rule.path,
+    target: rule.target,
+    options: { hostHeader: rule.hostHeader, websocket: rule.websocket, headers: [...rule.headers] },
+  })),
+  cache: project.cache,
+  gzip: project.gzip,
+  ssl: { enabled: project.ssl.enabled, certificateId: project.ssl.certificateId },
+}))
 const readState = async (root: string, path: string): Promise<unknown> => {
   let text: string
   try { text = await readFile(join(root, path), 'utf8') } catch (error) {
@@ -157,10 +175,11 @@ export async function readAccountEdge(root: string, accounts: readonly Pick<Acco
   const out = new Map<string, AccountEdgeInput>()
   for (const account of accounts) {
     const blockedRaw = await readState(root, edgeStatePath('ip-blocker', account.id)), cacheRaw = await readState(root, edgeStatePath('cache', account.id)), rulesRaw = await readState(root, proxyRulesPath(account.id))
+    const projectsRaw = await readState(root, proxyProjectsPath(account.id))
     const movedRaw = await readState(root, movedStatePath(account.id))
-    const blocked = blockedRaw === null ? null : readIpBlockerRecord(blockedRaw), cache = cacheRaw === null ? null : readEdgeCacheRecord(cacheRaw), rules = rulesRaw === null ? null : readProxyRulesRecord(rulesRaw), moved = movedRaw === null ? null : readMovedRecord(movedRaw)
-    if (blockedRaw !== null && !blocked || cacheRaw !== null && !cache || rulesRaw !== null && !rules || movedRaw !== null && !moved) return fail('PRECONDITION_FAILED', 'saved edge configuration is invalid; review it before reconciliation')
-    if (blocked || cache || rules || moved) out.set(account.id, { policy: { deny: blocked?.entries ?? [], cacheEpoch: cache?.epoch ?? null, ...(moved ? { movedTo: moved.ipv4 } : {}) }, cache: cache?.enabled ?? true, ...(rules && { proxyRules: proxyRulesByDomain(rules) }) })
+    const blocked = blockedRaw === null ? null : readIpBlockerRecord(blockedRaw), cache = cacheRaw === null ? null : readEdgeCacheRecord(cacheRaw), rules = rulesRaw === null ? null : readProxyRulesRecord(rulesRaw), projects = projectsRaw === null ? null : readProxyProjectsRecord(projectsRaw), moved = movedRaw === null ? null : readMovedRecord(movedRaw)
+    if (blockedRaw !== null && !blocked || cacheRaw !== null && !cache || rulesRaw !== null && !rules || projectsRaw !== null && !projects || movedRaw !== null && !moved) return fail('PRECONDITION_FAILED', 'saved edge configuration is invalid; review it before reconciliation')
+    if (blocked || cache || rules || projects || moved) out.set(account.id, { policy: { deny: blocked?.entries ?? [], cacheEpoch: cache?.epoch ?? null, ...(moved ? { movedTo: moved.ipv4 } : {}) }, cache: cache?.enabled ?? true, ...(rules && { proxyRules: proxyRulesByDomain(rules) }), ...(projects?.projects.length ? { proxyProjects: mapProxyProjects(projects.projects) } : {}) })
   }
   return out
 }
@@ -184,12 +203,12 @@ export async function writeAccountEdgeState(root: string, accountId: string, sta
 }
 /** Called once a purged account has left the desired state. */
 export async function removeAccountEdgeState(root: string, accountId: string): Promise<void> {
-  for (const path of [edgeStatePath('ip-blocker', accountId), edgeStatePath('cache', accountId), leechStatePath(accountId), proxyRulesPath(accountId), movedStatePath(accountId), LIVE_TRANSFER_STATE_DIR + '/' + accountId + '.json']) await rm(join(root, path), { force: true })
+  for (const path of [edgeStatePath('ip-blocker', accountId), edgeStatePath('cache', accountId), leechStatePath(accountId), proxyRulesPath(accountId), proxyProjectsPath(accountId), movedStatePath(accountId), LIVE_TRANSFER_STATE_DIR + '/' + accountId + '.json']) await rm(join(root, path), { force: true })
 }
 /** Unsuspending a moved account ends its proxying. */
 export const clearAccountMoved = (root: string, accountId: string): Promise<void> => rm(join(root, movedStatePath(accountId)), { force: true })
 /** nginxSiteFile options for one account: its edge policy, and the cache switched off when the account turned it off. */
-export const accountEdgeSiteOptions = (edgeByAccount: ReadonlyMap<string, AccountEdgeInput> | undefined, accountId: string): { accountEdge?: edge.AccountEdgePolicy; cache?: false; proxyRules?: Record<string, edge.ProxyRule[]> } => {
+export const accountEdgeSiteOptions = (edgeByAccount: ReadonlyMap<string, AccountEdgeInput> | undefined, accountId: string): { accountEdge?: edge.AccountEdgePolicy; cache?: false; proxyRules?: Record<string, edge.ProxyRule[]>; proxyProjects?: edge.ProxyProjectSite[] } => {
   const saved = edgeByAccount?.get(accountId)
-  return saved ? { accountEdge: saved.policy, ...(saved.cache ? {} : { cache: false as const }), ...(saved.proxyRules && { proxyRules: saved.proxyRules }) } : {}
+  return saved ? { accountEdge: saved.policy, ...(saved.cache ? {} : { cache: false as const }), ...(saved.proxyRules && { proxyRules: saved.proxyRules }), ...(saved.proxyProjects?.length && { proxyProjects: saved.proxyProjects }) } : {}
 }

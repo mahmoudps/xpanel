@@ -27,6 +27,27 @@ export function isSwAddonServiceCommand(argv: readonly unknown[]): boolean {
   return SW_ADDON_SERVICES.some(service => (['start', 'stop', 'restart'] as const).some(action => swAddonActionArgv(action, service).every((value, index) => value === argv[index])))
 }
 
+export type AddonBindAddress = '127.0.0.1' | '::1' | '0.0.0.0'
+export interface AddonDropInConfig {
+  serviceId: SwAddonServiceId
+  memoryLimitMb: number
+  bindAddress: AddonBindAddress
+  maxConnections: number | null
+}
+export function renderAddonDropIn(unit: string, cfg: AddonDropInConfig): { dropInPath: string; previewText: string } {
+  const dropInPath = `/etc/systemd/system/${unit}.d/xpanel-limits.conf`
+  const lines = [
+    `# Managed drop-in for ${unit}`,
+    '[Service]',
+    `MemoryMax=${cfg.memoryLimitMb}M`,
+    `Environment="XPANEL_BIND=${cfg.bindAddress}"`,
+  ]
+  if (cfg.maxConnections !== null) {
+    lines.push(`Environment="XPANEL_MAX_CONN=${cfg.maxConnections}"`)
+  }
+  return { dropInPath, previewText: lines.join('\n') }
+}
+
 export interface SwAddonServiceRow { id: SwAddonServiceId; unit: string; componentId: string | null; state: 'read' | 'unavailable'; load: string | null; active: string | null; sub: string | null; boot: string | null; revision: string | null }
 export interface SwAddonServicesView { scope: 'host-addon-services'; state: 'read' | 'unavailable'; reason: null | 'unsupported-host'; observedAt: string; services: SwAddonServiceRow[]; actions: { control: boolean; configure: false } }
 

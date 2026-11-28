@@ -11,6 +11,25 @@ const CATEGORIES = {
   module: [['php', msgctxt('theme:v2', 'PHP extensions')], ['perl', msgctxt('theme:v2', 'Perl modules')]],
 } as const
 
+/** Distro packages workspace section bridged to /api/server/software/distro-packages*. */
+function distroPackagesSection(t: Translate, canRead: boolean, canManage: boolean): string {
+  const templates = `<template data-xp-template="distro-pkg-row"><tr><td><strong data-xp-slot="name"></strong> <bdi dir="ltr" class="v2-mono" data-xp-slot="packages"></bdi></td><td data-xp-slot="state"></td><td><bdi dir="ltr" class="v2-mono" data-xp-slot="installed"></bdi></td><td data-xp-slot="estimate"></td><td><div class="v2-whm-data__actions"><button type="button" class="v2-btn" data-xp-slot="install" disabled></button><button type="button" class="v2-btn" data-xp-slot="remove" disabled></button></div></td></tr></template><template data-xp-template="distro-pkg-empty"><tr><td colspan="5" data-xp-slot="message"></td></tr></template>`
+  const filters = fields(
+    field('dp-page-filter', t(msgid('Category')), { kind: 'select', disabled: true, hooks: { 'data-dp-page': true }, options: [{ value: '', label: t(msgid('All categories')) }, { value: 'catalog', label: t(msgid('Catalog')) }, { value: 'runtime', label: t(msgid('Runtimes')) }, { value: 'module', label: t(msgid('Modules')) }] })
+    + field('dp-search-input', t(msgid('Search packages')), { kind: 'input', type: 'search', disabled: true, autocomplete: 'off', hooks: { 'data-dp-search': true } }),
+  )
+  const preview = `<section class="v2-whm-data__preview" data-dp-preview hidden><h3>${esc(t(msgid('Package change preview')))}</h3><p data-dp-preview-summary role="status"></p>${check(t(msgid('I reviewed extra package removals')), { 'data-dp-accept-extra': true })}${actions(button(t(msgid('Apply package change')), { 'data-dp-confirm': true }, true, true) + button(t(msgid('Cancel preview')), { 'data-dp-cancel': true }, true))}</section>`
+  return section('distro-packages', t(msgid('OS distribution packages')), note(t(msgid('Search and manage reviewed distribution repository packages without third-party repositories.')))
+    + filters
+    + actions(button(t(msgid('Read distro packages')), { 'data-dp-refresh': true }, !canRead))
+    + status(t(msgid('Distribution packages have not been read.')), { 'data-dp-status': true })
+    + table(t, t(msgid('Distribution packages')), [msgid('Component'), msgid('State'), msgid('Installed version'), msgid('Estimate'), msgid('Action')], { 'data-dp-rows': true }, t(msgid('Distribution packages have not been read.')))
+    + preview
+    + `<p data-dp-job hidden>${link(t(msgid('Open package job')), '/whm/jobs', { 'data-dp-job-link': true })}</p>`
+    + templates,
+  { 'data-whm-distro-packages': true, 'data-dp-can-read': String(canRead), 'data-dp-can-manage': String(canManage) })
+}
+
 export function renderV2WhmSoftwareCenter(input: WhmDataPageInput, kind: CenterKind): string {
   const { t, canRead, canManage } = context(input)
   const route = { catalog: '/whm/software/catalog', runtime: '/whm/software/runtimes', module: '/whm/software/modules' }[kind]
@@ -20,7 +39,8 @@ export function renderV2WhmSoftwareCenter(input: WhmDataPageInput, kind: CenterK
   const sources = section(`software-${kind}-sources`, t(msgctxt('theme:v2', 'Catalog sources')), `<ul class="v2-whm-data__list"><li data-sc-source="shipped"><strong>${esc(t(msgctxt('theme:v2', 'Trusted')))}</strong>${note(t(msgctxt('theme:v2', 'The reviewed catalog ships with this release. Packages use only repositories already configured on the server.')))}</li><li data-sc-source="external"><strong>${esc(t(msgid('Unavailable')))}</strong>${note(t(msgctxt('theme:v2', 'External signed catalogs are not supported. No third-party catalog URL is downloaded.')))}</li></ul>` + note(t(msgctxt('theme:v2', 'The panel stack is managed by server setup and cannot be removed from the software center.'))))
   const filters = fields(field(`v2-sc-${kind}-category`, t(msgid('Category')), { kind: 'select', disabled: true, hooks: { 'data-sc-category': true }, options: [{ value: '', label: t(msgctxt('theme:v2', 'All categories')) }, ...CATEGORIES[kind].map(([value, label]) => ({ value, label: t(label) }))] }) + field(`v2-sc-${kind}-search`, t(msgctxt('theme:v2', 'Search components')), { kind: 'input', type: 'search', disabled: true, autocomplete: 'off', hooks: { 'data-sc-search': true } }))
   const observations = `<dl class="v2-whm-data__facts"><div><dt>${esc(t(msgctxt('theme:v2', 'Package database')))}</dt><dd data-sc-family>${esc(t(msgid('Loading...')))}</dd></div><div><dt>${esc(t(msgctxt('theme:v2', 'Observed at (UTC)')))}</dt><dd><bdi dir="ltr" data-sc-observed-at>${esc(t(msgid('Loading...')))}</bdi></dd></div>${kind === 'module' ? `<div><dt>${esc(t(msgctxt('theme:v2', 'Installed PHP versions')))}</dt><dd data-sc-php-versions>${esc(t(msgid('Loading...')))}</dd></div>` : ''}</dl>`
-  return page(input, route, title, t(msgctxt('theme:v2', 'Review observed package state, preview changes, then submit a verified host job.')), (kind === 'runtime' ? renderV2ToolCard(t, pythonRuntimesCard, canManage) : kind === 'catalog' ? renderV2ToolCard(t, pluginImportCard, canManage) : '') + v2SoftwareCenterTemplates() + sources + section(`software-${kind}-components`, t(msgctxt('theme:v2', 'Components')), filters + actions(button(t(msgctxt('theme:v2', 'Read installed packages')), { 'data-sc-refresh': true }, !canRead)) + status(t(msgctxt('theme:v2', 'Installed packages have not been read. No component is shown as installed or available.')), { 'data-sc-status': true }) + observations + `<div class="v2-whm-data__stack" data-sc-groups data-sc-columns="${esc(JSON.stringify(headers.map(label => t(label))))}">${table(t, t(msgctxt('theme:v2', 'Components')), headers, {}, t(msgctxt('theme:v2', 'No components have been read.')))}</div>`) + preview + `<p data-sc-job hidden>${link(t(msgctxt('theme:v2', 'Open the submitted job')), '/whm/jobs', { 'data-sc-job-link': true })}</p>`, { 'data-whm-software-center': true, 'data-sc-page': kind, 'data-sc-can-read': String(canRead), 'data-sc-can-manage': String(canManage) })
+  const distro = kind === 'catalog' ? distroPackagesSection(t, canRead, canManage) : ''
+  return page(input, route, title, t(msgctxt('theme:v2', 'Review observed package state, preview changes, then submit a verified host job.')), (kind === 'runtime' ? renderV2ToolCard(t, pythonRuntimesCard, canManage) : kind === 'catalog' ? renderV2ToolCard(t, pluginImportCard, canManage) : '') + v2SoftwareCenterTemplates() + sources + section(`software-${kind}-components`, t(msgctxt('theme:v2', 'Components')), filters + actions(button(t(msgctxt('theme:v2', 'Read installed packages')), { 'data-sc-refresh': true }, !canRead)) + status(t(msgctxt('theme:v2', 'Installed packages have not been read. No component is shown as installed or available.')), { 'data-sc-status': true }) + observations + `<div class="v2-whm-data__stack" data-sc-groups data-sc-columns="${esc(JSON.stringify(headers.map(label => t(label))))}">${table(t, t(msgctxt('theme:v2', 'Components')), headers, {}, t(msgctxt('theme:v2', 'No components have been read.')))}</div>`) + preview + `<p data-sc-job hidden>${link(t(msgctxt('theme:v2', 'Open the submitted job')), '/whm/jobs', { 'data-sc-job-link': true })}</p>` + distro, { 'data-whm-software-center': true, 'data-sc-page': kind, 'data-sc-can-read': String(canRead), 'data-sc-can-manage': String(canManage) })
 }
 
 /** Signed catalog and offer: the whm-extend client reads /api/server/site-software and changes the offer. */
@@ -53,15 +73,64 @@ function siteInstances(t: Translate, canManage: boolean): string {
     { 'data-site-instances': true, 'data-site-instances-can-read': String(canManage), 'data-site-instances-can-manage': String(canManage) })
 }
 
-/** The store extension and activity views have no installer transport; they retain their approved controls and unread state. */
+/** One-click application deployment section bridged to /api/server/software/one-click*. */
+function oneClickDeploySection(t: Translate, canRead: boolean, canManage: boolean): string {
+  const templates = `<template data-xp-template="one-click-row"><tr><td><bdi dir="ltr" class="v2-mono" data-xp-slot="domain"></bdi></td><td data-xp-slot="account"></td><td><bdi dir="ltr" class="v2-mono" data-xp-slot="docroot"></bdi></td><td data-xp-slot="app"></td><td><bdi dir="ltr" class="v2-mono" data-xp-slot="version"></bdi></td></tr></template><template data-xp-template="one-click-empty"><tr><td colspan="5" data-xp-slot="message"></td></tr></template>`
+  const controls = fields(
+    field('ocd-domain', t(msgid('Target domain')), { kind: 'select', disabled: true, hooks: { 'data-ocd-domain': true }, options: [{ value: '', label: t(msgid('Select a target domain')) }] })
+    + field('ocd-app', t(msgid('Application')), { kind: 'select', disabled: true, hooks: { 'data-ocd-app': true }, options: [{ value: '', label: t(msgid('Select an application')) }] })
+    + field('ocd-version', t(msgid('Version')), { kind: 'select', disabled: true, hooks: { 'data-ocd-version': true }, options: [{ value: '', label: t(msgid('Select a version')) }] })
+    + field('ocd-path', t(msgid('Subdirectory (optional)')), { kind: 'input', type: 'text', dir: 'ltr', disabled: true, autocomplete: 'off', hooks: { 'data-ocd-path': true } }, t(msgid('Leave empty to deploy into the domain document root.'))),
+  )
+  return section('one-click-deploy', t(msgid('One-click application deploy')), note(t(msgid('Deploy a reviewed signed-catalog application directly onto an active domain document root or subdirectory.')))
+    + controls
+    + actions(button(t(msgid('Deploy application')), { 'data-ocd-deploy': true }, true, true) + button(t(msgid('Read deployment targets')), { 'data-ocd-refresh': true }, !canRead))
+    + status(t(msgid('One-click deployment catalog has not been read.')), { 'data-ocd-status': true })
+    + table(t, t(msgid('Eligible deployment targets and active installs')), [msgid('Domain'), msgid('Account'), msgid('Document root'), msgid('Application'), msgid('Version')], { 'data-ocd-rows': true }, t(msgid('One-click deployment targets have not been read.')))
+    + `<p data-ocd-job hidden>${link(t(msgid('Open deployment job')), '/whm/jobs', { 'data-ocd-job-link': true })}</p>`
+    + templates,
+  { 'data-whm-one-click-deploy': true, 'data-ocd-can-read': String(canRead), 'data-ocd-can-manage': String(canManage) })
+}
+
+/** Root-level reviewed application installer section bridged to /api/server/software/app-installer*. */
+function appInstallerSection(t: Translate, canRead: boolean, canManage: boolean): string {
+  const templates = `<template data-xp-template="app-installer-row"><tr><td><bdi dir="ltr" class="v2-mono" data-xp-slot="account"></bdi></td><td><bdi dir="ltr" class="v2-mono" data-xp-slot="site"></bdi></td><td data-xp-slot="app"></td><td><bdi dir="ltr" class="v2-mono" data-xp-slot="version"></bdi></td><td><button type="button" class="v2-btn" data-xp-slot="remove" disabled></button></td></tr></template><template data-xp-template="app-installer-empty"><tr><td colspan="5" data-xp-slot="message"></td></tr></template>`
+  const controls = fields(
+    field('ai-domain', t(msgid('Target domain')), { kind: 'select', disabled: true, hooks: { 'data-ai-domain': true }, options: [{ value: '', label: t(msgid('Select a target domain')) }] })
+    + field('ai-app', t(msgid('Application')), { kind: 'select', disabled: true, hooks: { 'data-ai-app': true }, options: [{ value: '', label: t(msgid('Select an application')) }] })
+    + field('ai-version', t(msgid('Version')), { kind: 'select', disabled: true, hooks: { 'data-ai-version': true }, options: [{ value: '', label: t(msgid('Select a version')) }] })
+    + field('ai-path', t(msgid('Subdirectory (optional)')), { kind: 'input', type: 'text', dir: 'ltr', disabled: true, autocomplete: 'off', hooks: { 'data-ai-path': true } }),
+  )
+  return section('app-installer', t(msgid('Reviewed application installer')), note(t(msgid('Install or remove reviewed applications across account sites through verified host jobs.')))
+    + controls
+    + actions(button(t(msgid('Install application')), { 'data-ai-install': true }, true, true) + button(t(msgid('Read installer catalog')), { 'data-ai-refresh': true }, !canRead))
+    + status(t(msgid('Application installer catalog has not been read.')), { 'data-ai-status': true })
+    + table(t, t(msgid('Installed applications')), [msgid('Account'), msgid('Site'), msgid('Application'), msgid('Version'), msgid('Action')], { 'data-ai-rows': true }, t(msgid('Installed applications have not been read.')))
+    + `<p data-ai-job hidden>${link(t(msgid('Open installer job')), '/whm/jobs', { 'data-ai-job-link': true })}</p>`
+    + templates,
+  { 'data-whm-app-installer': true, 'data-ai-can-read': String(canRead), 'data-ai-can-manage': String(canManage) })
+}
+
+/** Store catalog, extensions (distro packages), one-click deploy, and application installer views. */
 export function renderV2WhmStore(input: WhmDataPageInput, route: string): string {
   const { t, canRead, canManage } = context(input)
   const activity = route.endsWith('/activity')
-  const title = t(activity ? msgctxt('theme:v2', 'Installer activity') : route.endsWith('/extensions') ? msgctxt('theme:v2', 'Server extensions') : msgctxt('theme:v2', 'Catalog settings'))
+  const extensions = route.endsWith('/extensions')
+  const title = t(activity ? msgctxt('theme:v2', 'Installer activity') : extensions ? msgctxt('theme:v2', 'Server extensions') : msgctxt('theme:v2', 'Catalog settings'))
   const currentHref = route === '/whm/software/site-software' ? '/whm/software/store' : route
   const navigation = `<nav class="v2-whm-data__actions" aria-label="${esc(t(msgctxt('theme:v2', 'Store views')))}">${[['/whm/software/store', msgctxt('theme:v2', 'Catalog settings')], ['/whm/software/store/extensions', msgctxt('theme:v2', 'Server extensions')], ['/whm/software/store/activity', msgctxt('theme:v2', 'Installer activity')]].filter(([href]) => canRead || href === currentHref).map(([href, label]) => `<a class="v2-btn" href="${href}"${canRead ? ` data-nav-route="${href}"` : ''}${currentHref === href ? ' aria-current="page"' : ''}>${esc(t(label!))}</a>`).join('')}</nav>`
   const authority = activity ? section('store-activity', t(msgctxt('theme:v2', 'Installer activity')), status(t(msgctxt('theme:v2', 'Installer activity was not read. General audit events are not installer activity.')), { 'data-collection-state': 'unread' }))
     : section('store-authority', t(msgctxt('theme:v2', 'Catalog authority')), facts(t, [['sources', msgctxt('theme:v2', 'Catalog sources')], ['keys', msgctxt('theme:v2', 'Trusted signing keys')], ['extensions', msgctxt('theme:v2', 'Extensions')]], 'data-store-fact') + note(t(msgctxt('theme:v2', 'Private signing keys are never shown here.'))) + (canRead && input.plans !== undefined ? `<ul class="v2-whm-data__list" data-collection-state="read">${input.plans.map(plan => `<li><strong>${esc(plan.name)}</strong>${note(t(msgctxt('theme:v2', 'Application feature key not read.')))}</li>`).join('') || `<li>${esc(t(msgctxt('theme:v2', 'The read returned no plans.')))}</li>`}</ul>` : status(t(msgctxt('theme:v2', 'Plans have not been read.')), { 'data-collection-state': 'unread' })))
-  const signed = route === '/whm/software/store' || route === '/whm/software/site-software' ? siteSoftware(t, canManage) + siteInstances(t, canManage) : ''
-  return page(input, route, title, t(msgctxt('theme:v2', 'Catalog authority, server extensions and installer activity.')), navigation + section('store-unavailable', t(msgctxt('theme:v2', 'Installer unavailable')), status(t(msgid('Accounts install applications from their Applications page, and root manages copies under Installed applications. This store view has no installer controls.')), { 'data-installer-state': 'unavailable' }) + facts(t, [['catalog', msgid('Catalog')], ['installed', msgctxt('theme:v2', 'Installed applications')], ['platform', msgctxt('theme:v2', 'Platform')], ['version', msgctxt('theme:v2', 'Platform version')]], 'data-store-fact')) + authority + signed + section('store-actions', t(msgctxt('theme:v2', 'Available actions')), actions([msgid('Install'), msgid('Update'), msgctxt('theme:v2', 'Roll back'), msgctxt('theme:v2', 'Uninstall'), msgid('Retry')].map(label => button(t(label))).join(''))), { 'data-store-workspace': true })
+  const signed = route === '/whm/software/store' || route === '/whm/software/site-software'
+    ? siteSoftware(t, canManage) + siteInstances(t, canManage) + oneClickDeploySection(t, canRead, canManage) + appInstallerSection(t, canRead, canManage)
+    : extensions
+      ? distroPackagesSection(t, canRead, canManage)
+      : ''
+  const unavailableStore = !canRead || activity
+    ? section('store-unavailable', t(msgctxt('theme:v2', 'Installer unavailable')), status(t(msgid('Accounts install applications from their Applications page, and root manages copies under Installed applications. This store view has no installer controls.')), { 'data-installer-state': 'unavailable' }) + facts(t, [['catalog', msgid('Catalog')], ['installed', msgctxt('theme:v2', 'Installed applications')], ['platform', msgctxt('theme:v2', 'Platform')], ['version', msgctxt('theme:v2', 'Platform version')]], 'data-store-fact'))
+    : ''
+  const storeActivityAction = activity
+    ? section('store-actions', t(msgctxt('theme:v2', 'Available actions')), actions(button(t(msgid('Refresh')))))
+    : ''
+  return page(input, route, title, t(msgctxt('theme:v2', 'Catalog authority, server extensions and installer activity.')), navigation + authority + unavailableStore + signed + storeActivityAction, { 'data-store-workspace': true })
 }
