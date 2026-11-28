@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderWhmBackupFilesWorkspace } from './board-port/whm-backup-files-workspace.ts'
+import { renderV2WhmRestoreFilesPage } from './themes/v2/pages/xwhm/recovery-tools/restore.ts'
+import { WORKSPACE_RUNTIME_SCRIPT } from './workspace-runtime-client.ts'
 import { readBackupFilesReply, WHM_BACKUP_FILES_CLIENT_BINDING } from './whm-backup-files-client.ts'
 
 const FILE = 'xpanel-backup-alice-20261026T100000Z.tar.gz', BAD = 'xpanel-backup-alice-20261026T120000Z.tar.gz', FOLDER = 'restored-20261026T100000Z'
@@ -99,6 +101,8 @@ describe('WHM restore files client', () => {
     expect(q('[data-backup-files-steps] [aria-current]').getAttribute('data-step')).toBe('result')
     expect(status()).toContain('2 restored, 0 skipped, 0 failed, 0 not attempted.')
     expect(q<HTMLButtonElement>('[data-backup-files-continue]').hidden).toBe(true)
+    expect(ack.checked).toBe(false)
+    expect(restore.disabled).toBe(true)
   })
   it('invalidates the review when the destination changes and shows present files as skipped', async () => {
     const request = server({ preview: body => replies.preview(body.destination, [row('notes.txt', { destination: 'notes.txt', exists: 'yes' }), row('mail/x/cur/1', { destination: 'mail/x/cur/1', action: 'refuse', reason: 'mail-preserved', exists: 'unchecked' })]) })
@@ -168,6 +172,26 @@ describe('WHM restore files client', () => {
     expect(q<HTMLSelectElement>('[data-backup-files-account]').disabled).toBe(true)
     expect(WHM_BACKUP_FILES_CLIENT_BINDING).not.toContain('innerHTML')
     expect(WHM_BACKUP_FILES_CLIENT_BINDING).not.toContain('fetch(')
+  })
+  it('advances the guided wizard to completion-only result step without offering another submit', async () => {
+    document.body.innerHTML = renderV2WhmRestoreFilesPage({ locale: 'en' } as never, { canRead: true, canManage: true })
+    const win = window as unknown as Record<string, unknown>
+    if (!win.__xpanelWorkspaceRuntime) new Function(WORKSPACE_RUNTIME_SCRIPT)()
+    else if (typeof win.__xpanelMountWorkspace === 'function') (win.__xpanelMountWorkspace as (root: Document) => void)(document)
+    expect(document.querySelector('[data-ds-wizard-submit]')).toBeNull()
+    const request = server()
+    await openArchive(request)
+    await check('notes.txt')
+    await click(q('[data-backup-files-preview]'))
+    const wizard = q('[data-ds-wizard]')
+    expect(wizard.getAttribute('data-active-step')).toBe('2')
+    const ack = q<HTMLInputElement>('[data-backup-files-ack]')
+    ack.checked = true; ack.dispatchEvent(new Event('change', { bubbles: true }))
+    await click(q('[data-backup-files-restore]'))
+    expect(wizard.getAttribute('data-active-step')).toBe('3')
+    expect(ack.checked).toBe(false)
+    expect(q<HTMLButtonElement>('[data-backup-files-restore]').disabled).toBe(true)
+    expect((request as ReturnType<typeof vi.fn>).mock.calls.filter(call => call[1].endsWith('/restore'))).toHaveLength(1)
   })
 })
 

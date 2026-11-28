@@ -6109,11 +6109,6 @@ msgstr "مدة التشغيل"
 
 #: apps/web/src/themes/v2/pages/xwhm/accounts/list.ts
 msgctxt "theme:v2"
-msgid "Usage / configured plan limit. An account the host did not report shows Not read."
-msgstr "الاستخدام / حد الخطة المضبوط. الحساب الذي لم يبلّغ عنه الخادم يظهر «غير مقروء»."
-
-#: apps/web/src/themes/v2/pages/xwhm/accounts/list.ts
-msgctxt "theme:v2"
 msgid "Usage / limit in force: the package value or the account’s own limit. Only disk and bandwidth usage are read."
 msgstr "الاستخدام / الحد المعمول به: قيمة الباقة أو حد الحساب الخاص. يُقرأ استخدام القرص ونقل البيانات فقط."
 
@@ -6267,11 +6262,6 @@ msgctxt "theme:v2"
 msgid "Web server"
 msgstr "خادم الويب"
 
-#: apps/web/src/themes/v2/pages/xpanel/home.ts
-msgctxt "theme:v2"
-msgid "Welcome back, {username}"
-msgstr "مرحبًا بعودتك، {username}"
-
 #: apps/web/src/themes/v2/pages/xwhm/host/firewall.ts
 msgctxt "theme:v2"
 msgid "What a save does"
@@ -6386,3 +6376,38 @@ msgstr "المناطق في الحالة المحفوظة"
 msgctxt "theme:v2"
 msgid "Zstandard"
 msgstr "Zstandard"
+
+#: apps/web/src/themes/v2/pages/xwhm/overview/index.ts
+msgctxt "theme:v2"
+msgid "{count, plural, one {# stopped service} other {# stopped services}}"
+msgstr "{count, plural, one {خدمة متوقفة واحدة} other {# خدمات متوقفة}}"
+
+#: apps/web/src/themes/v2/pages/xwhm/overview/index.ts
+msgctxt "theme:v2"
+msgid "{count, plural, one {# config drift item} other {# config drift items}}"
+msgstr "{count, plural, one {عنصر انحراف إعدادات واحد} other {# عناصر انحراف إعدادات}}"
+
+#: apps/web/src/themes/v2/pages/xwhm/overview/index.ts
+msgctxt "theme:v2"
+msgid "{count, plural, one {# account near limit} other {# accounts near limit}}"
+msgstr "{count, plural, one {حساب قريب من الحد} other {# حسابات قريبة من الحد}}"
+
+#: apps/web/src/themes/v2/pages/xwhm/overview/index.ts
+msgctxt "theme:v2"
+msgid "{count, plural, one {# failed audit event} other {# failed audit events}}"
+msgstr "{count, plural, one {حدث تدقيق فاشل واحد} other {# أحداث تدقيق فاشلة}}"
+
+#: apps/web/src/themes/v2/pages/xwhm/accounts/create.ts
+msgctxt "theme:v2"
+msgid "Validating on input..."
+msgstr "جارٍ التحقق أثناء الإدخال..."
+
+#: apps/web/src/themes/v2/pages/xwhm/accounts/create.ts
+msgctxt "theme:v2"
+msgid "Checking IPv4 availability..."
+msgstr "جارٍ التحقق من توفر عنوان IPv4..."
+
+#: apps/web/src/themes/v2/pages/xwhm/accounts/list.ts
+msgctxt "theme:v2"
+msgid "Usage / configured plan limit."
+msgstr "الاستخدام / حد الباقة المهيّأ."

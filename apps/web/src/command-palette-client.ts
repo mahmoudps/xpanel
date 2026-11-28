@@ -148,7 +148,7 @@ export const COMMAND_PALETTE_CLIENT_FUNCTIONS = String.raw`
       var index = commandPalette.matches.findIndex(function (item) { return item.link === link; });
       if (index >= 0 && index !== commandPalette.activeIndex) selectCommandResult(index, false);
     });
-    function runQuickAction(actionName) {
+    function runQuickAction(actionName, actionBtn) {
       if (actionName === 'toggle-theme') {
         var themeLink = document.querySelector('[data-theme-toggle]');
         if (themeLink) themeLink.click();
@@ -159,6 +159,8 @@ export const COMMAND_PALETTE_CLIENT_FUNCTIONS = String.raw`
         if (typeof window.__xpanelToggleSidebar === 'function') window.__xpanelToggleSidebar();
       } else if (actionName === 'refresh-page') {
         window.location.reload();
+      } else if (actionBtn && typeof window.__xpanelExecuteCommandAction === 'function') {
+        window.__xpanelExecuteCommandAction(actionBtn);
       }
     }
     modal.addEventListener('click', function (event) {
@@ -185,7 +187,7 @@ export const COMMAND_PALETTE_CLIENT_FUNCTIONS = String.raw`
         event.preventDefault();
         var actionName = actionBtn.getAttribute('data-cmdk-action') || '';
         if (activeOverlay && activeOverlay.element === modal) closeActiveOverlay(true, false, true);
-        runQuickAction(actionName);
+        runQuickAction(actionName, actionBtn);
         return;
       }
       var link = event.target.closest ? event.target.closest('a[data-cmdk-item], a[data-cmdk-history-page]') : null;

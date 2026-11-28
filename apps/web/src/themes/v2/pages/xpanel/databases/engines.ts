@@ -15,7 +15,7 @@ export function renderV2AccountDatabaseEnginePage(props: DatabasePageProps, page
   const title = page === 'postgresql' ? t('PostgreSQL databases') : page === 'phpmyadmin' ? 'phpMyAdmin' : 'phpPgAdmin'
   // The existing phpMyAdmin open handler uses its read flag for the SSO POST too.
   const connected = page === 'phpmyadmin' ? canManage : canRead
-  const unread = t('Not read')
+  const unread = t('Loading...')
   const facts = (rows: readonly (readonly [string, string])[]): string => dbFacts(rows.map(([key, label]) => ({
     label, valueHtml: key === 'account' && account ? technical(account.username) : escapeHtml(unread), hooks: { 'data-db-fact': key },
   })))

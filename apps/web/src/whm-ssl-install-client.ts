@@ -130,6 +130,12 @@ function bindWhmSslInstall(askDialog: ((options: Record<string, unknown>) => Pro
     const nameTemplate=clientTemplate(root,'ssl-install-name');cloneClientTemplate(nameTemplate,'label',['checkbox','name'])
     const isolated = (text: string): HTMLElement => { const node = document.createElement('bdi'); node.dir = 'ltr'; node.textContent = text; return node }
     const step = (current: number): void => root.querySelectorAll<HTMLElement>('[data-ssl-install-step]').forEach(item => { if (item.dataset.sslInstallStep === String(current)) item.setAttribute('aria-current', 'step'); else item.removeAttribute('aria-current') })
+    const syncWizardStep = (index: number): void => {
+      const wizard = root.querySelector<HTMLElement>('[data-ds-wizard]')
+      if (!wizard) return
+      wizard.setAttribute('data-active-step', String(index))
+      wizard.dispatchEvent(new CustomEvent('xpanel:wizard-step', { detail: { step: index } }))
+    }
     const paintChoices = (): void => {
       if (!choices) return
       const target = selected(), shape = structure()
@@ -220,7 +226,7 @@ function bindWhmSslInstall(askDialog: ((options: Record<string, unknown>) => Pro
         if (!found || found.accountId !== target.account.id || found.notAfter !== ack.certificate.notAfter || found.fingerprintSha256 !== ack.certificate.fingerprintSha256 || [...found.names].sort().join('\n') !== [...ack.certificate.names].sort().join('\n')
           || !observed.domains.some(item => item.id === target.domain.id && item.certificateId === found.id)) throw new Error('certificate_saved_readback_mismatch')
         workspace = observed; certificate.value = ''; chain.value = ''
-        paintDomains(); paintNames(); paintChecks(); paintResult(ack); step(3)
+        paintDomains(); paintNames(); paintChecks(); paintResult(ack); step(3); syncWizardStep(2)
         announce('saved', t('Certificate saved and read back. Served TLS remains unverified.'))
       } catch (error) {
         key.value = ''

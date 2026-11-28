@@ -17,7 +17,7 @@ export function renderV2WebDiskPage(props: PanelSurfaceProps, authority: PanelSe
     + check('v2-webdisk-readonly', t(msgid('Read only')), { 'data-web-disk-read-only': true }),
     actions(button(t(msgid('Add login')), { 'data-web-disk-save': true }, true, true) + `<button type="button" class="v2-btn" data-web-disk-cancel hidden disabled>${esc(t(msgid('Cancel')))}</button>`))
   const connection = section('v2-webdisk-connect', t(msgctxt('theme:v2', 'Connect a client')), facts([
-    { label: t(msgid('Web Disk address')), valueHtml: `<ul data-web-disk-addresses></ul><span class="v2-panel-settings__blank">${esc(t(msgid('Not read')))}</span>` },
+    { label: t(msgid('Web Disk address')), valueHtml: `<ul data-web-disk-addresses></ul><span class="v2-panel-settings__blank">${esc(t(msgid('Loading...')))}</span>` },
     { label: t(msgid('Sign-in')), valueHtml: esc(t(msgid('The login and its password. The main login uses the account password.'))) },
     { label: t(msgid('Encryption')), valueHtml: esc(t(msgid('HTTPS only. Plain HTTP is not offered.'))) },
     { label: t(msgid('Storage')), valueHtml: esc(t(msgid('Files count toward the account disk quota.'))) },

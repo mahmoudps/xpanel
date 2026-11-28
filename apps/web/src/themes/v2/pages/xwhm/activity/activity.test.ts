@@ -27,7 +27,7 @@ describe('v2 WHM activity board regions', () => {
     const empty = render('/whm/audit', { ...admitted, auditEntries: [] })
     expect(empty).toMatch(/<td colspan="7"><div class="v2-state v2-state--empty">.*?<h3>No audit entries yet<\/h3>/s)
     const unread = render('/whm/audit')
-    expect(unread).toMatch(/<td colspan="7"><div class="v2-state v2-state--empty">.*?<h3>Not read<\/h3><\/div>/s)
+    expect(unread).toMatch(/<td colspan="7"><div class="v2-state v2-state--empty">.*?<h3>Loading...<\/h3><\/div>/s)
     expect(unread).not.toContain('No audit entries yet')
   })
 
@@ -84,7 +84,7 @@ describe('v2 WHM activity board regions', () => {
     expect([...section.matchAll(/<span class="v2-pill v2-pill--(\w+)/g)].map(match => match[1])).toEqual(['ok', 'warn', 'neutral'])
     // Actor, duration and the file-set checksum come from the generation rows; the full checksum stays in the title.
     expect(section).toContain(`<td><bdi dir="ltr" class="v2-mono">root</bdi></td><td><bdi dir="ltr" class="v2-mono">1.5 s</bdi></td><td><span title="${'c'.repeat(64)}"><bdi dir="ltr" class="v2-mono">cccccccccccc</bdi></span></td>`)
-    expect(render('/whm/audit')).toContain('<td colspan="8">Not read</td>')
+    expect(render('/whm/audit')).toContain('<td colspan="8">Loading...</td>')
   })
 
   it('counts the entries of the supplied page and stays silent without a read', () => {
@@ -94,14 +94,16 @@ describe('v2 WHM activity board regions', () => {
     expect(render('/whm/audit')).not.toContain('data-audit-count')
   })
 
-  it.each([['/whm/jobs', 'en', '--v2-col-2:&#39;Kind&#39;'], ['/whm/audit', 'ar', '--v2-col-5:'], ['/whm/support', 'en', '--v2-col-3:&#39;State&#39;']] as const)('ships the phone row labels of %s on its tables in its locale and the rules in the registered stylesheet', (route, locale, label) => {
-    const html = render(route, { ...admitted, locale })
-    expect(html).not.toContain('<style')
-    expect(html).toContain(label)
-    expect(html.match(/style="--v2-col-1:[^"]*"/g)!.join('')).not.toMatch(/[٠-٩۰-۹]/)
-    if (locale === 'ar') expect(html).toMatch(/--v2-col-1:&#39;\p{Script=Arabic}/u)
+  it('uses data-phone-labels on its tables without inline style attributes', () => {
+    for (const [route, locale] of [['/whm/jobs', 'en'], ['/whm/audit', 'ar'], ['/whm/support', 'en']] as const) {
+      const html = render(route, { ...admitted, locale })
+      expect(html).not.toContain('<style')
+      expect(html).toContain('data-phone-labels')
+      expect(html).not.toContain('style=')
+      expect(html).not.toMatch(/[٠-٩۰-۹]/)
+    }
     expect(WHM_ACTIVITY_CSS).toContain('@media(max-width:600px)')
-    expect(WHM_ACTIVITY_CSS).toContain('--c9:var(--v2-col-9)')
+    expect(WHM_ACTIVITY_CSS).toContain('content:attr(data-phone-label)')
   })
 
   it('keeps the jobs empty and failure blocks hidden until the controller reveals them', () => {

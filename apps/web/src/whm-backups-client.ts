@@ -194,6 +194,69 @@ function bindWhmBackups(askDialog: ((options: Record<string, unknown>) => Promis
     let policyFilter: 'all' | 'included' | 'excluded' = 'all'
     const selectedAccounts = new Set<string>(), selectedDestinations = new Set<string>()
     const shared = getSharedBackupState(root)
+    const cronBuilder = root.querySelector<HTMLElement>('#whm-backup-cron')
+    let syncingCronBuilder = false
+    const cronEl = <T extends HTMLInputElement | HTMLSelectElement>(suffix: 'freq' | 'minute' | 'hour' | 'dow' | 'dom' | 'custom'): T | null => {
+      if (!cronBuilder) return null
+      switch (suffix) {
+        case 'freq': return cronBuilder.querySelector<T>('#whm-backup-cron-freq')
+        case 'minute': return cronBuilder.querySelector<T>('#whm-backup-cron-minute')
+        case 'hour': return cronBuilder.querySelector<T>('#whm-backup-cron-hour')
+        case 'dow': return cronBuilder.querySelector<T>('#whm-backup-cron-dow')
+        case 'dom': return cronBuilder.querySelector<T>('#whm-backup-cron-dom')
+        case 'custom': return cronBuilder.querySelector<T>('#whm-backup-cron-custom')
+      }
+    }
+    const syncCronFields = (freq: string): void => {
+      if (!cronBuilder) return
+      const locked = cronBuilder.dataset.cronLocked === 'true'
+      const rules: Record<string, boolean> = {
+        hour: freq !== 'hourly' && freq !== 'custom',
+        minute: freq !== 'custom',
+        dow: freq === 'weekly',
+        dom: freq === 'monthly',
+        custom: freq === 'custom',
+      }
+      cronBuilder.querySelectorAll<HTMLElement>('[data-cron-field]').forEach(wrap => {
+        const key = wrap.dataset.cronField ?? ''
+        const visible = rules[key] === true
+        wrap.hidden = !visible
+        wrap.querySelectorAll<HTMLInputElement | HTMLSelectElement>('input,select').forEach(ctrl => { ctrl.disabled = locked || !visible })
+      })
+    }
+    const syncPolicyStartTime = (cronParts: string[]): void => {
+      const hour = select('frequency').value === '2' ? (cronParts[1] === '*/12' ? '0' : (cronParts[1] ?? '').split(',')[0]!) : cronParts[1] ?? ''
+      input('start-time').value = /^\d+$/.test(cronParts[0] ?? '') && /^\d+$/.test(hour) ? hour.padStart(2, '0') + ':' + cronParts[0]!.padStart(2, '0') : ''
+    }
+    const syncCronBuilderFromPolicy = (): void => {
+      if (!cronBuilder) return
+      syncingCronBuilder = true
+      try {
+        const expr = input('policy-cron').value.trim().replace(/\s+/g, ' ') || '0 2 * * *'
+        const parts = expr.split(/\s+/)
+        const freq = cronEl<HTMLSelectElement>('freq'), minute = cronEl<HTMLInputElement>('minute'), hour = cronEl<HTMLInputElement>('hour')
+        const dow = cronEl<HTMLSelectElement>('dow'), dom = cronEl<HTMLInputElement>('dom'), custom = cronEl<HTMLInputElement>('custom')
+        let mode = 'custom'
+        if (parts.length === 5 && /^\d+$/.test(parts[0]!) && parts[1] === '*' && parts[2] === '*' && parts[3] === '*' && parts[4] === '*') {
+          mode = 'hourly'; if (minute) minute.value = String(Math.min(59, Math.max(0, Number(parts[0]))))
+        } else if (parts.length === 5 && /^\d+$/.test(parts[0]!) && /^\d+$/.test(parts[1]!) && parts[2] === '*' && parts[3] === '*' && parts[4] === '*') {
+          mode = 'daily'; if (minute) minute.value = String(Math.min(59, Math.max(0, Number(parts[0])))); if (hour) hour.value = String(Math.min(23, Math.max(0, Number(parts[1]))))
+        } else if (parts.length === 5 && /^\d+$/.test(parts[0]!) && /^\d+$/.test(parts[1]!) && parts[2] === '*' && parts[3] === '*' && /^[0-6]$/.test(parts[4]!)) {
+          mode = 'weekly'; if (minute) minute.value = String(Math.min(59, Math.max(0, Number(parts[0])))); if (hour) hour.value = String(Math.min(23, Math.max(0, Number(parts[1])))); if (dow) dow.value = parts[4]!
+        } else if (parts.length === 5 && /^\d+$/.test(parts[0]!) && /^\d+$/.test(parts[1]!) && /^(?:[1-9]|1\d|2[0-8])$/.test(parts[2]!) && parts[3] === '*' && parts[4] === '*') {
+          mode = 'monthly'; if (minute) minute.value = String(Math.min(59, Math.max(0, Number(parts[0])))); if (hour) hour.value = String(Math.min(23, Math.max(0, Number(parts[1])))); if (dom) dom.value = parts[2]!
+        } else {
+          if (custom) custom.value = expr
+        }
+        if (freq) freq.value = mode
+        syncCronFields(mode)
+        const hiddenExpr = cronBuilder.querySelector<HTMLInputElement>('[data-ds-cron-expression]')
+        if (hiddenExpr) hiddenExpr.value = expr
+        const codeEl = cronBuilder.querySelector<HTMLElement>('[data-ds-cron-code] bdi')
+        if (codeEl) codeEl.textContent = expr
+        cronBuilder.dispatchEvent(new CustomEvent('xpanel:cron-sync', { detail: { expression: expr } }))
+      } finally { syncingCronBuilder = false }
+    }
     const announce = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', ['failed', 'uncertain', 'stale'].includes(state) ? 'alert' : 'status'); root.dataset.backupReadState = state }
     const setEnabled = (control: HTMLInputElement | HTMLSelectElement | HTMLButtonElement, enabled: boolean): void => {
       if (!control) return
@@ -460,6 +523,12 @@ function bindWhmBackups(askDialog: ((options: Record<string, unknown>) => Promis
       root.querySelectorAll<HTMLInputElement>('[data-backup-selected-account]').forEach(control => { control.disabled = !ready || allAccounts })
       root.querySelectorAll<HTMLInputElement>('[data-backup-selected-destination]').forEach(control => { control.disabled = !ready })
       root.querySelectorAll<HTMLButtonElement>('[data-backup-edit-destination],[data-backup-delete-destination]').forEach(control => { control.disabled = !ready || control.dataset.backupInUse === 'true' && control.hasAttribute('data-backup-delete-destination') })
+      if (cronBuilder) {
+        cronBuilder.dataset.cronLocked = String(!ready)
+        const freqCtrl = cronEl<HTMLSelectElement>('freq')
+        if (freqCtrl) setEnabled(freqCtrl, ready)
+        syncCronFields(freqCtrl?.value || 'daily')
+      }
       root.setAttribute('aria-busy', String(busy || confirming))
       paintPendingBar()
       paintAccountPolicyTable()
@@ -551,8 +620,8 @@ function bindWhmBackups(askDialog: ((options: Record<string, unknown>) => Promis
       const cron = input('policy-cron').value.split(/\s+/)
       const pairedHours = (cron[1] ?? '').split(',').map(Number)
       if (schedule?.frequency === 'daily' && (cron[1] === '*/12' || pairedHours.length === 2 && pairedHours.every(Number.isInteger) && Math.abs(pairedHours[1]! - pairedHours[0]!) === 12)) select('frequency').value = '2'
-      const hour = select('frequency').value === '2' ? cron[1] === '*/12' ? '0' : (cron[1] ?? '').split(',')[0]! : cron[1] ?? ''
-      input('start-time').value = /^\d+$/.test(cron[0] ?? '') && /^\d+$/.test(hour) ? hour.padStart(2, '0') + ':' + cron[0]!.padStart(2, '0') : ''
+      syncPolicyStartTime(cron)
+      syncCronBuilderFromPolicy()
       allAccounts = !schedule || schedule.selectedAccounts === 'all'; selectedAccounts.clear(); selectedDestinations.clear()
       if (schedule && schedule.selectedAccounts !== 'all') {
         for (const selector of schedule.selectedAccounts) selectedAccounts.add(selector)
@@ -645,7 +714,7 @@ function bindWhmBackups(askDialog: ((options: Record<string, unknown>) => Promis
         } else if (observed.destinations.some(destination => destination.id === selectedId)) throw new Error('backup_deleted_destination_still_present')
         install(observed)
         for (const [key, value] of remembered) { const control = ['frequency', 'policy-compress', 'destination-kind'].includes(key) ? select(key) : input(key); control.value = value.value; if (control instanceof HTMLInputElement) control.checked = value.checked }
-        if (keepSchedule) { selectedAccounts.clear(); for (const selector of rememberedAccounts) selectedAccounts.add(selector); selectedDestinations.clear(); for (const identity of rememberedDestinations) if (kind !== 'delete-destination' || identity !== selectedId) selectedDestinations.add(identity); allAccounts = rememberedAll; scheduleDirty = true; renderChoices() }
+        if (keepSchedule) { syncCronBuilderFromPolicy(); selectedAccounts.clear(); for (const selector of rememberedAccounts) selectedAccounts.add(selector); selectedDestinations.clear(); for (const identity of rememberedDestinations) if (kind !== 'delete-destination' || identity !== selectedId) selectedDestinations.add(identity); allAccounts = rememberedAll; scheduleDirty = true; renderChoices() }
         if (keepDestination) { destinationId = kind === 'delete-destination' && rememberedDestinationId === selectedId ? null : rememberedDestinationId; destinationDirty = true }
         announce('saved', t('Configuration stored and read back. Backup execution, remote connection and native archive verification remain unverified.'))
       } catch (error) {
@@ -655,29 +724,74 @@ function bindWhmBackups(askDialog: ((options: Record<string, unknown>) => Promis
       } finally { busy = false; lock() }
     }
     if (!readable()) { announce('unavailable', t('Backup configuration is unavailable here. Nothing was read or changed.')); return }
+    const normalizeCronDigits = (value: string): string => value
+      .replace(/[\u0660-\u0669]/g, ch => String(ch.charCodeAt(0) - 0x0660))
+      .replace(/[\u06f0-\u06f9]/g, ch => String(ch.charCodeAt(0) - 0x06f0))
+    const readCronBuilderExpr = (): string => {
+      const freq = cronEl<HTMLSelectElement>('freq')?.value || 'daily'
+      const clamp = (val: string | undefined, lo: number, hi: number, fallback: number): number => {
+        const n = Number(val === undefined ? fallback : normalizeCronDigits(val))
+        return Number.isFinite(n) ? Math.min(hi, Math.max(lo, Math.floor(n))) : fallback
+      }
+      const m = clamp(cronEl<HTMLInputElement>('minute')?.value, 0, 59, 0)
+      const h = clamp(cronEl<HTMLInputElement>('hour')?.value, 0, 23, 0)
+      const dow = clamp(cronEl<HTMLSelectElement>('dow')?.value, 0, 6, 0)
+      const dom = clamp(cronEl<HTMLInputElement>('dom')?.value, 1, 28, 1)
+      syncCronFields(freq)
+      if (freq === 'hourly') return m + ' * * * *'
+      if (freq === 'weekly') return m + ' ' + h + ' * * ' + dow
+      if (freq === 'monthly') return m + ' ' + h + ' ' + dom + ' * *'
+      if (freq === 'custom') return normalizeCronDigits(cronEl<HTMLInputElement>('custom')?.value || '').trim().replace(/\s+/g, ' ')
+      return m + ' ' + h + ' * * *'
+    }
+    const applyCronBuilderToPolicy = (explicitExpr?: string): void => {
+      if (!cronBuilder || syncingCronBuilder || cronBuilder.dataset.cronLocked === 'true') return
+      const freq = cronEl<HTMLSelectElement>('freq')?.value || 'daily'
+      const expr = typeof explicitExpr === 'string' ? normalizeCronDigits(explicitExpr).trim().replace(/\s+/g, ' ') : readCronBuilderExpr()
+      input('policy-cron').value = expr
+      const parts = expr.split(/\s+/)
+      const pairedHours = (parts[1] ?? '').split(',').map(Number)
+      if (freq === 'weekly') select('frequency').value = '3'
+      else if (freq === 'monthly') select('frequency').value = '4'
+      else if (parts[1] === '*/12' || pairedHours.length === 2 && pairedHours.every(Number.isInteger) && Math.abs(pairedHours[1]! - pairedHours[0]!) === 12) select('frequency').value = '2'
+      else select('frequency').value = '1'
+      syncPolicyStartTime(parts)
+      scheduleDirty = true
+      lock()
+    }
+    if (cronBuilder) {
+      cronBuilder.addEventListener('xpanel:cron-change', event => {
+        const detail = (event as CustomEvent<{ expression?: string }>).detail
+        applyCronBuilderToPolicy(detail?.expression)
+      })
+      cronBuilder.addEventListener('input', () => { applyCronBuilderToPolicy() })
+      cronBuilder.addEventListener('change', () => { applyCronBuilderToPolicy() })
+    }
     root.addEventListener('input', event => {
       const control = event.target
-      if (!(control instanceof HTMLInputElement) || control.disabled) return
+      if (!(control instanceof HTMLInputElement) || control.disabled || cronBuilder?.contains(control)) return
       if (control.id.startsWith('backup-layout-destination-')) destinationDirty = true
       else if ([...scheduleInputs.map(key => 'backup-layout-' + key), 'backup-layout-monthly-copies'].includes(control.id)) scheduleDirty = true
+      if (control.id === 'backup-layout-policy-cron') { syncPolicyStartTime(control.value.trim().split(/\s+/)); syncCronBuilderFromPolicy() }
       lock()
     })
     root.addEventListener('change', event => {
       const control = event.target
-      if (!(control instanceof HTMLSelectElement) || control.disabled) return
+      if (!(control instanceof HTMLSelectElement) || control.disabled || cronBuilder?.contains(control)) return
       if (control.id === 'backup-layout-destination-kind') destinationDirty = true
       else if (control.id === 'backup-layout-frequency' || control.id === 'backup-layout-policy-compress') scheduleDirty = true
       if (control.id === 'backup-layout-frequency') {
         const [hour = '02', minute = '00'] = (input('start-time').value || '02:00').split(':')
         const time = String(Number(minute)) + ' ' + String(Number(hour))
         input('policy-cron').value = control.value === '2' ? String(Number(minute)) + ' ' + String(Number(hour) % 12) + ',' + String(Number(hour) % 12 + 12) + ' * * *' : time + (control.value === '3' ? ' * * 0' : control.value === '4' ? ' 1 * *' : ' * * *')
+        syncCronBuilderFromPolicy()
       }
       lock()
     })
     input('start-time').addEventListener('change', () => {
       if (input('start-time').disabled || !/^\d\d:\d\d$/.test(input('start-time').value)) return
       const [hour, minute] = input('start-time').value.split(':'), fields = input('policy-cron').value.trim().split(/\s+/)
-      if (fields.length === 5) { fields[0] = String(Number(minute)); fields[1] = select('frequency').value === '2' ? String(Number(hour) % 12) + ',' + String(Number(hour) % 12 + 12) : String(Number(hour)); input('policy-cron').value = fields.join(' '); scheduleDirty = true; lock() }
+      if (fields.length === 5) { fields[0] = String(Number(minute)); fields[1] = select('frequency').value === '2' ? String(Number(hour) % 12) + ',' + String(Number(hour) % 12 + 12) : String(Number(hour)); input('policy-cron').value = fields.join(' '); syncCronBuilderFromPolicy(); scheduleDirty = true; lock() }
     })
     action('all-accounts').addEventListener('click', () => { if (!action('all-accounts').disabled) { allAccounts = true; scheduleDirty = true; renderChoices(); lock() } })
     action('selected-accounts').addEventListener('click', () => { if (!action('selected-accounts').disabled) { if (allAccounts) { selectedAccounts.clear(); for (const account of current?.accounts ?? []) selectedAccounts.add(account.id) } allAccounts = false; scheduleDirty = true; renderChoices(); lock() } })

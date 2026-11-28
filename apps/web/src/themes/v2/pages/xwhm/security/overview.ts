@@ -6,13 +6,13 @@ import { actions, area, button, check, context, esc, frameRead, field, fields, h
 export function renderV2WhmSecurityOverview(input: WhmObservationInput): string {
   const { t, canRead, canManage } = context(input)
   // The advisor client writes a count into each tile, so the tile keeps the numeric value size from the start.
-  const summaries = `<section class="v2-kpi-row" aria-label="${esc(t(msgctxt('theme:v2', 'Security advisor')))}">${([['all', msgid('Checks')], ['observed-ok', msgctxt('whm-security-client', 'Observed')], ['attention', msgid('Warnings')], ['unavailable', msgid('Not verified')]] as const).map(([state, label]) => kpiCard({ label: t(label), value: '—', numeric: true, note: t(msgid('Not read')), headingLevel: 2, valueHooks: { 'data-whm-security-count': state } })).join('')}</section>`
+  const summaries = `<section class="v2-kpi-row" aria-label="${esc(t(msgctxt('theme:v2', 'Security advisor')))}">${([['all', msgid('Checks')], ['observed-ok', msgctxt('whm-security-client', 'Observed')], ['attention', msgid('Warnings')], ['unavailable', msgid('Not verified')]] as const).map(([state, label]) => kpiCard({ label: t(label), value: '—', numeric: true, note: t(msgid('Loading...')), headingLevel: 2, valueHooks: { 'data-whm-security-count': state } })).join('')}</section>`
   // The state filter is a radio group read by page CSS; no controller is involved.
   const filter = `<div class="v2-observation__filter" role="radiogroup" aria-label="${esc(t(msgid('State')))}">${([['all', msgid('All')], ['observed-ok', msgctxt('whm-security-client', 'Observed')], ['attention', msgctxt('whm-security-client', 'Review')], ['unavailable', msgid('Unavailable')]] as const).map(([state, label], index) => `<label><input type="radio" name="v2-security-state" value="${state}"${index === 0 ? ' checked' : ''}${canRead ? '' : ' disabled'}><span>${esc(t(label))}</span></label>`).join('')}</div>`
   const factTemplates = xpTemplate('whm-security-fact-technical', '<div><dt data-xp-slot="label"></dt><dd><bdi class="v2-mono v2-num" dir="ltr" data-xp-slot="value"></bdi></dd></div>') + xpTemplate('whm-security-fact-text', '<div><dt data-xp-slot="label"></dt><dd><span data-xp-slot="value"></span></dd></div>')
   const evidence = `<div class="v2-observation__groups" data-whm-security-evidence>${help(t, msgid('Checks show individual host observations. No overall security score or capability qualification is inferred. Configuration values are labeled separately.'))}<dl class="v2-observation__facts" data-whm-security-configuration></dl>${filter}${table(t, msgid('Security observations have not been read'), [msgid('Check'), msgid('State'), msgid('Observed value')], { 'data-whm-security-check-rows': true })}<p class="v2-observation__filter-empty">${esc(t(msgid('No loaded rows match these filters.')))}</p>${actions(button(t, msgid('Read security observations'), { 'data-whm-security-refresh': true }))}${status(t, msgid('Security observations have not been read.'), { 'data-whm-security-status': true })}${factTemplates}</div>`
   const compilerFacts = ([['restriction', msgid('Compilers')], ['host-state', msgid('Host state')], ['commands', msgid('Restricted commands')], ['group', msgid('Compiler group')], ['hook', msgid('Re-apply after package updates')], ['updated', msgid('Last saved (UTC)')], ['reconcile', msgid('Last apply request')], ['observed-at', msgid('Observed at (UTC)')]] as const)
-    .map(([key, label]) => `<div><dt>${esc(t(label))}</dt><dd><bdi class="v2-num" data-sec-field="${key}">${esc(t(msgid('Not read')))}</bdi></dd></div>`).join('')
+    .map(([key, label]) => `<div><dt>${esc(t(label))}</dt><dd><bdi class="v2-num" data-sec-field="${key}">${esc(t(msgid('Loading...')))}</bdi></dd></div>`).join('')
   const notConnected = help(t, msgid('This setting has no connected host operation. No changes have been applied.'))
   const policyField = (key: string, label: string, extra = ' min="1" dir="ltr"'): string => {
     const id = `v2-sign-in-${key.replaceAll('.', '-')}`
@@ -22,14 +22,14 @@ export function renderV2WhmSecurityOverview(input: WhmObservationInput): string 
     .map(([id, label]) => `<a href="#v2-observation-${id}">${esc(t(label))}</a>`).join('')}</nav>`
   const panelAccess = (canRead || frameRead(input)) ? input.panelAccessSummary : undefined
   const entranceValue = !panelAccess
-    ? esc(t(msgid('Not read')))
+    ? esc(t(msgid('Loading...')))
     : panelAccess.state === 'invalid'
       ? esc(t(msgid('Invalid policy file')))
       : panelAccess.entrancePath
         ? `<bdi class="v2-mono" dir="ltr">${esc(panelAccess.entrancePath)}</bdi>${panelAccess.entranceListeners.length ? ` · <bdi class="v2-mono" dir="ltr">${esc(panelAccess.entranceListeners.join(', '))}</bdi>` : ''}`
         : esc(t(msgid('Off')))
   const allowlistValue = !panelAccess
-    ? esc(t(msgid('Not read')))
+    ? esc(t(msgid('Loading...')))
     : panelAccess.state === 'invalid'
       ? esc(t(msgid('Invalid policy file')))
       : panelAccess.listeners.xpanel === 0 && panelAccess.listeners.xwhm === 0 && panelAccess.listeners.xmail === 0

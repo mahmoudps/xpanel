@@ -26,23 +26,32 @@ function bindWhmServerInfo(path: string): void {
     if (root.dataset.hostInfoBound === 'true') return
     root.dataset.hostInfoBound = 'true'
     const status = root.querySelector<HTMLElement>('[data-host-info-status]')
+    const refreshBtn = root.querySelector<HTMLButtonElement>('[data-host-info-refresh]')
     const values = { load: root.querySelector<HTMLElement>('[data-host-load]'), memory: root.querySelector<HTMLElement>('[data-host-memory]'), disk: root.querySelector<HTMLElement>('[data-host-disk]') }
     const request = (window as Window & { xpanelSessionRequest?: (method: string, path: string) => Promise<unknown> }).xpanelSessionRequest
     const note = (state: string, message: string): void => { if (!status) return; status.hidden = !message; status.dataset.state = state; status.setAttribute('role', state === 'failed' ? 'alert' : 'status'); status.textContent = message }
     const show = (key: keyof typeof values, text: string, technical: boolean): void => { const node = values[key]; if (!node) return; node.textContent = text; if (technical) node.dir = 'ltr'; else node.removeAttribute('dir') }
     const megabytes = (count: number): string => formatClientBytes(count)
     const failed = (message: string): void => { for (const key of ['load', 'memory', 'disk'] as const) show(key, t('Unavailable'), false); note('failed', message) }
-    if (typeof request !== 'function') { failed(t('Server information is unavailable here. Nothing was read.')); return }
-    root.setAttribute('aria-busy', 'true')
-    request('GET', path).then(readWhmServerInfo).then(view => {
-      show('load', view.load.join(' '), true)
-      show('memory', megabytes(view.memory.availableBytes) + ' / ' + megabytes(view.memory.totalBytes), true)
-      show('disk', megabytes(view.disk.availableBytes) + ' / ' + megabytes(view.disk.totalBytes), true)
-      note('read', '')
-    }, (error: unknown) => {
-      const code = error && typeof error === 'object' ? (error as { status?: unknown }).status : undefined
-      failed(code === 401 || code === 403 ? t('Server information requires root authorization. Nothing was read.') : t('Server information could not be read. No measurements are shown.'))
-    }).finally(() => root.setAttribute('aria-busy', 'false'))
+    const setBusy = (busy: boolean): void => { root.setAttribute('aria-busy', busy ? 'true' : 'false'); if (refreshBtn) refreshBtn.disabled = busy }
+    let inFlight = false
+    const readOnce = (): void => {
+      if (inFlight) return
+      if (typeof request !== 'function') { failed(t('Server information is unavailable here. Nothing was read.')); return }
+      inFlight = true
+      setBusy(true)
+      request('GET', path).then(readWhmServerInfo).then(view => {
+        show('load', view.load.join(' '), true)
+        show('memory', megabytes(view.memory.availableBytes) + ' / ' + megabytes(view.memory.totalBytes), true)
+        show('disk', megabytes(view.disk.availableBytes) + ' / ' + megabytes(view.disk.totalBytes), true)
+        note('read', '')
+      }, (error: unknown) => {
+        const code = error && typeof error === 'object' ? (error as { status?: unknown }).status : undefined
+        failed(code === 401 || code === 403 ? t('Server information requires root authorization. Nothing was read.') : t('Server information could not be read. No measurements are shown.'))
+      }).finally(() => { inFlight = false; setBusy(false) })
+    }
+    if (refreshBtn) refreshBtn.addEventListener('click', readOnce)
+    readOnce()
   })
 }
 
