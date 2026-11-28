@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { fail } from '@xpanel/core'
 import type { Account, Plan } from '@xpanel/core'
 import type { FileEntry, FileText } from './file-manager.ts'
-import { GIT_REGISTRY, handleAccountGitRoute, parseGitBranches, parseGitDeployTasks, parseGitHistory, parseGitRequest, parseSafeGitConfig, runGitRequest } from './account-git.ts'
+import { GIT_DEPLOY_LOG, GIT_REGISTRY, handleAccountGitRoute, parseGitBranches, parseGitDeployTasks, parseGitHistory, parseGitRequest, parseSafeGitConfig, runGitRequest } from './account-git.ts'
 import type { AccountGitRouteDeps, GitRequest } from './account-git.ts'
 import type { AccountGitRun } from './account-git-runner.ts'
 
@@ -110,5 +110,116 @@ describe('deployment tasks of a repository', () => {
   it('reads only the task list of the deployment file', () => {
     expect(parseGitDeployTasks('---\ndeployment:\n  tasks:\n    - export DEPLOYPATH=/home/alice/public_html/\n    - /bin/cp index.html $DEPLOYPATH\n')).toEqual(['export DEPLOYPATH=/home/alice/public_html/', '/bin/cp index.html $DEPLOYPATH'])
     for (const text of ['', 'deployment:\n', 'deployment:\n  tasks:\n', 'other:\n  tasks:\n    - a\n', 'deployment:\n  tasks:\n    - a\n  extra: b\n']) expect(() => parseGitDeployTasks(text)).toThrow(expect.objectContaining({ code: 'PRECONDITION_FAILED' }))
+  })
+
+  it('supports deployment release history, rollback to a recorded commit and webhook rotation', async () => {
+    let tick = 0
+    const cpanelYaml = 'deployment:\n  tasks:\n    - /bin/true\n'
+    const texts = new Map<string, FileText>([
+      [GIT_REGISTRY, { path: GIT_REGISTRY, content: JSON.stringify(['repo']) + '\n', sizeBytes: 10, mtime: new Date(0).toISOString() }],
+      ['repo/.cpanel.yml', { path: 'repo/.cpanel.yml', content: cpanelYaml, sizeBytes: 32, mtime: new Date(0).toISOString() }],
+    ])
+    const rootEntries: FileEntry[] = [entry('repo'), entry(GIT_REGISTRY, 'file')]
+    const tree = new Map<string, FileEntry[]>([['', rootEntries], ['repo', [entry('.git'), entry('.cpanel.yml', 'file')]], ['repo/.git', [entry('config', 'file')]]])
+    const files = {
+      list: vi.fn(async (path: string) => tree.get(path) ?? []),
+      readText: vi.fn(async (path: string) => { const item = texts.get(path); if (!item) throw new Error('missing:' + path); return { ...item } }),
+      writeTextChecked: vi.fn(async (path: string, content: string | null, expected: FileText | null) => {
+        const current = texts.get(path) ?? null
+        if (JSON.stringify(current) !== JSON.stringify(expected)) return fail('CONFLICT', 'changed', { stateChanged: false })
+        const next: FileText = { path, content: content!, sizeBytes: Buffer.byteLength(content!), mtime: new Date(++tick * 1000).toISOString() }
+        texts.set(path, next)
+        if (!rootEntries.some(item => item.name === path)) rootEntries.push(entry(path, 'file'))
+        return entry(path, 'file')
+      }),
+      mkdir: vi.fn(async (path: string) => entry(path)),
+    }
+    const run = vi.fn(async (_a: Account, _p: string, op: Parameters<AccountGitRun>[2]) => {
+      if (op.op === 'config') return { ok: true, code: 0, stdout: config, stderr: '' }
+      if (op.op === 'head') return { ok: true, code: 0, stdout: 'main\n', stderr: '' }
+      if (op.op === 'branches') return { ok: true, code: 0, stdout: `main\t${hash}\t*\n`, stderr: '' }
+      if (op.op === 'history') return { ok: true, code: 0, stdout: `${hash}\t2026-10-27T01:00:00+00:00\tRelease\n`, stderr: '' }
+      if (op.op === 'status') return { ok: true, code: 0, stdout: '', stderr: '' }
+      if (op.op === 'view-blob' && op.file === '.cpanel.yml') return { ok: true, code: 0, stdout: cpanelYaml, stderr: '' }
+      return { ok: true, code: 0, stdout: '', stderr: '' }
+    })
+    const authorize = vi.fn(async () => undefined)
+    const listed = await runGitRequest({ account, files, run, request: { op: 'list' }, authorize })
+    const deployed = await runGitRequest({ account, files, run, request: { op: 'deploy', path: 'repo', expectedRevision: listed.revision }, authorize })
+    expect(deployed.deployed?.commit).toBe(hash)
+    expect(deployed.releases).toHaveLength(1)
+    const rotated = await runGitRequest({ account, files, run, request: { op: 'webhook-rotate', path: 'repo', expectedRevision: listed.revision }, authorize })
+    expect(rotated.webhook?.configured).toBe(true)
+    expect(rotated.webhook?.url).toMatch(/^\/api\/account\/git\/webhook\/[0-9a-f]+\?token=/)
+    const rolledBack = await runGitRequest({ account, files, run, request: { op: 'rollback', path: 'repo', targetCommit: hash, expectedRevision: listed.revision }, authorize })
+    expect(rolledBack.deployed?.commit).toBe(hash)
+    expect(rolledBack.deployed?.op).toBe('rollback')
+    expect(rolledBack.releases).toHaveLength(2)
+    await expect(runGitRequest({ account, files, run, request: { op: 'rollback', path: 'repo', targetCommit: other, expectedRevision: listed.revision }, authorize })).rejects.toMatchObject({ code: 'NOT_FOUND' })
+    const inspected = await runGitRequest({ account, files, run, request: { op: 'inspect', path: 'repo' }, authorize })
+    expect(inspected.webhook?.url).not.toContain('?token=')
+  })
+
+  it('reads rollback deployment tasks from targetCommit rather than the current working tree', async () => {
+    const releaseOneYaml = 'deployment:\n  tasks:\n    - /bin/echo release-one\n'
+    const releaseTwoYaml = 'deployment:\n  tasks:\n    - /bin/echo release-two\n'
+    let headCommit = hash
+    let currentYaml = releaseOneYaml
+    const texts = new Map<string, FileText>([
+      [GIT_REGISTRY, { path: GIT_REGISTRY, content: JSON.stringify(['repo']) + '\n', sizeBytes: 10, mtime: new Date(0).toISOString() }],
+      ['repo/.cpanel.yml', { path: 'repo/.cpanel.yml', content: releaseOneYaml, sizeBytes: 42, mtime: new Date(0).toISOString() }],
+    ])
+    const rootEntries: FileEntry[] = [entry('repo'), entry(GIT_REGISTRY, 'file')]
+    const tree = new Map<string, FileEntry[]>([['', rootEntries], ['repo', [entry('.git'), entry('.cpanel.yml', 'file')]], ['repo/.git', [entry('config', 'file')]]])
+    const files = {
+      list: vi.fn(async (path: string) => tree.get(path) ?? []),
+      readText: vi.fn(async (path: string) => {
+        if (path === 'repo/.cpanel.yml') return { path, content: currentYaml, sizeBytes: Buffer.byteLength(currentYaml), mtime: new Date(0).toISOString() }
+        const item = texts.get(path)
+        if (!item) throw new Error('missing:' + path)
+        return { ...item }
+      }),
+      writeTextChecked: vi.fn(async (path: string, content: string | null, expected: FileText | null) => {
+        const current = texts.get(path) ?? null
+        if (JSON.stringify(current) !== JSON.stringify(expected)) return fail('CONFLICT', 'changed', { stateChanged: false })
+        const next: FileText = { path, content: content!, sizeBytes: Buffer.byteLength(content!), mtime: new Date(1000).toISOString() }
+        texts.set(path, next)
+        if (!rootEntries.some(item => item.name === path)) rootEntries.push(entry(path, 'file'))
+        return entry(path, 'file')
+      }),
+      mkdir: vi.fn(async (path: string) => entry(path)),
+    }
+    const deployScripts: string[] = []
+    const blobs = new Map<string, string>([[hash, releaseOneYaml], [other, releaseTwoYaml]])
+    const run = vi.fn(async (_a: Account, _p: string, op: Parameters<AccountGitRun>[2]) => {
+      if (op.op === 'config') return { ok: true, code: 0, stdout: config, stderr: '' }
+      if (op.op === 'head') return { ok: true, code: 0, stdout: 'main\n', stderr: '' }
+      if (op.op === 'branches') return { ok: true, code: 0, stdout: `main\t${headCommit}\t*\n`, stderr: '' }
+      if (op.op === 'history') return { ok: true, code: 0, stdout: `${headCommit}\t2026-10-27T01:00:00+00:00\tRelease\n`, stderr: '' }
+      if (op.op === 'status') return { ok: true, code: 0, stdout: '', stderr: '' }
+      if (op.op === 'view-blob' && op.file === '.cpanel.yml') {
+        const found = blobs.get(op.rev)
+        return found ? { ok: true, code: 0, stdout: found, stderr: '' } : { ok: false, code: 128, stdout: '', stderr: 'missing' }
+      }
+      if (op.op === 'deploy') deployScripts.push(op.script)
+      return { ok: true, code: 0, stdout: '', stderr: '' }
+    })
+    const authorize = vi.fn(async () => undefined)
+    const listed = await runGitRequest({ account, files, run, request: { op: 'list' }, authorize })
+    await runGitRequest({ account, files, run, request: { op: 'deploy', path: 'repo', expectedRevision: listed.revision }, authorize })
+
+    headCommit = other
+    currentYaml = releaseTwoYaml
+    await runGitRequest({ account, files, run, request: { op: 'deploy', path: 'repo', expectedRevision: listed.revision }, authorize })
+
+    const rolledBack = await runGitRequest({ account, files, run, request: { op: 'rollback', path: 'repo', targetCommit: hash, expectedRevision: listed.revision }, authorize })
+    expect(rolledBack.deployed?.commit).toBe(hash)
+    expect(run).toHaveBeenCalledWith(account, 'repo', { op: 'view-blob', rev: hash, file: '.cpanel.yml' })
+    const rollbackScript = deployScripts.at(-1)!
+    expect(rollbackScript).toContain('/bin/echo release-one')
+    expect(rollbackScript).not.toContain('/bin/echo release-two')
+
+    blobs.delete(hash)
+    await expect(runGitRequest({ account, files, run, request: { op: 'rollback', path: 'repo', targetCommit: hash, expectedRevision: listed.revision }, authorize })).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' })
   })
 })

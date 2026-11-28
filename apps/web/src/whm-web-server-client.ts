@@ -82,14 +82,23 @@ function bindWhmWebServer(askDialog: ((options: Record<string, unknown>) => Prom
     const request = frameRequest(root)
     if (!page || !status || !refresh) return
     const form = page.querySelector<HTMLFormElement>('[data-server-settings-form]')
+    const unlimitedChild = page.querySelector<HTMLInputElement>('[data-web-unlimited-child]')
+    const maxConnections = page.querySelector<HTMLInputElement>('input[name="apache.maxConnectionsPerChild"]')
     const targetSelect = page.querySelector<HTMLSelectElement>('[data-whm-web-generation]')
     const restore = page.querySelector<HTMLButtonElement>('[data-whm-web-rollback]')
     const discardButton = page.querySelector<HTMLButtonElement>('[data-whm-detail-section="web-pending"] button')
     const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
     const admitted = () => root.isConnected && root.dataset.webCanRead === 'true'
     const rollbackAdmitted = () => admitted() && !root.closest(denied) && root.dataset.webCanRollback === 'true' && generations.canRollback && generations.desiredState?.pending === false
-    let busy = false, loaded = false, review = false, queuedRead = false, saved: WebValues | null = null
+    let busy = false, loaded = false, review = false, queuedRead = false, saved: WebValues | null = null, observedServices: WhmWebService[] | null = null
     let generations: WhmWebGenerationRead = { generations: [], currentGeneration: null, desiredState: null, canRollback: false, rollbackEligibleGenerationIds: [] }
+    const snapshotMap: Readonly<Record<string, string>> = {
+      engine: 'engine', apacheMpm: 'apacheMpm', backendPort: 'backendPort', backendTlsPort: 'backendTlsPort',
+      worker_processes: 'nginx.workerProcesses', worker_connections: 'nginx.workerConnections', worker_rlimit_nofile: 'nginx.workerRlimitNofile',
+      multi_accept: 'nginx.multiAccept', keepalive_timeout: 'nginx.keepaliveTimeoutSec',
+      StartServers: 'apache.startServers', MinSpareServers: 'apache.minSpareServers', MaxSpareServers: 'apache.maxSpareServers',
+      MaxRequestWorkers: 'apache.maxRequestWorkers', ServerLimit: 'apache.serverLimit', MaxConnectionsPerChild: 'apache.maxConnectionsPerChild',
+    }
     const priorDisabled = new Map<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | HTMLButtonElement, boolean>()
     const formControls = () => [...(form?.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | HTMLButtonElement>('input,select,textarea,button') ?? [])]
     const lockForm = (): void => { for (const control of formControls()) { if (!priorDisabled.has(control)) priorDisabled.set(control, control.disabled); control.disabled = true } }
@@ -114,7 +123,98 @@ function bindWhmWebServer(askDialog: ((options: Record<string, unknown>) => Prom
     }
     const cell = (row: HTMLTableRowElement, value: string, technical = false): void => { const td = document.createElement('td'), content = document.createElement(technical ? 'bdi' : 'span'); if (technical) content.dir = 'ltr'; content.textContent = value; td.append(content); row.append(td) }
     const empty = (body: HTMLElement | null, count: number, message: string): void => { if (!body) return; body.textContent = ''; const row = document.createElement('tr'), td = document.createElement('td'); td.colSpan = count; td.textContent = message; row.append(td); body.append(row) }
+    const syncUnlimitedFromInput = (): void => {
+      if (!unlimitedChild || !maxConnections) return
+      unlimitedChild.checked = maxConnections.value.trim() === '0'
+    }
+    const syncInputFromUnlimited = (): void => {
+      if (!unlimitedChild || !maxConnections) return
+      if (unlimitedChild.checked) {
+        maxConnections.value = '0'
+      } else if (maxConnections.value.trim() === '0') {
+        const previous = saved?.['apache.maxConnectionsPerChild']
+        maxConnections.value = typeof previous === 'number' && previous > 0 ? String(previous) : ''
+      }
+      preview()
+    }
+    const paintComparison = (): void => {
+      if (!saved) return
+      const current = draft()
+      const formatValue = (value: string | number | boolean | undefined): string => typeof value === 'boolean' ? (value ? 'on' : 'off') : String(value ?? '')
+      for (const row of page.querySelectorAll<HTMLTableRowElement>('[data-whm-detail-section="web-comparison"] tbody tr')) {
+        const savedCell = row.querySelector<HTMLElement>('[data-whm-web-snapshot-setting]')
+        const snapshotKey = savedCell?.dataset.whmWebSnapshotSetting ?? ''
+        const fieldKey = snapshotMap[snapshotKey]
+        if (!fieldKey) continue
+        const cells = row.querySelectorAll('td')
+        const baselineCell = cells[0], proposedCell = cells[2], stateCell = cells[3]
+        const savedValue = saved[fieldKey]
+        if (baselineCell) baselineCell.textContent = t('Host baseline not supplied')
+        if (savedCell) {
+          savedCell.textContent = ''
+          const bdi = document.createElement('bdi'); bdi.className = 'v2-mono'; bdi.dir = 'ltr'; bdi.textContent = formatValue(savedValue); savedCell.append(bdi)
+        }
+        const currentValue = current[fieldKey]
+        const changed = currentValue !== undefined && String(currentValue) !== String(savedValue)
+        if (proposedCell) {
+          proposedCell.textContent = ''
+          if (changed) {
+            const bdi = document.createElement('bdi'); bdi.className = 'v2-mono'; bdi.dir = 'ltr'; bdi.textContent = formatValue(currentValue); proposedCell.append(bdi)
+          } else {
+            proposedCell.textContent = t('Unchanged')
+          }
+        }
+        if (stateCell) stateCell.textContent = changed ? t('Draft changed') : t('Saved configuration')
+      }
+    }
+    const paintFlow = (): void => {
+      const hops = [...page.querySelectorAll<HTMLElement>('[data-whm-web-flow] [data-whm-web-hop]')]
+      if (!hops.length) return
+      const names: Record<string, string> = { active: t(msgctxt('whm-web-server-client', 'Active')), inactive: t('Inactive'), failed: t(msgctxt('whm-web-server-client', 'Failed')), 'not-installed': t('Not installed'), unchecked: t('Not read') }
+      const paintHop = (hop: HTMLElement | undefined, stateCode: string, label: string, footerText?: string, footerTechnical = false): void => {
+        if (!hop) return
+        const stateEl = hop.querySelector<HTMLElement>('.v2-whm-web__state')
+        if (stateEl) {
+          const icon = stateEl.querySelector('svg')
+          stateEl.textContent = ''
+          if (icon) stateEl.append(icon)
+          stateEl.append(document.createTextNode(label))
+          stateEl.dataset.state = stateCode
+        }
+        if (footerText !== undefined) {
+          const last = hop.lastElementChild as HTMLElement | null
+          if (last && (last.classList.contains('v2-muted') || last.tagName === 'BDI')) {
+            if (footerTechnical) {
+              if (last.tagName === 'BDI') { last.textContent = footerText }
+              else { const bdi = document.createElement('bdi'); bdi.className = 'v2-mono'; bdi.dir = 'ltr'; bdi.textContent = footerText; last.replaceWith(bdi) }
+            } else {
+              last.textContent = footerText
+            }
+          }
+        }
+      }
+      const edge = observedServices?.find(item => item.id === 'nginx')
+      if (edge) paintHop(hops[0], edge.state, names[edge.state] ?? edge.state, edge.unit ?? (names[edge.state] ?? edge.state), Boolean(edge.unit))
+      if (saved && hops[1]) {
+        const title = hops[1].querySelector('h3')
+        if (title) title.textContent = saved.engine === 'apache' ? 'Apache' : 'OpenLiteSpeed'
+        paintHop(hops[1], 'unchecked', t('Saved configuration'), '127.0.0.1:' + String(saved.backendPort), true)
+      }
+      const engineKey = saved ? String(saved.engine) : null
+      const backend = observedServices?.find(item => item.id === (engineKey ?? 'apache')) ?? observedServices?.find(item => item.id === 'apache' || item.id === 'openlitespeed')
+      if (backend) {
+        paintHop(hops[1], backend.state, names[backend.state] ?? backend.state, saved ? '127.0.0.1:' + String(saved.backendPort) : backend.unit ?? undefined, Boolean(saved || backend.unit))
+      }
+      if (observedServices) {
+        const fpm = observedServices.filter(item => item.id === 'php-fpm' || item.fpmVersion !== null)
+        const fpmState = fpm.some(item => item.state === 'active') ? 'active' : fpm.some(item => item.state === 'failed') ? 'failed' : fpm.some(item => item.state === 'inactive') ? 'inactive' : fpm.some(item => item.state === 'not-installed') ? 'not-installed' : 'unchecked'
+        const activeCount = fpm.filter(item => item.state === 'active').length
+        const summary = fpm.length ? String(activeCount) + '/' + String(fpm.length) + ' PHP-FPM' : t('No PHP-FPM observed')
+        paintHop(hops[2], fpmState, names[fpmState] ?? fpmState, summary, fpm.length > 0)
+      }
+    }
     const preview = (): void => {
+      paintComparison()
       const body = page.querySelector<HTMLElement>('[data-whm-detail-section="web-pending"] tbody'), current = draft(), keys = different()
       if (!body) { sync(); return }
       body.textContent = ''
@@ -137,12 +237,15 @@ function bindWhmWebServer(askDialog: ((options: Record<string, unknown>) => Prom
       if (body) { body.textContent = ''; for (const generation of value.generations) { const row = document.createElement('tr'); cell(row, String(generation.id), true); cell(row, formatDisplayDateTime(generation.createdAt), true); cell(row, ({ pending: t('Pending'), tested: t('Tested'), active: t('Active'), superseded: t('Superseded'), failed: t('Failed'), rolled_back: t('Rolled back') } as Record<string, string>)[generation.status] ?? generation.status); cell(row, generation.filesCount === undefined ? t('Not read') : String(generation.filesCount), true); body.append(row) }; if (!value.generations.length) empty(body, 4, t('The generation read returned no records.')) }
     }
     const paintServices = (services: WhmWebService[]): void => {
+      observedServices = services
       const body = root.querySelector<HTMLElement>('[data-whm-web-services]')
-      if (!body) return
-      body.textContent = ''
-      const names: Record<string, string> = { active: t(msgctxt('whm-web-server-client', 'Active')), inactive: t('Inactive'), failed: t(msgctxt('whm-web-server-client', 'Failed')), 'not-installed': t('Not installed'), unchecked: t('Not read') }
-      for (const service of services.filter(item => ['nginx', 'apache', 'php-fpm', 'openlitespeed'].includes(item.id) || item.fpmVersion !== null)) { const row = document.createElement('tr'); cell(row, service.label); cell(row, service.fpmVersion !== null ? 'xpanel-php-fpm-*-' + service.fpmVersion + '.service' : service.unit ?? (service.state === 'not-installed' ? t('Not installed') : t('Not read')), true); cell(row, names[service.state]!); body.append(row) }
-      if (!body.childElementCount) empty(body, 3, t('No web-service observation was returned. Availability is not assumed.'))
+      if (body) {
+        body.textContent = ''
+        const names: Record<string, string> = { active: t(msgctxt('whm-web-server-client', 'Active')), inactive: t('Inactive'), failed: t(msgctxt('whm-web-server-client', 'Failed')), 'not-installed': t('Not installed'), unchecked: t('Not read') }
+        for (const service of services.filter(item => ['nginx', 'apache', 'php-fpm', 'openlitespeed'].includes(item.id) || item.fpmVersion !== null)) { const row = document.createElement('tr'); cell(row, service.label); cell(row, service.fpmVersion !== null ? 'xpanel-php-fpm-*-' + service.fpmVersion + '.service' : service.unit ?? (service.state === 'not-installed' ? t('Not installed') : t('Not read')), true); cell(row, names[service.state]!); body.append(row) }
+        if (!body.childElementCount) empty(body, 3, t('No web-service observation was returned. Availability is not assumed.'))
+      }
+      paintFlow()
     }
     const load = async (explicit = false): Promise<void> => {
       if (busy || !admitted() || !request) return
@@ -154,7 +257,7 @@ function bindWhmWebServer(askDialog: ((options: Record<string, unknown>) => Prom
       const results = await Promise.allSettled([request('GET', '/api/server/settings').then(readWhmWebSettings), request('GET', '/api/server/services').then(readWhmWebServices), request('GET', '/api/generations').then(readWhmWebGenerations)])
       if (admitted()) {
         const [settings, services, history] = results
-        if (settings.status === 'fulfilled') { saved = settings.value; const engine = root.querySelector<HTMLElement>('[data-whm-web-engine]'); if (engine) engine.textContent = String(saved.engine) }
+        if (settings.status === 'fulfilled') { saved = settings.value; const engine = root.querySelector<HTMLElement>('[data-whm-web-engine]'); if (engine) engine.textContent = String(saved.engine); paintFlow() }
         if (services.status === 'fulfilled') paintServices(services.value)
         if (history.status === 'fulfilled') paintGenerations(history.value)
         loaded = results.every(item => item.status === 'fulfilled')
@@ -172,7 +275,8 @@ function bindWhmWebServer(askDialog: ((options: Record<string, unknown>) => Prom
         if (await askDialog({ title: t('Discard the settings draft?'), body: t('Read the current saved settings and replace this unsaved draft. No host change is sent.'), confirm: t('Discard and read'), danger: true }) !== true || !admitted()) return
         const observed = readWhmWebSettings(await request('GET', '/api/server/settings'))
         for (const key of WHM_WEB_SETTING_FIELDS) { const element = control(key); if (element) { if (element instanceof HTMLInputElement && element.type === 'checkbox') element.checked = observed[key] === true; else if (radio(element)) named(key).forEach(item => { (item as HTMLInputElement).checked = item.value === String(observed[key]) }); else element.value = String(observed[key]) } }
-        saved = observed; preview(); note('read', t('The draft was replaced with freshly read saved settings. No host change was sent.'))
+        syncUnlimitedFromInput()
+        saved = observed; paintFlow(); preview(); note('read', t('The draft was replaced with freshly read saved settings. No host change was sent.'))
       } catch { note('failed', t('Saved settings could not be read. The draft is preserved.')) }
       finally { busy = false; unlockForm(); sync() }
     }
@@ -208,6 +312,10 @@ function bindWhmWebServer(askDialog: ((options: Record<string, unknown>) => Prom
       } finally { busy = false; unlockForm(); sync() }
     }
     if (!request || !admitted()) { refresh.disabled = true; if (restore) restore.disabled = true; if (targetSelect) targetSelect.disabled = true; note('unavailable', t('Server state is unavailable here. Nothing was read or changed.')); return }
+    syncUnlimitedFromInput()
+    unlimitedChild?.addEventListener('change', syncInputFromUnlimited)
+    maxConnections?.addEventListener('input', syncUnlimitedFromInput)
+    maxConnections?.addEventListener('change', syncUnlimitedFromInput)
     form?.addEventListener('input', preview); form?.addEventListener('change', preview)
     discardButton?.addEventListener('click', () => { void discard() })
     refresh.addEventListener('click', () => { void load(true) })
