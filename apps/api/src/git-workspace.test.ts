@@ -41,4 +41,21 @@ describe('account Git API boundary', () => {
     for (const raw of [{ ...valid, selected: { ...selected, path: 'foreign' } }, { ...valid, selected: { ...selected, branches: [] } }, { ...valid, selected: { ...selected, commits: [{ ...selected.commits[0], hash: 'b'.repeat(40) }] } }, { ...valid, selected: { ...selected, dirty: true } }, { ...valid, nativeAvailable: false }]) expect(() => projectGitView(raw, account, { op: 'inspect', path: 'repo' })).toThrow()
     expect(() => projectGitView({ ...view('remove'), selected: null }, account, { op: 'remove', path: 'repo', expectedRevision: 'a'.repeat(64) })).toThrow()
   })
+  it('projects deployment release history, rollback target and webhook info', () => {
+    const second = 'b'.repeat(40)
+    const rollbackView = {
+      ...view('rollback'),
+      deployed: { commit: second, at: '2026-11-08T10:00:00.000Z', op: 'rollback' as const },
+      releases: [
+        { commit: second, at: '2026-11-08T10:00:00.000Z', op: 'rollback' as const },
+        { commit: hash, at: '2026-11-07T10:00:00.000Z', op: 'deploy' as const },
+      ],
+      webhook: { configured: true, url: '/api/account/git/webhook/0123456789abcdef', updatedAt: '2026-11-07T10:00:00.000Z' },
+    }
+    const projected = projectGitView(rollbackView, account, { op: 'rollback', path: 'repo', targetCommit: second, expectedRevision: 'a'.repeat(64) })
+    expect(projected.deployed).toEqual({ commit: second, at: '2026-11-08T10:00:00.000Z', op: 'rollback' })
+    expect(projected.releases).toHaveLength(2)
+    expect(projected.webhook?.configured).toBe(true)
+    expect(() => projectGitView({ ...rollbackView, deployed: { commit: hash, at: '2026-11-08T10:00:00.000Z', op: 'rollback' } }, account, { op: 'rollback', path: 'repo', targetCommit: second, expectedRevision: 'a'.repeat(64) })).toThrow()
+  })
 })

@@ -150,6 +150,10 @@ export const entryPointAllowsApiRoute = (entryPoint: EntryPoint, pathname: strin
   if (/^\/api\/accounts\/[^/]+\/ssl$/.test(pathname)) return method === 'GET'
   if (/^\/api\/accounts\/[^/]+\/ssl\/(?:keys|csrs|certificates)$/.test(pathname)) return method === 'POST'
   if (/^\/api\/accounts\/[^/]+\/ssl\/(?:keys|csrs|certificates)\/[a-z0-9][a-z0-9_-]{0,63}$/.test(pathname)) return method === 'GET' || method === 'PATCH' || method === 'DELETE'
+  if (pathname === '/api/account/traffic-monitor') return method === 'GET'
+  if (pathname === '/api/account/traffic-monitor/block-ip') return method === 'POST'
+  if (/^\/api\/account\/email\/connect-devices(?:\/(?:autoconfig\.xml|apple\.mobileconfig))?$/.test(pathname)) return method === 'GET'
+  if (pathname === '/api/account/email/connect-devices/send-instructions') return method === 'POST'
   if (ownerFamilies.test(pathname)) return pathname !== '/api/analytics/io'
   if (/^\/api\/mail(?:\/|$)/.test(pathname)) return pathname !== '/api/mail/ips'
   return false

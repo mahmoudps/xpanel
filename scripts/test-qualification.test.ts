@@ -116,14 +116,14 @@ describe('reviewed qualification inventory', { tags: ['feature'] }, () => {
     expect(plan.notRun).toHaveLength(inScope.length - plan.tools.length)
     // A driven tool without readiness probes would have its published evidence demoted on every host.
     expect(plan.tools.every((item: { readiness: unknown }) => Array.isArray(item.readiness))).toBe(true)
-    expect(plan.notRun.find((item: { toolId: string }) => item.toolId === 'connect-devices')!.readiness).toBeNull()
+    expect(plan.notRun.find((item: { toolId: string }) => item.toolId === 'aapanel-server-migrate')!.readiness).toBeNull()
     expect([...plan.tools, ...plan.notRun].find((item: { toolId: string }) => item.toolId === 'git-version-control')!.readiness).toEqual(['control-plane', 'files', 'systemd'])
     expect(plan.notRun.every((item: { reason: string }) => item.reason === 'no reviewed acceptance driver')).toBe(true)
-    expect(qualificationPlan('unit', `${TOOL},connect-devices`).notRun.map((item: { toolId: string }) => item.toolId)).toEqual(['connect-devices'])
+    expect(qualificationPlan('unit', `${TOOL},aapanel-server-migrate`).notRun.map((item: { toolId: string }) => item.toolId)).toEqual(['aapanel-server-migrate'])
     const outOfScope = tools.find(tool => tool.status === 'out-of-scope')!.id
     for (const requested of ['no-such-tool', `${TOOL},${TOOL}`, outOfScope, '']) expect(() => qualificationPlan('host', requested)).toThrow()
     expect(() => qualificationPlan('desktop')).toThrow(/--slot/)
-    expect(() => qualificationRequirements(['connect-devices'])).toThrow(/No reviewed qualification driver/)
+    expect(() => qualificationRequirements(['aapanel-server-migrate'])).toThrow(/No reviewed qualification driver/)
   })
 })
 
