@@ -124,6 +124,34 @@ function howServiceUsersWork(t: Translate): string {
     bodyHtml: `<dl class="v2-email-how">${items.map(([name, title, text]) => `<div><dt><span class="v2-email-how__mark" aria-hidden="true">${icon(name, 16)}</span>${escapeHtml(t(title))}</dt><dd>${escapeHtml(t(text))}</dd></div>`).join('')}</dl>` })
 }
 
+function connectDevicesCard(t: Translate, props: EmailAccountsPageProps): string {
+  const emailUsers = props.users.state === 'read' ? props.users.items.filter(user => user.services.email) : []
+  const canReadDevices = !!props.account && props.readOnly !== true
+  const canManageDevices = canReadDevices && props.canManage === true
+  const mailboxOptions = emailUsers.map((user, index) => `<option value="${escapeHtml(user.login)}"${index === 0 ? ' selected' : ''}>${escapeHtml(user.login)}</option>`).join('')
+  const mailboxSelect = `<div class="v2-field" data-account-devices-mailbox-field${emailUsers.length ? '' : ' hidden'}><label for="v2-account-devices-mailbox">${escapeHtml(t('Mailbox'))}</label><span class="v2-select"><select id="v2-account-devices-mailbox" dir="ltr" data-account-devices-mailbox${canReadDevices && emailUsers.length ? '' : ' disabled'}>${mailboxOptions}</select>${icon('chevDown', 16)}</span></div>`
+  const facts = `<dl class="v2-email-facts"><div><dt>${escapeHtml(t('Server'))}</dt><dd><bdi class="v2-mono" dir="ltr" data-account-devices-hostname>${escapeHtml(t('Loading...'))}</bdi></dd></div><div><dt>${escapeHtml(t('Certificate'))}</dt><dd>${escapeHtml(t('Not verified by this page'))}</dd></div></dl>`
+  const tableHtml = dataTable(t, {
+    id: 'v2-account-devices-table',
+    caption: t('Incoming and outgoing mail servers'),
+    columns: [{ label: t('Service') }, { label: t('Server') }, { label: t('Port') }, { label: t('Security') }, { label: t('Username') }],
+    state: 'empty',
+    emptyText: t('Settings have not been read.'),
+    rows: [],
+    bodyHooks: { 'data-account-devices-rows': true },
+  })
+  const downloads = `<div class="v2-email-actions"><button type="button" class="v2-btn" data-account-devices-refresh${canReadDevices ? '' : ' disabled'}>${escapeHtml(t('Read mail client settings'))}</button><a class="v2-btn" data-account-devices-download="autoconfig" hidden aria-disabled="true" download>${escapeHtml(t('Download Thunderbird setup (XML)'))}</a><a class="v2-btn" data-account-devices-download="apple" hidden aria-disabled="true" download>${escapeHtml(t('Download Apple profile (iPhone, iPad, Mac)'))}</a></div>`
+  const sendTag = canManageDevices ? 'form' : 'div'
+  const sendForm = `<${sendTag} class="v2-form" data-account-devices-send-form${canManageDevices ? ' novalidate' : ''} hidden>${field('v2-account-devices-send-email', t('Send to'), '<input id="v2-account-devices-send-email" type="email" dir="ltr" autocomplete="email" spellcheck="false" maxlength="254" data-account-devices-send-email disabled>')}<div class="v2-email-actions"><button type="${canManageDevices ? 'submit' : 'button'}" class="v2-btn" data-account-devices-send disabled>${escapeHtml(t('Send instructions'))}</button></div><p data-account-devices-send-status data-state="unread" role="status" hidden></p></${sendTag}>`
+  const templates = `<template data-xp-template="account-device-row"><tr><td data-xp-slot="service"></td><td><bdi dir="ltr" class="v2-mono" data-xp-slot="server"></bdi></td><td><bdi dir="ltr" class="v2-mono v2-num" data-xp-slot="port"></bdi></td><td><bdi dir="ltr" data-xp-slot="security"></bdi></td><td><bdi dir="ltr" class="v2-mono" data-xp-slot="username"></bdi></td></tr></template><template data-xp-template="account-device-empty"><tr><td colspan="5" data-xp-slot="message"></td></tr></template>`
+  return card({
+    title: t('Connect devices'),
+    titleId: 'v2-email-connect-devices-title',
+    description: t('Use these settings in desktop and mobile mail apps. Your password is the mailbox password; it is never shown here or included in setup files.'),
+    bodyHtml: `<div class="v2-stack" data-account-connect-devices data-account-devices-can-read="${canReadDevices}" data-account-devices-manage="${canManageDevices}">${mailboxSelect}<p data-account-devices-status data-state="unread" role="status">${escapeHtml(t(canReadDevices ? 'Settings have not been read.' : 'Mail client setup is unavailable here. Nothing was read.'))}</p>${facts}${downloads}<p data-account-devices-download-note class="v2-muted">${escapeHtml(t('Setup files are available after the settings are read.'))}</p>${tableHtml}${sendForm}${templates}</div>`,
+  })
+}
+
 /** Page body only. The active surface supplies the shell and core supplies the shared mutation controllers. */
 export function renderV2EmailAccountsPage(t: Translate, props: EmailAccountsPageProps): string {
   if (!props.account) props = { ...props, canManage: false, domains: { state: 'unread' }, users: { state: 'unread' }, plan: undefined }
@@ -136,7 +164,7 @@ export function renderV2EmailAccountsPage(t: Translate, props: EmailAccountsPage
     { label: t('Web Disk'), value: counts ? String(counts.webdisk) : t('Loading...') },
   ] })
   const connection = card({ title: t('Connection information'), titleId: 'v2-email-connection-title', bodyHtml: `<p class="v2-muted">${escapeHtml(t('Connection hosts, ports, mailbox usage and delivery health were not read.'))}</p>` })
-  const main = `<div class="v2-stack">${usersTable(t, props)}${connection}${howServiceUsersWork(t)}</div>`
+  const main = `<div class="v2-stack">${usersTable(t, props)}${connection}${connectDevicesCard(t, props)}${howServiceUsersWork(t)}</div>`
   const create = props.canManage ? createMailbox(t, props) : props.readOnly === true || !props.account ? `<div data-readonly="true"><fieldset disabled>${createMailbox(t, props)}</fieldset></div>` : ''
   const body = `${summaries}${accountFacts(t, props)}<div class="v2-split">${main}${create}</div>${props.canManage ? mailboxDialogs(t) : ''}`
   return `<div class="v2-email-accounts"${props.readOnly === true ? ' data-readonly="true"' : ''}>${layoutRoot(t, {

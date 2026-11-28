@@ -5,6 +5,7 @@ import { pageScript, pageScriptTag, type PageScript } from './page-scripts.ts'
 import { ACCOUNT_API_TOKENS_CLIENT_BINDING } from './account-api-tokens-client.ts'
 import { ACCOUNT_BACKUP_CLIENT_BINDING } from './account-backup-client.ts'
 import { ACCOUNT_COLLABORATION_CLIENT_BINDING } from './account-collaboration-client.ts'
+import { ACCOUNT_CONNECT_DEVICES_CLIENT_BINDING } from './account-connect-devices-client.ts'
 import { ACCOUNT_CONTACT_CLIENT_BINDING } from './account-contact-client.ts'
 import { ACCOUNT_CRON_CLIENT_BINDING } from './account-cron-client.ts'
 import { ACCOUNT_DATABASE_INSIGHTS_CLIENT_BINDING } from './account-database-insights-client.ts'
@@ -37,6 +38,7 @@ import { ACCOUNT_SPAM_CLIENT_BINDING } from './account-spam-client.ts'
 import { ACCOUNT_SSH_CLIENT_BINDING } from './account-ssh-client.ts'
 import { ACCOUNT_SSL_CLIENT_BINDING } from './account-ssl-client.ts'
 import { TEAM_AUDIT_CLIENT_BINDING } from './account-team-audit-client.ts'
+import { ACCOUNT_TRAFFIC_MONITOR_CLIENT_BINDING } from './account-traffic-monitor-client.ts'
 import { ACCOUNT_VIRUS_SCAN_CLIENT_BINDING } from './account-virus-scan-client.ts'
 import { ACCOUNT_WEB_DIRECTIVES_CLIENT_BINDING } from './account-web-directives-client.ts'
 import { WEBSITE_BACKUPS_CLIENT_BINDING } from './account-website-backups-client.ts'
@@ -168,6 +170,7 @@ import { WHM_PREFERENCES_CLIENT_BINDING } from './whm-preferences-client.ts'
 import { WHM_REPAIR_CLIENT_BINDING } from './whm-repair-client.ts'
 import { WHM_RESELLER_SUSPEND_CLIENT_BINDING } from './whm-reseller-suspend-client.ts'
 import { WHM_SECURITY_CLIENT_BINDING } from './whm-security-client.ts'
+import { WHM_SECURITY_CONTROLS_CLIENT_BINDING } from './whm-security-controls-client.ts'
 import { WHM_SECURITY_TOOLS_CLIENT_BINDING } from './whm-security-tools-client.ts'
 import { WHM_SERVER_HEALTH_CLIENT_BINDING } from './whm-server-health-client.ts'
 import { WHM_SERVER_INFO_CLIENT_BINDING } from './whm-server-info-client.ts'
@@ -591,12 +594,13 @@ export const ROUTE_CLIENT_CHUNKS: readonly RouteClientChunk[] = Object.freeze([
   if(window.__xpRt&&Array.isArray(window.__xpRt.rebinders))window.__xpRt.rebinders.push(run);
   run();
 })();`),
-  chunk('whm-sec-1', 'any', ["data-whm-security-evidence","data-whm-security-check-rows","data-whm-security-configuration","data-whm-security-status","data-whm-security-refresh","data-read-only","data-api-url","data-whm-security-count","data-whm-ssh-keys","data-whm-ssh-key-rows","data-whm-ssh-public-key","data-whm-ssh-status","data-whm-ssh-refresh","data-whm-ssh-add","data-whm-ssh-window","data-whm-ssh-effective","data-whm-ssh-policy","data-whm-ssh-port","data-whm-ssh-auth","data-whm-ssh-root","data-whm-ssh-apply","data-whm-ssh-policy-status","data-whm-ssh-start","data-whm-ssh-stop","data-approved-whm-operations","data-operation-state","data-whm-ops-section","data-firewall-manage-status","data-whm-firewall-panel","data-firewall-rule-count","data-firewall-manage-head","data-firewall-static-management","data-whm-security-tools-workspace","data-whm-security-tools-status","data-whm-security-tools-refresh","data-whm-security-tools-result","data-whm-security-tools-fact","data-whm-security-tools-rows","data-whm-security-tools-filter","data-whm-updates-workspace","data-whm-updates-status","data-whm-updates-rows","data-whm-updates-job","data-whm-updates-job-link","data-whm-updates-exclude-kernel","data-whm-updates-action","data-cache","data-whm-repair-workspace","data-whm-repair-","data-whm-repair-preview-action","data-whm-firewall-ping","data-whm-firewall-policy","data-whm-isolation-policy"], false, `(function(){
+  chunk('whm-sec-1', 'any', ["data-whm-security-evidence","data-whm-security-check-rows","data-whm-security-configuration","data-whm-security-status","data-whm-security-refresh","data-read-only","data-api-url","data-whm-security-count","data-whm-ssh-keys","data-whm-ssh-key-rows","data-whm-ssh-public-key","data-whm-ssh-status","data-whm-ssh-refresh","data-whm-ssh-add","data-whm-ssh-window","data-whm-ssh-effective","data-whm-ssh-policy","data-whm-ssh-port","data-whm-ssh-auth","data-whm-ssh-root","data-whm-ssh-apply","data-whm-ssh-policy-status","data-whm-ssh-start","data-whm-ssh-stop","data-approved-whm-operations","data-operation-state","data-whm-ops-section","data-firewall-manage-status","data-whm-firewall-panel","data-firewall-rule-count","data-firewall-manage-head","data-firewall-static-management","data-whm-security-tools-workspace","data-whm-security-tools-status","data-whm-security-tools-refresh","data-whm-security-tools-result","data-whm-security-tools-fact","data-whm-security-tools-rows","data-whm-security-tools-filter","data-whm-updates-workspace","data-whm-updates-status","data-whm-updates-rows","data-whm-updates-job","data-whm-updates-job-link","data-whm-updates-exclude-kernel","data-whm-updates-action","data-cache","data-whm-repair-workspace","data-whm-repair-","data-whm-repair-preview-action","data-whm-firewall-ping","data-whm-firewall-policy","data-whm-isolation-policy","data-whm-php-functions","data-whm-ssh-autoban","data-can-read","data-can-manage"], false, `(function(){
   function run(){
     if(typeof window==='undefined'||typeof window.xpanelSessionRequest!=='function')return;
     var __rt=window.__xpRt;if(!__rt)return;
     var askDialog=__rt.askDialog,rtl=document.documentElement.dir==='rtl',clientTemplate=__rt.clientTemplate,clientTemplateSlot=__rt.clientTemplateSlot,cloneClientTemplate=__rt.cloneClientTemplate,reload=__rt.reload;
     (${WHM_SECURITY_CLIENT_BINDING})();
+    (${WHM_SECURITY_CONTROLS_CLIENT_BINDING})(askDialog);
     (${WHM_SSH_CLIENT_BINDING})(askDialog);
     (${WHM_SSH_POLICY_CLIENT_BINDING})(askDialog);
     (${WHM_FIREWALL_CLIENT_BINDING})(askDialog);
@@ -767,6 +771,24 @@ export const ROUTE_CLIENT_CHUNKS: readonly RouteClientChunk[] = Object.freeze([
   chunk('whm-account-preflight', 'xwhm', ["data-account-preflight-url"], false, `(function(){
   if(typeof window==='undefined')return;
   ${ACCOUNT_PREFLIGHT_CLIENT_BINDING}();
+})();`),
+  chunk('panel-traffic-monitor', 'xpanel', ["data-account-traffic-monitor","data-traffic-monitor-"], false, `(function(){
+  function run(){
+    if(typeof window==='undefined'||typeof window.xpanelSessionRequest!=='function')return;
+    var __rt=window.__xpRt;if(!__rt)return;
+    var askDialog=__rt.askDialog;
+    (${ACCOUNT_TRAFFIC_MONITOR_CLIENT_BINDING})(askDialog);
+  }
+  if(window.__xpRt&&Array.isArray(window.__xpRt.rebinders))window.__xpRt.rebinders.push(run);
+  run();
+})();`),
+  chunk('panel-connect-devices', 'xpanel', ["data-account-connect-devices","data-account-devices-"], false, `(function(){
+  function run(){
+    if(typeof window==='undefined'||typeof window.xpanelSessionRequest!=='function')return;
+    ${ACCOUNT_CONNECT_DEVICES_CLIENT_BINDING};
+  }
+  if(window.__xpRt&&Array.isArray(window.__xpRt.rebinders))window.__xpRt.rebinders.push(run);
+  run();
 })();`)
 ])
 

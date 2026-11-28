@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ACCOUNT_GIT_CLIENT_BINDING, readGitClientView } from './account-git-client.ts'
-import { renderAccountGitWorkspace } from './board-port/account-git-workspace.ts'
+import { fixtureAccount, renderPanelRoute } from '../../../tests/fixtures/workspace-route-render.ts'
 
 const accountId = '11111111-1111-4111-8111-111111111111', hash = 'a'.repeat(40)
+const renderAccountGitWorkspace = ({ lang, canManage }: { lang: 'en' | 'ar'; accountId?: string; canManage: boolean }) =>
+  renderPanelRoute('/files/git', { locale: lang, account: fixtureAccount({ id: accountId, username: 'alice' }), canManage })
 const view = (op = 'list') => ({ context: { accountId, username: 'alice' }, revision: 'a'.repeat(64), repositories: ['repo'], nativeAvailable: true, selected: op === 'list' ? null : { path: 'repo', branch: 'main', head: hash, dirty: false, changedFiles: 0, remote: 'https://example.com/site.git', branches: [{ name: 'main', hash, current: true }], commits: [{ hash, at: '2026-10-27T00:00:00+00:00', subject: '<img src=x> release ١' }] }, application: { op, state: ['list', 'inspect'].includes(op) ? 'read' : 'verified', verificationRequired: false } })
 const settle = () => new Promise(resolve => setTimeout(resolve, 0))
 const $ = <T extends Element>(selector: string): T => document.querySelector<T>(selector)!
@@ -19,8 +21,9 @@ describe('Git account page and controller', () => {
     for (const lang of ['en', 'ar'] as const) {
       const html = renderAccountGitWorkspace({ lang, accountId, canManage: true })
       expect(html).toContain(`dir="${lang === 'ar' ? 'rtl' : 'ltr'}"`); expect(html).not.toMatch(/[٠-٩۰-۹]/)
-      for (const name of ['repository', 'branch', 'clone', 'init', 'pull', 'checkout', 'history', 'status', 'deploy', 'deployed']) expect(html).toContain('data-git-' + name)
-      expect(html).toContain('<bdi dir="ltr" data-git-selected>'); expect(html).toContain('id="git-deployment"')
+      for (const name of ['repository', 'branch', 'clone', 'init', 'pull', 'checkout', 'history', 'status', 'deploy', 'deployed', 'release-select', 'rollback', 'releases', 'webhook-url', 'webhook-rotate']) expect(html).toContain('data-git-' + name)
+      expect(html).not.toContain('Git web access is unavailable.')
+      expect(html).toContain('<bdi dir="ltr" data-git-selected>'); expect(html).toContain('id="v2-git-deployment"')
     }
     expect(ACCOUNT_GIT_CLIENT_BINDING).not.toContain('innerHTML')
   })
@@ -28,7 +31,7 @@ describe('Git account page and controller', () => {
     const request = vi.fn(async () => view()); await bind(request, false)
     expect(request).not.toHaveBeenCalled(); expect([...document.querySelectorAll<HTMLButtonElement>('button')].every(button => button.disabled)).toBe(true)
     await bind(request); expect(request).toHaveBeenCalledTimes(1)
-    expect($<HTMLButtonElement>('[aria-labelledby="git-deployment"] button').disabled).toBe(true)
+    expect($<HTMLButtonElement>('[aria-labelledby="v2-git-deployment"] button').disabled).toBe(true)
     expect($<HTMLInputElement>('[data-git-path]').disabled).toBe(false)
   })
   it('reads inside a read-only frame but never writes, with every control disabled', async () => {
@@ -112,11 +115,37 @@ describe('readable Git commit date metadata', () => {
     expect(time!.closest('bdi')!.dir).toBe('ltr')
     expect($('[data-git-tree]').textContent).toBe(locale === 'ar' ? '3 ملفات معدلة' : '3 changed files')
     expect(cells[1]!.textContent).not.toContain(storedAt)
-    expect($<HTMLButtonElement>('[aria-labelledby="git-deployment"] button').disabled).toBe(true)
+    expect($<HTMLButtonElement>('[aria-labelledby="v2-git-deployment"] button').disabled).toBe(true)
     expect(request.mock.calls).toEqual([['GET', '/api/account/git', undefined], ['POST', '/api/account/git', { op: 'inspect', path: 'repo' }]])
     expect(confirmation).not.toHaveBeenCalled()
     expect(inspected.selected!.head).toBe(hash)
     expect(inspected.revision).toBe('a'.repeat(64))
     expect(JSON.stringify({ listed, inspected })).toBe(original)
+  })
+
+  it('renders deployment history, rolls back a recorded release and rotates webhook token', async () => {
+    const prior = 'b'.repeat(40)
+    const releases = [
+      { commit: hash, at: '2026-11-08T10:00:00.000Z', op: 'deploy' as const },
+      { commit: prior, at: '2026-11-07T10:00:00.000Z', op: 'deploy' as const },
+    ]
+    const request = vi.fn(async (_method: string, _path: string, body?: unknown) => {
+      const op = body ? (body as { op: string }).op : 'list'
+      if (op === 'rollback') return { ...view(op), deployed: { commit: prior, at: '2026-11-09T10:00:00.000Z', op: 'rollback' }, releases: [{ commit: prior, at: '2026-11-09T10:00:00.000Z', op: 'rollback' }, ...releases], webhook: { configured: true, url: '/api/account/git/webhook/0123456789abcdef', updatedAt: '2026-11-08T09:00:00.000Z' } }
+      if (op === 'webhook-rotate') return { ...view(op), deployed: releases[0], releases, webhook: { configured: true, url: '/api/account/git/webhook/fedcba9876543210?token=' + 't'.repeat(32), updatedAt: '2026-11-09T11:00:00.000Z' } }
+      return { ...view(op), deployed: op === 'list' ? null : releases[0], releases: op === 'list' ? undefined : releases, webhook: op === 'list' ? undefined : { configured: true, url: '/api/account/git/webhook/0123456789abcdef', updatedAt: '2026-11-08T09:00:00.000Z' } }
+    })
+    await bind(request, true, async () => true)
+    $<HTMLButtonElement>('[data-git-inspect]').click(); await settle(); await settle()
+    expect($('[data-git-releases]').textContent).toContain(prior)
+    expect($('[data-git-webhook-url]').textContent).toBe('/api/account/git/webhook/0123456789abcdef')
+    const select = $<HTMLSelectElement>('[data-git-release-select]')
+    select.value = prior; select.dispatchEvent(new Event('change'))
+    $<HTMLButtonElement>('[data-git-rollback]').click(); await settle(); await settle(); await settle()
+    expect(request.mock.calls.at(-1)).toEqual(['POST', '/api/account/git', { op: 'rollback', path: 'repo', expectedRevision: 'a'.repeat(64), targetCommit: prior }])
+    expect($('[data-git-deployed]').textContent).toContain(prior.slice(0, 12))
+    $<HTMLButtonElement>('[data-git-webhook-rotate]').click(); await settle(); await settle(); await settle()
+    expect(request.mock.calls.at(-1)).toEqual(['POST', '/api/account/git', { op: 'webhook-rotate', path: 'repo', expectedRevision: 'a'.repeat(64) }])
+    expect($('[data-git-webhook-url]').textContent).toContain('?token=')
   })
 })

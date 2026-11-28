@@ -86,6 +86,12 @@ describe('renderFpmPool', () => {
     expect(codeOf(() => renderFpmPool(a, php(), debianOs, { allowedFunctions: ['phpinfo'] }))).toBe('VALIDATION')
     expect(codeOf(() => disabledFunctions(['exec,system']))).toBe('VALIDATION')
     expect(codeOf(() => renderFpmPool(a, php(), debianOs, { allowedFunctions: ['x\nphp_admin_value[open_basedir]=/'] }))).toBe('VALIDATION')
+    const selective = valueOf(renderFpmPool(a, php(), debianOs, { globalDisabledFunctions: ['shell_exec', 'system'], allowedFunctions: ['system'] }).content, 'php_admin_value[disable_functions]')?.split(',')
+    expect(selective).toContain('shell_exec')
+    expect(selective).not.toContain('exec')
+    expect(selective).not.toContain('system')
+    expect(selective).toContain('openlog')
+    expect(() => renderFpmPool(a, php(), debianOs, { globalDisabledFunctions: ['strlen'] })).toThrow(/Unsupported global disabled PHP function/)
   })
 
   it('writes per-directory keys as php_value and startup-only keys as admin values', () => {
