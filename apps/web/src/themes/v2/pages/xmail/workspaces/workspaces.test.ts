@@ -32,9 +32,9 @@ describe('v2 sealed mailbox workspace pages', () => {
 
   it('names each table column for phone rows and gives every select the house chevron', () => {
     const html = render('/mail/folders')
-    expect(html).toContain(`style="--h1:&#39;Folder&#39;;--h2:&#39;Messages&#39;;--h3:&#39;Unread&#39;;--h4:&#39;Shown in mail apps&#39;;--h5:&#39;Actions&#39;"`)
+    expect(html).toContain(`<table id="v2-mail-folders-table" data-phone-labels>`)
     expect(html).toMatch(/<span class="v2-select"><select id="mail-folders-parent"[^>]*>[^]*?<\/select><svg class="v2-icon"/)
-    expect(MAIL_WORKSPACES_CSS).toContain('td:nth-child(2)::before{content:var(--h2) ": "}')
+    expect(MAIL_WORKSPACES_CSS).toContain('content:attr(data-phone-label) ": "')
   })
 
   it('keeps long loaded names inside the page: phone rows cap the value column and buttons may wrap', () => {

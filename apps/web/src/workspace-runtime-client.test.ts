@@ -15,6 +15,7 @@ import {
   renderToastRegion,
   renderWizard,
 } from './design-system/components/index.ts'
+import { renderGuidedWizard } from './features/wizards/flow.ts'
 import { WORKSPACE_RUNTIME_SCRIPT } from './workspace-runtime-client.ts'
 
 function bootRuntime(): void {
@@ -649,6 +650,13 @@ describe('workspace runtime client', () => {
       expect(nextBtn.hidden).toBe(true)
       expect(submitBtn.hidden).toBe(false)
       prevBtn.click()
+      expect(s1.hidden).toBe(false)
+      expect(s2.hidden).toBe(true)
+
+      nextBtn.click()
+      expect(s2.hidden).toBe(false)
+      const firstNav = wiz.querySelector<HTMLElement>('[data-ds-wizard-goto="0"]')!
+      firstNav.click()
       expect(s1.hidden).toBe(false)
       expect(s2.hidden).toBe(true)
 
@@ -1459,5 +1467,98 @@ describe('workspace runtime client', () => {
     expect(opt1.getAttribute('aria-selected')).toBe('true')
     expect(opt2.getAttribute('aria-selected')).toBe('false')
     expect(saveBar.hidden).toBe(true)
+  })
+
+  it('syncs disabled state and forwards final submit clicks to submitTarget across hidden steps', async () => {
+    const extWrap = document.createElement('div')
+    extWrap.innerHTML = renderGuidedWizard({
+      id: 'ext-target-wiz',
+      activeStepIndex: 0,
+      submitLabel: 'Publish target',
+      submitTarget: '[data-ext-publish]',
+      steps: [
+        { id: 'es1', label: 'Compose', bodyHtml: '<button type="button" data-ext-publish disabled>Hidden publish</button>' },
+        { id: 'es2', label: 'Preview', bodyHtml: '<p>Ready</p>' },
+      ],
+    })
+    document.body.appendChild(extWrap)
+    bootRuntime()
+
+    const extWiz = document.querySelector<HTMLElement>('#ext-target-wiz')!
+    const extNext = extWiz.querySelector<HTMLButtonElement>('[data-ds-wizard-next]')!
+    const extSubmit = extWiz.querySelector<HTMLButtonElement>('[data-ds-wizard-submit]')!
+    const extTarget = extWiz.querySelector<HTMLButtonElement>('[data-ext-publish]')!
+    let targetClicks = 0
+    extTarget.addEventListener('click', () => { targetClicks++ })
+
+    extNext.click()
+    expect(extSubmit.hidden).toBe(false)
+    expect(extSubmit.disabled).toBe(true)
+
+    extTarget.disabled = false
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(extSubmit.disabled).toBe(false)
+
+    extSubmit.click()
+    expect(targetClicks).toBe(1)
+  })
+
+  it('handles xpanel:cron-sync without firing xpanel:cron-change and emits xpanel:cron-change on user edits', () => {
+    document.body.innerHTML = `
+      <div id="cron-test" data-ds-cron-builder data-ds-cron-templates='{"hourly":"H:{m}","daily":"D:{time}","weekly":"W:{day}:{time}","monthly":"M:{dom}:{time}","custom":"C:{expr}","days":["Sun","Mon","Tue","Wed","Thu","Fri","Sat"]}'>
+        <select id="cron-test-freq" name="s[frequency]"><option value="hourly">H</option><option value="daily" selected>D</option><option value="weekly">W</option><option value="monthly">M</option><option value="custom">C</option></select>
+        <div data-cron-field="hour"><input id="cron-test-hour" name="s[hour]" type="number" value="2"></div>
+        <div data-cron-field="minute"><input id="cron-test-minute" name="s[minute]" type="number" value="0"></div>
+        <div data-cron-field="dow" hidden><select id="cron-test-dow" name="s[dayOfWeek]"><option value="0">Sun</option><option value="5">Fri</option></select></div>
+        <div data-cron-field="dom" hidden><input id="cron-test-dom" name="s[dayOfMonth]" type="number" value="1"></div>
+        <div data-cron-field="custom" hidden><input id="cron-test-custom" name="s[customExpression]" type="text" value="0 2 * * *"></div>
+        <span data-ds-cron-summary-text></span><div data-ds-cron-code></div>
+        <input type="hidden" data-ds-cron-expression value="0 2 * * *">
+      </div>
+    `
+    bootRuntime()
+    const builder = document.getElementById('cron-test')!
+    const events: string[] = []
+    builder.addEventListener('xpanel:cron-change', ev => { events.push((ev as CustomEvent<{ expression: string }>).detail.expression) })
+
+    builder.dispatchEvent(new CustomEvent('xpanel:cron-sync', { detail: { expression: '30 4 * * 5' } }))
+    expect(events).toEqual([])
+    expect(document.querySelector<HTMLSelectElement>('#cron-test-freq')!.value).toBe('weekly')
+    expect(document.querySelector<HTMLSelectElement>('#cron-test-dow')!.value).toBe('5')
+    expect(document.querySelector('[data-ds-cron-summary-text]')!.textContent).toBe('W:Fri:04:30')
+
+    const min = document.querySelector<HTMLInputElement>('#cron-test-minute')!
+    min.value = '45'
+    min.dispatchEvent(new Event('input', { bubbles: true }))
+    expect(events).toEqual(['45 4 * * 5'])
+  })
+
+  it('activates the owning wizard step when setup fragment links or hashchange target a hidden panel', () => {
+    document.body.innerHTML = `
+      <div data-setup-stepper>
+        <a id="nav-workers" href="#v2-setup-workers">Workers</a>
+        <div id="setup-wiz" data-ds-wizard data-active-step="0">
+          <div data-ds-wizard-step="0"><section id="v2-setup-identity"></section></div>
+          <div data-ds-wizard-step="1" hidden><section id="v2-setup-workers"></section></div>
+          <div data-ds-wizard-step="2" hidden><section id="v2-setup-review"></section></div>
+        </div>
+      </div>
+    `
+    bootRuntime()
+    const p0 = document.querySelector<HTMLElement>('[data-ds-wizard-step="0"]')!
+    const p1 = document.querySelector<HTMLElement>('[data-ds-wizard-step="1"]')!
+    const p2 = document.querySelector<HTMLElement>('[data-ds-wizard-step="2"]')!
+    expect(p0.hidden).toBe(false)
+    expect(p1.hidden).toBe(true)
+
+    document.getElementById('nav-workers')!.click()
+    expect(p0.hidden).toBe(true)
+    expect(p1.hidden).toBe(false)
+
+    window.location.hash = '#v2-setup-review'
+    window.dispatchEvent(new Event('hashchange'))
+    expect(p1.hidden).toBe(true)
+    expect(p2.hidden).toBe(false)
+    window.location.hash = ''
   })
 })

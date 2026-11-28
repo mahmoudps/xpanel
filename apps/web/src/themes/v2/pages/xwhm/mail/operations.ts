@@ -13,8 +13,8 @@ export function renderV2WhmMailQueue(input: WhmMailPageInput): string {
     ['deferred', msgctxt('whm-mail-queue-workspace', 'Deferred')], ['hold', msgid('Hold')], ['maildrop', msgid('Maildrop')]] as const
   const summary = group('queue-summary', t(msgctxt('theme:v2', 'Queue summary')),
     `${status(t(msgid('The mail queue has not been read.')), { 'data-whm-mail-queue-status': true })}
-<dl class="v2-whm-mail__facts">${queues.map(([key, label]) => `<div><dt>${escapeHtml(t(label))}</dt><dd><bdi dir="ltr" data-whm-mail-queue-count="${key}">${escapeHtml(t(msgid('Not read')))}</bdi></dd></div>`).join('')}
-<div><dt>${escapeHtml(t(msgid('Total size')))}</dt><dd><bdi dir="ltr" data-whm-mail-queue-total-size>${escapeHtml(t(msgid('Not read')))}</bdi></dd></div><div><dt>${escapeHtml(t(msgid('Observed at (UTC)')))}</dt><dd><bdi dir="ltr" data-whm-mail-queue-observed-at>${escapeHtml(t(msgid('Not read')))}</bdi></dd></div></dl>
+<dl class="v2-whm-mail__facts">${queues.map(([key, label]) => `<div><dt>${escapeHtml(t(label))}</dt><dd><bdi dir="ltr" data-whm-mail-queue-count="${key}">${escapeHtml(t(msgid('Loading...')))}</bdi></dd></div>`).join('')}
+<div><dt>${escapeHtml(t(msgid('Total size')))}</dt><dd><bdi dir="ltr" data-whm-mail-queue-total-size>${escapeHtml(t(msgid('Loading...')))}</bdi></dd></div><div><dt>${escapeHtml(t(msgid('Observed at (UTC)')))}</dt><dd><bdi dir="ltr" data-whm-mail-queue-observed-at>${escapeHtml(t(msgid('Loading...')))}</bdi></dd></div></dl>
 <p data-whm-mail-queue-truncated hidden>${escapeHtml(t(msgid('Only the first messages of a larger queue were read. Counts and totals cover the shown messages only.')))}</p><p>${escapeHtml(t(msgid('Only envelope details are shown. Message content and headers are never read here.')))}</p>`,
     button(t(msgid('Refresh')), { 'data-whm-mail-queue-refresh': true }, !canRead))
   const filters = `<div class="v2-whm-mail__fields">${formField({ id: 'v2-mail-queue-filter-queue', label: t(msgid('Queue')), control: {

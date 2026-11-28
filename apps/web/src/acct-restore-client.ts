@@ -152,7 +152,11 @@ function bindRestoreMore(): void {
       td.colSpan = columns; td.textContent = empty; body.replaceChildren(row)
     }
     const fact = (name: string, value: Node | string): void => { find(name)?.replaceChildren(value) }
-    const step = (name: string): void => steps.querySelectorAll<HTMLElement>('li').forEach(item => { if (item.dataset.step === name) item.setAttribute('aria-current', 'step'); else item.removeAttribute('aria-current') })
+    const step = (name: string): void => {
+      steps.querySelectorAll<HTMLElement>('li').forEach(item => { if (item.dataset.step === name) item.setAttribute('aria-current', 'step'); else item.removeAttribute('aria-current') })
+      const wizardIndex = name === 'components' ? 1 : name === 'review' ? 2 : name === 'result' ? 3 : 0
+      root.querySelector<HTMLElement>('[data-ds-wizard]')?.dispatchEvent(new CustomEvent('xpanel:wizard-step', { detail: { step: wizardIndex } }))
+    }
     const base = (): string => '/api/backups/components/' + encodeURIComponent(username)
     const sync = (): void => {
       account.disabled = busy || account.options.length < 2

@@ -13,7 +13,7 @@ import { renderV2EmailUsers, renderV2ForcePassword, renderV2Rearrange, renderV2S
 export function renderV2WhmAccountHealthPage(props: WhmSurfaceProps, authority: WhmAccountToolAuthority): string {
   const { t, readable } = context(props, authority)
   const title = t(msgid('Account health & repair'))
-  const unread = t(msgid('Not read'))
+  const unread = t(msgid('Loading...'))
   const summary = toolCard('health-summary', t(msgid('Health checks')), `<p>${esc(t(msgid('Checks compare each account with its saved plan, certificates, DNS zones and PHP settings, and read its system user, home directory and disk quota on this server. Checks never change anything. Each problem links to the page that fixes it.')))}</p>`
     + actions(button(t(msgid('Run checks')), { 'data-whm-health-run': true }, readable, true))
     + status(t(readable ? msgid('Checks have not been run.') : msgid('Account health requires an authorized root administrator or a reseller with the list-accounts privilege. Nothing was read or changed.')), { 'data-whm-health-status': true }, readable ? 'unread' : 'unavailable')
@@ -70,7 +70,7 @@ export function renderV2WhmAccountBandwidthPage(props: WhmSurfaceProps, authorit
     + facts([
       ['month', msgid('Month (UTC)')], ['since', msgid('Counted since (UTC)')], ['updated', msgid('Last counted (UTC)')],
       ['pending', msgid('Log data not yet counted')], ['web', msgid('Web logs')], ['mail', msgid('Mail journal')], ['ftp', msgid('FTP journal')],
-    ].map(([key, label]) => ({ label: t(label!), hooks: { 'data-whm-metering-fact': key! } })), t(msgid('Not read')))
+    ].map(([key, label]) => ({ label: t(label!), hooks: { 'data-whm-metering-fact': key! } })), t(msgid('Loading...')))
     + table(t(msgid('Bandwidth per account')), [msgid('Account'), msgid('Domain'), msgid('Status'), msgid('Web'), msgid('Mail'), 'FTP', msgid('Total'), msgid('Plan limit')].map(label => t(label)), { 'data-whm-metering-rows': 'bandwidth' }, t(msgid('No bandwidth has been read.'))))
   const relief = toolCard('bandwidth-relief', t(msgid('Unsuspend bandwidth exceeders')), `<p>${esc(t(msgid('Lifts the bandwidth-exceeded page of every account limited this month until 00:00 UTC. From the next UTC day each one is evaluated again and limited if it is still over its limit.')))}</p>`
     + actions(button(t(msgid('Unsuspend bandwidth exceeders')), { 'data-whm-bandwidth-relief': true }))
@@ -88,7 +88,7 @@ export function renderV2WhmAccountAnnouncementsPage(props: WhmSurfaceProps, auth
   const title = t(msgid('Announcements'))
   const list = toolCard('announcements-list', t(msgid('Saved announcements')), status(t(msgid('Announcements have not been read. No announcement is assumed to be shown.')), { 'data-whm-announcements-status': true })
     + `<div data-whm-announcements-loading aria-busy="true" aria-label="${esc(t(msgid('Loading announcements')))}" hidden></div>`
-    + table(t(msgid('Announcements, newest first')), [msgid('Title'), msgid('Severity'), msgid('Audience'), msgid('Shown (UTC)'), msgid('State'), msgid('Updated (UTC)'), msgid('Actions')].map(label => t(label)), { 'data-whm-announcements-rows': true }, t(msgid('Not read')))
+    + table(t(msgid('Announcements, newest first')), [msgid('Title'), msgid('Severity'), msgid('Audience'), msgid('Shown (UTC)'), msgid('State'), msgid('Updated (UTC)'), msgid('Actions')].map(label => t(label)), { 'data-whm-announcements-rows': true }, t(msgid('Loading...')))
     + `<div data-whm-announcements-empty hidden><h3>${esc(t(msgid('No announcements yet')))}</h3><p>${esc(t(msgid('Create one below. Account owners see no notice until then.')))}</p></div><p class="v2-muted">${esc(t(msgid('Newest first. Up to 50 announcements can be active. Archived ones are kept as history, up to 100 records in all; past that, the oldest archived record is removed.')))}</p>`
     + actions(button(t(msgid('Refresh')), { 'data-whm-announcements-refresh': true }, editable))
     + status('', { 'data-whm-announcements-list-status': true }, 'unread', true))
@@ -98,8 +98,8 @@ export function renderV2WhmAccountAnnouncementsPage(props: WhmSurfaceProps, auth
     + field(`v2-announcements-body-${language}`, t(msgid('Message')), `<textarea id="v2-announcements-body-${language}" name="body-${language}" lang="${language}" dir="${localeDirection(language)}" rows="5" maxlength="2000" required aria-describedby="v2-announcements-text-help" data-whm-announcements-input="body-${language}"${off}></textarea>`) + '</fieldset>').join('')
   const choices = fields(field('v2-announcements-severity', t(msgid('Severity')), select('severity', [['info', msgid('Notice')], ['warning', msgid('Warning')], ['maintenance', msgid('Maintenance')]]))
     + field('v2-announcements-audience', t(msgid('Audience')), select('audience', [['all', msgid('All accounts')], ['plan', msgid('Accounts on a plan')], ['reseller', msgid("A reseller's accounts")], ['accounts', msgid('Listed accounts')]]))
-    + field('v2-announcements-plan', t(msgid('Plan')), select('plan', [['', msgid('Not read')]]), undefined, { 'data-whm-announcements-audience-field': 'plan' }, true)
-    + field('v2-announcements-reseller', t(msgid('Reseller')), select('reseller', [['', msgid('Not read')]]), undefined, { 'data-whm-announcements-audience-field': 'reseller' }, true)
+    + field('v2-announcements-plan', t(msgid('Plan')), select('plan', [['', msgid('Loading...')]]), undefined, { 'data-whm-announcements-audience-field': 'plan' }, true)
+    + field('v2-announcements-reseller', t(msgid('Reseller')), select('reseller', [['', msgid('Loading...')]]), undefined, { 'data-whm-announcements-audience-field': 'reseller' }, true)
     + field('v2-announcements-usernames', t(msgid('Accounts')), `<textarea id="v2-announcements-usernames" name="usernames" rows="3" dir="ltr" maxlength="1800" autocomplete="off" spellcheck="false" data-whm-announcements-input="usernames" aria-describedby="v2-announcements-usernames-help"${off}></textarea>`, t(msgid('Account usernames, one per line or comma-separated, up to 100. Each must exist.')), { 'data-whm-announcements-audience-field': 'accounts' }, true))
   const dates = fields(field('v2-announcements-starts', t(msgctxt('whm-announcements-workspace', 'Starts (UTC)')), `<input id="v2-announcements-starts" name="starts" type="datetime-local" dir="ltr" data-whm-announcements-input="starts" aria-describedby="v2-announcements-starts-help"${off}>`, t(msgid('Empty starts as soon as it is saved.')))
     + field('v2-announcements-ends', t(msgctxt('whm-announcements-workspace', 'Ends (UTC)')), `<input id="v2-announcements-ends" name="ends" type="datetime-local" dir="ltr" data-whm-announcements-input="ends" aria-describedby="v2-announcements-ends-help"${off}>`, t(msgid('Empty keeps it shown until you archive it.'))))
@@ -123,7 +123,7 @@ export function renderV2WhmAccountTemplatesPage(props: WhmSurfaceProps, authorit
     + status(t(msgid('The page text of a template replaces the owner page for accounts on its plans.')), { 'data-acct-templates-pages': true }, 'ready'))
   const list = toolCard('template-list', t(msgid('Saved templates')), status(t(msgid('Templates have not been read.')), { 'data-acct-templates-status': true })
     + `<div data-acct-templates-loading aria-busy="true" aria-label="${esc(t(msgid('Loading templates')))}" hidden></div>`
-    + table(t(msgid('Account creation templates')), [msgid('Name'), msgid('Plans'), msgid('Zone records'), msgid('Updated (UTC)'), msgid('Actions')].map(label => t(label)), { 'data-acct-templates-rows': true }, t(msgid('Not read')))
+    + table(t(msgid('Account creation templates')), [msgid('Name'), msgid('Plans'), msgid('Zone records'), msgid('Updated (UTC)'), msgid('Actions')].map(label => t(label)), { 'data-acct-templates-rows': true }, t(msgid('Loading...')))
     + `<div data-acct-templates-empty hidden><h3>${esc(t(msgid('No templates yet')))}</h3><p>${esc(t(msgid('Create one below. A plan uses at most one template.')))}</p></div>`
     + actions(button(t(msgid('Refresh')), { 'data-acct-templates-refresh': true }, editable)) + status('', { 'data-acct-templates-list-status': true }, 'unread', true))
   const contentPage = (kind: 'defaultPage' | 'suspendedPage', label: string, help: string): string => `<fieldset${off}><legend>${esc(label)}</legend><p>${esc(help)}</p>${input(`${kind}.title`, t(msgid('Title')))}${field(`v2-account-template-${kind}.body`, t(msgid('Message')), `<textarea id="v2-account-template-${kind}.body" rows="4" maxlength="2000" dir="auto" data-acct-templates-input="${kind}.body"${off}></textarea>`)}</fieldset>`

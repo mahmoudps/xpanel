@@ -1970,7 +1970,7 @@ export const navigation: NavSurface[] = [
       },
       {
         "id": "accounts",
-        "name": "Accounts",
+        "name": "Accounts, plans & resellers",
         "icon": "Users",
         "pages": [
           {
@@ -2146,14 +2146,7 @@ export const navigation: NavSurface[] = [
               "Email templates"
             ],
             "summary": "Everything a new or changed account is built from in one place: skeleton directory, DNS zone templates, web placeholder pages and notification templates (English and Arabic)."
-          }
-        ]
-      },
-      {
-        "id": "plans",
-        "name": "Plans",
-        "icon": "Package",
-        "pages": [
+          },
           {
             "id": "plans",
             "name": "Plans",
@@ -2226,14 +2219,7 @@ export const navigation: NavSurface[] = [
               "Add-on flags"
             ],
             "summary": "Entitlement flags assigned to accounts independently of their plan, with per-reseller caps."
-          }
-        ]
-      },
-      {
-        "id": "resellers",
-        "name": "Resellers",
-        "icon": "Store",
-        "pages": [
+          },
           {
             "id": "resellers",
             "name": "Resellers",
@@ -2245,30 +2231,7 @@ export const navigation: NavSurface[] = [
               "root"
             ],
             "tools": [
-              "reseller-center"
-            ],
-            "keywords": [
-              "Reseller Center",
-              "Show Reseller Accounts",
-              "View Reseller Usage and Manage Account Status",
-              "Reseller limits",
-              "Overselling",
-              "Change Ownership of Multiple Accounts",
-              "Package limits"
-            ],
-            "summary": "List resellers and create one with a username, password and the ACL flags that reseller may use."
-          },
-          {
-            "id": "resellers-more",
-            "name": "Reseller usage & mail",
-            "route": "/whm/resellers/more",
-            "template": "list",
-            "artboard": null,
-            "primaryAction": null,
-            "roles": [
-              "root"
-            ],
-            "tools": [
+              "reseller-center",
               "show-reseller-accounts",
               "view-reseller-usage-and-account-status",
               "reseller-account-limits",
@@ -2277,11 +2240,17 @@ export const navigation: NavSurface[] = [
               "email-all-resellers"
             ],
             "keywords": [
+              "Reseller Center",
               "Show Reseller Accounts",
+              "View Reseller Usage and Manage Account Status",
               "Reseller limits",
+              "Overselling",
+              "Change Ownership of Multiple Accounts",
+              "Package limits",
+              "Reseller usage & mail",
               "Email All Resellers"
             ],
-            "summary": "Reseller usage, account lists, package limits, bulk ownership changes and email to every reseller."
+            "summary": "List resellers and create one with a username, password and the ACL flags that reseller may use."
           },
           {
             "id": "reseller-privileges",
@@ -2386,7 +2355,10 @@ export const navigation: NavSurface[] = [
             "tools": [
               "dns-zone-manager",
               "add-dns-zone",
-              "delete-dns-zone"
+              "delete-dns-zone",
+              "zone-ttl-bulk",
+              "hostname-a-record",
+              "dns-config-cleanup"
             ],
             "keywords": [
               "Edit DNS Zone",
@@ -2397,31 +2369,11 @@ export const navigation: NavSurface[] = [
               "Add an A Entry for Your Hostname",
               "Perform a DNS Cleanup",
               "DNSSEC",
-              "Zone editor"
-            ],
-            "summary": "List, add, edit and delete DNS zones. Saving a zone reconciles it to the local PowerDNS server."
-          },
-          {
-            "id": "dns-more",
-            "name": "DNS diagnostics & TTL",
-            "route": "/whm/dns/more",
-            "template": "list",
-            "artboard": null,
-            "primaryAction": null,
-            "roles": [
-              "root",
-              "reseller:manage-dns"
-            ],
-            "tools": [
-              "zone-ttl-bulk",
-              "hostname-a-record",
-              "dns-config-cleanup"
-            ],
-            "keywords": [
-              "Set Zone Time to Live (TTL)",
+              "Zone editor",
+              "DNS diagnostics & TTL",
               "DNS cleanup"
             ],
-            "summary": "Bulk TTL, the hostname A record and nameserver cleanup."
+            "summary": "List, add, edit and delete DNS zones. Saving a zone reconciles it to the local PowerDNS server."
           },
           {
             "id": "ssl-certificates",
@@ -2827,1073 +2779,6 @@ export const navigation: NavSurface[] = [
               "Welcome email"
             ],
             "summary": "Server administrator subscriber groups, suppression lists, campaigns and automation flows; unavailable until every capability and its task screen are qualified."
-          }
-        ]
-      },
-      {
-        "id": "security",
-        "name": "Security center",
-        "icon": "ShieldCheck",
-        "pages": [
-          {
-            "id": "security-advisor",
-            "name": "Security advisor",
-            "route": "/whm/security",
-            "template": "dashboard",
-            "artboard": "WhmSecurity",
-            "primaryAction": "Check again",
-            "roles": [
-              "root"
-            ],
-            "tools": [
-              "security-advisor"
-            ],
-            "keywords": [
-              "Security Advisor",
-              "Security Center",
-              "Security Risk Scanner",
-              "Security checks",
-              "Hardening"
-            ],
-            "summary": "Security checks for the server and its sites, each finding with severity, why it matters and one fix button; accepted risks need a reason and expiry."
-          },
-          {
-            "id": "firewall",
-            "name": "Firewall",
-            "route": "/whm/security/firewall",
-            "template": "list",
-            "artboard": "WhmFirewall",
-            "primaryAction": "Add rule",
-            "roles": [
-              "root"
-            ],
-            "tools": [
-              "aapanel-firewall-switch",
-              "aapanel-port-rules",
-              "aapanel-ip-rules",
-              "aapanel-region-rules",
-              "aapanel-port-forward",
-              "aapanel-icmp-block",
-              "aapanel-firewall-import-export",
-              "host-access-control"
-            ],
-            "keywords": [
-              "System Firewall",
-              "CSF",
-              "ConfigServer Firewall",
-              "Host Access Control",
-              "nftables",
-              "iptables",
-              "Port rules",
-              "IP rules",
-              "Block country",
-              "Region blocking",
-              "Port forwarding",
-              "Block ping",
-              "Import rules",
-              "Authorized IPs"
-            ],
-            "summary": "nftables default-deny firewall: port and IP rules, country blocks, port forwarding, ping, per-service access rules and JSON import/export, with the guard that refuses to lock out the current session."
-          },
-          {
-            "id": "intrusion-detection",
-            "name": "Intrusion detection",
-            "route": "/whm/security/intrusion",
-            "template": "list",
-            "artboard": "WhmIntrusion",
-            "primaryAction": "Check an address",
-            "roles": [
-              "root"
-            ],
-            "tools": [
-              "intrusion-detection"
-            ],
-            "keywords": [
-              "cPHulk Brute Force Protection",
-              "Brute force",
-              "CSF LFD",
-              "Login Failure Daemon",
-              "fail2ban",
-              "Panel Login Lockout",
-              "Blocked IPs",
-              "Why is this IP blocked",
-              "Ban list",
-              "Brute Force Protection",
-              "Brute-Force Protection",
-              "Log-Based Intrusion Ban"
-            ],
-            "summary": "Watches login failures across SSH, FTP, mail, the panel and web logins and bans attackers by IP, with allow and deny lists, country rules, history and the why-is-this-IP-blocked lookup."
-          },
-          {
-            "id": "flood-protection",
-            "name": "Flood protection",
-            "route": "/whm/security/flood",
-            "template": "settings",
-            "artboard": "WhmFlood",
-            "primaryAction": "Review & apply",
-            "roles": [
-              "root"
-            ],
-            "tools": [
-              "flood-protection"
-            ],
-            "keywords": [
-              "Connection limits",
-              "CSF CT_LIMIT",
-              "Port flood",
-              "SYN flood",
-              "ICMP flood",
-              "DDoS protection",
-              "Rate limiting"
-            ],
-            "summary": "Connection limits per address and per port, new-connection rate limits and SYN and ICMP flood protection."
-          },
-          {
-            "id": "waf",
-            "name": "Web application firewall",
-            "route": "/whm/security/waf",
-            "template": "settings",
-            "artboard": "WhmWaf",
-            "primaryAction": "Review & apply",
-            "roles": [
-              "root"
-            ],
-            "tools": [
-              "waf-settings",
-              "waf-rules",
-              "waf-vendors"
-            ],
-            "keywords": [
-              "ModSecurity",
-              "ModSecurity Configuration",
-              "ModSecurity Tools",
-              "ModSecurity Vendors",
-              "OWASP CRS",
-              "Core Rule Set",
-              "WAF",
-              "Rule hits"
-            ],
-            "summary": "ModSecurity engine options, OWASP CRS and other vendor rule sets with auto-update, custom rules with staged deployment and the hit history."
-          },
-          {
-            "id": "account-isolation",
-            "name": "Account isolation",
-            "route": "/whm/security/isolation",
-            "template": "list",
-            "artboard": "WhmIsolation",
-            "primaryAction": "Review & apply",
-            "roles": [
-              "root"
-            ],
-            "tools": [
-              "account-isolation",
-              "manage-shell-access",
-              "fork-bomb-protection",
-              "compiler-access",
-              "traceroute-toggle",
-              "userdir-protection"
-            ],
-            "keywords": [
-              "CageFS",
-              "Account isolation",
-              "Manage Shell Access",
-              "Jailed shell",
-              "Shell Fork Bomb Protection",
-              "Compiler Access",
-              "Compilers Tweak",
-              "Traceroute",
-              "Apache mod_userdir Tweak",
-              "Private /tmp",
-              "Compiler Access Control"
-            ],
-            "summary": "What each account can see and run: filesystem isolation and private /tmp, shell mode (off, jailed, normal), process limits for shells, and restricted compilers, traceroute and /~user URLs."
-          },
-          {
-            "id": "antivirus",
-            "name": "Antivirus",
-            "route": "/whm/security/antivirus",
-            "template": "settings",
-            "artboard": null,
-            "primaryAction": "Start scan",
-            "roles": [
-              "root"
-            ],
-            "tools": [
-              "antivirus-scanner-config",
-              "aapanel-clamav"
-            ],
-            "keywords": [
-              "ClamAV",
-              "Configure ClamAV Scanner",
-              "Antivirus Scanner",
-              "Malware scan",
-              "Virus scanner",
-              "Quarantine"
-            ],
-            "summary": "What the virus scanner may scan globally and per user, on-demand scans and the quarantine."
-          },
-          {
-            "id": "ssh",
-            "name": "SSH",
-            "route": "/whm/security/ssh",
-            "template": "settings",
-            "artboard": "WhmSsh",
-            "primaryAction": "Review & apply",
-            "roles": [
-              "root"
-            ],
-            "tools": [
-              "aapanel-ssh-settings",
-              "root-ssh-keys",
-              "aapanel-ssh-service",
-              "aapanel-ssh-login-logs",
-              "aapanel-ssh-login-alarm",
-              "change-root-password",
-              "wheel-group-users",
-              "sudo-group-users"
-            ],
-            "keywords": [
-              "Manage root's SSH Keys",
-              "SSH Password Authorization Tweak",
-              "SSH Login Settings",
-              "Change Root Password",
-              "Manage Wheel Group Users",
-              "sudo",
-              "SSH port",
-              "Root login",
-              "SSH login log",
-              "SSH login alert",
-              "SSH Password Login",
-              "Root Password and Key",
-              "Panel Username and Password"
-            ],
-            "summary": "Root access to the server: SSH port, password and key login, root login policy, root keys, root password, wheel/sudo members, the login log and root-login alerts."
-          },
-          {
-            "id": "panel-access",
-            "name": "Panel access",
-            "route": "/whm/security/panel-access",
-            "template": "settings",
-            "artboard": null,
-            "primaryAction": "Review & apply",
-            "roles": [
-              "root"
-            ],
-            "tools": [
-              "aapanel-panel-port",
-              "aapanel-security-entrance",
-              "aapanel-unauth-response",
-              "aapanel-panel-domain",
-              "aapanel-basic-auth",
-              "aapanel-subpanel-service",
-              "tweak-security",
-              "tweak-redirection",
-              "aapanel-temporary-login",
-              "aapanel-recovery-cli"
-            ],
-            "keywords": [
-              "Panel Port",
-              "Security Entrance",
-              "Panel domain binding",
-              "BasicAuth",
-              "Session timeout",
-              "Security (Tweak Settings)",
-              "Redirection (Tweak Settings)",
-              "Temporary login",
-              "Recovery commands",
-              "Unauthenticated response",
-              "Panel lockout recovery",
-              "Session Timeout and Binding"
-            ],
-            "summary": "How the panels are reached: ports, secret entrance path, bound domains, basic auth, session and transport hardening, shortcut URL redirects, time-limited helper links and the root commands that undo a lockout."
-          },
-          {
-            "id": "sign-in",
-            "name": "Password and authenticator",
-            "route": "/whm/security/sign-in",
-            "template": "settings",
-            "artboard": "WhmSecurity",
-            "primaryAction": "Review & apply",
-            "roles": [
-              "root"
-            ],
-            "tools": [
-              "security-policies",
-              "password-strength",
-              "xwhm-two-factor-auth",
-              "security-questions",
-              "external-authentication"
-            ],
-            "keywords": [
-              "Security Policies",
-              "Password Strength Configuration",
-              "Two-Factor Authentication",
-              "2FA",
-              "Security Questions",
-              "Manage External Authentications",
-              "OpenID Connect",
-              "Password policy",
-              "Password age",
-              "Password Policy",
-              "Panel Two-Factor Authentication"
-            ],
-            "summary": "Who may sign in and how: password rules and age, two-factor policy and enrolments, verified-IP security questions and external identity providers."
-          }
-        ]
-      },
-      {
-        "id": "monitoring",
-        "name": "Monitoring",
-        "icon": "Activity",
-        "pages": [
-          {
-            "id": "server-health",
-            "name": "Server health",
-            "route": "/whm/monitoring/health",
-            "template": "dashboard",
-            "artboard": "WhmServerHealth",
-            "primaryAction": "Check again",
-            "roles": [
-              "root"
-            ],
-            "tools": [
-              "server-health"
-            ],
-            "keywords": [
-              "Server health",
-              "Health checks",
-              "System Health",
-              "Status"
-            ],
-            "summary": "One page of host health checks, each with status, evidence and a fix."
-          },
-          {
-            "id": "alerts",
-            "name": "Alerts",
-            "route": "/whm/monitoring/alerts",
-            "template": "list",
-            "artboard": "WhmAlerts",
-            "primaryAction": "Create rule",
-            "roles": [
-              "root"
-            ],
-            "tools": [
-              "alert-rules"
-            ],
-            "keywords": [
-              "Alerts",
-              "Alert rules",
-              "Service down",
-              "Thresholds",
-              "Maintenance window",
-              "chkservd notifications"
-            ],
-            "summary": "Turn health checks, service failures, security events and limits into deduplicated notifications, with maintenance windows."
-          },
-          {
-            "id": "repair-center",
-            "name": "Repair center",
-            "route": "/whm/monitoring/repair",
-            "template": "custom",
-            "artboard": "WhmRepair",
-            "primaryAction": "Scan now",
-            "roles": [
-              "root"
-            ],
-            "tools": [
-              "server-repair"
-            ],
-            "keywords": [
-              "Repair",
-              "Fix",
-              "Broken packages",
-              "dpkg",
-              "apt",
-              "dnf",
-              "Disk full",
-              "Service will not start",
-              "Self-repair",
-              "Doctor"
-            ],
-            "summary": "Scan for common server problems and fix each one with a preview, a job log and a verification step."
-          },
-          {
-            "id": "performance-history",
-            "name": "Performance history",
-            "route": "/whm/monitoring/performance",
-            "template": "dashboard",
-            "artboard": null,
-            "primaryAction": null,
-            "roles": [
-              "root"
-            ],
-            "tools": [
-              "aapanel-system-monitor"
-            ],
-            "keywords": [
-              "System Monitor",
-              "Load history",
-              "CPU graph",
-              "Memory graph",
-              "Network graph",
-              "Monitor",
-              "Server monitor"
-            ],
-            "summary": "Recorded load, CPU, memory, disk IO and network history charted over time."
-          },
-          {
-            "id": "traffic-monitor",
-            "name": "Traffic monitor",
-            "route": "/whm/monitoring/traffic",
-            "template": "dashboard",
-            "artboard": "WhmTraffic",
-            "primaryAction": null,
-            "roles": [
-              "root"
-            ],
-            "tools": [
-              "traffic-monitor"
-            ],
-            "keywords": [
-              "Traffic monitor",
-              "Live traffic",
-              "Bandwidth live",
-              "Nginx traffic",
-              "Top domains",
-              "Requests per second"
-            ],
-            "summary": "Live and historical HTTP and network traffic per server, account and domain."
-          },
-          {
-            "id": "io-monitor",
-            "name": "IO monitor",
-            "route": "/whm/monitoring/io",
-            "template": "dashboard",
-            "artboard": "WhmIo",
-            "primaryAction": null,
-            "roles": [
-              "root"
-            ],
-            "tools": [
-              "io-monitor"
-            ],
-            "keywords": [
-              "IO monitor",
-              "Disk IO",
-              "IOPS",
-              "iotop",
-              "I/O usage",
-              "IO throttling"
-            ],
-            "summary": "Per-account disk IO bandwidth, IOPS and throttling from each slice, with the processes behind it."
-          },
-          {
-            "id": "resource-limits",
-            "name": "Resource limits",
-            "route": "/whm/monitoring/limits",
-            "template": "list",
-            "artboard": "WhmResourceLimits",
-            "primaryAction": null,
-            "roles": [
-              "root"
-            ],
-            "tools": [
-              "resource-limits-manager"
-            ],
-            "keywords": [
-              "Resource limits manager",
-              "LVE Manager",
-              "CloudLinux limits",
-              "CPU limits",
-              "Memory limits",
-              "Faults",
-              "Account slices",
-              "Limit hits"
-            ],
-            "summary": "Every account slice: applied CPU, memory, process and IO limits with their source, current usage, fault counts and history."
-          },
-          {
-            "id": "processes",
-            "name": "Processes",
-            "route": "/whm/monitoring/processes",
-            "template": "list",
-            "artboard": null,
-            "primaryAction": null,
-            "roles": [
-              "root"
-            ],
-            "tools": [
-              "process-manager",
-              "daily-process-log",
-              "background-process-killer"
-            ],
-            "keywords": [
-              "Process Manager",
-              "Show Current Running Processes",
-              "Daily Process Log",
-              "Background Process Killer",
-              "top",
-              "kill process",
-              "Running Processes Snapshot"
-            ],
-            "summary": "Running processes as a list or tree with kill and trace, per-user daily averages, and the nightly killer for forbidden background programs."
-          },
-          {
-            "id": "disk-usage",
-            "name": "Disk usage",
-            "route": "/whm/monitoring/disk",
-            "template": "dashboard",
-            "artboard": null,
-            "primaryAction": null,
-            "roles": [
-              "root"
-            ],
-            "tools": [
-              "current-disk-usage"
-            ],
-            "keywords": [
-              "Show Current Disk Usage",
-              "df",
-              "Filesystems",
-              "Disk space"
-            ],
-            "summary": "Size, used and free space of every mounted filesystem with IO statistics."
-          },
-          {
-            "id": "logs",
-            "name": "Logs",
-            "route": "/whm/monitoring/logs",
-            "template": "log",
-            "artboard": null,
-            "primaryAction": null,
-            "roles": [
-              "root"
-            ],
-            "tools": [
-              "aapanel-os-log-audit",
-              "aapanel-software-logs",
-              "aapanel-log-security-analysis",
-              "raw-apache-log-download",
-              "raw-nginx-log-download",
-              "raw-ftp-log-download",
-              "web-log-retention",
-              "panel-log-rotation",
-              "tweak-stats-logs",
-              "web-stats-engines",
-              "aapanel-log-cleanup"
-            ],
-            "keywords": [
-              "OS Log Audit",
-              "Service Logs",
-              "Slow query log",
-              "FTP logs",
-              "Access log security analysis",
-              "Raw Apache Log Download",
-              "Raw NGINX Log Download",
-              "Raw FTP Log Download",
-              "Web Log Retention",
-              "cPanel Log Rotation Configuration",
-              "Stats and Logs (Tweak Settings)",
-              "Statistics Software Configuration",
-              "Log Cleanup",
-              "Website Log Usage",
-              "Stats Program Toggles"
-            ],
-            "summary": "Server and service logs in one browser (OS, FTP activity, database slow and error logs), attack-pattern scans across every site's access logs, raw per-domain downloads, retention, rotation, statistics processing and cleanup."
-          },
-          {
-            "id": "server-information",
-            "name": "Server information",
-            "route": "/whm/monitoring/server-info",
-            "template": "dashboard",
-            "artboard": null,
-            "primaryAction": "Run benchmark",
-            "roles": [
-              "root"
-            ],
-            "tools": [
-              "server-information"
-            ],
-            "keywords": [
-              "Server Information",
-              "Hardware",
-              "Performance Benchmark",
-              "CPU benchmark",
-              "Disk benchmark"
-            ],
-            "summary": "Load average, memory and root filesystem space on this server."
-          },
-          {
-            "id": "performance-benchmark",
-            "name": "Benchmark",
-            "route": "/whm/monitoring/benchmark",
-            "template": "dashboard",
-            "artboard": null,
-            "primaryAction": "Run benchmark",
-            "roles": [
-              "root"
-            ],
-            "tools": [
-              "aapanel-performance-test"
-            ],
-            "keywords": [
-              "Performance Benchmark",
-              "CPU benchmark"
-            ],
-            "summary": "CPU, disk and network benchmarks."
-          }
-        ]
-      },
-      {
-        "id": "services",
-        "name": "Services",
-        "icon": "ServerCog",
-        "pages": [
-          {
-            "id": "services",
-            "name": "Services",
-            "route": "/whm/services",
-            "template": "list",
-            "artboard": "WhmServices",
-            "primaryAction": null,
-            "roles": [
-              "root"
-            ],
-            "tools": [
-              "restart-web",
-              "restart-mta",
-              "restart-imap",
-              "restart-dns",
-              "restart-mysql",
-              "restart-ftp"
-            ],
-            "keywords": [
-              "Service Manager",
-              "Service Status",
-              "Restart Services",
-              "Installed Services",
-              "Startup Items",
-              "Process Supervisor",
-              "Graceful Server Reboot",
-              "Forceful Server Reboot",
-              "systemctl"
-            ],
-            "summary": "Status and restart for Apache, MariaDB, Postfix, Dovecot, pure-ftpd and PowerDNS."
-          },
-          {
-            "id": "services-more",
-            "name": "Service manager & watchdog",
-            "route": "/whm/services/more",
-            "template": "list",
-            "artboard": null,
-            "primaryAction": null,
-            "roles": [
-              "root"
-            ],
-            "tools": [
-              "service-manager",
-              "restart-php-fpm",
-              "restart-postgresql",
-              "restart-ssh",
-              "restart-mailing-lists",
-              "aapanel-boot-items",
-              "aapanel-supervisor",
-              "system-reboot",
-              "service-watchdog"
-            ],
-            "keywords": [
-              "Service Manager",
-              "Server reboot"
-            ],
-            "summary": "The wider service manager, startup items, supervised processes and server reboot."
-          },
-          {
-            "id": "web-server",
-            "name": "Web server",
-            "route": "/whm/services/web",
-            "template": "settings",
-            "artboard": "WhmWebServer",
-            "primaryAction": "Review & apply",
-            "roles": [
-              "root"
-            ],
-            "tools": [
-              "web-stack-builder",
-              "apache-global-config",
-              "aapanel-openlitespeed-manager",
-              "directory-index-priority",
-              "web-config-includes",
-              "process-memory-limit",
-              "web-log-rotation",
-              "piped-logging",
-              "web-server-status",
-              "aapanel-default-site",
-              "aapanel-https-protection"
-            ],
-            "keywords": [
-              "EasyApache 4",
-              "Apache Configuration",
-              "Global Configuration",
-              "Include Editor",
-              "DirectoryIndex Priority",
-              "Memory Usage Restrictions",
-              "Log Rotation",
-              "Piped Log Configuration",
-              "Apache Status",
-              "NGINX Manager",
-              "Nginx cache",
-              "OpenLiteSpeed",
-              "Web Server Selection",
-              "Default Site",
-              "Website Acceleration Cache",
-              "Web Server Configuration Hub",
-              "Web Server Manager (Apache)",
-              "Web Server Manager (Nginx family)"
-            ],
-            "summary": "Nginx edge and Apache (mpm-itk) or OpenLiteSpeed: the web stack profile, global directives, includes, index priority, process memory, logging, cache, default site and status, all through review and apply."
-          },
-          {
-            "id": "config-health",
-            "name": "Configuration health",
-            "route": "/whm/services/health",
-            "template": "list",
-            "artboard": "WhmConfigHealth",
-            "primaryAction": "Check again",
-            "roles": [
-              "root"
-            ],
-            "tools": [
-              "service-config-health"
-            ],
-            "keywords": [
-              "Service configuration health",
-              "Config check",
-              "Configuration drift",
-              "Baseline",
-              "nginx -t",
-              "apachectl configtest",
-              "Config drift",
-              "Desired state"
-            ],
-            "summary": "Checks every service's live configuration files against the panel's records and a security baseline, shows each drift with the file and line, and fixes it through Review & apply."
-          },
-          {
-            "id": "ftp-server",
-            "name": "FTP server",
-            "route": "/whm/services/ftp",
-            "template": "settings",
-            "artboard": null,
-            "primaryAction": "Review & apply",
-            "roles": [
-              "root"
-            ],
-            "tools": [
-              "ftp-server-selection",
-              "ftp-server-config"
-            ],
-            "keywords": [
-              "FTP Server Selection",
-              "FTP Server Configuration",
-              "FTP Server Management",
-              "Pure-FTPd",
-              "ProFTPD",
-              "FTP port",
-              "FTP Service Port"
-            ],
-            "summary": "Which FTP daemon runs (or none), its port, TLS, anonymous access and connection limits."
-          },
-          {
-            "id": "dns-server",
-            "name": "DNS server",
-            "route": "/whm/services/dns",
-            "template": "settings",
-            "artboard": null,
-            "primaryAction": "Review & apply",
-            "roles": [
-              "root"
-            ],
-            "tools": [
-              "nameserver-selection"
-            ],
-            "keywords": [
-              "Nameserver Selection",
-              "PowerDNS",
-              "BIND",
-              "Self-Hosted DNS Server",
-              "Authoritative DNS"
-            ],
-            "summary": "Chooses the authoritative DNS daemon or disables DNS on this server."
-          },
-          {
-            "id": "service-certificates",
-            "name": "Service certificates",
-            "route": "/whm/services/certificates",
-            "template": "list",
-            "artboard": null,
-            "primaryAction": "Install certificate",
-            "roles": [
-              "root"
-            ],
-            "tools": [
-              "service-ssl-certificates",
-              "panel-web-tls",
-              "webdisk-tls"
-            ],
-            "keywords": [
-              "Manage Service SSL Certificates",
-              "Panel SSL",
-              "Hostname certificate",
-              "TLS Cipher Suites",
-              "Web Disk TLS",
-              "cpsrvd TLS"
-            ],
-            "summary": "Certificates and TLS protocol and cipher lists for the panels, webmail, mail, FTP and Web Disk services."
-          },
-          {
-            "id": "ftp-log-analysis",
-            "name": "FTP log analysis",
-            "route": "/whm/services/ftp-log-analysis",
-            "template": "list",
-            "artboard": null,
-            "primaryAction": null,
-            "roles": [
-              "root"
-            ],
-            "tools": [
-              "aapanel-ftp-logs"
-            ],
-            "keywords": [
-              "FTP Logs",
-              "FTP log analysis",
-              "FTP activity"
-            ],
-            "summary": "Server administrator FTP activity and log analysis; unavailable until the capability and its task screen are qualified."
-          },
-          {
-            "id": "default-index",
-            "name": "Default index files",
-            "route": "/whm/services/default-index",
-            "template": "list",
-            "artboard": null,
-            "primaryAction": null,
-            "roles": [
-              "root"
-            ],
-            "tools": [
-              "aapanel-default-index"
-            ],
-            "keywords": [
-              "Default Index Files",
-              "DirectoryIndex",
-              "index.php",
-              "index.html"
-            ],
-            "summary": "Server administrator ordering of default index filenames; unavailable until the capability and its task screen are qualified."
-          },
-          {
-            "id": "nginx-proxy",
-            "name": "NGINX reverse proxy",
-            "route": "/whm/services/nginx-proxy",
-            "template": "list",
-            "artboard": null,
-            "primaryAction": null,
-            "roles": [
-              "root"
-            ],
-            "tools": [
-              "nginx-proxy-manager"
-            ],
-            "keywords": [
-              "NGINX Manager",
-              "Reverse proxy",
-              "Proxy rules",
-              "Response cache"
-            ],
-            "summary": "Server administrator reverse proxy rules per domain and response cache per account; unavailable until the capability and its task screen are qualified."
-          }
-        ]
-      },
-      {
-        "id": "backups",
-        "name": "Backups & transfers",
-        "icon": "ArchiveRestore",
-        "pages": [
-          {
-            "id": "backups",
-            "name": "Server backups",
-            "route": "/whm/backups",
-            "template": "settings",
-            "artboard": "WhmBackups",
-            "primaryAction": "Review & apply",
-            "roles": [
-              "root"
-            ],
-            "tools": [
-              "backup-config",
-              "backup-user-selection",
-              "tweak-compression"
-            ],
-            "keywords": [
-              "Backup Configuration",
-              "Backup User Selection",
-              "Mail Store Backup",
-              "Compression (Tweak Settings)",
-              "pigz",
-              "Backup schedule"
-            ],
-            "summary": "Scheduled backup policy (type, timing, retention, contents, database mode), which accounts are included, compression and per-account restore points."
-          },
-          {
-            "id": "backup-destinations",
-            "name": "Backup destinations",
-            "route": "/whm/backups/destinations",
-            "template": "list",
-            "artboard": "WhmBackups",
-            "primaryAction": "Add destination",
-            "roles": [
-              "root"
-            ],
-            "tools": [
-              "backup-destinations"
-            ],
-            "keywords": [
-              "Additional Destinations",
-              "Remote Backup Destinations",
-              "S3",
-              "SFTP",
-              "FTP backup",
-              "Cloud storage"
-            ],
-            "summary": "Local and remote targets that receive backup files, with validation and send test."
-          },
-          {
-            "id": "restore-accounts",
-            "name": "Restore accounts",
-            "route": "/whm/backups/restore",
-            "template": "wizard",
-            "artboard": "WhmRestore",
-            "primaryAction": "Restore account",
-            "roles": [
-              "root"
-            ],
-            "tools": [
-              "backup-restoration"
-            ],
-            "keywords": [
-              "Backup Restoration",
-              "Restore a Full Backup/cpmove File",
-              "Transfer or Restore a cPanel Account",
-              "Restore account"
-            ],
-            "summary": "Create an account archive in the local backup directory and restore that archive into the account home."
-          },
-          {
-            "id": "restore-more",
-            "name": "Mail & partial restore",
-            "route": "/whm/backups/restore-more",
-            "template": "list",
-            "artboard": null,
-            "primaryAction": null,
-            "roles": [
-              "root"
-            ],
-            "tools": [
-              "transfer-or-restore-account",
-              "account-restore-progress"
-            ],
-            "keywords": [
-              "Transfer or Restore a cPanel Account"
-            ],
-            "summary": "Remote account transfer and restore progress for archives this server did not create."
-          },
-          {
-            "id": "restore-files",
-            "name": "Restore files",
-            "route": "/whm/backups/files",
-            "template": "wizard",
-            "artboard": null,
-            "primaryAction": "Restore files",
-            "roles": [
-              "root"
-            ],
-            "tools": [
-              "file-restore"
-            ],
-            "keywords": [
-              "File and Directory Restoration",
-              "Restore file",
-              "Restore folder"
-            ],
-            "summary": "Restore single files or folders of an account from local backups."
-          },
-          {
-            "id": "transfer-tool",
-            "name": "Transfer tool",
-            "route": "/whm/transfers",
-            "template": "wizard",
-            "artboard": "WhmTransfer",
-            "primaryAction": "Start transfer",
-            "roles": [
-              "root"
-            ],
-            "tools": [
-              "transfer-tool",
-              "transfer-tool-selection",
-              "live-transfer",
-              "account-transfer-progress",
-              "review-transfers-and-restores"
-            ],
-            "keywords": [
-              "Transfer Tool",
-              "Review Transfers and Restores",
-              "Live Transfer",
-              "Import from another panel",
-              "cPanel import",
-              "One-click migration",
-              "Site Migration",
-              "Site Migration to Another Server",
-              "Import from Another Panel"
-            ],
-            "summary": "Connect to a source server, select accounts, plans and service settings with conflicts found up front, run with live per-account progress and review past sessions."
-          },
-          {
-            "id": "convert-addon",
-            "name": "Convert addon domain",
-            "route": "/whm/transfers/convert-addon",
-            "template": "wizard",
-            "artboard": null,
-            "primaryAction": "Convert domain",
-            "roles": [
-              "root"
-            ],
-            "tools": [
-              "convert-addon-to-account"
-            ],
-            "keywords": [
-              "Convert Addon Domain to Account",
-              "Split account"
-            ],
-            "summary": "Turn an addon domain into its own account, copying or moving its site, mail, DNS, databases and sub-accounts."
-          },
-          {
-            "id": "server-migration",
-            "name": "Server migration",
-            "route": "/whm/transfers/server",
-            "template": "wizard",
-            "artboard": null,
-            "primaryAction": "Start migration",
-            "roles": [
-              "root"
-            ],
-            "tools": [
-              "aapanel-server-migrate"
-            ],
-            "keywords": [
-              "Whole-Server Migration",
-              "Server move",
-              "Move to new server"
-            ],
-            "summary": "Back up this whole server and restore it onto a fresh server, installing the panel there."
           }
         ]
       },
@@ -4421,6 +3306,1041 @@ export const navigation: NavSurface[] = [
               "composer update"
             ],
             "summary": "Server administrator Composer package operations; unavailable until the capability and its task screen are qualified."
+          }
+        ]
+      },
+      {
+        "id": "services",
+        "name": "Services",
+        "icon": "ServerCog",
+        "pages": [
+          {
+            "id": "services",
+            "name": "Services",
+            "route": "/whm/services",
+            "template": "list",
+            "artboard": "WhmServices",
+            "primaryAction": null,
+            "roles": [
+              "root"
+            ],
+            "tools": [
+              "restart-web",
+              "restart-mta",
+              "restart-imap",
+              "restart-dns",
+              "restart-mysql",
+              "restart-ftp",
+              "service-manager",
+              "restart-php-fpm",
+              "restart-postgresql",
+              "restart-ssh",
+              "restart-mailing-lists",
+              "aapanel-boot-items",
+              "aapanel-supervisor",
+              "system-reboot",
+              "service-watchdog"
+            ],
+            "keywords": [
+              "Service Manager",
+              "Service Status",
+              "Restart Services",
+              "Installed Services",
+              "Startup Items",
+              "Process Supervisor",
+              "Graceful Server Reboot",
+              "Forceful Server Reboot",
+              "systemctl",
+              "Service manager & watchdog",
+              "Server reboot"
+            ],
+            "summary": "Status and restart for Apache, MariaDB, Postfix, Dovecot, pure-ftpd and PowerDNS."
+          },
+          {
+            "id": "web-server",
+            "name": "Web server",
+            "route": "/whm/services/web",
+            "template": "settings",
+            "artboard": "WhmWebServer",
+            "primaryAction": "Review & apply",
+            "roles": [
+              "root"
+            ],
+            "tools": [
+              "web-stack-builder",
+              "apache-global-config",
+              "aapanel-openlitespeed-manager",
+              "directory-index-priority",
+              "web-config-includes",
+              "process-memory-limit",
+              "web-log-rotation",
+              "piped-logging",
+              "web-server-status",
+              "aapanel-default-site",
+              "aapanel-https-protection"
+            ],
+            "keywords": [
+              "EasyApache 4",
+              "Apache Configuration",
+              "Global Configuration",
+              "Include Editor",
+              "DirectoryIndex Priority",
+              "Memory Usage Restrictions",
+              "Log Rotation",
+              "Piped Log Configuration",
+              "Apache Status",
+              "NGINX Manager",
+              "Nginx cache",
+              "OpenLiteSpeed",
+              "Web Server Selection",
+              "Default Site",
+              "Website Acceleration Cache",
+              "Web Server Configuration Hub",
+              "Web Server Manager (Apache)",
+              "Web Server Manager (Nginx family)"
+            ],
+            "summary": "Nginx edge and Apache (mpm-itk) or OpenLiteSpeed: the web stack profile, global directives, includes, index priority, process memory, logging, cache, default site and status, all through review and apply."
+          },
+          {
+            "id": "config-health",
+            "name": "Configuration health",
+            "route": "/whm/services/health",
+            "template": "list",
+            "artboard": "WhmConfigHealth",
+            "primaryAction": "Check again",
+            "roles": [
+              "root"
+            ],
+            "tools": [
+              "service-config-health"
+            ],
+            "keywords": [
+              "Service configuration health",
+              "Config check",
+              "Configuration drift",
+              "Baseline",
+              "nginx -t",
+              "apachectl configtest",
+              "Config drift",
+              "Desired state"
+            ],
+            "summary": "Checks every service's live configuration files against the panel's records and a security baseline, shows each drift with the file and line, and fixes it through Review & apply."
+          },
+          {
+            "id": "ftp-server",
+            "name": "FTP server",
+            "route": "/whm/services/ftp",
+            "template": "settings",
+            "artboard": null,
+            "primaryAction": "Review & apply",
+            "roles": [
+              "root"
+            ],
+            "tools": [
+              "ftp-server-selection",
+              "ftp-server-config"
+            ],
+            "keywords": [
+              "FTP Server Selection",
+              "FTP Server Configuration",
+              "FTP Server Management",
+              "Pure-FTPd",
+              "ProFTPD",
+              "FTP port",
+              "FTP Service Port"
+            ],
+            "summary": "Which FTP daemon runs (or none), its port, TLS, anonymous access and connection limits."
+          },
+          {
+            "id": "dns-server",
+            "name": "DNS server",
+            "route": "/whm/services/dns",
+            "template": "settings",
+            "artboard": null,
+            "primaryAction": "Review & apply",
+            "roles": [
+              "root"
+            ],
+            "tools": [
+              "nameserver-selection"
+            ],
+            "keywords": [
+              "Nameserver Selection",
+              "PowerDNS",
+              "BIND",
+              "Self-Hosted DNS Server",
+              "Authoritative DNS"
+            ],
+            "summary": "Chooses the authoritative DNS daemon or disables DNS on this server."
+          },
+          {
+            "id": "service-certificates",
+            "name": "Service certificates",
+            "route": "/whm/services/certificates",
+            "template": "list",
+            "artboard": null,
+            "primaryAction": "Install certificate",
+            "roles": [
+              "root"
+            ],
+            "tools": [
+              "service-ssl-certificates",
+              "panel-web-tls",
+              "webdisk-tls"
+            ],
+            "keywords": [
+              "Manage Service SSL Certificates",
+              "Panel SSL",
+              "Hostname certificate",
+              "TLS Cipher Suites",
+              "Web Disk TLS",
+              "cpsrvd TLS"
+            ],
+            "summary": "Certificates and TLS protocol and cipher lists for the panels, webmail, mail, FTP and Web Disk services."
+          },
+          {
+            "id": "ftp-log-analysis",
+            "name": "FTP log analysis",
+            "route": "/whm/services/ftp-log-analysis",
+            "template": "list",
+            "artboard": null,
+            "primaryAction": null,
+            "roles": [
+              "root"
+            ],
+            "tools": [
+              "aapanel-ftp-logs"
+            ],
+            "keywords": [
+              "FTP Logs",
+              "FTP log analysis",
+              "FTP activity"
+            ],
+            "summary": "Server administrator FTP activity and log analysis; unavailable until the capability and its task screen are qualified."
+          },
+          {
+            "id": "default-index",
+            "name": "Default index files",
+            "route": "/whm/services/default-index",
+            "template": "list",
+            "artboard": null,
+            "primaryAction": null,
+            "roles": [
+              "root"
+            ],
+            "tools": [
+              "aapanel-default-index"
+            ],
+            "keywords": [
+              "Default Index Files",
+              "DirectoryIndex",
+              "index.php",
+              "index.html"
+            ],
+            "summary": "Server administrator ordering of default index filenames; unavailable until the capability and its task screen are qualified."
+          },
+          {
+            "id": "nginx-proxy",
+            "name": "NGINX reverse proxy",
+            "route": "/whm/services/nginx-proxy",
+            "template": "list",
+            "artboard": null,
+            "primaryAction": null,
+            "roles": [
+              "root"
+            ],
+            "tools": [
+              "nginx-proxy-manager"
+            ],
+            "keywords": [
+              "NGINX Manager",
+              "Reverse proxy",
+              "Proxy rules",
+              "Response cache"
+            ],
+            "summary": "Server administrator reverse proxy rules per domain and response cache per account; unavailable until the capability and its task screen are qualified."
+          }
+        ]
+      },
+      {
+        "id": "security",
+        "name": "Security center",
+        "icon": "ShieldCheck",
+        "pages": [
+          {
+            "id": "security-advisor",
+            "name": "Security advisor",
+            "route": "/whm/security",
+            "template": "dashboard",
+            "artboard": "WhmSecurity",
+            "primaryAction": "Check again",
+            "roles": [
+              "root"
+            ],
+            "tools": [
+              "security-advisor"
+            ],
+            "keywords": [
+              "Security Advisor",
+              "Security Center",
+              "Security Risk Scanner",
+              "Security checks",
+              "Hardening"
+            ],
+            "summary": "Security checks for the server and its sites, each finding with severity, why it matters and one fix button; accepted risks need a reason and expiry."
+          },
+          {
+            "id": "firewall",
+            "name": "Firewall",
+            "route": "/whm/security/firewall",
+            "template": "list",
+            "artboard": "WhmFirewall",
+            "primaryAction": "Add rule",
+            "roles": [
+              "root"
+            ],
+            "tools": [
+              "aapanel-firewall-switch",
+              "aapanel-port-rules",
+              "aapanel-ip-rules",
+              "aapanel-region-rules",
+              "aapanel-port-forward",
+              "aapanel-icmp-block",
+              "aapanel-firewall-import-export",
+              "host-access-control"
+            ],
+            "keywords": [
+              "System Firewall",
+              "CSF",
+              "ConfigServer Firewall",
+              "Host Access Control",
+              "nftables",
+              "iptables",
+              "Port rules",
+              "IP rules",
+              "Block country",
+              "Region blocking",
+              "Port forwarding",
+              "Block ping",
+              "Import rules",
+              "Authorized IPs"
+            ],
+            "summary": "nftables default-deny firewall: port and IP rules, country blocks, port forwarding, ping, per-service access rules and JSON import/export, with the guard that refuses to lock out the current session."
+          },
+          {
+            "id": "intrusion-detection",
+            "name": "Intrusion detection",
+            "route": "/whm/security/intrusion",
+            "template": "list",
+            "artboard": "WhmIntrusion",
+            "primaryAction": "Check an address",
+            "roles": [
+              "root"
+            ],
+            "tools": [
+              "intrusion-detection"
+            ],
+            "keywords": [
+              "cPHulk Brute Force Protection",
+              "Brute force",
+              "CSF LFD",
+              "Login Failure Daemon",
+              "fail2ban",
+              "Panel Login Lockout",
+              "Blocked IPs",
+              "Why is this IP blocked",
+              "Ban list",
+              "Brute Force Protection",
+              "Brute-Force Protection",
+              "Log-Based Intrusion Ban"
+            ],
+            "summary": "Watches login failures across SSH, FTP, mail, the panel and web logins and bans attackers by IP, with allow and deny lists, country rules, history and the why-is-this-IP-blocked lookup."
+          },
+          {
+            "id": "flood-protection",
+            "name": "Flood protection",
+            "route": "/whm/security/flood",
+            "template": "settings",
+            "artboard": "WhmFlood",
+            "primaryAction": "Review & apply",
+            "roles": [
+              "root"
+            ],
+            "tools": [
+              "flood-protection"
+            ],
+            "keywords": [
+              "Connection limits",
+              "CSF CT_LIMIT",
+              "Port flood",
+              "SYN flood",
+              "ICMP flood",
+              "DDoS protection",
+              "Rate limiting"
+            ],
+            "summary": "Connection limits per address and per port, new-connection rate limits and SYN and ICMP flood protection."
+          },
+          {
+            "id": "waf",
+            "name": "Web application firewall",
+            "route": "/whm/security/waf",
+            "template": "settings",
+            "artboard": "WhmWaf",
+            "primaryAction": "Review & apply",
+            "roles": [
+              "root"
+            ],
+            "tools": [
+              "waf-settings",
+              "waf-rules",
+              "waf-vendors"
+            ],
+            "keywords": [
+              "ModSecurity",
+              "ModSecurity Configuration",
+              "ModSecurity Tools",
+              "ModSecurity Vendors",
+              "OWASP CRS",
+              "Core Rule Set",
+              "WAF",
+              "Rule hits"
+            ],
+            "summary": "ModSecurity engine options, OWASP CRS and other vendor rule sets with auto-update, custom rules with staged deployment and the hit history."
+          },
+          {
+            "id": "account-isolation",
+            "name": "Account isolation",
+            "route": "/whm/security/isolation",
+            "template": "list",
+            "artboard": "WhmIsolation",
+            "primaryAction": "Review & apply",
+            "roles": [
+              "root"
+            ],
+            "tools": [
+              "account-isolation",
+              "manage-shell-access",
+              "fork-bomb-protection",
+              "compiler-access",
+              "traceroute-toggle",
+              "userdir-protection"
+            ],
+            "keywords": [
+              "CageFS",
+              "Account isolation",
+              "Manage Shell Access",
+              "Jailed shell",
+              "Shell Fork Bomb Protection",
+              "Compiler Access",
+              "Compilers Tweak",
+              "Traceroute",
+              "Apache mod_userdir Tweak",
+              "Private /tmp",
+              "Compiler Access Control"
+            ],
+            "summary": "What each account can see and run: filesystem isolation and private /tmp, shell mode (off, jailed, normal), process limits for shells, and restricted compilers, traceroute and /~user URLs."
+          },
+          {
+            "id": "antivirus",
+            "name": "Antivirus",
+            "route": "/whm/security/antivirus",
+            "template": "settings",
+            "artboard": null,
+            "primaryAction": "Start scan",
+            "roles": [
+              "root"
+            ],
+            "tools": [
+              "antivirus-scanner-config",
+              "aapanel-clamav"
+            ],
+            "keywords": [
+              "ClamAV",
+              "Configure ClamAV Scanner",
+              "Antivirus Scanner",
+              "Malware scan",
+              "Virus scanner",
+              "Quarantine"
+            ],
+            "summary": "What the virus scanner may scan globally and per user, on-demand scans and the quarantine."
+          },
+          {
+            "id": "ssh",
+            "name": "SSH",
+            "route": "/whm/security/ssh",
+            "template": "settings",
+            "artboard": "WhmSsh",
+            "primaryAction": "Review & apply",
+            "roles": [
+              "root"
+            ],
+            "tools": [
+              "aapanel-ssh-settings",
+              "root-ssh-keys",
+              "aapanel-ssh-service",
+              "aapanel-ssh-login-logs",
+              "aapanel-ssh-login-alarm",
+              "change-root-password",
+              "wheel-group-users",
+              "sudo-group-users"
+            ],
+            "keywords": [
+              "Manage root's SSH Keys",
+              "SSH Password Authorization Tweak",
+              "SSH Login Settings",
+              "Change Root Password",
+              "Manage Wheel Group Users",
+              "sudo",
+              "SSH port",
+              "Root login",
+              "SSH login log",
+              "SSH login alert",
+              "SSH Password Login",
+              "Root Password and Key",
+              "Panel Username and Password"
+            ],
+            "summary": "Root access to the server: SSH port, password and key login, root login policy, root keys, root password, wheel/sudo members, the login log and root-login alerts."
+          },
+          {
+            "id": "panel-access",
+            "name": "Panel access",
+            "route": "/whm/security/panel-access",
+            "template": "settings",
+            "artboard": null,
+            "primaryAction": "Review & apply",
+            "roles": [
+              "root"
+            ],
+            "tools": [
+              "aapanel-panel-port",
+              "aapanel-security-entrance",
+              "aapanel-unauth-response",
+              "aapanel-panel-domain",
+              "aapanel-basic-auth",
+              "aapanel-subpanel-service",
+              "tweak-security",
+              "tweak-redirection",
+              "aapanel-temporary-login",
+              "aapanel-recovery-cli"
+            ],
+            "keywords": [
+              "Panel Port",
+              "Security Entrance",
+              "Panel domain binding",
+              "BasicAuth",
+              "Session timeout",
+              "Security (Tweak Settings)",
+              "Redirection (Tweak Settings)",
+              "Temporary login",
+              "Recovery commands",
+              "Unauthenticated response",
+              "Panel lockout recovery",
+              "Session Timeout and Binding"
+            ],
+            "summary": "How the panels are reached: ports, secret entrance path, bound domains, basic auth, session and transport hardening, shortcut URL redirects, time-limited helper links and the root commands that undo a lockout."
+          },
+          {
+            "id": "sign-in",
+            "name": "Password and authenticator",
+            "route": "/whm/security/sign-in",
+            "template": "settings",
+            "artboard": "WhmSecurity",
+            "primaryAction": "Review & apply",
+            "roles": [
+              "root"
+            ],
+            "tools": [
+              "security-policies",
+              "password-strength",
+              "xwhm-two-factor-auth",
+              "security-questions",
+              "external-authentication"
+            ],
+            "keywords": [
+              "Security Policies",
+              "Password Strength Configuration",
+              "Two-Factor Authentication",
+              "2FA",
+              "Security Questions",
+              "Manage External Authentications",
+              "OpenID Connect",
+              "Password policy",
+              "Password age",
+              "Password Policy",
+              "Panel Two-Factor Authentication"
+            ],
+            "summary": "Who may sign in and how: password rules and age, two-factor policy and enrolments, verified-IP security questions and external identity providers."
+          }
+        ]
+      },
+      {
+        "id": "backups",
+        "name": "Backups & transfers",
+        "icon": "ArchiveRestore",
+        "pages": [
+          {
+            "id": "backups",
+            "name": "Server backups",
+            "route": "/whm/backups",
+            "template": "settings",
+            "artboard": "WhmBackups",
+            "primaryAction": "Review & apply",
+            "roles": [
+              "root"
+            ],
+            "tools": [
+              "backup-config",
+              "backup-user-selection",
+              "tweak-compression"
+            ],
+            "keywords": [
+              "Backup Configuration",
+              "Backup User Selection",
+              "Mail Store Backup",
+              "Compression (Tweak Settings)",
+              "pigz",
+              "Backup schedule"
+            ],
+            "summary": "Scheduled backup policy (type, timing, retention, contents, database mode), which accounts are included, compression and per-account restore points."
+          },
+          {
+            "id": "backup-destinations",
+            "name": "Backup destinations",
+            "route": "/whm/backups/destinations",
+            "template": "list",
+            "artboard": "WhmBackups",
+            "primaryAction": "Add destination",
+            "roles": [
+              "root"
+            ],
+            "tools": [
+              "backup-destinations"
+            ],
+            "keywords": [
+              "Additional Destinations",
+              "Remote Backup Destinations",
+              "S3",
+              "SFTP",
+              "FTP backup",
+              "Cloud storage"
+            ],
+            "summary": "Local and remote targets that receive backup files, with validation and send test."
+          },
+          {
+            "id": "restore-accounts",
+            "name": "Restore accounts",
+            "route": "/whm/backups/restore",
+            "template": "wizard",
+            "artboard": "WhmRestore",
+            "primaryAction": "Restore account",
+            "roles": [
+              "root"
+            ],
+            "tools": [
+              "backup-restoration",
+              "transfer-or-restore-account",
+              "account-restore-progress"
+            ],
+            "keywords": [
+              "Backup Restoration",
+              "Restore a Full Backup/cpmove File",
+              "Transfer or Restore a cPanel Account",
+              "Restore account",
+              "Mail & partial restore"
+            ],
+            "summary": "Create an account archive in the local backup directory and restore that archive into the account home."
+          },
+          {
+            "id": "restore-files",
+            "name": "Restore files",
+            "route": "/whm/backups/files",
+            "template": "wizard",
+            "artboard": null,
+            "primaryAction": "Restore files",
+            "roles": [
+              "root"
+            ],
+            "tools": [
+              "file-restore"
+            ],
+            "keywords": [
+              "File and Directory Restoration",
+              "Restore file",
+              "Restore folder"
+            ],
+            "summary": "Restore single files or folders of an account from local backups."
+          },
+          {
+            "id": "transfer-tool",
+            "name": "Transfer tool",
+            "route": "/whm/transfers",
+            "template": "wizard",
+            "artboard": "WhmTransfer",
+            "primaryAction": "Start transfer",
+            "roles": [
+              "root"
+            ],
+            "tools": [
+              "transfer-tool",
+              "transfer-tool-selection",
+              "live-transfer",
+              "account-transfer-progress",
+              "review-transfers-and-restores"
+            ],
+            "keywords": [
+              "Transfer Tool",
+              "Review Transfers and Restores",
+              "Live Transfer",
+              "Import from another panel",
+              "cPanel import",
+              "One-click migration",
+              "Site Migration",
+              "Site Migration to Another Server",
+              "Import from Another Panel"
+            ],
+            "summary": "Connect to a source server, select accounts, plans and service settings with conflicts found up front, run with live per-account progress and review past sessions."
+          },
+          {
+            "id": "convert-addon",
+            "name": "Convert addon domain",
+            "route": "/whm/transfers/convert-addon",
+            "template": "wizard",
+            "artboard": null,
+            "primaryAction": "Convert domain",
+            "roles": [
+              "root"
+            ],
+            "tools": [
+              "convert-addon-to-account"
+            ],
+            "keywords": [
+              "Convert Addon Domain to Account",
+              "Split account"
+            ],
+            "summary": "Turn an addon domain into its own account, copying or moving its site, mail, DNS, databases and sub-accounts."
+          },
+          {
+            "id": "server-migration",
+            "name": "Server migration",
+            "route": "/whm/transfers/server",
+            "template": "wizard",
+            "artboard": null,
+            "primaryAction": "Start migration",
+            "roles": [
+              "root"
+            ],
+            "tools": [
+              "aapanel-server-migrate"
+            ],
+            "keywords": [
+              "Whole-Server Migration",
+              "Server move",
+              "Move to new server"
+            ],
+            "summary": "Back up this whole server and restore it onto a fresh server, installing the panel there."
+          }
+        ]
+      },
+      {
+        "id": "monitoring",
+        "name": "Monitoring",
+        "icon": "Activity",
+        "pages": [
+          {
+            "id": "server-health",
+            "name": "Server health",
+            "route": "/whm/monitoring/health",
+            "template": "dashboard",
+            "artboard": "WhmServerHealth",
+            "primaryAction": "Check again",
+            "roles": [
+              "root"
+            ],
+            "tools": [
+              "server-health"
+            ],
+            "keywords": [
+              "Server health",
+              "Health checks",
+              "System Health",
+              "Status"
+            ],
+            "summary": "One page of host health checks, each with status, evidence and a fix."
+          },
+          {
+            "id": "alerts",
+            "name": "Alerts",
+            "route": "/whm/monitoring/alerts",
+            "template": "list",
+            "artboard": "WhmAlerts",
+            "primaryAction": "Create rule",
+            "roles": [
+              "root"
+            ],
+            "tools": [
+              "alert-rules"
+            ],
+            "keywords": [
+              "Alerts",
+              "Alert rules",
+              "Service down",
+              "Thresholds",
+              "Maintenance window",
+              "chkservd notifications"
+            ],
+            "summary": "Turn health checks, service failures, security events and limits into deduplicated notifications, with maintenance windows."
+          },
+          {
+            "id": "repair-center",
+            "name": "Repair center",
+            "route": "/whm/monitoring/repair",
+            "template": "custom",
+            "artboard": "WhmRepair",
+            "primaryAction": "Scan now",
+            "roles": [
+              "root"
+            ],
+            "tools": [
+              "server-repair"
+            ],
+            "keywords": [
+              "Repair",
+              "Fix",
+              "Broken packages",
+              "dpkg",
+              "apt",
+              "dnf",
+              "Disk full",
+              "Service will not start",
+              "Self-repair",
+              "Doctor"
+            ],
+            "summary": "Scan for common server problems and fix each one with a preview, a job log and a verification step."
+          },
+          {
+            "id": "performance-history",
+            "name": "Performance history",
+            "route": "/whm/monitoring/performance",
+            "template": "dashboard",
+            "artboard": null,
+            "primaryAction": null,
+            "roles": [
+              "root"
+            ],
+            "tools": [
+              "aapanel-system-monitor"
+            ],
+            "keywords": [
+              "System Monitor",
+              "Load history",
+              "CPU graph",
+              "Memory graph",
+              "Network graph",
+              "Monitor",
+              "Server monitor"
+            ],
+            "summary": "Recorded load, CPU, memory, disk IO and network history charted over time."
+          },
+          {
+            "id": "traffic-monitor",
+            "name": "Traffic monitor",
+            "route": "/whm/monitoring/traffic",
+            "template": "dashboard",
+            "artboard": "WhmTraffic",
+            "primaryAction": null,
+            "roles": [
+              "root"
+            ],
+            "tools": [
+              "traffic-monitor"
+            ],
+            "keywords": [
+              "Traffic monitor",
+              "Live traffic",
+              "Bandwidth live",
+              "Nginx traffic",
+              "Top domains",
+              "Requests per second"
+            ],
+            "summary": "Live and historical HTTP and network traffic per server, account and domain."
+          },
+          {
+            "id": "io-monitor",
+            "name": "IO monitor",
+            "route": "/whm/monitoring/io",
+            "template": "dashboard",
+            "artboard": "WhmIo",
+            "primaryAction": null,
+            "roles": [
+              "root"
+            ],
+            "tools": [
+              "io-monitor"
+            ],
+            "keywords": [
+              "IO monitor",
+              "Disk IO",
+              "IOPS",
+              "iotop",
+              "I/O usage",
+              "IO throttling"
+            ],
+            "summary": "Per-account disk IO bandwidth, IOPS and throttling from each slice, with the processes behind it."
+          },
+          {
+            "id": "resource-limits",
+            "name": "Resource limits",
+            "route": "/whm/monitoring/limits",
+            "template": "list",
+            "artboard": "WhmResourceLimits",
+            "primaryAction": null,
+            "roles": [
+              "root"
+            ],
+            "tools": [
+              "resource-limits-manager"
+            ],
+            "keywords": [
+              "Resource limits manager",
+              "LVE Manager",
+              "CloudLinux limits",
+              "CPU limits",
+              "Memory limits",
+              "Faults",
+              "Account slices",
+              "Limit hits"
+            ],
+            "summary": "Every account slice: applied CPU, memory, process and IO limits with their source, current usage, fault counts and history."
+          },
+          {
+            "id": "processes",
+            "name": "Processes",
+            "route": "/whm/monitoring/processes",
+            "template": "list",
+            "artboard": null,
+            "primaryAction": null,
+            "roles": [
+              "root"
+            ],
+            "tools": [
+              "process-manager",
+              "daily-process-log",
+              "background-process-killer"
+            ],
+            "keywords": [
+              "Process Manager",
+              "Show Current Running Processes",
+              "Daily Process Log",
+              "Background Process Killer",
+              "top",
+              "kill process",
+              "Running Processes Snapshot"
+            ],
+            "summary": "Running processes as a list or tree with kill and trace, per-user daily averages, and the nightly killer for forbidden background programs."
+          },
+          {
+            "id": "disk-usage",
+            "name": "Disk usage",
+            "route": "/whm/monitoring/disk",
+            "template": "dashboard",
+            "artboard": null,
+            "primaryAction": null,
+            "roles": [
+              "root"
+            ],
+            "tools": [
+              "current-disk-usage"
+            ],
+            "keywords": [
+              "Show Current Disk Usage",
+              "df",
+              "Filesystems",
+              "Disk space"
+            ],
+            "summary": "Size, used and free space of every mounted filesystem with IO statistics."
+          },
+          {
+            "id": "logs",
+            "name": "Logs",
+            "route": "/whm/monitoring/logs",
+            "template": "log",
+            "artboard": null,
+            "primaryAction": null,
+            "roles": [
+              "root"
+            ],
+            "tools": [
+              "aapanel-os-log-audit",
+              "aapanel-software-logs",
+              "aapanel-log-security-analysis",
+              "raw-apache-log-download",
+              "raw-nginx-log-download",
+              "raw-ftp-log-download",
+              "web-log-retention",
+              "panel-log-rotation",
+              "tweak-stats-logs",
+              "web-stats-engines",
+              "aapanel-log-cleanup"
+            ],
+            "keywords": [
+              "OS Log Audit",
+              "Service Logs",
+              "Slow query log",
+              "FTP logs",
+              "Access log security analysis",
+              "Raw Apache Log Download",
+              "Raw NGINX Log Download",
+              "Raw FTP Log Download",
+              "Web Log Retention",
+              "cPanel Log Rotation Configuration",
+              "Stats and Logs (Tweak Settings)",
+              "Statistics Software Configuration",
+              "Log Cleanup",
+              "Website Log Usage",
+              "Stats Program Toggles"
+            ],
+            "summary": "Server and service logs in one browser (OS, FTP activity, database slow and error logs), attack-pattern scans across every site's access logs, raw per-domain downloads, retention, rotation, statistics processing and cleanup."
+          },
+          {
+            "id": "server-information",
+            "name": "Server information",
+            "route": "/whm/monitoring/server-info",
+            "template": "dashboard",
+            "artboard": null,
+            "primaryAction": "Run benchmark",
+            "roles": [
+              "root"
+            ],
+            "tools": [
+              "server-information"
+            ],
+            "keywords": [
+              "Server Information",
+              "Hardware",
+              "Performance Benchmark",
+              "CPU benchmark",
+              "Disk benchmark"
+            ],
+            "summary": "Load average, memory and root filesystem space on this server."
+          },
+          {
+            "id": "performance-benchmark",
+            "name": "Benchmark",
+            "route": "/whm/monitoring/benchmark",
+            "template": "dashboard",
+            "artboard": null,
+            "primaryAction": "Run benchmark",
+            "roles": [
+              "root"
+            ],
+            "tools": [
+              "aapanel-performance-test"
+            ],
+            "keywords": [
+              "Performance Benchmark",
+              "CPU benchmark"
+            ],
+            "summary": "CPU, disk and network benchmarks."
           }
         ]
       },

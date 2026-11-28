@@ -1,8 +1,11 @@
 import { v2WhmBackupClientTemplates } from './backup-client-templates.ts'
 import { renderV2BackupDestinationManager } from './destination-manager.ts'
 import { localeDirection } from '../../../../../i18n.ts'
+import { renderCronBuilder } from '../../../../../design-system/components/cron-builder.ts'
+import { renderGuidedWizard } from '../../../../../features/wizards/flow.ts'
 import { v2Messages } from '../../../messages.ts'
 import { escapeHtml } from '../../../html.ts'
+import { subtabs } from '../../../components/page-header.ts'
 import { tabs, tabPanel } from '../../../components/tabs.ts'
 import { icon } from '../../../icons.ts'
 import { lifecycleButton, lifecycleCard, lifecycleField, lifecycleHeader, lifecycleLink, lifecycleRules, lifecycleStatus, lifecycleTable, text, type LifecycleAccess } from './shared.ts'
@@ -21,7 +24,7 @@ export function renderV2BackupsPage(props: V2BackupsPageProps): string {
   const input = (key: string, label: string, type = 'text', limits = '', enabled = false): string => lifecycleField(t, `backup-layout-${key}`, label,
     `<input id="backup-layout-${key}" type="${type}" dir="ltr"${limits}${enabled ? '' : ' disabled'}>`)
   const select = (key: string, label: string, choices: readonly string[]): string => lifecycleField(t, `backup-layout-${key}`, label,
-    `<select id="backup-layout-${key}" disabled><option value="">${text(t, msgid('Not read'))}</option>${choices.map((choice, index) => `<option value="${index + 1}">${text(t, choice)}</option>`).join('')}</select>`)
+    `<select id="backup-layout-${key}" disabled><option value="">${text(t, msgid('Loading...'))}</option>${choices.map((choice, index) => `<option value="${index + 1}">${text(t, choice)}</option>`).join('')}</select>`)
   const choice = (key: string, label: string, help?: string): string => `<label class="v2-lifecycle__choice" for="backup-layout-${key}"><input id="backup-layout-${key}" type="checkbox" disabled><span><strong>${text(t, label)}</strong>${help ? `<span class="v2-muted">${text(t, help)}</span>` : ''}</span></label>`
   const actions = (body: string): string => `<div class="v2-lifecycle__actions">${body}</div>`
   const fields = (body: string): string => `<div class="v2-lifecycle__fields">${body}</div>`
@@ -29,7 +32,7 @@ export function renderV2BackupsPage(props: V2BackupsPageProps): string {
   const status = (hook: string, label: string): string => lifecycleStatus(t, label, { [`data-backup-${hook}`]: true })
   const table = (title: string, columns: readonly string[], hook: string, label: string, value: number): string => lifecycleTable(t, title, columns, { [`data-backup-${hook}`]: true }, label, { value })
   const group = (label: string, body: string): string => `<fieldset disabled><legend>${text(t, label)}</legend><div class="v2-lifecycle__group">${body}</div></fieldset>`
-  const summary = `<dl class="v2-lifecycle__summary">${([['last', msgid('Last run'), 'clock'], ['next', msgid('Next run'), 'calendar'], ['local', msgid('Local storage'), 'disk'], ['remote', msgid('Remote SFTP'), 'server']] as const).map(([key, label, glyph]) => `<div class="v2-lifecycle__field"><dt><span>${text(t, label)}</span><span class="v2-tile v2-tile--neutral" aria-hidden="true">${icon(glyph)}</span></dt><dd data-backup-summary="${key}">${text(t, msgid('Not read'))}</dd></div>`).join('')}</dl>`
+  const summary = `<dl class="v2-lifecycle__summary">${([['last', msgid('Last run'), 'clock'], ['next', msgid('Next run'), 'calendar'], ['local', msgid('Local storage'), 'disk'], ['remote', msgid('Remote SFTP'), 'server']] as const).map(([key, label, glyph]) => `<div class="v2-lifecycle__field"><dt><span>${text(t, label)}</span><span class="v2-tile v2-tile--neutral" aria-hidden="true">${icon(glyph)}</span></dt><dd data-backup-summary="${key}">${text(t, msgid('Loading...'))}</dd></div>`).join('')}</dl>`
   const accountChoices = authorizedAccounts === undefined
     ? `<p role="status">${text(t, msgid('The account list has not been read.'))}</p>`
     : authorizedAccounts.length ? '' : `<p role="status">${text(t, msgid('No accounts were returned by the authorized read.'))}</p>`
@@ -45,7 +48,8 @@ ${group(msgid('Schedule'), fields(choice('policy-enabled', msgid('Request schedu
     + select('frequency', msgid('Frequency'), [msgid('Daily'), msgid('Every 12 hours'), msgid('Weekly only'), msgid('Monthly')])
     + input('start-time', msgid('Start time (UTC)'), 'time')
     + input('policy-cron', msgid('Schedule expression (UTC)'), 'text', ' data-cron-expression')
-    + select('policy-compress', msgid('Compression'), [msgctxt('theme:v2', 'Zstandard'), msgctxt('theme:v2', 'Gzip')])))}
+    + select('policy-compress', msgid('Compression'), [msgctxt('theme:v2', 'Zstandard'), msgctxt('theme:v2', 'Gzip')]))
+    + renderCronBuilder({ id: 'whm-backup-cron', namePrefix: 'backupSchedule', state: { frequency: 'daily', minute: 0, hour: 2 }, locale: props.locale, copy: key => t(key) }))}
 ${group(msgid('Retention'), fields(input('daily-copies', msgid('Daily copies'), 'number', ' min="1" max="3650" step="1"')
     + input('weekly-copies', msgid('Weekly copies'), 'number', ' min="0" max="520" step="1"')
     + input('monthly-copies', msgid('Monthly copies'), 'number', ' min="0" max="240" step="1"'))
@@ -71,21 +75,39 @@ ${actions(button('run-now', msgid('Run backup now'), true) + button('restore-run
 <section class="v2-lifecycle__group" data-backup-run-failure aria-labelledby="v2-backup-incomplete"><h3 id="v2-backup-incomplete">${text(t, msgid('Incomplete parts and retry'))}</h3><p>${text(t, msgid('Failed parts, diagnostic output and the account to retry have not been read. A partial run must keep the completed parts and report its actual failure before retry.'))}</p><ul data-backup-run-log hidden></ul>${actions(button('rerun-account', msgid('Back up selected account again')))}</section>
 `, { 'data-backup-section': 'runs' })
 
+  const restoreRunStep = `<section class="v2-lifecycle__group" aria-labelledby="v2-backup-run-choice"><h3 id="v2-backup-run-choice">${text(t, msgid('Run'))}</h3><div role="radiogroup" aria-labelledby="v2-backup-run-choice" data-backup-restore-runs>${status('restore-runs-observation', msgid('Run dates, types, sizes and partial-copy state have not been read.'))}</div></section>`
+  const restoreAccountStep = `${input('restore-search', msgid('Find an account in this run'), 'search', '', props.canRead && props.canManage)}
+<section class="v2-lifecycle__group" aria-labelledby="v2-backup-account-choice"><h3 id="v2-backup-account-choice">${text(t, msgid('Account in the selected run'))}</h3><div role="radiogroup" aria-labelledby="v2-backup-account-choice" data-backup-restore-accounts>${status('restore-accounts-observation', msgid('The account list and archive sizes for the selected run have not been read.'))}</div></section>`
+  const restoreDiffStep = `${group(msgid('Parts to restore for the selected account'), `<div class="v2-lifecycle__choices">${choice('restore-home', msgid('Home files'))}${choice('restore-databases', msgid('Databases'))}${choice('restore-mail', msgid('Mail'))}${choice('restore-dns', msgid('DNS zone'))}</div>`)}
+${status('part-availability', msgid('Part availability has not been read. A missing database or other part must be identified before restore; another complete run may be required.'))}
+<section class="v2-lifecycle__group" data-backup-restore-difference aria-label="${text(t, msgid('Restore difference'))}"><h3>${text(t, msgid('Difference for the selected account against the selected run'))}</h3>
+<dl class="v2-lifecycle__fields">${[['differ', msgid('Files that differ')], ['add', msgid('Only in the archive')], ['keep', msgid('Only on disk')], ['databases', msgid('Databases')]].map(([key, label]) => `<div class="v2-lifecycle__field"><dt>${text(t, label!)}</dt><dd data-backup-difference="${key}">${text(t, msgid('Loading...'))}</dd></div>`).join('')}</dl>
+${table(msgid('Restore difference'), [msgid('Part'), msgid('Path or record'), msgid('Current'), msgid('Backup'), msgid('Planned action')], 'difference-rows', msgid('No run, account or parts have been compared. No difference or restore result is assumed.'), 5)}
+${choice('restore-acknowledge', msgid('I reviewed the proposed restore changes.'))}</section>
+${status('restore-status', msgid('No restore has been started. Restore progress and its account audit record have not been read.'))}
+${actions(button('restore-back', msgid('Back')) + button('restore-continue', msgid('Continue')) + button('restore-review', msgid('Review differences')) + button('restore-apply', msgid('Restore selected account'), true))}`
+  const restoreWizard = renderGuidedWizard({
+    id: 'whm-restore-accounts-wizard',
+    activeStepIndex: 0,
+    disabled: !(props.canRead && props.canManage),
+    locale: props.locale,
+    copy: t,
+    submitLabel: text(t, msgid('Restore selected account')),
+    submitTarget: '[data-backup-action="restore-apply"]',
+    changePlan: [
+      { label: text(t, msgid('Target account')), before: text(t, msgid('Current disk files & databases')), after: text(t, msgid('Selected archive parts only')) },
+    ],
+    steps: [
+      { id: 'run', label: text(t, msgid('Run')), bodyHtml: restoreRunStep },
+      { id: 'account', label: text(t, msgid('Account')), bodyHtml: restoreAccountStep },
+      { id: 'parts', label: text(t, msgid('Parts and difference')), bodyHtml: restoreDiffStep },
+    ],
+  })
   const restore = lifecycleCard(t, 'backup-restore', msgid('Restore accounts'), `
 <p>${text(t, msgid('Pick a run, an account, then the parts to bring back.'))}</p>
 ${table(msgid('Discovered restore points'), [msgid('Created'), msgid('Type'), msgid('Contents'), msgid('Size'), msgid('Stored on'), msgid('Status'), msgid('Actions')], 'restore-tab-points-rows', msgid('No archive restore points have been discovered yet.'), 6)}
 <ol class="v2-lifecycle__steps" aria-label="${text(t, msgid('Restore steps'))}">${[msgid('Run'), msgid('Account'), msgid('Parts and difference')].map((label, index) => `<li data-backup-restore-step="${index + 1}"${index === 0 ? ' aria-current="step"' : ''}><span aria-hidden="true">${index + 1}</span><span>${text(t, label)}</span></li>`).join('')}</ol>
-<section class="v2-lifecycle__group" aria-labelledby="v2-backup-run-choice"><h3 id="v2-backup-run-choice">${text(t, msgid('Run'))}</h3><div role="radiogroup" aria-labelledby="v2-backup-run-choice" data-backup-restore-runs>${status('restore-runs-observation', msgid('Run dates, types, sizes and partial-copy state have not been read.'))}</div></section>
-${input('restore-search', msgid('Find an account in this run'), 'search', '', props.canRead && props.canManage)}
-<section class="v2-lifecycle__group" aria-labelledby="v2-backup-account-choice"><h3 id="v2-backup-account-choice">${text(t, msgid('Account in the selected run'))}</h3><div role="radiogroup" aria-labelledby="v2-backup-account-choice" data-backup-restore-accounts>${status('restore-accounts-observation', msgid('The account list and archive sizes for the selected run have not been read.'))}</div></section>
-${group(msgid('Parts to restore for the selected account'), `<div class="v2-lifecycle__choices">${choice('restore-home', msgid('Home files'))}${choice('restore-databases', msgid('Databases'))}${choice('restore-mail', msgid('Mail'))}${choice('restore-dns', msgid('DNS zone'))}</div>`)}
-${status('part-availability', msgid('Part availability has not been read. A missing database or other part must be identified before restore; another complete run may be required.'))}
-<section class="v2-lifecycle__group" data-backup-restore-difference aria-label="${text(t, msgid('Restore difference'))}"><h3>${text(t, msgid('Difference for the selected account against the selected run'))}</h3>
-<dl class="v2-lifecycle__fields">${[['differ', msgid('Files that differ')], ['add', msgid('Only in the archive')], ['keep', msgid('Only on disk')], ['databases', msgid('Databases')]].map(([key, label]) => `<div class="v2-lifecycle__field"><dt>${text(t, label!)}</dt><dd data-backup-difference="${key}">${text(t, msgid('Not read'))}</dd></div>`).join('')}</dl>
-${table(msgid('Restore difference'), [msgid('Part'), msgid('Path or record'), msgid('Current'), msgid('Backup'), msgid('Planned action')], 'difference-rows', msgid('No run, account or parts have been compared. No difference or restore result is assumed.'), 5)}
-${choice('restore-acknowledge', msgid('I reviewed the proposed restore changes.'))}</section>
-${status('restore-status', msgid('No restore has been started. Restore progress and its account audit record have not been read.'))}
-${actions(button('restore-back', msgid('Back')) + button('restore-continue', msgid('Continue')) + button('restore-review', msgid('Review differences')) + button('restore-apply', msgid('Restore selected account'), true))}
+${restoreWizard}
 `, { 'data-backup-section': 'restore' })
 
   const rules = lifecycleCard(t, 'backup-boundary', msgid('What a restore does'), lifecycleRules(t, [
@@ -117,9 +139,13 @@ ${status('status', msgctxt('theme:v2', 'No account archive has been read.'))}
   ].map(([key, label]) => ({ id: `v2-backup-tab-${key}`, label: t(label!), panelId: `v2-backup-panel-${key}`, selected: key === initialTab, hooks: { 'data-presentation-tab': key! } })) })
   const panel = (key: string, bodyHtml: string): string => tabPanel({ id: `v2-backup-panel-${key}`, tabId: `v2-backup-tab-${key}`, bodyHtml, hidden: key !== initialTab, sectionSpacing: true })
   const pageTitle = route === '/whm/backups/restore' ? msgid('Restore accounts') : msgid('Server backups')
+  const restoreTabs = route === '/whm/backups/restore' ? subtabs(text(t, msgid('Restore views')), [
+    { label: text(t, msgid('Restore accounts')), href: '/whm/backups/restore', active: true },
+    { label: text(t, msgid('Mail & partial restore')), href: '/whm/backups/restore-more' },
+  ]) : ''
   return `<div class="v2-lifecycle" data-presentation-tabs="panels" data-whm-detail-route="${route}" lang="${props.locale}" dir="${localeDirection(props.locale)}">
 ${lifecycleHeader(t, pageTitle, route, msgctxt('theme:v2', 'Configure copies, review actual run evidence and restore only the selected account and parts.'), lifecycleLink(t, msgid('Backup destinations'), `/whm/backups/destinations?lang=${props.locale}`) + lifecycleLink(t, msgid('Audit log'), `/whm/audit?lang=${props.locale}`))}
-${navigation}
+${restoreTabs}${navigation}
 <section class="v2-lifecycle__column" data-approved-whm-backups data-backup-destination-editor="manager" data-backup-can-read="${props.canRead && props.canManage}" data-backup-manage="${props.canRead && props.canManage}" data-backup-read-state="${props.canRead ? 'unread' : 'denied'}" data-backup-native="unavailable" aria-label="${text(t, msgid('Server backups'))}">
 <p id="whm-backup-layout-unavailable" class="v2-lifecycle__status" role="status">${text(t, props.canRead ? msgid('Server-wide run history, restore differences, scheduling and remote destinations have not been loaded. Their controls stay unavailable; no result or saved configuration is assumed.') : msgid('This workspace requires an authorized root account.'))}</p>
 ${v2WhmBackupClientTemplates()}${summary}

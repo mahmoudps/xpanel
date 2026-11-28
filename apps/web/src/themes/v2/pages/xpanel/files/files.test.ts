@@ -113,7 +113,7 @@ it.each(['en', 'ar'] as const)('restores the %s seven-column file layout and mou
 it('names the modified time, mode and owner of a file row on a phone', () => {
   const html = render({ files: [{ name: 'a.txt', path: '/home/alice/a.txt', kind: 'file', sizeBytes: 1, modeOctal: '0640', modifiedAt: '2026-10-29T00:00:00.000Z' }] })
   expect(html).toContain('<td data-label="Modified (UTC)"><time dir="ltr" class="v2-mono" data-xp-slot="modified">')
-  expect(html).toContain('<td data-label="Owner">Not read</td>')
+  expect(html).toContain('<td data-label="Owner">Loading...</td>')
   expect(renderV2FilesPage(t, { surface: { account, activeRoute: '/files/trash' }, canManage: true })).toContain('<td data-label="Deleted (UTC)"><time')
   expect(V2_FILES_CSS).toContain('td[data-label]::before{content:attr(data-label)')
 })

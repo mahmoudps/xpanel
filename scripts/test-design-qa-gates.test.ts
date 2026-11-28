@@ -15,18 +15,32 @@ import {
 const SCRIPTS_DIR = dirname(fileURLToPath(import.meta.url))
 
 describe('design-qa-gates static compliance & scale checks', () => {
-  it('passes strict G4/G6/G8 static checks across apps/web/src/design-system', () => {
+  it('passes strict G1/G2/G4/G6/G8 static checks across catalog and design-system', () => {
     const res = scanStaticDesignCompliance({ scope: 'design-system' })
     expect(res.violations).toEqual([])
     expect(res.passed).toBe(true)
-    expect(res.gates).toEqual({ G4: true, G6: true, G8: true })
+    expect(res.gates).toEqual({ G1: true, G2: true, G4: true, G6: true, G8: true })
   })
 
   it('tracks repo-wide ratchet ceilings cleanly without regressions', () => {
     const res = scanStaticDesignCompliance({ scope: 'ratchet' })
     expect(res.passed).toBe(true)
-    expect(res.metrics.notReadCount).toBeLessThanOrEqual(1002)
+    expect(res.gates.G1).toBe(true)
+    expect(res.gates.G2).toBe(true)
+    expect(res.metrics.notReadCount).toBeLessThanOrEqual(560)
+    expect(res.metrics.notObservedCount).toBeLessThanOrEqual(25)
     expect(res.metrics.importantCount).toBeLessThanOrEqual(456)
+    expect(res.metrics.inlineStyleCount).toBeLessThanOrEqual(825)
+  })
+
+  it('enforces zero Not read, Not observed, and inline styles across themes/v2/pages and browser G1-G16 coverage', () => {
+    const source = readFileSync(resolve(SCRIPTS_DIR, 'design-qa-gates.mjs'), 'utf8')
+    expect(source).toContain("apps/web/src/themes/v2/pages/")
+    for (const gate of ['G1', 'G2', 'G3', 'G4', 'G5', 'G6', 'G7', 'G8', 'G9', 'G10', 'G11', 'G12', 'G13', 'G14', 'G15', 'G16']) {
+      expect(source).toContain(`${gate}:`)
+    }
+    expect(source).toContain('wcag22aa')
+    expect(source).toContain('layout-shift')
   })
 
   it('flags off-scale spacing values cleanly', () => {

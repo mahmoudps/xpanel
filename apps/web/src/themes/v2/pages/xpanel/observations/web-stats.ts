@@ -18,8 +18,8 @@ export function renderV2PanelWebStatistics(props: PanelSurfaceProps, authority?:
   const selection = view?.selection ?? null, report = readState === 'loaded' ? view!.report! : null
   const site = selection ? view!.sites.find(row => row.site === selection.site) : undefined
   const schemeLabel = (scheme: WebStatsScheme): string => scheme === 'https' ? t(msgid('SSL (https)')) : t(msgid('Non-SSL (http)'))
-  const number = (value: number | undefined): string => value === undefined ? esc(t(msgid('Not read'))) : technical(formatAsciiNumber(value))
-  const bytes = (value: number | undefined): string => value === undefined ? esc(t(msgid('Not read'))) : technical(formatAsciiBytes(value))
+  const number = (value: number | undefined): string => value === undefined ? esc(t(msgid('Loading...'))) : technical(formatAsciiNumber(value))
+  const bytes = (value: number | undefined): string => value === undefined ? esc(t(msgid('Loading...'))) : technical(formatAsciiBytes(value))
   const when = (value: string | null | undefined): string => value ? technical(formatDisplayDateTime(value)) : esc(t(msgid('Not yet')))
   const run = (value: WebStatsRun | null): string => esc(t(webStatsRunLabel(value))) + (value ? ` <span>${technical(formatDisplayDateTime(value.at))}</span>` : '')
 
@@ -30,7 +30,7 @@ export function renderV2PanelWebStatistics(props: PanelSurfaceProps, authority?:
       field('v2-web-stats-site', t(msgid('Domain')), select('v2-web-stats-site', view.sites.map(row => [row.site, row.site] as const), undefined, readOnly, ' name="site" dir="ltr"', selection.site))
       + field('v2-web-stats-scheme', t(msgid('Entry')), select('v2-web-stats-scheme', WEB_STATS_SCHEMES.map(scheme => [scheme, schemeLabel(scheme)] as const), undefined, readOnly, ' name="scheme"', selection.scheme))
       + field('v2-web-stats-month', t(msgid('Month')), select('v2-web-stats-month', months.map(month => [month, month] as const), undefined, readOnly, ' name="month" dir="ltr"', selection.month)))}<div class="v2-panel-extra__actions"><button type="submit" class="v2-btn"${readOnly ? ' disabled' : ''}>${esc(t(msgid('Show')))}</button></div></form></div>`
-    : blankState(t(view ? msgid('No site of this account is served yet.') : msgid('Not read')), readState)
+    : blankState(t(view ? msgid('No site of this account is served yet.') : msgid('Loading...')), readState)
   const scope = section('v2-web-stats-selection', t(msgid('Report selection')), selector)
 
   const installed = view ? (['awstats', 'webalizer'] as const).filter(engine => view.engines[engine].installed && view.engines[engine].entitled) : []
@@ -47,7 +47,7 @@ export function renderV2PanelWebStatistics(props: PanelSurfaceProps, authority?:
     { label: t(msgid('Pages')), value: report?.pages, icon: 'files' as const },
     { label: t(msgid('Hits')), value: report?.hits, icon: 'layers' as const },
     { label: t(msgid('Bandwidth')), value: report?.bytes, icon: 'globe' as const, unit: 'bytes' as const },
-  ].map(item => kpiCard({ label: item.label, value: item.value === undefined ? t(msgid('Not read')) : item.unit ? formatAsciiBytes(item.value) : formatAsciiNumber(item.value), headingLevel: 2, icon: item.icon, tone: item.value === undefined ? 'neutral' : 'info', note: selection?.month ?? t(msgid('Not read')) })).join('')}</section>`
+  ].map(item => kpiCard({ label: item.label, value: item.value === undefined ? t(msgid('Loading...')) : item.unit ? formatAsciiBytes(item.value) : formatAsciiNumber(item.value), headingLevel: 2, icon: item.icon, tone: item.value === undefined ? 'neutral' : 'info', note: selection?.month ?? t(msgid('Loading...')) })).join('')}</section>`
 
   const empty = (columns: number): string => `<tr><td colspan="${columns}">${esc(t(report ? msgid('No records were returned.') : msgid('Nothing has been read.')))}</td></tr>`
   const tableOf = (id: string, title: string, columns: string[], rows: string[][] | undefined): string =>
@@ -73,10 +73,10 @@ export function renderV2PanelWebStatistics(props: PanelSurfaceProps, authority?:
   const robots = tableOf('v2-web-stats-robots', t(msgid('Robots and spiders')), [t(msgid('Robot')), t(msgid('Hits')), t(msgid('Bandwidth'))], report?.robots.map(([code, hits, size]) => [technical(code), number(hits), bytes(size)]))
 
   const scheme = selection && site ? site.schemes[selection.scheme] : undefined
-  const engineFacts = (engine: 'awstats' | 'webalizer'): string => !view ? esc(t(msgid('Not read')))
-    : !view.engines[engine].entitled ? esc(t(msgid('Not included in your plan'))) : !view.engines[engine].installed ? esc(t(msgid('Not installed on this server'))) : scheme ? run(scheme[engine]) : esc(t(msgid('Not read')))
+  const engineFacts = (engine: 'awstats' | 'webalizer'): string => !view ? esc(t(msgid('Loading...')))
+    : !view.engines[engine].entitled ? esc(t(msgid('Not included in your plan'))) : !view.engines[engine].installed ? esc(t(msgid('Not installed on this server'))) : scheme ? run(scheme[engine]) : esc(t(msgid('Loading...')))
   const webalizerOpen = !readOnly && view && selection && scheme?.webalizer?.state === 'updated' && view.engines.webalizer.installed && view.engines.webalizer.entitled
-  const analogFact = esc(t(!view ? msgid('Not read') : !view.engines.analog.entitled ? msgid('Not included in your plan') : view.sites.find(row => row.site === selection?.site)?.selected.includes('analog') === false ? msgid('Turned off for this site') : msgid('Shown on the Traffic page')))
+  const analogFact = esc(t(!view ? msgid('Loading...') : !view.engines.analog.entitled ? msgid('Not included in your plan') : view.sites.find(row => row.site === selection?.site)?.selected.includes('analog') === false ? msgid('Turned off for this site') : msgid('Shown on the Traffic page')))
   const engines = section('v2-web-stats-engines', t(msgid('Statistics engines')), facts([
     { label: 'Analog', valueHtml: analogFact },
     { label: 'AWStats', valueHtml: engineFacts('awstats') },
@@ -84,15 +84,15 @@ export function renderV2PanelWebStatistics(props: PanelSurfaceProps, authority?:
   ]) + (webalizerOpen ? `<div class="v2-panel-extra__actions"><a class="v2-btn" href="${esc(webalizerReportHref(selection.site, selection.scheme))}" target="_blank" rel="noopener noreferrer">${esc(t(msgid('Open Webalizer report')))}</a></div>`
     : ''))
   const schedule = section('v2-web-stats-schedule', t(msgid('Schedule')), facts([
-    { label: t(msgid('Processing interval (hours)')), valueHtml: view?.schedule.intervalHours != null ? technical(view.schedule.intervalHours) : esc(t(msgid('Not read'))) },
-    { label: t(msgid('Last run')), valueHtml: view ? when(view.schedule.lastRunAt) : esc(t(msgid('Not read'))) },
-    { label: t(msgid('Next run')), valueHtml: view ? when(view.schedule.nextRunAt) : esc(t(msgid('Not read'))) },
+    { label: t(msgid('Processing interval (hours)')), valueHtml: view?.schedule.intervalHours != null ? technical(view.schedule.intervalHours) : esc(t(msgid('Loading...'))) },
+    { label: t(msgid('Last run')), valueHtml: view ? when(view.schedule.lastRunAt) : esc(t(msgid('Loading...'))) },
+    { label: t(msgid('Next run')), valueHtml: view ? when(view.schedule.nextRunAt) : esc(t(msgid('Loading...'))) },
     { label: t(msgid('Waiting for the next run')), valueHtml: bytes(scheme?.pendingBytes) },
-    { label: t(msgid('Lines not processed')), valueHtml: scheme ? technical(formatAsciiNumber(scheme.droppedLines)) : esc(t(msgid('Not read'))) },
+    { label: t(msgid('Lines not processed')), valueHtml: scheme ? technical(formatAsciiNumber(scheme.droppedLines)) : esc(t(msgid('Loading...'))) },
     { label: t(msgid('Log not read')), valueHtml: bytes(scheme?.lostBytes) },
   ]))
   const geoip = section('v2-web-stats-geoip', t(msgid('Visitor countries')), facts([
-    { label: t(msgid('Location database')), valueHtml: view ? view.geoip.installed ? `${esc(view.geoip.source)} ${technical(view.geoip.month ?? '')}` : esc(t(msgid('Not installed; countries are not resolved'))) : esc(t(msgid('Not read'))) },
+    { label: t(msgid('Location database')), valueHtml: view ? view.geoip.installed ? `${esc(view.geoip.source)} ${technical(view.geoip.month ?? '')}` : esc(t(msgid('Not installed; countries are not resolved'))) : esc(t(msgid('Loading...'))) },
   ]) + `<p><a class="v2-btn v2-btn--ghost" href="https://db-ip.com" rel="noopener noreferrer" target="_blank">${esc(t(msgid('IP Geolocation by DB-IP')))}</a></p>`)
   const sites = tableCard('v2-web-stats-site', t(msgid('Sites')), [t(msgid('Domain')), t(msgid('Entry')), 'AWStats', 'Webalizer'],
     view?.sites.length ? view.sites.flatMap(row => WEB_STATS_SCHEMES.map(entry => {
