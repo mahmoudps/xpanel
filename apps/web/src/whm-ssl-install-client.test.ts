@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderWhmSslInstallChoices, renderWhmSslInstallWorkspace } from './board-port/whm-ssl-install-workspace.ts'
+import { renderV2WhmTlsInstallPage } from './themes/v2/pages/xwhm/tls/install.ts'
+import { WORKSPACE_RUNTIME_SCRIPT } from './workspace-runtime-client.ts'
 import { readSslInstallResult, readSslInstallWorkspace, sslInstallStructure, WHM_SSL_INSTALL_CLIENT_BINDING } from './whm-ssl-install-client.ts'
 
 const id = (value: number) => 'aaaaaaaa-aaaa-4aaa-8aaa-' + String(value).padStart(12, '0')
@@ -163,5 +165,30 @@ describe('WHM manual certificate installation client', () => {
     expect(sslInstallStructure('junk ' + block('CERTIFICATE'), '', block('PRIVATE KEY')).reasons).toEqual(['certificate_format'])
     expect(sslInstallStructure(block('CERTIFICATE').repeat(11), '', block('PRIVATE KEY')).reasons).toEqual(['too_large'])
     expect(sslInstallStructure(block('CERTIFICATE'), '', '-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\nMIIB\n-----END RSA PRIVATE KEY-----').reasons).toEqual(['key_encrypted'])
+  })
+  it('advances the guided wizard to the result step after certificate installation completes', async () => {
+    document.documentElement.lang = 'en'
+    document.documentElement.dir = 'ltr'
+    document.body.innerHTML = renderV2WhmTlsInstallPage({ locale: 'en', accounts: [] }, { canRead: true, canManage: true })
+    const win = window as unknown as Record<string, unknown>
+    if (!win.__xpanelWorkspaceRuntime) new Function(WORKSPACE_RUNTIME_SCRIPT)()
+    else if (typeof win.__xpanelMountWorkspace === 'function') (win.__xpanelMountWorkspace as (root: Document) => void)(document)
+    const f = model()
+    f.boot()
+    await tick()
+    const nextBtn = document.querySelector<HTMLButtonElement>('[data-ds-wizard-next]')!
+    nextBtn.click()
+    const wizard = document.querySelector<HTMLElement>('[data-ds-wizard]')!
+    expect(wizard.getAttribute('data-active-step')).toBe('1')
+    expect(document.querySelector<HTMLElement>('[data-ds-wizard-step="result"]')!.hidden).toBe(true)
+    fill()
+    control('submit').click()
+    await tick()
+    expect(control('status').dataset.state).toBe('saved')
+    expect(wizard.getAttribute('data-active-step')).toBe('2')
+    expect(document.querySelector<HTMLElement>('[data-ds-wizard-step="cert-key"]')!.hidden).toBe(true)
+    expect(document.querySelector<HTMLElement>('[data-ds-wizard-step="result"]')!.hidden).toBe(false)
+    expect(control('result').hidden).toBe(false)
+    expect(control('facts').textContent).toContain('#3')
   })
 })

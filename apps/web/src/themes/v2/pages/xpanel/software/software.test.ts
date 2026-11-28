@@ -51,7 +51,7 @@ describe('V2 account PHP page', () => {
     const html = renderV2PanelPhpPage(props, manage)
     expect(html).toMatch(/<li data-current="true"><strong>PHP-FPM<\/strong>/)
     expect(html).toMatch(/<li data-offered="false"><strong>suPHP<\/strong>/)
-    expect(html).toMatch(/<th scope="row"><bdi dir="ltr" class="v2-mono">pm\.max_children<\/bdi><\/th><td><bdi dir="ltr" class="v2-mono">4<\/bdi><\/td><td>Not read<\/td>/)
+    expect(html).toMatch(/<th scope="row"><bdi dir="ltr" class="v2-mono">pm\.max_children<\/bdi><\/th><td><bdi dir="ltr" class="v2-mono">4<\/bdi><\/td><td>Loading...<\/td>/)
   })
 
   it('shows no account or domain value without a readable account', () => {

@@ -6,7 +6,7 @@ type Translate = ReturnType<typeof operationContext>['t']
 
 /** File and Directory Restoration on /files/backup; the shared backup-files controller runs in owner mode. */
 export function renderV2FileRestorationSection(t: Translate, input: { username: string; canRead: boolean; canRestore: boolean }): string {
-  const unread = t(msgid('Not read'))
+  const unread = t(msgid('Loading...'))
   const facts = (rows: readonly (readonly [string, string])[]): string => operationFacts(rows.map(([key, label]) => ({ label, valueHtml: `<span data-backup-files-${key}>${escapeHtml(unread)}</span>` })))
   const choice = (value: string, label: string, checked = false): string => `<label class="v2-panel-operation-check"><input type="radio" name="v2-file-restoration-destination" value="${value}"${checked ? ' checked' : ''} disabled><span>${label}</span></label>`
   const steps = [['backup', t(msgid('Backup'))], ['files', t(msgid('Files'))], ['review', t(msgid('Review'))], ['result', t(msgid('Result'))]] as const

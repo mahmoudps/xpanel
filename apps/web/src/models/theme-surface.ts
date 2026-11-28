@@ -92,15 +92,29 @@ export interface WhmSurfaceView extends SurfaceProjection {
   readonly monitoringLogMaxLines: number
 }
 
+const ALIAS_CORE_TOOLS: Readonly<Record<string, string>> = {
+  '/whm/resellers/more': 'show-reseller-accounts',
+  '/whm/dns/more': 'zone-ttl-bulk',
+  '/whm/services/more': 'service-manager',
+}
+
 function surfaceAccess(surface: 'xpanel' | 'xwhm' | 'xmail', route: string, visibility: VisibilityContext, catalog: readonly CatalogTool[]) {
   const pages = visibleNavigation(visibility, catalog).find(item => item.surface === surface)?.sections.flatMap(section => section.pages) ?? []
   const routes = new Set(pages.map(page => page.route))
-  // Persisted operator preferences are admitted by core independently of native host tools.
-  if (surface === 'xwhm' && canOpenRegisteredRoute('/whm/preferences', visibility)) routes.add('/whm/preferences')
-  for (const alias of registeredDocumentAliases) if (routes.has(alias.parentRoute)) routes.add(alias.route)
   const qualifiedTools = new Set(visibleTools(catalog, visibility).map(tool => tool.id))
   const authorizedTools = new Set(catalog.filter(tool => isToolAuthorized(tool, visibility)).map(tool => tool.id))
-  const allowed = canOpenRegisteredRoute(route, visibility) && routes.has(canonicalNavigationRoute(route))
+  // Persisted operator preferences are admitted by core independently of native host tools.
+  if (surface === 'xwhm' && canOpenRegisteredRoute('/whm/preferences', visibility)) routes.add('/whm/preferences')
+  for (const alias of registeredDocumentAliases) {
+    const aliasTool = ALIAS_CORE_TOOLS[alias.route]
+    if (routes.has(alias.parentRoute) && (aliasTool === undefined || qualifiedTools.has(aliasTool))) {
+      routes.add(alias.route)
+    }
+  }
+  const aliasTool = ALIAS_CORE_TOOLS[route]
+  const allowed = canOpenRegisteredRoute(route, visibility)
+    && routes.has(canonicalNavigationRoute(route))
+    && (aliasTool === undefined || qualifiedTools.has(aliasTool))
   return { routes, qualifiedTools, authorizedTools, allowed }
 }
 
