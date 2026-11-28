@@ -11,7 +11,7 @@ export const TEMPORARY_LOGIN_PATH = /^\/login\/temporary\/([A-Za-z0-9_-]{43})$/
 
 /** These carry their own credential and are called by machines or one-time forms that hold no gate cookie. */
 const OWN_CREDENTIAL = new Set(['/api/health', '/api/dav/authorize', '/api/integrations/whmcs/provision', '/nic/update', '/login/handoff'])
-const hasOwnCredential = (pathname: string): boolean => OWN_CREDENTIAL.has(pathname) || pathname.startsWith('/hook/') || pathname.startsWith('/share/') || pathname.startsWith(DNS_CLUSTER_PEER_PREFIX) || TEMPORARY_LOGIN_PATH.test(pathname)
+const hasOwnCredential = (pathname: string): boolean => OWN_CREDENTIAL.has(pathname) || pathname.startsWith('/hook/') || pathname.startsWith('/share/') || pathname.startsWith('/api/account/git/webhook/') || pathname.startsWith(DNS_CLUSTER_PEER_PREFIX) || TEMPORARY_LOGIN_PATH.test(pathname)
 
 const plain = (status: number, headers: Record<string, string> = {}): Response => new Response(null, { status, headers: { 'cache-control': 'no-store', ...headers } })
 export const cookieName = (listener: SecListener, secure: boolean): string => `${secure ? '__Host-' : ''}${listener}_gate`

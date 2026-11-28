@@ -27,17 +27,10 @@ export const PROFILE_EXCLUSIONS: Readonly<Record<string, ProfileExclusion>> = {
 
 /** Truthful availability reasons for catalog tools whose host or multi-node capability is not shipped on single-server hosts. */
 export const UNIMPLEMENTED_TOOL_REASONS: Readonly<Record<string, string>> = {
-  'connect-devices': 'Account-wide device setup is delivered per mailbox under xMail Connect Devices rather than on the account filters page.',
-  'calendars-contacts-sharing': 'Cross-mailbox CalDAV/CardDAV ACL sharing is not enabled in the single-collection Radicale profile.',
-  'reseller-acl-lists': 'Reseller privileges are assigned directly per reseller; named ACL template lists are not enabled.',
   'disk-quota-setup': 'Filesystem quota mount flags require host boot-loader and fstab provisioning during installation rather than runtime remounting.',
   'tweak-panel-php': 'xPanel runs natively on Node.js and executes no internal panel PHP runtime.',
-  'nameserver-report': 'Nightly cross-zone nameserver delegation aggregation is not enabled; inspect per-zone NS records in the DNS Zone Manager.',
-  'remote-service-ips': 'External authoritative nameserver and mail gateway IP bypass lists are not enabled for tenant domain creation.',
   'web-stack-builder': 'Web server MPM and stack topology are pinned by the signed OS installation profile rather than rebuilt dynamically.',
   'distro-packages': 'Arbitrary OS repository package installation is disabled; manage reviewed components in Software Center.',
-  'webmail-dav-collections': 'Each mailbox provisions its default calendar and address book; custom multi-collection creation is not enabled.',
-  'webmail-dav-sharing': 'Cross-mailbox calendar and address-book sharing is not enabled in the Radicale host profile.',
   'aapanel-site-reverse-proxy': 'Path-scoped custom reverse-proxy rules are not enabled; site proxy mode is managed on the Domains workspace.',
   'aapanel-proxy-project': 'Standalone Nginx proxy-only projects without a hosting domain are not enabled.',
   'aapanel-one-click-deploy': 'Automated PHP application bundle deployment is not enabled on this host.',
@@ -46,10 +39,7 @@ export const UNIMPLEMENTED_TOOL_REASONS: Readonly<Record<string, string>> = {
   'aapanel-node-file-transfer': 'Direct node-to-node file transfer between linked servers is unavailable on standalone hosts.',
   'aapanel-openlitespeed-manager': 'Apache httpd with mpm-itk behind Nginx is the active web stack on this host; OpenLiteSpeed is not installed.',
   'aapanel-server-migrate': 'Automated whole-server OS migration to a remote target host requires a paired destination server and is unavailable.',
-  'traffic-monitor-account': 'Live per-request visitor stream inspection is root-only; per-domain bandwidth totals are shown on Bandwidth.',
-  'spam-quarantine': 'Server-held spam quarantine release and Bayesian retraining are not enabled; spam delivery uses mailbox Junk folders.',
   'database-tuning': 'MariaDB runtime variables and counters are read-only; automated my.cnf buffer-pool rewriting is not enabled.',
-  'git-deployments': 'Build-pipeline release symlink hooks are not enabled; manage Git repositories on Git Version Control.',
   'app-installer': 'Automated open-source application installer packages are not configured on this host.',
   'linked-server-nodes': 'Linking peer xPanel servers requires a paired second host and is unavailable on standalone hosts.',
   'configuration-cluster': 'Pushing server configuration snapshots across peer servers requires linked cluster nodes and is unavailable on standalone hosts.',

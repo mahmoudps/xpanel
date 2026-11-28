@@ -110,7 +110,7 @@ import { handleServiceManagerWorkspaceRoute } from './service-manager-workspace.
 import { handleBenchmarkWorkspaceRoute } from './benchmark-workspace.ts'
 import { handleTrafficWorkspaceRoute } from './traffic-workspace.ts'
 import { handleMeteringWorkspaceRoute } from './metering-workspace.ts'
-import { handleGitWorkspaceRoute } from './git-workspace.ts'
+import { GIT_WEBHOOK_PREFIX, handleGitWebhookRoute, handleGitWorkspaceRoute } from './git-workspace.ts'
 import { handleEmailDiskUsageWorkspaceRoute } from './email-disk-usage-workspace.ts'
 import { handlePgpWorkspace } from './pgp-workspace.ts'
 import { createDynamicDnsRoutes } from './dynamic-dns.ts'
@@ -191,6 +191,11 @@ import { createSecurityWorkspaceRoutes } from './security-workspace.ts'
 import type { CookieIpMode, CronJobIntent, CronJobObservationReceipt } from '@xpanel/core'
 import { HTACCESS_DOMAIN_ROUTE, executeHtaccessWorkspaceRequest, parseHtaccessHttpRequest } from './htaccess-workspace.ts'
 import { createQuarantineRoutes, type QuarantineGateway } from './mail/quarantine-routes.ts'
+import { handleWhmSearchIndexReindexRoute } from './whm-panel-reindex-routes.ts'
+import { handleNameserverReportRoute } from './nameserver-report-workspace.ts'
+import { handleAccountConnectDevicesRoute } from './mail/account-device-setup.ts'
+import { handleAccountTrafficRoute } from './account-traffic-workspace.ts'
+import { handleWhmSecurityControlsRoute } from './whm-security-controls-routes.ts'
 import { assertDnsZoneRevision, dnsExpectedRevision, dnsZoneRevision } from './dns-workspace.ts'
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { chmod, rm } from 'node:fs/promises'
@@ -2142,6 +2147,16 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
           return response.status === 202
         } })
       }
+      if (pathname.startsWith(GIT_WEBHOOK_PREFIX)) {
+        if (entryPoint !== 'xpanel') return transportProblem(404, 'NOT_FOUND', 'route is unavailable on this entry point', pathname)
+        if (!publicOrigin || url.host !== new URL(publicOrigin).host || !isVerifiedHttps(req)) return transportProblem(403, 'FORBIDDEN', 'verified HTTPS ingress and the configured host are required', pathname)
+        return handleGitWebhookRoute(req, url, method, {
+          store: deps.store,
+          readAgent: readNativeWorkspace,
+          findAccountPrincipal: account => findPrincipalByUsername(deps.db, account.username),
+          emitAudit,
+        })
+      }
       // A public download: the token is the whole authority, so it stays on the account listener and verified HTTPS.
       if (pathname.startsWith('/share/')) {
         if (entryPoint !== 'xpanel' || !isVerifiedHttps(req)) return transportProblem(404, 'NOT_FOUND', 'route is unavailable on this entry point', pathname)
@@ -3142,6 +3157,16 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         })
         if (response) return response
       }
+      if (pathname === '/api/account/email/connect-devices' || pathname.startsWith('/api/account/email/connect-devices/')) {
+        const response = await handleAccountConnectDevicesRoute(req, url, method, {
+          store: deps.store,
+          requireCaller,
+          readHostname: async () => (await deps.store.getServerSettings())?.hostname ?? null,
+          sendEmail: async message => { await (await alertTransports(deps.store)).email(message) },
+          emitAudit,
+        })
+        if (response) return response
+      }
       if (pathname === WEBMAIL_DAV_CONFIG_PATH || pathname === WEBMAIL_DAV_PROFILE_PATH) {
         const response = await handleWebmailDavConfigRoute(req, url, method, { store: deps.store, open: async request => {
           const { opened } = await authorizeNativeMailboxRequest(request, ['webmail-dav-config'])
@@ -3440,6 +3465,8 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
       const accountToolPorts = { store: deps.store, requireCaller, readAgent: readNativeWorkspace }
       const accountSshResponse = await handleAccountSshRoute(req, url, method, accountToolPorts)
       if (accountSshResponse) return accountSshResponse
+      const accountTrafficResponse = await handleAccountTrafficRoute(req, url, method, { ...accountToolPorts, emitAudit, triggerReconcile })
+      if (accountTrafficResponse) return accountTrafficResponse
       const dynamicDnsResponse = await dynamicDns.manage(req, url, method)
       if (dynamicDnsResponse) return dynamicDnsResponse
       const emailDiskUsage = await handleEmailDiskUsageWorkspaceRoute(req, url, method, accountToolPorts)
@@ -3922,6 +3949,14 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
           ...(deps.agentApp && deps.agentToken ? { readDetail: (caller, path) => readNativeWorkspace(caller, path) } : {}) })
         if (response) return response
       }
+      if (pathname === '/api/server/dns/nameserver-report') {
+        const response = await handleNameserverReportRoute(req, url, method, { requireCaller, assertRoot, store: deps.store })
+        if (response) return response
+      }
+      if (pathname === '/api/server/search-index/rebuild') {
+        const response = await handleWhmSearchIndexReindexRoute(req, url, method, { requireCaller, assertRoot, emitAudit, db: deps.db, store: deps.store })
+        if (response) return response
+      }
       if (pathname === '/api/server/dns-tools' || pathname.startsWith('/api/server/dns-tools/')) {
         const response = await handleDnsToolsWorkspaceRoute(req, url, method, { requireCaller, assertRoot, emitAudit, triggerReconcile, store: deps.store,
           ...(deps.agentApp && deps.agentToken ? { callHost: (caller, path, body) => readNativeWorkspace(caller, path, body, body !== undefined) } : {}),
@@ -3938,6 +3973,15 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
       }
       if (pathname.startsWith('/api/server/panel-access')) { const response = await handlePanelAccessRoute(req, url, method, { ...secHelpers(), db: deps.db, serverSecret, ...(publicOrigin ? { publicOrigin } : {}), secureCookies: useSecureCookies, ...(deps.agentApp && deps.agentToken ? { callHostRelay: (caller, path, body) => readNativeWorkspace(caller, path, body, body !== undefined, 'POST', null, true) } : {}) }); if (response) return response }
       if (pathname.startsWith('/api/server/sec/') || pathname.startsWith('/api/server/services/')) {
+        const secControlsResponse = await handleWhmSecurityControlsRoute(req, url, method, {
+          requireCaller,
+          assertRoot,
+          emitAudit,
+          store: deps.store,
+          triggerReconcile,
+          ...(deps.agentApp && deps.agentToken ? { callHost: (caller, path, body) => readNativeWorkspace(caller, path, body, body !== undefined) } : {}),
+        })
+        if (secControlsResponse) return secControlsResponse
         const svcResponse = await handleSvcWorkspaceRoute(req, url, method, secHelpers())
         if (svcResponse) return svcResponse
         const response = await handleSecWorkspaceRoute(req, url, method, secHelpers())
@@ -4695,7 +4739,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         const serverSettings = await deps.store.getServerSettings()
         const domainTweaks = await tweakSettingsFile(deps.store).current()
         assertDomainTweaks({ values: domainTweaks, privileged: caller.principal.kind === 'root', name, accountId: account.id, home: account.home, docRoot: guarded && alias ? undefined : body.docRoot,
-          ...(caller.principal.kind !== 'root' && (domainTweaks['domains.allowRemote'] === false || domainTweaks['domains.allowUnregistered'] === false) ? { resolution: await observeDomainResolution(name, [account.ipv4, ...(await deps.store.readSnapshot()).ipPool?.map(ip => ip.address) ?? []]) } : {}),
+          ...(caller.principal.kind !== 'root' && (domainTweaks['domains.allowRemote'] === false || domainTweaks['domains.allowUnregistered'] === false) ? { resolution: await observeDomainResolution(name, [account.ipv4, ...(await deps.store.readSnapshot()).ipPool?.map(ip => ip.address) ?? []], undefined, { rootDir: deps.store.rootDir }) } : {}),
           defaultDocRoot: `${account.home}/domains/${name}/public_html`, hostname: serverSettings?.hostname ?? null, others: await deps.store.listDomains() })
         const defaultZone = (effectiveKind === 'addon' || effectiveKind === 'alias') && (serverSettings?.nameservers?.length ?? 0) > 0 && !(await deps.store.getDnsZone(name))
           ? (() => {

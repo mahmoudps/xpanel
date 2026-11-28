@@ -1,7 +1,7 @@
 // PHP policy shared by FPM pools, CGI wrappers, lsphp and .user.ini. The rules themselves
 // (dangerous functions, php.ini allowlist, pool sanity, plan cap) live in @xpanel/core; this
 // module turns their output into isolation values and INI-safe text.
-import { disabledFunctions, phpIniScope, sanitizePhpIni, validateFpm } from '@xpanel/core'
+import { DANGEROUS_FUNCTIONS, disabledFunctions, PHP_EXCEPTION_FUNCTIONS, phpIniScope, sanitizePhpIni, validateFpm } from '@xpanel/core'
 import type { Account, Limit, OsProfile, PhpIniOptions, PhpSettings } from '@xpanel/core'
 import { systemPhpLibDir } from './paths.ts'
 import { iniValue } from './quote.ts'
@@ -27,6 +27,8 @@ export const iniEntries = (ini: Record<string, string> | null | undefined, opts:
 }
 
 export interface PhpIsolationOptions {
+  /** global toggleable disabled functions saved on the host; mandatory hardening stays disabled */
+  globalDisabledFunctions?: readonly string[]
   /** root-granted exceptions; each must be on core's DANGEROUS_FUNCTIONS list */
   allowedFunctions?: readonly string[]
   /** add the distribution's shared PEAR/PHP library dir to open_basedir */
@@ -50,7 +52,22 @@ export const phpIsolation = (account: Account, os: OsProfile, opts: PhpIsolation
   if (opts.includeSystemPhpLib) dirs.push(systemPhpLibDir(os))
   if (opts.pearLibrary) dirs.push(opts.pearLibrary)
   const openBasedir = dirs.join(':')
-  const disableFunctions = disabledFunctions(opts.allowedFunctions ?? []).join(',')
+  const allowed = opts.allowedFunctions ?? []
+  let list = disabledFunctions(allowed)
+  if (opts.globalDisabledFunctions !== undefined) {
+    const enabledGlobal = new Set(disabledFunctions([]))
+    const selected = new Set<string>()
+    for (const fn of opts.globalDisabledFunctions) {
+      if (typeof fn !== 'string' || !DANGEROUS_FUNCTIONS.includes(fn)) {
+        throw new Error(`Unsupported global disabled PHP function: ${String(fn)}`)
+      }
+      selected.add(fn)
+    }
+    const allowedSet = new Set(allowed)
+    const mandatory = new Set(DANGEROUS_FUNCTIONS.filter(fn => !(PHP_EXCEPTION_FUNCTIONS as readonly string[]).includes(fn)))
+    list = [...enabledGlobal].filter(fn => (mandatory.has(fn) || selected.has(fn)) && !allowedSet.has(fn))
+  }
+  const disableFunctions = list.join(',')
   return {
     tmpDir,
     openBasedir,
