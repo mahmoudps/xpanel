@@ -366,22 +366,6 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
     ]
   },
   {
-    "path": "apps/web/src/account-git-client.ts",
-    "sha256": "0ea51bc64e899298569e5899a6620e6bd26511583ed14f9e7efcd980b38127e4",
-    "sites": [
-      {
-        "line": 51,
-        "column": 82,
-        "method": "querySelector",
-        "argument": "'[data-git-' + key + ']'",
-        "classification": "finite-helper-or-variant-selector",
-        "controllers": [
-          "account-git"
-        ]
-      }
-    ]
-  },
-  {
     "path": "apps/web/src/account-gitweb-client.ts",
     "sha256": "b9d5342124a27a2facc9f43c5944e3872d9875028f4bc4431eec86a09da8e4d9",
     "sites": [
@@ -3607,10 +3591,10 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/whm-dns-tools-client.ts",
-    "sha256": "979426656214f693c0d08aaf08d62c1f318658949348d013b18799a2d99eae9f",
+    "sha256": "1a0f82d718ba587cd79284cf533b2a9b5f4939adf8446c7a364b87f7c1483acd",
     "sites": [
       {
-        "line": 119,
+        "line": 140,
         "column": 102,
         "method": "querySelector",
         "argument": "selector",
@@ -3620,7 +3604,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 126,
+        "line": 148,
         "column": 112,
         "method": "closest",
         "argument": "denied",
@@ -3630,7 +3614,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 168,
+        "line": 190,
         "column": 106,
         "method": "querySelectorAll",
         "argument": "selector",
@@ -3640,7 +3624,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 174,
+        "line": 197,
         "column": 50,
         "method": "querySelectorAll",
         "argument": "'[data-whm-dns-tools-page=\"' + key + '\"]'",
@@ -4144,10 +4128,10 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/whm-panel-data-client.ts",
-    "sha256": "bcbb03de5399deec66a92f0179b5348123476f611912b0a75f19001e07233414",
+    "sha256": "93e204679d107fcfb24dde1526b61c3dfc235ee767255bea8039929af61f164c",
     "sites": [
       {
-        "line": 42,
+        "line": 43,
         "column": 145,
         "method": "closest",
         "argument": "denied",
@@ -4919,10 +4903,10 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/whm-web-server-client.ts",
-    "sha256": "7e43030a28620f76e6c0c64d13edcf96a1660d3e61e68b7ce7e318f961b0bf98",
+    "sha256": "17c288c454f791fab23cad87dc238250566ef9a3c1ffc41230f8e99e97295a32",
     "sites": [
       {
-        "line": 90,
+        "line": 92,
         "column": 64,
         "method": "closest",
         "argument": "denied",

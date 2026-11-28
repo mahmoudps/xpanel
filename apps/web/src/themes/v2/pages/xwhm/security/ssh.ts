@@ -1,7 +1,7 @@
 import { renderV2RootIdentityCards } from '../../identity.ts'
 import { kpiCard } from '../../../components/kpi-card.ts'
 import { notice } from '../../../components/notice.ts'
-import { actions, area, button, check, context, esc, field, fields, help, inputControl, page, section, select, status, table, type WhmObservationInput } from '../monitoring/common.ts'
+import { actions, area, button, check, context, esc, field, fields, frameRead, help, inputControl, page, section, select, status, table, type WhmObservationInput } from '../monitoring/common.ts'
 import { whmStoredFacts } from '../stored-facts.ts'
 
 const SSH_TEMPLATES = '<template data-xp-template="whm-ssh-remove"><button type="button" class="v2-btn" data-whm-ssh-remove data-protected="true" disabled><span data-xp-slot="label"></span></button></template><template data-xp-template="whm-ssh-fact-technical"><div><dt data-xp-slot="label"></dt><dd><bdi dir="ltr" class="v2-mono v2-num" data-xp-slot="value"></bdi></dd></div></template><template data-xp-template="whm-ssh-fact-text"><div><dt data-xp-slot="label"></dt><dd><span data-xp-slot="value"></span></dd></div></template>'
@@ -41,9 +41,12 @@ export function renderV2WhmSsh(input: WhmObservationInput): string {
     + section(t, 'ssh-failures', msgid('Failed sign-ins'), field(t, 'v2-ssh-window', msgid('Show'), select(t, 'v2-ssh-window', { 'data-whm-ssh-window': true }, [['24h', msgid('Last 24 hours')], ['7d', msgid('Last 7 days')]]))
       + help(t, msgid('Latest 500 trusted sshd journal entries within 24 hours. An observed failure does not establish a ban.'), { 'data-whm-ssh-failures-note': true })
       + table(t, msgid('Failed SSH sign-ins have not been read'), [msgid('Time (UTC)'), msgid('Address'), msgid('Username'), msgid('Method'), msgid('Count'), msgid('Result')], { 'data-whm-ssh-failure-rows': true }))
-    + section(t, 'ssh-autoban', msgid('Auto-ban rule'), check(t, msgid('Enable auto-ban'), {}) + fields(field(t, 'v2-ssh-failures', msgid('Failures'), inputControl('v2-ssh-failures', {}, false, ' min="1" step="1" dir="ltr"', 'number'))
-      + field(t, 'v2-ssh-minutes', msgid('Within, minutes'), inputControl('v2-ssh-minutes', {}, false, ' min="1" step="1" dir="ltr"', 'number')))
-      + table(t, msgid('Banned by SSH'), [msgid('Address'), msgid('Since (UTC)'), msgid('Until (UTC)'), msgid('Reason'), msgid('Action')], { 'data-v2-ssh-banned': true })
-      + help(t, msgctxt('theme:v2', 'Automatic ban settings and manual unban are not connected on this page. No ban state has been read.')))
+    + section(t, 'ssh-autoban', msgid('Auto-ban rule'), `<div class="v2-observation__groups" data-whm-ssh-autoban data-can-read="${canRead || frameRead(input)}" data-can-manage="${canManage}"><template data-xp-template="whm-ssh-autoban-unban"><button type="button" class="v2-btn" data-ssh-autoban-unban disabled><span data-xp-slot="label"></span></button></template>${check(t, msgid('Enable auto-ban'), { 'data-ssh-autoban-enabled': true })}
+      ${fields(field(t, 'v2-ssh-failures', msgid('Failures'), inputControl('v2-ssh-failures', { 'data-ssh-autoban-failures': true }, false, ' min="1" max="500" step="1" dir="ltr"', 'number'))
+      + field(t, 'v2-ssh-minutes', msgid('Within, minutes'), inputControl('v2-ssh-minutes', { 'data-ssh-autoban-window': true }, false, ' min="1" max="1440" step="1" dir="ltr"', 'number')))}
+      ${actions(button(t, msgid('Refresh'), { 'data-ssh-autoban-refresh': true }, canRead || frameRead(input)) + button(t, msgid('Save auto-ban rule'), { 'data-ssh-autoban-save': true }, false, true))}
+      ${status(t, canRead || frameRead(input) ? msgid('Auto-ban policy and ban list have not been read.') : msgid('This page requires an authorized administrator. Nothing was read or changed.'), { 'data-ssh-autoban-status': true }, canRead || frameRead(input) ? 'unread' : 'unavailable')}
+      ${table(t, msgid('Banned by SSH'), [msgid('Address'), msgid('Since (UTC)'), msgid('Until (UTC)'), msgid('Reason'), msgid('Action')], { 'data-v2-ssh-banned': true }, msgid('No banned addresses have been read.'))}
+      ${help(t, msgid('Saves the SSH auto-ban rule and unbans individual IP addresses after a fresh read.'))}</div>`)
   return page(input, '/whm/security/ssh', 'SSH', msgid('SSH access, effective policy and account recovery remain separate decisions.'), body + renderV2RootIdentityCards(t, canRead, canManage) + SSH_TEMPLATES)
 }

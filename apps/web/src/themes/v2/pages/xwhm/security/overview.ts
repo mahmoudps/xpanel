@@ -13,7 +13,6 @@ export function renderV2WhmSecurityOverview(input: WhmObservationInput): string 
   const evidence = `<div class="v2-observation__groups" data-whm-security-evidence>${help(t, msgid('Checks show individual host observations. No overall security score or capability qualification is inferred. Configuration values are labeled separately.'))}<dl class="v2-observation__facts" data-whm-security-configuration></dl>${filter}${table(t, msgid('Security observations have not been read'), [msgid('Check'), msgid('State'), msgid('Observed value')], { 'data-whm-security-check-rows': true })}<p class="v2-observation__filter-empty">${esc(t(msgid('No loaded rows match these filters.')))}</p>${actions(button(t, msgid('Read security observations'), { 'data-whm-security-refresh': true }))}${status(t, msgid('Security observations have not been read.'), { 'data-whm-security-status': true })}${factTemplates}</div>`
   const compilerFacts = ([['restriction', msgid('Compilers')], ['host-state', msgid('Host state')], ['commands', msgid('Restricted commands')], ['group', msgid('Compiler group')], ['hook', msgid('Re-apply after package updates')], ['updated', msgid('Last saved (UTC)')], ['reconcile', msgid('Last apply request')], ['observed-at', msgid('Observed at (UTC)')]] as const)
     .map(([key, label]) => `<div><dt>${esc(t(label))}</dt><dd><bdi class="v2-num" data-sec-field="${key}">${esc(t(msgid('Loading...')))}</bdi></dd></div>`).join('')
-  const notConnected = help(t, msgid('This setting has no connected host operation. No changes have been applied.'))
   const policyField = (key: string, label: string, extra = ' min="1" dir="ltr"'): string => {
     const id = `v2-sign-in-${key.replaceAll('.', '-')}`
     return field(t, id, label, inputControl(id, { 'data-sign-in-field': key }, false, extra, 'number'))
@@ -59,23 +58,21 @@ export function renderV2WhmSecurityOverview(input: WhmObservationInput): string 
   const saveBar = `<div class="v2-observation__savebar">${status(t, canRead ? msgid('Nothing has been read yet.') : msgid('This page requires an authorized administrator. Nothing was read or changed.'), { 'data-sign-in-status': true }, canRead ? 'unread' : 'unavailable')}${actions(button(t, msgid('Refresh'), { 'data-sign-in-refresh': true }, canRead) + button(t, msgid('Save sign-in policy'), { 'data-sign-in-save': true }, false, true))}</div>`
   // WHM cPHulk, Password Strength Configuration and session lifetimes, painted by the sign-in policy client from GET /api/server/sec/sign-in.
   const columns = `<div class="v2-observation__columns" data-sign-in-policy data-sign-in-can-read="${canRead}" data-sign-in-can-manage="${canManage}"><div class="v2-observation__groups">${access}${mfa}${passwords}</div><div class="v2-observation__groups">${locked}${lockout}</div>${saveBar}</div>`
+  const tokensSummary = `<dl class="v2-observation__facts"><div><dt>${esc(t(msgid('Scope model')))}</dt><dd><bdi class="v2-mono" dir="ltr">accounts, plans, dns, backups, transfer, metrics</bdi></dd></div><div><dt>${esc(t(msgid('Workspace')))}</dt><dd>${esc(t(msgctxt('theme:v2', 'Managed on API tokens')))}</dd></div></dl>`
+  const wafSummary = `<dl class="v2-observation__facts"><div><dt>${esc(t(msgid('Edge rules')))}</dt><dd>${esc(t(msgctxt('theme:v2', 'Rate limits, body cap and deny lists')))}</dd></div><div><dt>${esc(t(msgid('ModSecurity')))}</dt><dd>${esc(t(msgctxt('theme:v2', 'OWASP Core Rule Set on Nginx')))}</dd></div></dl>`
+  const phpCanRead = canRead || frameRead(input)
   const body = summaries + section(t, 'security-evidence', msgctxt('theme:v2', 'Advisor findings'), evidence) + jump + columns
-    + section(t, 'security-tokens', msgctxt('approved-xwhm', 'API tokens'), fields(field(t, 'v2-security-token-name', msgid('Name'), inputControl('v2-security-token-name', {}))
-      + field(t, 'v2-security-token-addresses', msgid('Allowed addresses'), area('v2-security-token-addresses', {}, ' dir="ltr"'))
-      + field(t, 'v2-security-token-expiry', msgctxt('approved-xwhm', 'Expires'), inputControl('v2-security-token-expiry', {}, false, ' dir="ltr"', 'date')))
-      + check(t, msgctxt('approved-xwhm', 'No expiry'), {})
-      + fields(['accounts:read', 'accounts:write', 'plans:read', 'dns:write', 'backups:read', 'transfer:read', 'metrics:read'].map(scope => check(t, scope, {})).join(''))
+    + section(t, 'security-tokens', msgctxt('approved-xwhm', 'API tokens'), tokensSummary
       + table(t, msgid('Current API tokens'), [msgid('Name'), msgid('Scopes'), msgid('Allowed addresses'), msgctxt('approved-xwhm', 'Expires'), msgid('Last used (UTC)'), msgid('Manage')], { 'data-v2-security-tokens': true })
       + actions(link(t, msgctxt('approved-xwhm', 'API tokens'), '/whm/panel/api-tokens')) + help(t, msgctxt('theme:v2', 'Create and revoke tokens in their dedicated authenticated workspace. Token values are not read here.')))
-    + section(t, 'security-waf', msgid('Nginx web application firewall'), fields(field(t, 'v2-security-rate', msgid('Requests per address'), inputControl('v2-security-rate', {}, false, ' dir="ltr"', 'number'))
-      + field(t, 'v2-security-burst', msgid('Burst'), inputControl('v2-security-burst', {}, false, ' dir="ltr"', 'number')) + field(t, 'v2-security-body', msgctxt('approved-xwhm', 'Largest request body'), inputControl('v2-security-body', {}, false, ' dir="ltr"')))
-      + check(t, msgid('Unlimited request rate'), {}) + check(t, msgid('Unlimited request body'), {})
-      + fields(field(t, 'v2-security-denied-addresses', msgid('Denied addresses and ranges'), area('v2-security-denied-addresses', {}, ' dir="ltr"'))
-        + field(t, 'v2-security-denied-paths', msgid('Path patterns'), area('v2-security-denied-paths', {}, ' dir="ltr"')) + field(t, 'v2-security-denied-agents', msgctxt('approved-xwhm', 'User-agent patterns'), area('v2-security-denied-agents', {}, ' dir="ltr"')))
-      + actions(link(t, msgid('Web application firewall'), '/whm/security/waf')))
-    + '<div class="v2-observation__columns v2-observation__columns--wide-end">' + section(t, 'security-php-functions', msgid('Dangerous PHP functions'), help(t, msgid('Global function policy and per-account exceptions have not been read. A listed function is not a verified prohibition.'))
-      + fields(['exec', 'shell_exec', 'system', 'passthru', 'proc_open', 'popen'].map(name => check(t, name, {})).join(''))
-      + table(t, msgid('PHP function exceptions'), [msgid('Account'), msgid('Functions'), msgid('Reason')], { 'data-v2-security-php-exceptions': true }) + actions(link(t, msgid('Add exception'), '/whm/software/php')) + notConnected)
+    + section(t, 'security-waf', msgid('Nginx web application firewall'), wafSummary
+      + actions(link(t, msgid('Web application firewall'), '/whm/security/waf')) + help(t, msgctxt('theme:v2', 'Configure edge rate limits, request body limits, deny lists and ModSecurity on the dedicated WAF page.')))
+    + '<div class="v2-observation__columns v2-observation__columns--wide-end">' + section(t, 'security-php-functions', msgid('Dangerous PHP functions'), help(t, msgid('Checked functions are disabled globally in PHP pools and wrappers unless an account holds an explicit exception.'))
+      + fields(['exec', 'shell_exec', 'system', 'passthru', 'proc_open', 'popen'].map(name => check(t, name, { 'data-sec-php-fn': name })).join(''))
+      + table(t, msgid('PHP function exceptions'), [msgid('Account'), msgid('Functions'), msgid('Reason')], { 'data-v2-security-php-exceptions': true })
+      + actions(button(t, msgid('Save PHP functions'), { 'data-sec-php-save': true }, false, true) + link(t, msgid('Add exception'), '/whm/software/php'))
+      + status(t, phpCanRead ? msgid('Nothing has been read yet.') : msgid('This page requires an authorized administrator. Nothing was read or changed.'), { 'data-sec-php-status': true }, phpCanRead ? 'unread' : 'unavailable'),
+      { 'data-whm-php-functions': true, 'data-can-read': String(phpCanRead), 'data-can-manage': String(canManage) })
     // cPanel WHM Compiler Access, painted by the sec client from GET /api/server/sec/compiler-access.
     + section(t, 'security-compiler', msgctxt('approved-xwhm', 'Compiler lock'), check(t, msgid('Restrict compiler access'), { 'data-sec-input': 'restricted' })
       + `<dl class="v2-observation__facts">${compilerFacts}</dl>`

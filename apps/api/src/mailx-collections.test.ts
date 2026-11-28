@@ -94,4 +94,12 @@ describe('mail collection settings', () => {
     expect((await f.call('GET', undefined, '?account=x')).code).toBe('VALIDATION')
     f.root(); expect((await f.call()).code).toBe('FORBIDDEN')
   })
+
+  it('rejects color on address books/task lists with 422 COLOR_NOT_SUPPORTED and normalizes mailbox casing', async () => {
+    const f = await fixture(), mailbox = (await f.call()).body.mailboxes[0]
+    const base = { mailbox: mailbox.mailbox.toUpperCase(), expectedRevision: mailbox.revision, defaultCalendar: null, descriptions: {}, addressBooks: mailbox.addressBooks.map(plain), taskLists: [] }
+    expect((await f.call('PUT', { ...base, addressBooks: [{ id: null, name: 'Colored', description: '', isDefault: false, color: '#112233' }] })).detail).toMatchObject({ reason: 'COLOR_NOT_SUPPORTED', field: 'addressBooks', stateChanged: false })
+    expect((await f.call('PUT', { ...base, taskLists: [{ id: null, name: 'Colored Tasks', description: '', isDefault: true, color: '#112233' }] })).detail).toMatchObject({ reason: 'COLOR_NOT_SUPPORTED', field: 'taskLists', stateChanged: false })
+    expect((await f.call('PUT', base)).status).toBe(200)
+  })
 })

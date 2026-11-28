@@ -135,7 +135,9 @@ describe('v2 WHM diagnostic, security and activity bodies', () => {
     expect(html.split(V2_SECURITY_SLOT)).toHaveLength(2)
     expect(html).toContain('Enrollment is optional.')
     expect(html).not.toContain('name="totp"')
-    expect(render('/whm/security')).toContain('Global function policy and per-account exceptions have not been read.')
+    const securityOverview = render('/whm/security')
+    expect(securityOverview).toContain('data-whm-php-functions')
+    expect(securityOverview).toContain('Checked functions are disabled globally in PHP pools and wrappers unless an account holds an explicit exception.')
   })
 
   it('does not expose denied audit rows, raw secrets or internal references in exports', () => {

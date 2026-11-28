@@ -15,6 +15,7 @@ export const LOG_LINE_MAX_CHARS = 8192
 export type AccountLogKind = 'access' | 'error'
 /** Plan feature per log kind: tool id and its catalog featureKey. */
 export const ACCOUNT_LOG_FEATURES: Readonly<Record<AccountLogKind, readonly [string, string]>> = { access: ['raw-access', 'Raw Access Logs'], error: ['errors', 'Error Log'] }
+export const ACCOUNT_TRAFFIC_TELEMETRY_FEATURES = ['traffic-monitor-account', 'Live traffic'] as const
 export interface LogTail { exists: boolean; sizeBytes: number; mtime: string | null; text: string; truncated: boolean }
 export type LogTailReader = (path: string, maxBytes: number) => Promise<LogTail>
 export interface AccountLogView {
@@ -128,23 +129,26 @@ export interface AccountLogsRouteDeps {
   now?: () => Date
 }
 const LOG_ROUTE = /^\/accounts\/([a-z][a-z0-9]{0,15})\/logs\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/(access|error)$/
+const TRAFFIC_TELEMETRY_ROUTE = /^\/accounts\/([a-z][a-z0-9]{0,15})\/logs\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/traffic-telemetry$/
 const DOWNLOAD_ROUTE = /^\/accounts\/([a-z][a-z0-9]{0,15})\/logs\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/access\/download$/
 const ARCHIVE_ROUTE = /^\/accounts\/([a-z][a-z0-9]{0,15})\/logs\/archives(?:\/([a-z0-9.-]{1,280}\.gz))?$/
 export interface AccountLogArchivesView { context: { accountId: string; username: string }; available: boolean; archives: LogArchive[]; pending: LogRotationPending | null; observedAt: string }
 
 /** Account owner reads the edge log of one owned domain, or the raw access log archives in ~/logs; paths come from saved state only. */
 export async function handleAccountLogsRoute(req: Request, url: URL, method: string, deps: AccountLogsRouteDeps): Promise<Response | null> {
-  const download = DOWNLOAD_ROUTE.exec(url.pathname), archiveMatch = download ? null : ARCHIVE_ROUTE.exec(url.pathname), match = download ? [download[0], download[1], download[2], 'access'] as const : archiveMatch ? null : LOG_ROUTE.exec(url.pathname)
-  if (!match && !archiveMatch) return null
+  const download = DOWNLOAD_ROUTE.exec(url.pathname), trafficMatch = download ? null : TRAFFIC_TELEMETRY_ROUTE.exec(url.pathname), archiveMatch = download || trafficMatch ? null : ARCHIVE_ROUTE.exec(url.pathname), match = download || trafficMatch || archiveMatch ? null : LOG_ROUTE.exec(url.pathname)
+  const route = download ? [download[0], download[1], download[2], 'access'] as const : trafficMatch ? [trafficMatch[0], trafficMatch[1], trafficMatch[2], 'access'] as const : match
+  if (!route && !archiveMatch) return null
   if (method !== 'GET') return new Response(null, { status: 405, headers: { allow: 'GET' } })
   if (url.search) return fail('VALIDATION', 'log reads do not accept query selectors', { stateChanged: false })
-  const username = (match ?? archiveMatch)![1]!, domainId = match?.[2] ?? '', kind: AccountLogKind = match ? match[3] as AccountLogKind : 'access', caller = deps.caller
-  if (caller.role !== 'user' || !caller.accountId || match && !isUuid(domainId)) return fail('FORBIDDEN', 'site logs are read by the signed-in account owner', { stateChanged: false })
+  const username = (route ?? archiveMatch)![1]!, domainId = route?.[2] ?? '', kind: AccountLogKind = route ? route[3] as AccountLogKind : 'access', caller = deps.caller
+  const requiredFeatures: readonly string[] = trafficMatch ? ACCOUNT_TRAFFIC_TELEMETRY_FEATURES : ACCOUNT_LOG_FEATURES[kind]
+  if (caller.role !== 'user' || !caller.accountId || route && !isUuid(domainId)) return fail('FORBIDDEN', 'site logs are read by the signed-in account owner', { stateChanged: false })
   const authorize = async (): Promise<Account> => {
     const account = await deps.store.getAccountByUsername(username), principal = await deps.currentPrincipal()
     if (!account || account.id !== caller.accountId || account.status !== 'active' || !principal || principal.disabled || principal.kind !== 'user' || principal.id !== caller.principalId || principal.accountId !== account.id || principal.username !== account.username) return fail('FORBIDDEN', 'the current account owner is not authorized', { stateChanged: false })
     const plan = await deps.store.getPlan(account.planId), features = plan ? await deps.store.getFeatureList(plan.featureListId) : null
-    if (!features || ACCOUNT_LOG_FEATURES[kind].some(key => features.disabled.includes(key))) return fail('FORBIDDEN', 'this log is disabled by the account plan', { stateChanged: false })
+    if (!features || requiredFeatures.some(key => features.disabled.includes(key))) return fail('FORBIDDEN', 'this log is disabled by the account plan', { stateChanged: false })
     return account
   }
   const account = await authorize()
