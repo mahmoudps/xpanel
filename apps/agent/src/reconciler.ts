@@ -52,6 +52,7 @@ import { dbQuotaPrivileges, readDbQuotaLocks } from './db-quota.ts'
 import { compilePhpMyAdminAccess, observePhpMyAdminHost, phpMyAdminPorts, phpMyAdminRestartActions, type PhpMyAdminHostObservation } from './phpmyadmin-access.ts'
 import { postgresqlAccountStatements, postgresqlSqlAction } from './pg-sql.ts'
 import { readSecEdgeConfiguration } from './sec-waf.ts'
+import { enforceSshAutoban, readActiveSshAutobanBans, readGlobalPhpDisabledFunctions, readSshAutobanPolicy, toFirewallBans } from './ssh-autoban.ts'
 import { compilerAccessHookAvailable, compilerAccessInput } from './compiler-access.ts'
 import { effectiveFpm, fpmIniDefaults } from './svc-policy.ts'
 import { readSvcHostInput, renderSvcHost } from './svc-reconcile.ts'
@@ -241,6 +242,10 @@ export interface CompileOptions {
   mailTls?: { certFile: string; keyFile: string } | null
   /** sec: saved WAF, flood and per-site switches (sec-waf.ts). Absent renders the previous defaults. */
   secEdge?: SecEdgeConfiguration
+  /** Global PHP disabled-function policy (`extended/server/php-functions.json`). */
+  globalPhpDisabled?: readonly string[]
+  /** SSH auto-ban firewall timeout and preserved active bans (`extended/server/ssh-autoban.json`). */
+  sshAutoban?: { enabled: boolean; banTimeoutSec: number; activeBans: system.FirewallBan[] }
   /** sec: activated trusted-proxy policy, re-admitted against protected ingress evidence (sec-ingress-provider.ts). */
   trustedProxyAuthority?: TrustedProxyRenderAuthority
   /** Saved runtime apps, caches and containers per account id (account-runtime.ts). Absent renders none. */
@@ -419,11 +424,12 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
 
     // Firewall: real hosts (managementPorts) always maintain table inet xpanel (policy accept while off) for remote-db/ban/guard sets
     const firewall = firewallPolicy(snapshot.firewall)
-    if (firewall.rules.length > 0 || firewall.blockPing || opts.managementPorts !== undefined || opts.secEdge?.flood != null || opts.svcHost?.smtpRestricted === true) {
+    if (firewall.rules.length > 0 || firewall.blockPing || opts.managementPorts !== undefined || opts.secEdge?.flood != null || opts.svcHost?.smtpRestricted === true || opts.sshAutoban?.enabled === true) {
       const prefixLists = Object.fromEntries(firewall.prefixLists.map((l) => [l.name, l.entries]))
       const nftSettings = system.nftSettingsFromServer(settings, {
         prefixLists,
-        banTimeoutSec: 3600,
+        banTimeoutSec: opts.sshAutoban?.banTimeoutSec ?? 3600,
+        ...(opts.sshAutoban?.enabled && opts.sshAutoban.activeBans.length > 0 ? { bans: opts.sshAutoban.activeBans, now: Math.floor(now.getTime() / 1000) } : {}),
         databaseRemoteSources: snapshot.accounts.filter((a) => a.status === 'active').flatMap((a) => (a.databaseRemoteAccess ?? []).map((e) => e.host)),
         flood: opts.secEdge?.flood ?? null, // sec: flood limits
         ...(opts.ftpServer && opts.ftpServer.roleEnabled !== false && effectiveServerFtpSettings(settings).enabled ? { ftpPassivePorts: effectiveServerFtpSettings(settings).passivePorts } : {}),
@@ -624,6 +630,7 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
 
       // root-granted disable_functions exceptions follow the account on every handler and version
       const allowedFunctions = settings.phpFunctionExceptions?.find(item => item.account === account.username)?.functions ?? []
+      const phpDisableOpts = opts.globalPhpDisabled !== undefined ? { globalDisabledFunctions: opts.globalPhpDisabled, allowedFunctions } : { allowedFunctions }
       if (settings.engine === 'apache') {
         files.push(...edge.renderApacheVhosts(account, edge.servedDomains(accountDomains), settings, os, {
           now,
@@ -633,13 +640,13 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
         for (const dom of accountDomains) {
           if (dom.siteType === 'php' && dom.php.handler !== 'fpm') {
             preActions.push(...edge.cgiWrapperDirs(account, settings, os))
-            files.push(edge.renderPhpCgiWrapper(account, dom, settings, os, { allowedFunctions }))
+            files.push(edge.renderPhpCgiWrapper(account, dom, settings, os, phpDisableOpts))
           }
         }
       } else {
         const olsAcc = edge.renderOlsAccount(account, edge.servedDomains(accountDomains), settings, os, {
           workerCap: plan.caps.phpWorkers,
-          allowedFunctions,
+          ...phpDisableOpts,
           now,
           ...(opts.accountPages ? { pageScope: opts.accountPages.scopeOf.get(account.id) ?? '' } : {}),
         })
@@ -661,7 +668,7 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
             workerCap: plan.caps.phpWorkers,
             maxMemoryMb: plan.resources.memoryMb,
             apacheMpm: settings.apacheMpm,
-            allowedFunctions,
+            ...phpDisableOpts,
             narrowableBasedir: accountDomains.some(dom => dom.site?.isolated && dom.php.version === version),
             iniDefaults: fpmIniDefaults(opts.svcHost?.phpFpm ?? null),
             pearLibrary: opts.svcHost?.pearLibraries[version] ?? null,
@@ -1961,6 +1968,10 @@ export class HostReconciler {
     let mailFx = await readMailfxRenderInput(this.deps.store.rootDir, snapshot, this.deps.os.family, null)
     // sec: saved WAF/flood edge input and the activated trusted-proxy authority
     const secEdge = await readSecEdgeConfiguration(this.deps.store.rootDir, { family: this.deps.os.family, domains: snapshot.domains })
+    const globalPhpDisabled = await readGlobalPhpDisabledFunctions(this.deps.store.rootDir)
+    const sshAutobanPolicy = await readSshAutobanPolicy(this.deps.store.rootDir)
+    const sshAutobanBans = sshAutobanPolicy.enabled ? await readActiveSshAutobanBans(this.deps.store.rootDir) : []
+    const sshAutoban = { enabled: sshAutobanPolicy.enabled, banTimeoutSec: sshAutobanPolicy.banMin * 60, activeBans: toFirewallBans(sshAutobanBans) }
     const compilerAccess = await compilerAccessInput(this.deps.store.rootDir, this.deps.os.family, snapshot)
     const sourceBuildHook = this.deps.os.family === 'rhel' && await compilerAccessHookAvailable('rhel')
     const svcHost = await readSvcHostInput(this.deps.store.rootDir, snapshot, this.deps.webStatus === true)
@@ -2042,6 +2053,8 @@ export class HostReconciler {
         mailFx,
         ...(mailTls !== undefined ? { mailTls } : {}),
         secEdge,
+        ...(globalPhpDisabled !== undefined ? { globalPhpDisabled } : {}),
+        sshAutoban,
         compilerAccess,
         sourceBuildHook,
         svcHost,
@@ -2236,6 +2249,8 @@ export class HostReconciler {
           mailFx,
           ...(mailTls !== undefined ? { mailTls } : {}),
           secEdge,
+        ...(globalPhpDisabled !== undefined ? { globalPhpDisabled } : {}),
+        sshAutoban,
           compilerAccess,
           sourceBuildHook,
           svcHost,
@@ -2626,6 +2641,7 @@ export class HostReconciler {
       const finalSnapshot =
         compiled.terminatingAccounts.length > 0 ? await this.deps.store.readSnapshot() : snapshot
       await reindexFromState(this.deps.db, finalSnapshot)
+      await enforceSshAutoban({ rootDir: this.deps.store.rootDir, executor: this.deps.executor, os: this.deps.os, getWriterLock: () => this.deps.store.getWriterLock() }).catch(() => undefined)
 
       this.emitStage(pendingGen.id, 'verify', 'passed', scope)
 

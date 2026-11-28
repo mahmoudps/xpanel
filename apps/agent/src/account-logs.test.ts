@@ -68,5 +68,12 @@ describe('agent account log route', () => {
     await expect(setup({ readTail: async () => { throw new Error('EACCES') } }).call('/accounts/alice/logs/' + MAIN + '/access')).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' })
     await expect(setup().call('/accounts/alice/logs/' + MAIN + '/access?path=/etc/shadow')).rejects.toMatchObject({ code: 'VALIDATION' })
     expect((await setup().call('/accounts/alice/logs/' + MAIN + '/access', 'POST'))!.status).toBe(405)
+
+    const trafficOnly = setup({ disabled: ['raw-access', 'Raw Access Logs'] })
+    await expect(trafficOnly.call('/accounts/alice/logs/' + MAIN + '/access')).rejects.toMatchObject({ code: 'FORBIDDEN' })
+    expect((await trafficOnly.call('/accounts/alice/logs/' + MAIN + '/traffic-telemetry'))!.status).toBe(200)
+    const noTraffic = setup({ disabled: ['traffic-monitor-account'] })
+    await expect(noTraffic.call('/accounts/alice/logs/' + MAIN + '/traffic-telemetry')).rejects.toMatchObject({ code: 'FORBIDDEN' })
+    expect((await noTraffic.call('/accounts/alice/logs/' + MAIN + '/access'))!.status).toBe(200)
   })
 })

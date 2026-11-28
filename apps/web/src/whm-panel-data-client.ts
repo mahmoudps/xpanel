@@ -17,6 +17,7 @@ function bindWhmPanelData(askDialog: ((options: Record<string, unknown>) => Prom
     if (root.dataset.generationsBound === 'true') return
     root.dataset.generationsBound = 'true'
     const status = root.querySelector<HTMLElement>('[data-generations-status]'), body = root.querySelector<HTMLTableSectionElement>('tbody[data-generation-rows]')
+    const rebuildButton = root.querySelector<HTMLButtonElement>('[data-action="rebuild-index"]')
     const request = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
     if (!status || !body) return
     const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
@@ -53,6 +54,7 @@ function bindWhmPanelData(askDialog: ((options: Record<string, unknown>) => Prom
     const sync = (): void => {
       const open = !busy && !review && admitted() && restorable()
       body.querySelectorAll<HTMLButtonElement>('[data-action="rollback-generation"]').forEach(button => { button.disabled = !open || !read!.rollbackEligibleGenerationIds.includes(Number(button.dataset.generationId)) })
+      if (rebuildButton) rebuildButton.disabled = busy || !admitted()
       root.setAttribute('aria-busy', String(busy))
     }
     const explain = (): void => note('read', restorable() ? t('Restore requires fresh current/target checks, the current desired-state revision and typing the persisted target generation number. Saved pending changes prevent restoration.')
@@ -115,6 +117,24 @@ function bindWhmPanelData(askDialog: ((options: Record<string, unknown>) => Prom
         note(review ? 'uncertain' : 'failed', review ? t('The restore outcome requires review. No retry was sent; read current state before continuing.') : t('Restore was refused or confirmation did not match. No automatic retry was sent.'))
       } finally { busy = false; sync() }
     }
+    const rebuild = async (): Promise<void> => {
+      if (busy || !admitted()) return
+      if (typeof askDialog !== 'function') { note('failed', t('Confirmation is required; nothing was sent.')); return }
+      busy = true; sync()
+      try {
+        const confirmed = await askDialog({ title: t('Rebuild search index'), body: t('Rebuilds the derived FTS and SQLite search index tables from the desired-state tree without modifying operational tables.'), confirm: t('Rebuild index') })
+        if (confirmed !== true || !admitted()) return
+        note('rebuilding', t('Rebuilding search index…'))
+        const reply = await checkedRequest('POST', '/api/server/search-index/rebuild', { confirm: true })
+        const counts = panelObject(reply) && panelObject(reply.counts) ? reply.counts as Record<string, unknown> : null
+        const ftsEntries = typeof counts?.ftsEntries === 'number' ? counts.ftsEntries : null
+        note('rebuilt', ftsEntries !== null ? t('Search index rebuilt ({count} indexed entries).', { count: ftsEntries }) : t('Search index rebuilt from the desired-state tree.'))
+      } catch {
+        if (!templateContractIntact) return
+        note('failed', t('Search index rebuild failed. Review server status before retrying.'))
+      } finally { busy = false; sync() }
+    }
+    rebuildButton?.addEventListener('click', () => { void rebuild() })
     body.addEventListener('click', event => { const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>('[data-action="rollback-generation"]') : null; if (button && !button.disabled) void rollback(Number(button.dataset.generationId)) })
     if (!admitted()) { sync(); note('unavailable', t('Generation history and rollback require root authorization. Nothing was read or changed.')); return }
     busy = true; sync(); note('reading', t('Reading…'))
