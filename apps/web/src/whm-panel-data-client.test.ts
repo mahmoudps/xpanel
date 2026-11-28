@@ -1,7 +1,7 @@
 /// <reference lib="dom" />
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { renderWhmSurface } from './surfaces/xwhm.ts'
+import { renderWhmRoute } from '../../../tests/fixtures/workspace-route-render.ts'
 import { allRouteClientChunkSources } from './route-client-chunks.ts'
 import { WHM_PANEL_DATA_CLIENT_BINDING } from './whm-panel-data-client.ts'
 
@@ -16,14 +16,14 @@ const tick = async () => { for (let index = 0; index < 8; index++) await new Pro
 const $ = <T extends HTMLElement = HTMLElement>(selector: string) => document.querySelector<T>(selector)!
 const rollbackButton = (id: number) => $<HTMLButtonElement>(`[data-action="rollback-generation"][data-generation-id="${id}"]`)
 const boot = (send: Send, ask: (options: Record<string, unknown>) => Promise<unknown> = async () => '7') => {
-  document.body.innerHTML = renderWhmSurface({ locale: 'en', activeRoute: '/whm/panel/data', generationId: 9, principal: { kind: 'root', id: 'fixture-root', username: 'operator' } })
+  document.body.innerHTML = renderWhmRoute('/whm/panel/data', { locale: 'en', generationId: 9, principal: { kind: 'root', id: 'fixture-root', username: 'operator' } })
   ;(window as Window & { xpanelSessionRequest?: Send }).xpanelSessionRequest = send
   new Function('return ' + WHM_PANEL_DATA_CLIENT_BINDING)()(ask)
 }
 afterEach(() => { document.body.replaceChildren(); delete (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest })
 
 describe('configuration history binding', () => {
-  it('is registered, reads the real history and enables only admitted rollback targets; rebuild stays disabled with a reason', async () => {
+  it('is registered, reads the real history and enables admitted rollback targets and search index rebuild', async () => {
     expect(allRouteClientChunkSources()).toContain(WHM_PANEL_DATA_CLIENT_BINDING)
     boot(vi.fn<Send>(async () => before)); await tick()
     expect(document.querySelectorAll('[data-generation-row]')).toHaveLength(2)
@@ -31,8 +31,36 @@ describe('configuration history binding', () => {
     expect(rollbackButton(9).disabled).toBe(true)
     expect($('[data-generations-status]').dataset.state).toBe('read')
     const rebuild = $<HTMLButtonElement>('[data-action="rebuild-index"]')
-    expect(rebuild.disabled).toBe(true)
-    expect(document.getElementById(rebuild.getAttribute('aria-describedby')!)!.textContent).toContain('cannot rebuild the index')
+    expect(rebuild.disabled).toBe(false)
+    expect(document.getElementById(rebuild.getAttribute('aria-describedby')!)!.textContent).toContain('derived FTS and SQLite search index')
+  })
+  it('rebuilds the search index after confirmation and announces live status', async () => {
+    const send = vi.fn<Send>(async (method, path) => method === 'POST' && path === '/api/server/search-index/rebuild'
+      ? { ok: true, rebuilt: true, counts: { resellers: 1, plans: 2, accounts: 3, domains: 4, serviceUsers: 5, databases: 1, ftsEntries: 16 } }
+      : before)
+    const ask = vi.fn(async () => true)
+    boot(send, ask); await tick()
+    $<HTMLButtonElement>('[data-action="rebuild-index"]').click(); await tick()
+    expect(ask).toHaveBeenCalledWith(expect.objectContaining({ title: 'Rebuild search index' }))
+    expect(send).toHaveBeenCalledWith('POST', '/api/server/search-index/rebuild', { confirm: true })
+    expect($('[data-generations-status]').dataset.state).toBe('rebuilt')
+    expect($('[data-generations-status]').textContent).toContain('16')
+    expect($('[data-generations-status]').getAttribute('role')).toBe('status')
+  })
+  it('does not send rebuild when confirmation is declined and announces failure on error', async () => {
+    const send = vi.fn<Send>(async (method) => {
+      if (method === 'POST') throw { status: 500 }
+      return before
+    })
+    boot(send, async () => false); await tick()
+    $<HTMLButtonElement>('[data-action="rebuild-index"]').click(); await tick()
+    expect(send.mock.calls.filter(([method]) => method === 'POST')).toHaveLength(0)
+
+    document.body.replaceChildren()
+    boot(send, async () => true); await tick()
+    $<HTMLButtonElement>('[data-action="rebuild-index"]').click(); await tick()
+    expect($('[data-generations-status]').dataset.state).toBe('failed')
+    expect($('[data-generations-status]').getAttribute('role')).toBe('alert')
   })
   it('restores after a typed danger confirmation, a fresh check and a read-back of the new active generation', async () => {
     let restoredState = false

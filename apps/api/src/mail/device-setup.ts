@@ -27,18 +27,39 @@ export interface DeviceSetupView {
 
 // The edge's autoconfig documents and this page describe the same rendered listeners.
 export const MAIL_CLIENT_ENDPOINTS = edge.MAIL_CLIENT_ENDPOINTS
-const AUTOCONFIG = { path: '/api/webmail/connect-devices/autoconfig.xml', filename: 'config-v1.1.xml', contentType: 'application/xml; charset=utf-8' }
-const APPLE = { path: '/api/webmail/connect-devices/apple.mobileconfig', filename: 'mail-account.mobileconfig', contentType: 'application/x-apple-aspen-config' }
+export const DEVICE_SETUP_FILES = {
+  autoconfig: { filename: 'config-v1.1.xml', contentType: 'application/xml; charset=utf-8' },
+  apple: { filename: 'mail-account.mobileconfig', contentType: 'application/x-apple-aspen-config' },
+} as const
+const AUTOCONFIG = { path: '/api/webmail/connect-devices/autoconfig.xml', ...DEVICE_SETUP_FILES.autoconfig }
+const APPLE = { path: '/api/webmail/connect-devices/apple.mobileconfig', ...DEVICE_SETUP_FILES.apple }
 
 const xml = (value: string): string => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;')
-const hostnameOf = (value: unknown): string | null => {
+export const normalizeDeviceSetupHostname = (value: unknown): string | null => {
   const host = typeof value === 'string' ? value.trim().toLowerCase().replace(/\.$/, '') : ''
   return host.length <= 253 && /^(?!-)[a-z0-9-]{1,63}(?<!-)(?:\.(?!-)[a-z0-9-]{1,63}(?<!-))+$/.test(host) ? host : null
 }
-const mailboxOf = (value: unknown): string => {
+export const normalizeDeviceSetupMailbox = (value: unknown): string => {
   const mailbox = typeof value === 'string' ? value.trim().toLowerCase() : ''
   return mailbox.length <= 254 && /^[a-z0-9._%+-]{1,64}@(?!-)[a-z0-9-]{1,63}(?<!-)(?:\.(?!-)[a-z0-9-]{1,63}(?<!-))+$/.test(mailbox)
     ? mailbox : fail('PRECONDITION_FAILED', 'the mailbox address is unavailable', { stateChanged: false })
+}
+const hostnameOf = normalizeDeviceSetupHostname
+const mailboxOf = normalizeDeviceSetupMailbox
+
+export function buildDeviceSetupView(mailbox: string, hostname: string | null, downloads: DeviceSetupView['downloads']): DeviceSetupView {
+  return {
+    mailbox,
+    username: mailbox,
+    hostname,
+    incoming: [...MAIL_CLIENT_ENDPOINTS.incoming],
+    outgoing: [...MAIL_CLIENT_ENDPOINTS.outgoing],
+    pop3: 'not-offered',
+    authentication: 'password',
+    passwordIncluded: false,
+    certificate: 'not-verified-by-this-page',
+    downloads,
+  }
 }
 
 /** Thunderbird autoconfig (config-v1.1); the password is never part of the file. */
@@ -128,14 +149,12 @@ export const mailClientInstructions = (mailbox: string, hostname: string): { sub
   text: ['Use these settings in your mail client.', '', 'Username: ' + mailbox, 'Password: your mailbox password', 'Incoming mail (IMAP): ' + hostname + ', port 993, SSL/TLS', 'Outgoing mail (SMTP): ' + hostname + ', port 465, SSL/TLS'].join('\n'),
 })
 
-async function sendInstructions(request: Request, url: URL, method: string, ports: DeviceSetupPorts): Promise<Response> {
-  if (method !== 'POST') return methodNotAllowed(['POST'])
-  if (url.search) return fail('VALIDATION', 'mail client setup accepts no query selectors', { stateChanged: false })
-  const mailbox = mailboxOf((await ports.open(request)).mailbox)
-  let body: unknown
-  try { body = await request.json() } catch { return fail('VALIDATION', 'a JSON body with one email address is required', { stateChanged: false }) }
-  if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).length !== 1 || !Object.hasOwn(body, 'email')) return fail('VALIDATION', 'a JSON body with one email address is required', { stateChanged: false })
-  const email = assertEmail((body as { email: unknown }).email, 'email'), hostname = hostnameOf(await ports.readHostname())
+export async function dispatchDeviceSetupInstructions(
+  mailbox: string,
+  targetEmail: unknown,
+  ports: Pick<DeviceSetupPorts, 'readHostname' | 'sendEmail' | 'now'>,
+): Promise<string> {
+  const email = assertEmail(targetEmail, 'email'), hostname = hostnameOf(await ports.readHostname())
   if (!hostname) return fail('PRECONDITION_FAILED', 'the server hostname has not been saved, so no instructions can be sent', { stateChanged: false, reason: 'hostname_unavailable' })
   // shortcut: counted in this process, so a restart forgets; one API process sends and Postfix limits still apply.
   const now = (ports.now ?? Date.now)(), recent = (instructionsSent.get(mailbox) ?? []).filter(at => now - at < 3_600_000)
@@ -143,6 +162,17 @@ async function sendInstructions(request: Request, url: URL, method: string, port
   const message = mailClientInstructions(mailbox, hostname)
   await ports.sendEmail({ to: [email], ...message })
   instructionsSent.set(mailbox, [...recent, now])
+  return email
+}
+
+async function sendInstructions(request: Request, url: URL, method: string, ports: DeviceSetupPorts): Promise<Response> {
+  if (method !== 'POST') return methodNotAllowed(['POST'])
+  if (url.search) return fail('VALIDATION', 'mail client setup accepts no query selectors', { stateChanged: false })
+  const mailbox = mailboxOf((await ports.open(request)).mailbox)
+  let body: unknown
+  try { body = await request.json() } catch { return fail('VALIDATION', 'a JSON body with one email address is required', { stateChanged: false }) }
+  if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).length !== 1 || !Object.hasOwn(body, 'email')) return fail('VALIDATION', 'a JSON body with one email address is required', { stateChanged: false })
+  await dispatchDeviceSetupInstructions(mailbox, (body as { email: unknown }).email, ports)
   return mailboxJson({ sent: true })
 }
 
@@ -155,10 +185,7 @@ export async function handleMailDeviceSetupRoute(request: Request, url: URL, met
   if (url.search) return fail('VALIDATION', 'mail client setup accepts no query selectors', { stateChanged: false })
   const mailbox = mailboxOf((await ports.open(request)).mailbox), hostname = hostnameOf(await ports.readHostname())
   if (route === 'view') {
-    const view: DeviceSetupView = { mailbox, username: mailbox, hostname, incoming: [...MAIL_CLIENT_ENDPOINTS.incoming], outgoing: [...MAIL_CLIENT_ENDPOINTS.outgoing],
-      pop3: 'not-offered', authentication: 'password', passwordIncluded: false, certificate: 'not-verified-by-this-page',
-      downloads: hostname ? [{ kind: 'autoconfig', ...AUTOCONFIG }, { kind: 'apple', ...APPLE }] : [] }
-    return mailboxJson(view)
+    return mailboxJson(buildDeviceSetupView(mailbox, hostname, hostname ? [{ kind: 'autoconfig', ...AUTOCONFIG }, { kind: 'apple', ...APPLE }] : []))
   }
   if (!hostname) return fail('PRECONDITION_FAILED', 'the server hostname has not been saved, so no setup file can be generated', { stateChanged: false, reason: 'hostname_unavailable' })
   const file = route === 'autoconfig' ? AUTOCONFIG : APPLE

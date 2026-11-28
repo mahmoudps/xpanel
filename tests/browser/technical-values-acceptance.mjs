@@ -144,6 +144,10 @@ try {
             'v2-traffic-error': [0, 2],
             'v2-traffic-referrer': [0, 1, 2],
             'v2-traffic-client': [0, 1, 2],
+            'v2-traffic-visitors': [0, 1, 2],
+            'v2-traffic-live-monitor': [0, 1, 2, 3, 4],
+            'v2-traffic-live-agents': [1, 2],
+            'v2-traffic-live-ips': [0, 1, 2],
           }
           for (const region of document.querySelectorAll('#main-content [data-surface-widget="website-analytics"] [role="region"][tabindex="0"]')) {
             const card = region.closest('.v2-card'), table = region.querySelector('table'), key = card?.getAttribute('aria-labelledby')?.replace(/-heading$/, '')
@@ -207,8 +211,8 @@ try {
           const result = { raw: e.textContent, unicode_bidi: getComputedStyle(e).unicodeBidi, number: ranges[0], unit: ranges[1] }; e.innerHTML = original; return result
         })
         check('text-replacement-number-before-unit', outcome.live_text_replacement.number.left < outcome.live_text_replacement.unit.left, outcome.live_text_replacement)
-        const expectedTables = ['v2-traffic-bandwidth', 'v2-traffic-page', 'v2-traffic-status', 'v2-traffic-error', 'v2-traffic-referrer', 'v2-traffic-client']
-        check('all-traffic-tables-preserved', g.wrappers.length === 6 && expectedTables.every(key => g.wrappers.some(w => w.key === key)), g.wrappers)
+        const expectedTables = ['v2-traffic-bandwidth', 'v2-traffic-page', 'v2-traffic-status', 'v2-traffic-error', 'v2-traffic-referrer', 'v2-traffic-client', 'v2-traffic-visitors', 'v2-traffic-live-monitor', 'v2-traffic-live-agents', 'v2-traffic-live-ips']
+        check('all-traffic-tables-preserved', g.wrappers.length === expectedTables.length && expectedTables.every(key => g.wrappers.some(w => w.key === key)), g.wrappers)
         check('all-traffic-table-rows-match-header-spans', g.wrappers.every(w => w.columns > 0 && w.rows.length > 0 && w.rows.every(row => row.column_span === w.columns && row.cells.every(cell => cell.text.length > 0))), g.wrappers)
         check('table-scroll-regions-contained', g.wrappers.every(w => w.left >= -1 && w.right <= sample.width + 1 && w.left >= w.card.left - 1 && w.right <= w.card.right + 1 && w.overflow_x === 'auto' && w.role === 'region' && w.tabindex === 0), g.wrappers)
         const expectedTrafficFields = [
@@ -218,6 +222,10 @@ try {
           ['v2-traffic-cache-latency:1', 'DD', ['Average request latency', 'متوسط زمن استجابة الطلب']],
           ['v2-traffic-cache-latency:2', 'DD', ['P95 request latency', 'زمن استجابة الطلب عند P95']],
           ['v2-traffic-visitors:0', 'DD', ['Unique visitors', 'الزوار الفريدون']],
+          ['v2-traffic-live-monitor:0', 'DD', ['Total Requests', 'إجمالي الطلبات']],
+          ['v2-traffic-live-monitor:1', 'DD', ['Unique Visitors', 'الزوار الفريدون']],
+          ['v2-traffic-live-monitor:2', 'DD', ['5xx errors', 'أخطاء 5xx']],
+          ['v2-traffic-live-monitor:3', 'DD', ['Blocked addresses', 'العناوين المحظورة']],
         ]
         check('approved-traffic-field-identities-preserved', g.approved_fields.length === expectedTrafficFields.length && expectedTrafficFields.every(([identity, tag, labels]) => g.approved_fields.some(field => field.identity === identity && field.tag === tag && field.label === labels[sample.locale === 'ar' ? 1 : 0])), g.approved_fields)
         check('approved-traffic-field-label-gaps-and-edges', g.approved_fields.length === expectedTrafficFields.length && g.approved_fields.every(field => Math.abs(field.gap - 8) <= 0.8 && field.logical_edge_delta <= 1 && (field.glyph_edge_delta === null || field.glyph_edge_delta <= 1)), g.approved_fields)
