@@ -100,7 +100,7 @@ function databaseWorkspace(input: WhmDatabaseInput, kind: DatabaseKind): string 
   } else {
     const canRootPassword = canRead && input.dataAuthority?.canRootPassword === true
     body = section('database-engines', t(msgctxt('theme:v2', 'Database engines')), rows('engines', t(msgctxt('theme:v2', 'Database engines')), [msgctxt('theme:v2', 'Engine'), msgid('Service'), msgid('Unit'), msgid('Version'), msgctxt('theme:v2', 'Saved databases')]))
-      + databaseProfiles(input) + databaseServerTools(input) + dbServiceWorkspace(input, 'postgresql', input.dataAuthority?.canDbService)
+      + databaseProfiles(input) + databaseServerTools(input) + dbServiceWorkspace(input, 'mysql', input.dataAuthority?.canDbService) + dbServiceWorkspace(input, 'postgresql', input.dataAuthority?.canDbService)
       + section('database-root-password', t(msgid('MariaDB root password')), `<div class="v2-whm-data__stack" data-whm-db-root-password data-can-manage="${canRootPassword}">${facts(t, [['clientFile', msgid('Root client file')]], 'data-db-root-fact')}`
         + fields(field('v2-whm-db-root-new', t(msgid('New password')), { kind: 'input', type: 'password', disabled: true, autocomplete: 'new-password', dir: 'ltr', maxlength: 128, spellcheck: false, hooks: { 'data-db-root-new': true } }) + field('v2-whm-db-root-confirm', t(msgid('Confirm password')), { kind: 'input', type: 'password', disabled: true, autocomplete: 'new-password', dir: 'ltr', maxlength: 128, spellcheck: false, hooks: { 'data-db-root-confirm': true } }))
         + note('', { 'data-db-root-strength': true }) + actions(button(t(msgid('Generate password')), { 'data-db-root-generate': true }) + button(t(msgid('Change password')), { 'data-db-root-submit': true }, true, true))
@@ -144,12 +144,41 @@ function engineWorkspace(input: WhmDatabaseInput, engine: 'phpmyadmin' | 'upgrad
 }
 
 function tuningWorkspace(input: WhmDatabaseInput): string {
-  const { t, canRead } = context(input)
-  return page(input, '/whm/databases/tuning', t(msgctxt('theme:v2', 'Database tuning')), t(msgctxt('theme:v2', 'Review observed MariaDB counters before planning changes. No settings are applied here.')), status(t(msgctxt('theme:v2', 'Database tuning observations have not been read yet.')), { 'data-db-tuning-status': true })
+  const { t, canRead, canManage } = context(input)
+  const numField = (key: string, label: string, min: number, max: number, step = 1): string =>
+    field(`db-tuning-${key}`, t(label), { kind: 'input', type: 'number', min, max, step, disabled: true, dir: 'ltr', hooks: { 'data-db-tuning-input': key } })
+  const selectField = (key: string, label: string, options: readonly (readonly [string, string])[]): string =>
+    field(`db-tuning-${key}`, t(label), { kind: 'select', disabled: true, dir: 'ltr', hooks: { 'data-db-tuning-input': key }, options: options.map(([value, text]) => ({ value, label: t(text) })) })
+  const tuningControls = `<div class="v2-whm-data__stack" data-db-tuning-editor>`
+    + facts(t, [['dropinPath', msgid('Drop-in file')], ['dropinState', msgid('Drop-in status')], ['rollbackState', msgid('Rollback snapshot')]], 'data-db-tuning-fact')
+    + fields(
+      numField('innodb_buffer_pool_size', msgid('InnoDB buffer pool size (bytes)'), 67_108_864, 549_755_813_888)
+      + numField('max_connections', msgid('Maximum connections'), 10, 10_000)
+      + numField('tmp_table_size', msgid('Temporary table size (bytes)'), 1_048_576, 4_294_967_296)
+      + numField('max_heap_table_size', msgid('Max heap table size (bytes)'), 1_048_576, 4_294_967_296)
+      + numField('table_open_cache', msgid('Table open cache'), 64, 524_288)
+      + numField('thread_cache_size', msgid('Thread cache size'), 0, 16_384)
+      + numField('innodb_log_file_size', msgid('InnoDB log file size (bytes)'), 16_777_216, 17_179_869_184)
+      + selectField('query_cache_type', msgid('Query cache mode'), [['0', msgid('Off (0)')], ['1', msgid('On (1)')], ['2', msgid('Demand (2)')]])
+      + selectField('slow_query_log', msgid('Slow query log'), [['0', msgid('Off (0)')], ['1', msgid('On (1)')]])
+      + numField('long_query_time', msgid('Long query time (seconds)'), 0.1, 3600, 0.1)
+    )
+    + actions(
+      button(t(msgid('Preview drop-in')), { 'data-db-tuning-preview': true })
+      + button(t(msgid('Apply tuning')), { 'data-db-tuning-apply': true }, true, true)
+      + button(t(msgid('Roll back')), { 'data-db-tuning-rollback': true })
+    )
+    + `<pre class="v2-mono" dir="ltr" tabindex="0" data-db-tuning-diff></pre>`
+    + status(t(msgid('Read MariaDB before previewing or applying tuning changes.')), { 'data-db-tuning-action-status': true })
+    + note(t(msgid('Changes are written only to 90-xpanel-tuning.cnf, checked with mariadbd, and automatically rolled back if MariaDB fails to restart or answer SELECT 1.')))
+    + '</div>'
+  return page(input, '/whm/databases/tuning', t(msgctxt('theme:v2', 'Database tuning')), t(msgid('Review observed MariaDB counters, preview validated 90-xpanel-tuning.cnf drop-in diffs, apply changes, or roll back.')), status(t(msgctxt('theme:v2', 'Database tuning observations have not been read yet.')), { 'data-db-tuning-status': true })
     + section('database-tuning-summary', t(msgctxt('theme:v2', 'MariaDB observations')), facts(t, [['version', msgid('Version')], ['observedAt', msgctxt('theme:v2', 'Observed at (UTC)')], ['Uptime', msgctxt('theme:v2', 'Server uptime (seconds)')], ['Uptime_since_flush_status', msgctxt('theme:v2', 'Status interval (seconds)')]], 'data-db-tuning-fact'))
     + section('database-tuning-settings', t(msgctxt('theme:v2', 'Runtime settings')), table(t, t(msgctxt('theme:v2', 'Observed runtime settings')), [msgctxt('theme:v2', 'Setting or counter'), msgctxt('theme:v2', 'Observed value')], { 'data-db-tuning-rows': 'variables' }))
     + section('database-tuning-counters', t(msgctxt('theme:v2', 'Status counters')), table(t, t(msgctxt('theme:v2', 'MariaDB status counters')), [msgctxt('theme:v2', 'Setting or counter'), msgctxt('theme:v2', 'Observed value')], { 'data-db-tuning-rows': 'status' }) + note(t(msgctxt('theme:v2', 'One counter reading does not establish a workload trend.'))))
-    + section('database-tuning-plan', t(msgctxt('theme:v2', 'Tuning review plan')), `<div class="v2-whm-data__stack" data-db-tuning-plan data-empty-text="${esc(t(msgctxt('theme:v2', 'Read MariaDB to prepare the advisory plan.')))}">${note(t(msgctxt('theme:v2', 'Read MariaDB to prepare the advisory plan.')))}</div>`) + databaseTuningTemplates(), { 'data-whm-database-tuning': true, 'data-can-read': String(canRead) }, button(t(msgid('Read again')), { 'data-db-tuning-read': true }, !canRead))
+    + section('database-tuning-plan', t(msgctxt('theme:v2', 'Tuning review plan')), `<div class="v2-whm-data__stack" data-db-tuning-plan data-empty-text="${esc(t(msgctxt('theme:v2', 'Read MariaDB to prepare the advisory plan.')))}">${note(t(msgctxt('theme:v2', 'Read MariaDB to prepare the advisory plan.')))}</div>`)
+    + section('database-tuning-apply', t(msgid('Apply MariaDB tuning drop-in')), tuningControls)
+    + databaseTuningTemplates(), { 'data-whm-database-tuning': true, 'data-can-read': String(canRead), 'data-can-manage': String(canManage) }, button(t(msgid('Read again')), { 'data-db-tuning-read': true }, !canRead))
 }
 
 /** An unrelated route is never represented as an unavailable database operation. */

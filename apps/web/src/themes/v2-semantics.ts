@@ -44,13 +44,19 @@ export const V2_WEB_STATS_REQUIREMENT: ControllerDeclaration = { id: 'v2-semanti
   rootAttributes: { 'data-chart-state': { oneOf: ['unread', 'unavailable', 'empty', 'loaded'] } },
   requiredSelectors: ['section[aria-labelledby="v2-web-stats-selection-heading"] h2#v2-web-stats-selection-heading', 'section[aria-labelledby="v2-web-stats-days-heading"] h2#v2-web-stats-days-heading', 'section[aria-labelledby="v2-web-stats-engines-heading"] h2#v2-web-stats-engines-heading'],
   elements: [{ selector: 'form', tags: ['form'], attributes: { method: 'get', action: '/metrics/web-stats' }, occurrence: 'every', required: false }] }
-const store = (route: string): ObservationCounterpart => ({
+const storeUnavailable = (route: string): ObservationCounterpart => ({
   route, legacyHook: '[data-wiring="unavailable"]',
-  evidence: 'V2 software/catalog.ts renderV2WhmStore: installer absent; data-installer-state=unavailable on its visible status, with all approved action buttons disabled by common.button default.',
+  evidence: 'V2 software/catalog.ts renderV2WhmStore activity view retains data-installer-state=unavailable with disabled actions.',
   requirement: { id: 'v2-semantic-installer:' + route, rootSelector: '[data-store-workspace]', rootRequired: true, applicableRoutes: [route],
     rootAttributes: { 'data-whm-detail-route': route }, requiredSelectors: ['[data-installer-state="unavailable"]', '[data-store-fact]', 'button'],
     elements: [{ selector: '[data-installer-state="unavailable"]', tags: ['p'], attributes: { role: 'status', hidden: false }, occurrence: 'every' },
       { selector: 'button', tags: ['button'], attributes: { type: 'button', disabled: true }, occurrence: 'every' }] },
+})
+const storeLive = (route: string, selectors: readonly string[]): ObservationCounterpart => ({
+  route, legacyHook: '[data-wiring="unavailable"]',
+  evidence: 'V2 software/catalog.ts renderV2WhmStore activates live one-click deploy, app installer, and distro package workspaces.',
+  requirement: { id: 'v2-semantic-installer:' + route, rootSelector: '[data-store-workspace]', rootRequired: true, applicableRoutes: [route],
+    rootAttributes: { 'data-whm-detail-route': route }, requiredSelectors: ['[data-store-fact]', ...selectors] },
 })
 
 /** Each replaced wiring observation has a real source-owned counterpart. Never mark an operational
@@ -66,7 +72,10 @@ export const V2_OBSERVATION_COUNTERPARTS: readonly ObservationCounterpart[] = [
   native('/software/php', 'form[data-domain-php-form]', 'V2 software/php.ts real stored domain PHP editor and existing core client fields', ['[name="domainId"]', '[name="version"]', '[name="handler"]', '[name="fpm.mode"]', '[data-domain-php-status]']),
   native('/whm/security/firewall', '[data-approved-whm-operations="/whm/security/firewall"]', 'whm-firewall-client and existing qualified/denied conditional table/editor declarations'),
   native('/whm/services', '[data-host-services]', 'host-services client and existing approved-host-services declaration; no qualification changes'),
-  ...['/whm/software/site-software', '/whm/software/store', '/whm/software/store/activity', '/whm/software/store/extensions'].map(store),
+  storeUnavailable('/whm/software/store/activity'),
+  storeLive('/whm/software/site-software', ['[data-whm-one-click-deploy]', '[data-whm-app-installer]']),
+  storeLive('/whm/software/store', ['[data-whm-one-click-deploy]', '[data-whm-app-installer]']),
+  storeLive('/whm/software/store/extensions', ['[data-whm-distro-packages]']),
 ]
 
 /** Exact Classic-only split/filter/drawer observations. Real announcement hooks and data-state stay required. */

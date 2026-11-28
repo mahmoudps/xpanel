@@ -1,4 +1,4 @@
-import { DB_RUNUSER, postgresqlQueryArgv } from './db-engines-command.ts'
+import { DB_ADMIN_DEFAULTS_FILE, DB_RUNUSER, postgresqlQueryArgv } from './db-engines-command.ts'
 
 /**
  * Reviewed grammar of the WHM database service tools (Redis, MongoDB, PostgreSQL and phpMyAdmin access).
@@ -24,7 +24,7 @@ export const PG_MAJORS: readonly number[] = [13, 14, 15, 16, 17, 18]
 export const DB_SERVICE_ACTIONS = ['start', 'stop', 'restart', 'reload', 'enable', 'disable'] as const
 export type DbServiceAction = typeof DB_SERVICE_ACTIONS[number]
 
-const UNIT = /^(?:redis-server|redis|valkey-server|valkey|mongod|postgresql|postgresql@[0-9]{2}-main)\.service$/
+const UNIT = /^(?:redis-server|redis|valkey-server|valkey|mongod|postgresql|postgresql@[0-9]{2}-main|mariadb|mysql)\.service$/
 const REDIS_FILE = /^redis-[0-9]{8}T[0-9]{6}Z\.rdb$/
 const MONGO_FILE = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,120}\.archive\.gz$/
 const REDIS_DATA = /^\/var\/lib\/(?:redis|valkey)(?:\/[a-z0-9_-]{1,64})?\/[A-Za-z0-9_-]{1,64}\.rdb$/
@@ -120,9 +120,19 @@ export const PMA_HTPASSWD = '/etc/nginx/xpanel-phpmyadmin.htpasswd'
 export function isDbServiceHostTarget(path: string, operation: string): boolean {
   if (path === PMA_TICKET_DIR) return operation === 'ensure-directory'
   if (['/usr/share/phpmyadmin/xpanel-signon.php', '/usr/share/phpMyAdmin/xpanel-signon.php', '/etc/phpmyadmin/conf.d/90-xpanel-signon.php', '/etc/phpMyAdmin/config.inc.php', '/etc/xpanel/database-web-clients.json', '/etc/xpanel/phpmyadmin-fpm.conf'].includes(path)) return operation === 'read' || operation === 'write' || operation === 'remove'
+  if (['/etc/mysql/mariadb.conf.d/90-xpanel-tuning.cnf', '/etc/my.cnf.d/90-xpanel-tuning.cnf', '/etc/mysql/mariadb.conf.d/90-xpanel-mysql.cnf', '/etc/my.cnf.d/90-xpanel-mysql.cnf'].includes(path)) return operation === 'read' || operation === 'write' || operation === 'remove'
   if (['/etc/redis/redis.conf', '/etc/redis.conf', '/etc/valkey/valkey.conf', '/etc/mongod.conf', MONGO_ADMIN_FILE, MONGO_TOOLS_CONFIG].includes(path) || isPostgresqlConfigPath(path) || PG_START.test(path)) return operation === 'read' || operation === 'write'
   return false
 }
+
+export const MYSQL_PING_SQL = 'SELECT 1'
+export const MYSQL_VERSION_SQL = 'SELECT VERSION()'
+export const MYSQL_SETTINGS_NAMES = ['port', 'bind_address', 'socket', 'datadir', 'log_error', 'max_connections', 'innodb_buffer_pool_size', 'slow_query_log', 'long_query_time', 'skip_networking'] as const
+export const MYSQL_SERVICE_SETTINGS_SQL = `SHOW GLOBAL VARIABLES WHERE Variable_name IN (${MYSQL_SETTINGS_NAMES.map(name => `'${name}'`).join(', ')})`
+export const MYSQL_CLI = '/usr/bin/mariadb'
+export const mysqlQueryArgv = (sql: string): string[] => [MYSQL_CLI, `--defaults-extra-file=${DB_ADMIN_DEFAULTS_FILE}`, '--batch', '--skip-column-names', '-e', sql]
+export const mariadbdCheckArgv = (family: 'debian' | 'rhel' | null): string[] => [family === 'rhel' ? '/usr/libexec/mariadbd' : '/usr/sbin/mariadbd', '--verbose', '--help']
+const MYSQL_SQL: readonly string[] = [MYSQL_PING_SQL, MYSQL_VERSION_SQL, MYSQL_SERVICE_SETTINGS_SQL]
 
 const same = (argv: readonly unknown[], allowed: readonly string[]): boolean => argv.length === allowed.length && allowed.every((value, index) => argv[index] === value)
 export function isDatabaseServiceCommand(argv: readonly unknown[]): boolean {
@@ -130,6 +140,8 @@ export function isDatabaseServiceCommand(argv: readonly unknown[]): boolean {
   const words = argv as string[]
   if (words[0] === DB_SERVICE_SYSTEMCTL) return words.length === 4 && DB_SERVICE_ACTIONS.includes(words[1] as DbServiceAction) && words[2] === '--' && isDbServiceUnit(words[3])
   if (PG_SQL.some(sql => same(words, postgresqlQueryArgv(sql)))) return true
+  if (MYSQL_SQL.some(sql => same(words, mysqlQueryArgv(sql)))) return true
+  if (same(words, mariadbdCheckArgv('debian')) || same(words, mariadbdCheckArgv('rhel'))) return true
   if (same(words, dnfModuleListArgv())) return true
   try {
     if (words[0] === '/usr/bin/dnf') return same(words, dnfVersionListArgv(words[5] ?? ''))

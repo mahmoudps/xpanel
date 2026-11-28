@@ -33,7 +33,7 @@ describe('database tuning workspace', () => {
   it('reconstructs exact observed values and refuses malformed or unsupported claims', () => {
     expect(readDatabaseTuningView(reply()).variables?.long_query_time).toBe(0.5)
     const bad: unknown[] = []
-    bad.push({ ...reply(), extra: 'secret' }, { ...reply(), state: 'ok' }, { ...reply(), capabilities: { apply: true } }, { ...reply(), observedAt: null })
+    bad.push({ ...reply(), extra: 'secret' }, { ...reply(), state: 'ok' }, { ...reply(), capabilities: { apply: false } }, { ...reply(), observedAt: null })
     const negative = reply(); negative.status!.Uptime = -1; bad.push(negative)
     const zero = reply(); zero.variables!.max_connections = 0; bad.push(zero)
     const unknown = reply(); bad.push({ ...unknown, variables: { ...unknown.variables, path: '/private' } })

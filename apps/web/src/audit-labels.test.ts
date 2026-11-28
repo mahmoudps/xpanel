@@ -69,6 +69,13 @@ const SOURCES = [
   'apps/api/src/account-traffic-workspace.ts',
   'apps/api/src/mail/account-device-setup.ts',
   'apps/api/src/whm-security-controls-routes.ts',
+  'apps/agent/src/web-stack-builder.ts',
+  'apps/agent/src/ols-manager.ts',
+  'apps/api/src/whm-web-stack-routes.ts',
+  'apps/api/src/database-tuning-workspace.ts',
+  'apps/api/src/account-proxy-projects-routes.ts',
+  'apps/api/src/whm-app-installer-routes.ts',
+  'apps/api/src/workspace-controls-routes.ts',
 ]
 
 /** Templates whose concrete actions are written at runtime. */

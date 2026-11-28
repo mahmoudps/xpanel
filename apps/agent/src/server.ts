@@ -99,6 +99,8 @@ import type { ApplicationArtifactProvider, ApplicationInstallCoordinator } from 
 import type { HostJobPlan } from './host-job-contract.ts'
 import { handleMariadbAdminRoute, parseMariadbVersion } from './mariadb-admin.ts'
 import { handleDatabaseTuningRoute } from './database-tuning.ts'
+import { handleWebStackRoute } from './web-stack-builder.ts'
+import { handleOlsManagerRoute } from './ols-manager.ts'
 import { handleAccountDbMaintenanceRoute, handleDbMaintenanceRoute } from './db-maintenance.ts'
 import { handleDbAdminToolsRoute } from './db-admin-tools.ts'
 import type { HostAction } from '@xpanel/core'
@@ -1580,6 +1582,27 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         const svcResponse = await handleSvcRoute(req, url, method, svcRouteContext(deps, freshRoot('services'), secHostProfile(), linuxHost, caller.principalId))
         if (svcResponse) return svcResponse
       }
+      if (url.pathname.startsWith('/host/web-stack') || url.pathname.startsWith('/host/ols')) {
+        const osProfile = secHostProfile() ?? profileFor('ID=' + deps.os.id + '\nVERSION_ID=' + deps.os.versionId)
+        const webStackResponse = await handleWebStackRoute(req, url, method, {
+          assertRoot: freshRoot('web stack builder'),
+          os: osProfile,
+          stateRoot: deps.store.rootDir,
+          readServerSettings: () => deps.store.getServerSettings(),
+          run: linuxHost ? argv => deps.executor!.runCommand([...argv]) : null,
+          audit: async entry => { await appendAudit(deps.db, { ...entry, principalId: caller.principalId }) },
+        })
+        if (webStackResponse) return webStackResponse
+        const olsManagerResponse = await handleOlsManagerRoute(req, url, method, {
+          assertRoot: freshRoot('OpenLiteSpeed manager'),
+          os: osProfile,
+          stateRoot: deps.store.rootDir,
+          readServerSettings: () => deps.store.getServerSettings(),
+          run: linuxHost ? argv => deps.executor!.runCommand([...argv]) : null,
+          audit: async entry => { await appendAudit(deps.db, { ...entry, principalId: caller.principalId }) },
+        })
+        if (olsManagerResponse) return olsManagerResponse
+      }
       const systemUpdates = await handleSystemUpdatesRoute(req, url, method, {
         assertRoot: freshRoot('system update'),
         family: linuxHost ? (deps.os.family === 'debian' ? 'debian' : deps.os.family === 'rhel' ? 'rhel' : null) : null,
@@ -1743,13 +1766,17 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
       const dbAdminNative = url.pathname === '/host/databases/access-hosts/push' ? await resolveDatabaseRemoteAccessNative() : undefined
       const dbAdminToolsResponse = await handleDbAdminToolsRoute(req, url, method, { caller, reauthenticate: () => authenticateCaller(req), assertRoot: assertRootCaller, audit: entry => appendAudit(deps.db, entry), store: deps.store, ...(deps.mariadbAdmin ? { mariadb: deps.mariadbAdmin } : {}), ...(dbAdminNative ? { native: dbAdminNative } : {}), ...(deps.executor instanceof LinuxHostExecutor ? { host: deps.executor, runAction: (action: HostAction) => deps.executor!.runAction(action) } : {}) })
       if (dbAdminToolsResponse) return dbAdminToolsResponse
+      const dbFamily = linuxHost ? (deps.os.family === 'debian' ? 'debian' as const : deps.os.family === 'rhel' ? 'rhel' as const : null) : null
+      const dbRun = linuxHost ? (argv: readonly string[]) => new LinuxHostExecutor({ timeoutMs: 180_000 }).runCommand([...argv]) : null
       const databaseTuningResponse = await handleDatabaseTuningRoute(req, url, method, {
         caller, reauthenticate: () => authenticateCaller(req), assertRoot: assertRootCaller,
+        ...(dbFamily ? { family: dbFamily } : {}),
+        ...(deps.executor instanceof LinuxHostExecutor ? { host: deps.executor } : {}),
+        ...(dbRun ? { run: dbRun } : {}),
+        stateRoot: deps.store.rootDir,
         ...(deps.mariadbAdmin ? { mariadb: deps.mariadbAdmin } : {}),
       })
       if (databaseTuningResponse) return databaseTuningResponse
-      const dbFamily = linuxHost ? (deps.os.family === 'debian' ? 'debian' as const : deps.os.family === 'rhel' ? 'rhel' as const : null) : null
-      const dbRun = linuxHost ? (argv: readonly string[]) => new LinuxHostExecutor({ timeoutMs: 180_000 }).runCommand([...argv]) : null
       const dbAccount = { caller, store: deps.store, currentPrincipal: () => getPrincipal(deps.db, caller.principalId) }
       const dbEnginesResponse = await handleDbEnginesRoute(req, url, method, { ...dbAccount, assertRoot: freshRoot('database engines'), family: dbFamily, run: dbRun, readFile: linuxHost ? nodeDbSignonFs.readFile : null,
         runPostgresql: linuxHost ? statements => deps.executor!.runAction({ kind: 'sql', engine: 'postgresql', statements }) : null })
