@@ -22,7 +22,7 @@ export function renderV2WhmNginxProxy(input: WhmDataPageInput): string {
     + '<p class="v2-field__error" data-np-error hidden></p>'
     + actions(button(t(msgid('Add rule')), { 'data-np-add': true }, true, true) + button(t(msgid('Read rules')), { 'data-np-refresh': true }, true))
     + status(t(msgid('The reverse proxy rules have not been read.')), { 'data-np-status': true })
-    + `<p data-np-count>${esc(t(msgid('Not read')))}</p>`
+    + `<p data-np-count>${esc(t(msgid('Loading...')))}</p>`
     + table(t, t(msgid('Reverse proxy rules')), [msgid('Path'), msgid('Target'), msgid('Host header'), msgid('WebSocket'), msgid('State'), msgid('Actions')], { 'data-np-rows': true }))
   const cache = section('nginx-proxy-cache', t(msgid('Response cache by account')), note(t(msgid('Purging drops every cached response of the account at once. Turning the cache off sends every request to its sites.')))
     + fields(field('np-filter', t(msgid('Find an account')), { kind: 'input', type: 'search', dir: 'ltr', disabled: true, maxlength: 255, hooks: { 'data-np-filter': true } }))

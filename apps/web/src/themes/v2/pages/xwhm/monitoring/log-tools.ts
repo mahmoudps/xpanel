@@ -1,7 +1,7 @@
 import type { Translate } from '../../../../../i18n.ts'
 import { actions, button, esc, field, fields, help, section, select, status, table } from './common.ts'
 
-const fact = (t: Translate, key: string, label: string): string => `<div><dt>${esc(t(label))}</dt><dd><bdi dir="ltr" data-log-tools-fact="${key}">${esc(t(msgid('Not read')))}</bdi></dd></div>`
+const fact = (t: Translate, key: string, label: string): string => `<div><dt>${esc(t(label))}</dt><dd><bdi dir="ltr" data-log-tools-fact="${key}">${esc(t(msgid('Loading...')))}</bdi></dd></div>`
 
 /** Access log security analysis, MariaDB logs and the raw FTP log; whm-log-tools-client.ts owns the behaviour. */
 export function renderV2WhmLogTools(t: Translate, canRead: boolean): string {

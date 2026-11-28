@@ -215,7 +215,7 @@ describe('v2 account home', () => {
     expect(html).not.toContain('>Stored certificate<')
     expect(html).not.toContain('other.test')
     expect(html).not.toContain('>No stored certificate<')
-    expect(html).toContain('Not read')
+    expect(html).toContain('Loading...')
   })
 
   it('shows the stored expiry only under an owned stored certificate', () => {
@@ -244,7 +244,7 @@ describe('v2 account home', () => {
     const html = renderV2PanelHome({})
     expect(html).toContain('v2-home-sites-title')
     expect(html).toContain('v2-home-information-title')
-    expect(html).toContain('Not read')
+    expect(html).toContain('Loading...')
     expect(html).not.toContain('data-account=')
   })
 })
@@ -331,5 +331,21 @@ describe('v2 home registered personal navigation', () => {
     expect(html).toContain('data-cert-renewal-strip')
     expect(html).toContain('1 expiring within 30 days · 0 healthy')
     expect(html).toContain('Next AutoSSL renewal check: 2026-11-12 03:00 UTC')
+  })
+
+  it('uses canonical G2 Home title, gates quick actions by visible routes, and omits Not read hints on unread tool metrics', () => {
+    const html = renderV2PanelHome(props())
+    expect(html).toContain('<h1>Home</h1>')
+    expect(html).not.toContain('Welcome back')
+    expect(html).toContain('data-home-quick-actions')
+    expect(html).toContain('href="/files/manager"')
+    expect(html).toContain('href="/databases/mariadb"')
+    expect(html).not.toContain('d="undefined"')
+    expect(html).toMatch(/data-tool-capability="ftp-accounts"[^>]*>[\s\S]*?<span class="v2-home-tool__hint v2-num"><\/span>/)
+
+    const limited = renderV2PanelHome(props({
+      visibility: { principal: props().visibility!.principal, allowedToolIds: new Set() },
+    }))
+    expect(limited).not.toContain('data-home-quick-actions')
   })
 })

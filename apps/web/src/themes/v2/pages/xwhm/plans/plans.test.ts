@@ -59,7 +59,7 @@ describe('v2 plan family', () => {
     const closed = renderV2WhmPlans(t, props(), authority)
     expect(closed).not.toContain('Editing above')
     expect(closed).toContain('>Create plan</h2>')
-    expect(renderV2WhmPlans(t, props({ planEditorState: { kind: 'edit', plan }, accounts: undefined }), authority)).toContain('Owner Root · Not read Accounts')
+    expect(renderV2WhmPlans(t, props({ planEditorState: { kind: 'edit', plan }, accounts: undefined }), authority)).toContain('Owner Root · Loading... Accounts')
   })
   it('distinguishes unread assignments from measured empty assignments', () => {
     expect(renderV2WhmPlans(t, props({ accounts: undefined }), authority)).toContain('Account assignments have not been read.')
