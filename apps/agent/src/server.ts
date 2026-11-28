@@ -74,6 +74,7 @@ import type { ReleasePackages } from './release-packages.ts'
 import { handlePhpManagerRoute } from './php-manager-routes.ts'
 import { PHP_STAGING_DIR } from './php-manager.ts'
 import { readBans, unbanAddresses, type BanRun } from './firewall-bans.ts'
+import { clearPersistedSshAutobanBans } from './ssh-autoban.ts'
 import { handleSwContainersRoute } from './sw-containers.ts'
 import { handleCtrRoute, resolveContainerTerminal } from './ctr-workspace.ts'
 import { createCtrCatalog } from './ctr-catalog.ts'
@@ -1643,7 +1644,11 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         if (!linuxHost) return fail('PRECONDITION_FAILED', 'the live ban sets exist only on a native Linux host', { stateChanged: false })
         const run: BanRun = argv => deps.executor!.runCommand(argv)
         const body = read ? null : await req.json().catch(() => fail('VALIDATION', 'request body must be valid JSON', { stateChanged: false })) as { addresses?: unknown } | null
-        const response = jsonResponse(read ? await readBans(run) : await unbanAddresses(run, body?.addresses))
+        const result = read ? await readBans(run) : await unbanAddresses(run, body?.addresses)
+        if (!read && 'unbanned' in result && result.unbanned.length > 0) {
+          await clearPersistedSshAutobanBans(deps.store.rootDir, result.unbanned, new Date(), () => deps.store.getWriterLock())
+        }
+        const response = jsonResponse(result)
         response.headers.set('cache-control', 'no-store')
         return response
       }
