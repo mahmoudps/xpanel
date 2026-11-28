@@ -89,6 +89,12 @@ function bindDbServices(askDialog: ((options: Record<string, unknown>) => Promis
         for (const [name, key] of [['port', 'port'], ['maxConnections', 'max_connections'], ['logMinDurationMs', 'log_min_duration_statement']] as const) { const node = field(name), value = record(settings[key]).value; if (node && value !== undefined) node.value = String(value) }
         for (const [name, key] of [['sharedBuffers', 'shared_buffers'], ['workMem', 'work_mem'], ['maintenanceWorkMem', 'maintenance_work_mem'], ['effectiveCacheSize', 'effective_cache_size']] as const) { const node = field(name); if (node && settings[key]) node.value = dbServicePgSize(settings[key]) }
       }
+      if (engine === 'mysql') {
+        const listen = record(view.listenCheck)
+        fact('listen', listen.skipNetworking === true ? t('Local socket only') : listen.bindAddress || listen.port ? `${String(listen.bindAddress ?? '127.0.0.1')}:${String(listen.port ?? 3306)}` : null)
+        for (const [name, key] of [['port', 'port'], ['bindAddress', 'bind_address'], ['maxConnections', 'max_connections']] as const) { const node = field(name), value = record(settings[key]).value; if (node && value !== undefined && value !== null) node.value = String(value) }
+        const skip = field('skipNetworking'); if (skip) { const val = record(settings.skip_networking).value; skip.checked = val === true || val === 'ON' || val === 'on' || val === '1' || val === 1 }
+      }
       const backups = root.querySelector<HTMLElement>('[data-dbs-rows="backups"]')
       fill(backups, list(view.backups).map(row => { const name = String(row.name); return [name, dbServiceBytes(row.sizeBytes), stamp(row.modifiedAt), action(t('Restore'), { dbsRow: 'restore', name }, !canManage), action(t('Delete'), { dbsRow: 'backup-delete', name }, !canManage)] }), 5, t('No backups yet.'))
       const databases = root.querySelector<HTMLElement>('[data-dbs-rows="databases"]')
@@ -112,10 +118,19 @@ function bindDbServices(askDialog: ((options: Record<string, unknown>) => Promis
     root.querySelector<HTMLButtonElement>('[data-dbs-settings-save]')?.addEventListener('click', () => { void (async () => {
       const number = (name: string): number => Number(field(name)?.value), text = (name: string): string => field(name)?.value.trim() ?? ''
       const body = engine === 'redis' ? { port: number('port'), maxmemoryMb: number('maxmemoryMb'), maxclients: number('maxclients'), maxmemoryPolicy: text('maxmemoryPolicy'), persistence: text('persistence'), remoteAccess: field('remoteAccess')?.checked === true }
-        : engine === 'mongodb' ? { port: number('port'), bindIp: text('bindIp') } : { port: number('port'), maxConnections: number('maxConnections'), sharedBuffers: text('sharedBuffers'), workMem: text('workMem'), maintenanceWorkMem: text('maintenanceWorkMem'), effectiveCacheSize: text('effectiveCacheSize'), logMinDurationMs: number('logMinDurationMs') }
+        : engine === 'mongodb' ? { port: number('port'), bindIp: text('bindIp') }
+          : engine === 'mysql' ? { port: number('port'), bindAddress: text('bindAddress'), maxConnections: number('maxConnections'), skipNetworking: field('skipNetworking')?.checked === true }
+            : { port: number('port'), maxConnections: number('maxConnections'), sharedBuffers: text('sharedBuffers'), workMem: text('workMem'), maintenanceWorkMem: text('maintenanceWorkMem'), effectiveCacheSize: text('effectiveCacheSize'), logMinDurationMs: number('logMinDurationMs') }
       if (!await confirmed(t('Save and restart?'), t('The service restarts when a setting needs it, and connected clients lose their connections.'), t('Save'))) return
       await run(t('Saving the settings and checking the service…'), async () => { await transport!('POST', base + '/settings', body); return t('The settings are saved and the service answers.') })
     })() })
+    root.querySelector<HTMLButtonElement>('[data-dbs-preview]')?.addEventListener('click', () => { void run(t('Previewing configuration…'), async () => {
+      const number = (name: string): number => Number(field(name)?.value), text = (name: string): string => field(name)?.value.trim() ?? ''
+      const reply = record(await transport!('POST', base + '/preview', { port: number('port'), bindAddress: text('bindAddress'), maxConnections: number('maxConnections'), skipNetworking: field('skipNetworking')?.checked === true }))
+      const out = root.querySelector<HTMLElement>('[data-dbs-preview-diff]')
+      if (out) out.textContent = String(reply.diff || reply.proposedText || '')
+      return reply.changed === false ? t('No changes to preview.') : t('Preview ready.')
+    }, false) })
     root.querySelectorAll<HTMLElement>('[data-dbs-file]').forEach(block => {
       const kind = block.dataset.dbsFile!, text = block.querySelector<HTMLTextAreaElement>('[data-dbs-file-text]'), load = block.querySelector<HTMLButtonElement>('[data-dbs-file-load]'), save = block.querySelector<HTMLButtonElement>('[data-dbs-file-save]')
       let revision = ''

@@ -100,14 +100,19 @@ describe('explicit V2 semantic counterparts', () => {
       for (const issue of originalIssues.filter(issue => !(issue.kind === 'hook' && issue.controller === undefined && (issue.name === '[data-status]' || route === '/home' && V2_HOME_OBSERVATION_HOOKS.some(hook => hook === issue.name))))) expect(nextIssues).toContainEqual(issue)
     }
   })
-  it('requires the actual unavailable installer and disabled actions instead of a wiring label', () => {
-    const counterpart = V2_OBSERVATION_COUNTERPARTS.find(item => item.route === '/whm/software/store')
-    if (!counterpart) throw new Error('Missing installer counterpart')
-    const html = '<section data-store-workspace data-whm-detail-route="/whm/software/store"><p role="status" data-installer-state="unavailable">Installer unavailable</p><dl><dd data-store-fact="catalog">Not read</dd></dl><button type="button" disabled>Install</button></section>'
-    const check = (value: string) => checkControllerDeclarations(parseMarkup(value), [counterpart.requirement], { route: counterpart.route, surface: 'xwhm', qualified: true })
+  it('requires the actual installer or unavailable store workspace instead of a wiring label', () => {
+    const activityCounterpart = V2_OBSERVATION_COUNTERPARTS.find(item => item.route === '/whm/software/store/activity')
+    if (!activityCounterpart) throw new Error('Missing installer activity counterpart')
+    const html = '<section data-store-workspace data-whm-detail-route="/whm/software/store/activity"><p role="status" data-installer-state="unavailable">Installer unavailable</p><dl><dd data-store-fact="catalog">Not read</dd></dl><button type="button" disabled>Refresh</button></section>'
+    const check = (value: string) => checkControllerDeclarations(parseMarkup(value), [activityCounterpart.requirement], { route: activityCounterpart.route, surface: 'xwhm', qualified: true })
     expect(check(html)).toEqual([])
     expect(check(html.replace('data-installer-state="unavailable"', 'data-wiring="unavailable"')).length).toBeGreaterThan(0)
     expect(check(html.replace(' disabled', '')).length).toBeGreaterThan(0)
+
+    const storeCounterpart = V2_OBSERVATION_COUNTERPARTS.find(item => item.route === '/whm/software/store')!
+    const extCounterpart = V2_OBSERVATION_COUNTERPARTS.find(item => item.route === '/whm/software/store/extensions')!
+    expect(storeCounterpart.requirement.requiredSelectors).toEqual(expect.arrayContaining(['[data-whm-one-click-deploy]', '[data-whm-app-installer]']))
+    expect(extCounterpart.requirement.requiredSelectors).toContain('[data-whm-distro-packages]')
   })
   it.each(['en', 'ar'] as const)('binds the web statistics selection, days and engines and keeps the report selection GET-only (%s)', locale => {
     const route = '/metrics/web-stats'

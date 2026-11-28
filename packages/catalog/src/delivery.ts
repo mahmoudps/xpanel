@@ -27,20 +27,10 @@ export const PROFILE_EXCLUSIONS: Readonly<Record<string, ProfileExclusion>> = {
 
 /** Truthful availability reasons for catalog tools whose host or multi-node capability is not shipped on single-server hosts. */
 export const UNIMPLEMENTED_TOOL_REASONS: Readonly<Record<string, string>> = {
-  'disk-quota-setup': 'Filesystem quota mount flags require host boot-loader and fstab provisioning during installation rather than runtime remounting.',
   'tweak-panel-php': 'xPanel runs natively on Node.js and executes no internal panel PHP runtime.',
-  'web-stack-builder': 'Web server MPM and stack topology are pinned by the signed OS installation profile rather than rebuilt dynamically.',
-  'distro-packages': 'Arbitrary OS repository package installation is disabled; manage reviewed components in Software Center.',
-  'aapanel-site-reverse-proxy': 'Path-scoped custom reverse-proxy rules are not enabled; site proxy mode is managed on the Domains workspace.',
-  'aapanel-proxy-project': 'Standalone Nginx proxy-only projects without a hosting domain are not enabled.',
-  'aapanel-one-click-deploy': 'Automated PHP application bundle deployment is not enabled on this host.',
-  'aapanel-mysql-service': 'MariaDB daemon port and data-directory relocation are pinned by the host reconciler; inspect server state on Database Servers.',
   'aapanel-node-management': 'Remote server management over panel API or SSH keys requires a multi-node lab and is unavailable on standalone hosts.',
   'aapanel-node-file-transfer': 'Direct node-to-node file transfer between linked servers is unavailable on standalone hosts.',
-  'aapanel-openlitespeed-manager': 'Apache httpd with mpm-itk behind Nginx is the active web stack on this host; OpenLiteSpeed is not installed.',
   'aapanel-server-migrate': 'Automated whole-server OS migration to a remote target host requires a paired destination server and is unavailable.',
-  'database-tuning': 'MariaDB runtime variables and counters are read-only; automated my.cnf buffer-pool rewriting is not enabled.',
-  'app-installer': 'Automated open-source application installer packages are not configured on this host.',
   'linked-server-nodes': 'Linking peer xPanel servers requires a paired second host and is unavailable on standalone hosts.',
   'configuration-cluster': 'Pushing server configuration snapshots across peer servers requires linked cluster nodes and is unavailable on standalone hosts.',
   'dns-cluster': 'Synchronizing authoritative zones across peer nameservers requires a multi-node DNS cluster and is unavailable on standalone hosts.',
