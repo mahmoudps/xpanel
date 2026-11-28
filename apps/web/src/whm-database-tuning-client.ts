@@ -17,7 +17,7 @@ export interface DatabaseTuningClientView {
   engine: 'mariadb'; state: 'read' | 'partial' | 'unavailable'; observedAt: string | null; version: string | null
   variables: Record<string, number | 'ON' | 'OFF'> | null; status: Record<string, number> | null
   plan: { kind: 'advisory'; state: 'ready' | 'unavailable'; checks: { id: typeof DB_TUNING_CHECKS[number]; state: 'review' | 'observe' | 'unavailable'; evidence: { name: string; value: number | string }[]; next: typeof DB_TUNING_NEXT[number] | 'read-again' }[] }
-  capabilities: { apply: false }
+  capabilities: { apply: boolean }
 }
 
 /** Reject malformed or inconsistent replies before any values reach the page. */
@@ -26,7 +26,7 @@ export function readDatabaseTuningView(raw: unknown): DatabaseTuningClientView {
   const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
   const keys = (value: Record<string, unknown>, names: readonly string[]): boolean => Object.keys(value).length === names.length && names.every(name => Object.hasOwn(value, name))
   const number = (value: unknown, decimal = false): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= Number.MAX_SAFE_INTEGER && (decimal || Number.isSafeInteger(value))
-  if (!object(raw) || !keys(raw, ['engine', 'state', 'observedAt', 'version', 'variables', 'status', 'plan', 'capabilities']) || raw.engine !== 'mariadb' || !['read', 'partial', 'unavailable'].includes(String(raw.state))) return bad()
+  if (!object(raw) || !(keys(raw, ['engine', 'state', 'observedAt', 'version', 'variables', 'status', 'plan', 'capabilities']) || keys(raw, ['engine', 'state', 'observedAt', 'version', 'variables', 'status', 'plan', 'capabilities', 'dropIn']) && object(raw.dropIn)) || raw.engine !== 'mariadb' || !['read', 'partial', 'unavailable'].includes(String(raw.state))) return bad()
   if (!(raw.observedAt === null || typeof raw.observedAt === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(raw.observedAt) && Number.isFinite(Date.parse(raw.observedAt))) || raw.observedAt === null && raw.state !== 'unavailable') return bad()
   if (!(raw.version === null || typeof raw.version === 'string' && /^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,4}[0-9A-Za-z.+_~-]{0,96}$/.test(raw.version))) return bad()
   let variables: DatabaseTuningClientView['variables'] = null, status: DatabaseTuningClientView['status'] = null
@@ -47,7 +47,7 @@ export function readDatabaseTuningView(raw: unknown): DatabaseTuningClientView {
   }
   const present = [raw.version, variables, status].filter(value => value !== null).length
   if (raw.state !== (present === 3 ? 'read' : present === 0 ? 'unavailable' : 'partial')) return bad()
-  if (!object(raw.capabilities) || !keys(raw.capabilities, ['apply']) || raw.capabilities.apply !== false || !object(raw.plan) || !keys(raw.plan, ['kind', 'state', 'checks']) || raw.plan.kind !== 'advisory' || !['ready', 'unavailable'].includes(String(raw.plan.state)) || !Array.isArray(raw.plan.checks) || raw.plan.checks.length !== DB_TUNING_CHECKS.length) return bad()
+  if (!object(raw.capabilities) || !keys(raw.capabilities, ['apply']) || raw.capabilities.apply !== (raw.state !== 'unavailable') || !object(raw.plan) || !keys(raw.plan, ['kind', 'state', 'checks']) || raw.plan.kind !== 'advisory' || !['ready', 'unavailable'].includes(String(raw.plan.state)) || !Array.isArray(raw.plan.checks) || raw.plan.checks.length !== DB_TUNING_CHECKS.length) return bad()
   const observed = { ...variables, ...status }
   const checks = raw.plan.checks.map((row: unknown, index: number): DatabaseTuningClientView['plan']['checks'][number] => {
     if (!object(row) || !keys(row, ['id', 'state', 'evidence', 'next']) || row.id !== DB_TUNING_CHECKS[index] || !['review', 'observe', 'unavailable'].includes(String(row.state)) || !Array.isArray(row.evidence) || row.evidence.length > 5) return bad()
@@ -60,7 +60,7 @@ export function readDatabaseTuningView(raw: unknown): DatabaseTuningClientView {
     return { id: row.id as typeof DB_TUNING_CHECKS[number], state: row.state as 'review' | 'observe' | 'unavailable', evidence, next: row.next as typeof DB_TUNING_NEXT[number] | 'read-again' }
   })
   if (raw.plan.state !== (checks.some(row => row.state !== 'unavailable') ? 'ready' : 'unavailable')) return bad()
-  return { engine: 'mariadb', state: raw.state as DatabaseTuningClientView['state'], observedAt: raw.observedAt as string | null, version: raw.version as string | null, variables, status, plan: { kind: 'advisory', state: raw.plan.state as 'ready' | 'unavailable', checks }, capabilities: { apply: false } }
+  return { engine: 'mariadb', state: raw.state as DatabaseTuningClientView['state'], observedAt: raw.observedAt as string | null, version: raw.version as string | null, variables, status, plan: { kind: 'advisory', state: raw.plan.state as 'ready' | 'unavailable', checks }, capabilities: { apply: raw.state !== 'unavailable' } }
 }
 
 export function bindWhmDatabaseTuning(root: HTMLElement, send: ((method: string, path: string) => Promise<unknown>) | undefined): void {

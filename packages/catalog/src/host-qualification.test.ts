@@ -197,8 +197,7 @@ describe('host qualification', () => {
 
   it('keeps unimplemented pages and extra tools closed even when every probe passed', () => {
     const qualified = qualifyHostTools(acceptedTools, allPassed)
-    for (const id of ['distro-packages',
-      'web-stack-builder', 'tweak-panel-php', 'app-installer']) {
+    for (const id of ['tweak-panel-php']) {
       expect(qualified.find(tool => tool.id === id)?.status, id).toBe('researched')
     }
     const dnsReseller: VisibilityContext = { principal: { kind: 'reseller', id: 'reseller', username: 'reseller' }, reseller: { acl: ['manage-dns'] } }
@@ -341,6 +340,16 @@ describe('host qualification', () => {
     'spam-quarantine': ['control-plane', 'mail'],
     'traffic-monitor-account': ['control-plane', 'apache'],
     'git-deployments': ['control-plane', 'files', 'systemd'],
+    'disk-quota-setup': ['control-plane', 'linux-account', 'files'],
+    'web-stack-builder': ['control-plane', 'apache', 'systemd'],
+    'aapanel-openlitespeed-manager': ['control-plane', 'systemd'],
+    'distro-packages': ['control-plane', 'packages', 'host-jobs'],
+    'aapanel-one-click-deploy': ['control-plane', 'apache', 'mariadb', 'files', 'host-jobs'],
+    'app-installer': ['control-plane', 'apache', 'mariadb', 'files', 'host-jobs'],
+    'aapanel-site-reverse-proxy': ['control-plane', 'apache'],
+    'aapanel-proxy-project': ['control-plane', 'apache'],
+    'aapanel-mysql-service': ['control-plane', 'mariadb', 'mariadb-admin', 'systemd'],
+    'database-tuning': ['control-plane', 'mariadb', 'mariadb-admin', 'systemd'],
   }
 
   it('declares the host needs of every implemented effect without an exception', () => {

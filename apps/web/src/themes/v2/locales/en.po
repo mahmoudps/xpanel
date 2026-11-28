@@ -47,11 +47,6 @@ msgctxt "theme:v2"
 msgid "A feature list changes tool admission for its assigned plans. It does not remove existing resources or establish a host operation outcome."
 msgstr ""
 
-#: apps/web/src/themes/v2/pages/xpanel/software/php.ts
-msgctxt "theme:v2"
-msgid "A generated pool or .user.ini file has not been read."
-msgstr ""
-
 #: apps/web/src/themes/v2/pages/xpanel/operations/backup.ts
 msgctxt "theme:v2"
 msgid "A host archive is not an off-server disaster recovery copy."
@@ -475,6 +470,11 @@ msgstr ""
 #: apps/web/src/themes/v2/layouts/settings-page.ts
 msgctxt "theme:v2"
 msgid "Apply changes"
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xwhm/software/containers.ts
+msgctxt "theme:v2"
+msgid "Apply drop-in"
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/software/updates.ts
@@ -1582,6 +1582,11 @@ msgctxt "theme:v2"
 msgid "Driver"
 msgstr ""
 
+#: apps/web/src/themes/v2/pages/xwhm/software/containers.ts
+msgctxt "theme:v2"
+msgid "Drop-in configuration preview"
+msgstr ""
+
 #: apps/web/src/themes/v2/pages/xwhm/host/php.ts
 msgctxt "theme:v2"
 msgid "Each account pool runs inside its account slice. Inherited pools use these server-wide defaults unless overridden per domain."
@@ -2557,6 +2562,11 @@ msgctxt "theme:v2"
 msgid "Live summary of the form."
 msgstr ""
 
+#: apps/web/src/themes/v2/pages/xwhm/software/containers.ts
+msgctxt "theme:v2"
+msgid "Load or preview an add-on drop-in configuration."
+msgstr ""
+
 #: apps/web/src/themes/v2/pages/xwhm/overview/index.ts
 msgctxt "theme:v2"
 msgid "Load {load} on {cores} cores"
@@ -2782,11 +2792,6 @@ msgctxt "theme:v2"
 msgid "Memory limit"
 msgstr ""
 
-#: apps/web/src/themes/v2/pages/xwhm/software/containers.ts
-msgctxt "theme:v2"
-msgid "Memory limits, listeners and users require a reviewed configuration writer with a restart check. Nothing is changed here."
-msgstr ""
-
 #: apps/web/src/themes/v2/pages/xpanel/resources.ts
 msgctxt "theme:v2"
 msgid "Memory usage"
@@ -3005,11 +3010,6 @@ msgstr ""
 #: apps/web/src/themes/v2/pages/xpanel/store/index.ts
 msgctxt "theme:v2"
 msgid "No diagnostic output was supplied."
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xpanel/resources.ts
-msgctxt "theme:v2"
-msgid "No directory-size observation was supplied. A file listing is not a recursive quota measurement."
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/service-tools/details.ts
@@ -3297,7 +3297,7 @@ msgctxt "theme:v2"
 msgid "Observe scheduled host work without reading cron contents or starting commands."
 msgstr ""
 
-#: apps/web/src/themes/v2/pages/xwhm/databases/index.ts apps/web/src/themes/v2/pages/xwhm/service-tools/details.ts apps/web/src/themes/v2/pages/xwhm/service-tools/ftp-log.ts apps/web/src/themes/v2/pages/xwhm/software/catalog.ts apps/web/src/themes/v2/pages/xwhm/software/containers.ts apps/web/src/themes/v2/pages/xwhm/software/projects.ts apps/web/src/themes/v2/pages/xwhm/software/updates.ts
+#: apps/web/src/themes/v2/pages/xwhm/databases/index.ts apps/web/src/themes/v2/pages/xwhm/server/setup.ts apps/web/src/themes/v2/pages/xwhm/service-tools/details.ts apps/web/src/themes/v2/pages/xwhm/service-tools/ftp-log.ts apps/web/src/themes/v2/pages/xwhm/software/catalog.ts apps/web/src/themes/v2/pages/xwhm/software/containers.ts apps/web/src/themes/v2/pages/xwhm/software/projects.ts apps/web/src/themes/v2/pages/xwhm/software/updates.ts
 msgctxt "theme:v2"
 msgid "Observed at (UTC)"
 msgstr ""
@@ -3435,11 +3435,6 @@ msgstr ""
 #: apps/web/src/themes/v2/pages/xwhm/service-tools/details.ts
 msgctxt "theme:v2"
 msgid "Only the first zones were read. Counts cover the shown zones only."
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xpanel/software/php.ts
-msgctxt "theme:v2"
-msgid "Only the four enabled INI overrides are submitted. Additional saved values remain visible and are preserved by the existing update operation."
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/recovery-tools/convert.ts
@@ -3782,9 +3777,19 @@ msgctxt "theme:v2"
 msgid "Preview directives"
 msgstr ""
 
+#: apps/web/src/themes/v2/pages/xwhm/software/containers.ts
+msgctxt "theme:v2"
+msgid "Preview drop-in"
+msgstr ""
+
 #: apps/web/src/themes/v2/pages/xwhm/service-tools/details.ts
 msgctxt "theme:v2"
 msgid "Preview is not a native syntax check. Saved configuration does not verify the page served externally; overrides and rewrites may change it."
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xwhm/host/php.ts
+msgctxt "theme:v2"
+msgid "Preview or save INI overrides to inspect the managed php.ini directives."
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/domains/index.ts
@@ -3975,6 +3980,11 @@ msgstr ""
 #: apps/web/src/themes/v2/pages/xpanel/observations/health.ts
 msgctxt "theme:v2"
 msgid "Read bounded checks for your sites without changing DNS, services or saved configuration."
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xwhm/software/containers.ts
+msgctxt "theme:v2"
+msgid "Read config"
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/service-tools/details.ts
@@ -4372,6 +4382,11 @@ msgctxt "theme:v2"
 msgid "Review and apply"
 msgstr ""
 
+#: apps/web/src/themes/v2/pages/xwhm/software/containers.ts
+msgctxt "theme:v2"
+msgid "Review and apply bounded systemd drop-in memory limits and bind addresses for listed add-on services."
+msgstr ""
+
 #: apps/web/src/themes/v2/layouts/common.ts
 msgctxt "theme:v2"
 msgid "Review and save"
@@ -4415,11 +4430,6 @@ msgstr ""
 #: apps/web/src/themes/v2/pages/xwhm/software/projects.ts
 msgctxt "theme:v2"
 msgid "Review job"
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xwhm/databases/index.ts
-msgctxt "theme:v2"
-msgid "Review observed MariaDB counters before planning changes. No settings are applied here."
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/software/catalog.ts
@@ -4505,11 +4515,6 @@ msgstr ""
 #: apps/web/src/themes/v2/pages/xpanel/settings/team.ts
 msgctxt "theme:v2"
 msgid "Role limit"
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xwhm/software/catalog.ts
-msgctxt "theme:v2"
-msgid "Roll back"
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/panel/data.ts
@@ -4947,6 +4952,11 @@ msgctxt "theme:v2"
 msgid "Security updates"
 msgstr ""
 
+#: apps/web/src/themes/v2/pages/xpanel/software/php.ts
+msgctxt "theme:v2"
+msgid "Select Preview INI to render the validated directives."
+msgstr ""
+
 #: apps/web/src/themes/v2/pages/xwhm/lifecycle/transfers.ts
 msgctxt "theme:v2"
 msgid "Select accounts"
@@ -5265,6 +5275,11 @@ msgstr ""
 #: apps/web/src/themes/v2/pages/xwhm/host/firewall.ts
 msgctxt "theme:v2"
 msgid "Staged by {actor}: {current} current rules -> {proposed} proposed rules (+{added} / ~{changed} / -{removed})."
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xpanel/software/php.ts
+msgctxt "theme:v2"
+msgid "Standard runtime fields save via the form bar; Preview INI and Apply INI overrides validate and persist the full extended INI allowlist."
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/software/containers.ts
@@ -5950,11 +5965,6 @@ msgstr ""
 #: apps/web/src/themes/v2/pages/xpanel/software/htaccess.ts
 msgctxt "theme:v2"
 msgid "Unified diff"
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xwhm/software/catalog.ts
-msgctxt "theme:v2"
-msgid "Uninstall"
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/software/containers.ts

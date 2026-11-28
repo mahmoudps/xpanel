@@ -74,7 +74,7 @@ describe('v2 WHM diagnostic, security and activity bodies', () => {
     expect(performance.match(/data-whm-monitoring-chart=/g)).toHaveLength(5)
     expect(render('/whm/monitoring/disk')).toContain('Without enabled quotas, per-account usage stays unavailable')
     expect(render('/whm/monitoring/traffic')).toContain('No missing sample is displayed as zero.')
-    expect(render('/whm/monitoring/io')).toContain('Account IO history is not recorded.')
+    expect(render('/whm/monitoring/io')).toContain('No IO history snapshots recorded yet.')
   })
 
   it('requires the reviewed host log unit list and bounds before enabling a read', () => {

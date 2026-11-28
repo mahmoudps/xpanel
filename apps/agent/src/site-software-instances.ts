@@ -28,6 +28,8 @@ export interface SiteSoftwareInstancesContext {
   submitJob: ((plan: HostJobPlan, actor: string) => Promise<HostJobView>) | null
   audit(entry: { action: string; target: string; outcome: 'ok' | 'failed'; detail: Record<string, unknown> }): Promise<unknown>
 }
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+const USERNAME_RE = /^[a-z][a-z0-9]{0,15}$/
 const unchanged = { stateChanged: false }
 const json = (status: number, body: unknown): Response => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } })
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
@@ -40,7 +42,13 @@ const readBody = async (req: Request, limit: number): Promise<Record<string, unk
 }
 
 export async function handleSiteSoftwareInstancesRoute(req: Request, url: URL, method: string, ctx: SiteSoftwareInstancesContext): Promise<Response | null> {
-  const paths = { '/host/site-software/instances': 'GET', '/host/site-software/instances/jobs': 'POST', '/host/site-software/artifacts': 'POST' } as Record<string, string>
+  const paths = {
+    '/host/site-software/instances': 'GET',
+    '/host/site-software/instances/jobs': 'POST',
+    '/host/site-software/artifacts': 'POST',
+    '/host/software/one-click/deploy': 'POST',
+    '/host/software/app-installer/install': 'POST',
+  } as Record<string, string>
   const expected = Object.hasOwn(paths, url.pathname) ? paths[url.pathname]! : null
   if (!expected) return null
   if (method !== expected) return new Response(null, { status: 405, headers: { allow: expected } })
@@ -49,6 +57,9 @@ export async function handleSiteSoftwareInstancesRoute(req: Request, url: URL, m
   if (caller.role !== 'root') return fail('FORBIDDEN', 'root role is required for site software', unchanged)
   if (url.pathname === '/host/site-software/artifacts') return receiveArtifact(req, ctx)
   if (expected === 'GET') return json(200, { instances: await listInstances(ctx) })
+  if (url.pathname === '/host/software/one-click/deploy' || url.pathname === '/host/software/app-installer/install') {
+    return submitRootInstallJob(req, url.pathname === '/host/software/one-click/deploy', caller, ctx)
+  }
   const body = await readBody(req, 2048)
   if (!exact(body, ['username', 'domainId', 'path', 'action', 'expectedRecord', ...(body.action === 'update' ? ['version'] : [])]) || typeof body.username !== 'string' || typeof body.domainId !== 'string' || !isApplicationDigest(body.expectedRecord)
     || !['update', 'remove'].includes(String(body.action)) || body.action === 'update' && !isApplicationVersion(body.version)) return fail('VALIDATION', 'choose one listed installation and an update or removal', unchanged)
@@ -64,6 +75,45 @@ export async function handleSiteSoftwareInstancesRoute(req: Request, url: URL, m
   const request = { action: body.action, appId: record.appId, expectedRevision: read.observation!.revision, expectedCatalogRevision: read.catalog.revision, ...(body.action === 'update' ? { version: body.version } : {}) }
   const job = await submitApplicationJob(ctx.coordinator, ctx.submitJob, request, deps, caller.actor, account.id, assertAuthority, submitted =>
     ctx.audit({ action: 'server.site_software.instance_job_submitted', target: 'account:' + account.username, outcome: 'ok', detail: { domain: record.domain, path, appId: record.appId, kind: submitted.kind, jobId: submitted.id } }))
+  return json(202, { job })
+}
+
+async function submitRootInstallJob(
+  req: Request,
+  isOneClick: boolean,
+  caller: { actor: string; role: string; principalId: string },
+  ctx: SiteSoftwareInstancesContext,
+): Promise<Response> {
+  const body = await readBody(req, 4096)
+  if (!exact(body, ['accountId', 'username', 'domainId', 'docRoot', 'path', 'appId', 'version', 'expectedRevision', 'expectedCatalogRevision'])
+    || typeof body.accountId !== 'string' || !UUID.test(body.accountId)
+    || typeof body.username !== 'string' || !USERNAME_RE.test(body.username)
+    || typeof body.domainId !== 'string' || !UUID.test(body.domainId)
+    || typeof body.docRoot !== 'string' || !body.docRoot
+    || !isApplicationId(body.appId) || !isApplicationVersion(body.version)
+    || !isApplicationDigest(body.expectedRevision) || !isApplicationDigest(body.expectedCatalogRevision)) {
+    return fail('VALIDATION', 'choose an active account site and reviewed application version to install', unchanged)
+  }
+  const path = readApplicationPath(body.path)
+  if (!ctx.source) return fail('PRECONDITION_FAILED', 'no signed application catalog is configured on this server', { ...unchanged, reason: 'application_catalog_unavailable' })
+  if (!applicationInstallProviderAvailable(ctx.provider) || !ctx.submitJob || !ctx.coordinator) return fail('PRECONDITION_FAILED', 'application writes require an admitted descriptor-confined account artifact provider', { ...unchanged, reason: 'application_provider_unavailable' })
+  const account = await ctx.store.getAccountByUsername(body.username)
+  if (!account || account.id !== body.accountId || account.status !== 'active') return fail('NOT_FOUND', 'the target account does not exist or is inactive', unchanged)
+  const domain = (await ctx.store.listDomains()).find(item => item.id === body.domainId && item.accountId === account.id && !item.suspended && item.docRoot === body.docRoot)
+  if (!domain) return fail('NOT_FOUND', 'the target domain is not an active site of this account', unchanged)
+  const assertAuthority = async (): Promise<void> => {
+    const fresh = await ctx.authenticate()
+    if (fresh.role !== 'root' || fresh.principalId !== caller.principalId) fail('FORBIDDEN', 'root authority changed', unchanged)
+  }
+  const deps = applicationDeps({ store: ctx.store, source: ctx.source, provider: ctx.provider, database: ctx.database, account, domainId: domain.id, path, holdToPlan: false, assertAuthority })
+  const request = { action: 'install', appId: body.appId, version: body.version, expectedRevision: body.expectedRevision, expectedCatalogRevision: body.expectedCatalogRevision }
+  const job = await submitApplicationJob(ctx.coordinator, ctx.submitJob, request, deps, caller.actor, account.id, assertAuthority, submitted =>
+    ctx.audit({
+      action: isOneClick ? 'server.one_click.job_submitted' : 'server.app_installer.job_submitted',
+      target: 'account:' + account.username,
+      outcome: 'ok',
+      detail: { domain: domain.name, path, appId: body.appId, version: body.version, kind: submitted.kind, jobId: submitted.id },
+    }))
   return json(202, { job })
 }
 

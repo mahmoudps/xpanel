@@ -33,3 +33,71 @@ export const proxyRulesByDomain = (record: ProxyRulesRecord): Record<string, edg
   for (const { domain, ...rule } of record.rules) (out[domain] ??= []).push(rule)
   return out
 }
+
+export const PROXY_PROJECTS_STATE_DIR = 'extended/edge/proxy-projects'
+export const PROXY_PROJECTS_MAX = 32
+export const PROXY_PROJECT_RULES_MAX = 32
+const PROXY_PROJECT_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+const PROXY_PROJECT_CONTROL_CHARS = /[\u0000-\u001f\u007f]/
+
+export interface ProxyProjectRule {
+  id: string
+  path: string
+  target: string
+  websocket: boolean
+  hostHeader: 'client' | 'upstream'
+  headers: { name: string; value: string }[]
+}
+
+export interface ProxyProjectRecord {
+  id: string
+  accountId: string
+  name: string
+  domains: string[]
+  note: string
+  ssl: { enabled: boolean; certificateId: string | null }
+  cache: boolean
+  gzip: boolean
+  rules: ProxyProjectRule[]
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ProxyProjectsFileRecord {
+  rulesVersion: 1
+  projects: ProxyProjectRecord[]
+  updatedAt: string
+}
+
+export const proxyProjectsPath = (accountId: string): string =>
+  PROXY_PROJECT_UUID.test(accountId) ? `${PROXY_PROJECTS_STATE_DIR}/${accountId}.json` : fail('VALIDATION', 'account id is invalid', { stateChanged: false })
+
+export function readProxyProjectsRecord(raw: unknown): ProxyProjectsFileRecord | null {
+  if (!object(raw) || raw.rulesVersion !== 1 || !Array.isArray(raw.projects) || raw.projects.length > PROXY_PROJECTS_MAX
+    || typeof raw.updatedAt !== 'string' || !Number.isFinite(Date.parse(raw.updatedAt))) return null
+  for (const project of raw.projects) {
+    if (!object(project) || typeof project.id !== 'string' || !PROXY_PROJECT_UUID.test(project.id)
+      || typeof project.accountId !== 'string' || !PROXY_PROJECT_UUID.test(project.accountId)
+      || typeof project.name !== 'string' || project.name.length < 1 || project.name.length > 64 || PROXY_PROJECT_CONTROL_CHARS.test(project.name)
+      || !Array.isArray(project.domains) || project.domains.length < 1 || project.domains.length > 16
+      || typeof project.note !== 'string' || project.note.length > 256 || PROXY_PROJECT_CONTROL_CHARS.test(project.note)
+      || !object(project.ssl) || typeof project.ssl.enabled !== 'boolean' || !(project.ssl.certificateId === null || typeof project.ssl.certificateId === 'string')
+      || typeof project.cache !== 'boolean' || typeof project.gzip !== 'boolean'
+      || !Array.isArray(project.rules) || project.rules.length < 1 || project.rules.length > PROXY_PROJECT_RULES_MAX
+      || typeof project.createdAt !== 'string' || typeof project.updatedAt !== 'string') return null
+    for (const name of project.domains) {
+      if (typeof name !== 'string') return null
+      try { if (validateDomainName(name) !== name) return null } catch { return null }
+    }
+    for (const rule of project.rules) {
+      if (!object(rule) || typeof rule.id !== 'string' || !PROXY_PROJECT_UUID.test(rule.id)
+        || typeof rule.path !== 'string' || !edge.PROXY_RULE_PATH.test(rule.path)
+        || typeof rule.target !== 'string') return null
+      try {
+        edge.parseUpstream(rule.target, 'proxy rule target')
+        assertProxyOptions({ websocket: rule.websocket, hostHeader: rule.hostHeader, headers: rule.headers })
+      } catch { return null }
+    }
+  }
+  return raw as unknown as ProxyProjectsFileRecord
+}

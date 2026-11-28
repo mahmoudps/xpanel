@@ -57,6 +57,17 @@ export type EdgeSettings = ServerSettings & { edge?: EdgeExtras }
 
 // ---- sites --------------------------------------------------------------------------------
 
+/** A standalone proxy-only site belonging to an account (proxy projects workspace). */
+export interface ProxyProjectSite {
+  id: string
+  name: string
+  domains: readonly string[]
+  rules: readonly ProxyRule[]
+  cache: boolean
+  gzip: boolean
+  ssl: { enabled: boolean; certificateId: string | null }
+}
+
 export interface NginxSiteOptions extends UpstreamPolicy {
   /** WAF policy per site, keyed by the site's main domain name */
   waf?: Record<string, WafSitePolicy>
@@ -70,6 +81,10 @@ export interface NginxSiteOptions extends UpstreamPolicy {
   dedicatedAddresses?: ReadonlySet<string>
   /** reverse proxy rules per site, keyed by the site's main domain name (proxy-rules.ts) */
   proxyRules?: Record<string, ProxyRule[]>
+  /** standalone reverse-proxy projects rendered into additional nginx server blocks */
+  proxyProjects?: readonly ProxyProjectSite[]
+  /** loopback runtime ports owned by this account that site proxy rules may target */
+  allowedLoopbackPorts?: ReadonlySet<number> | readonly number[]
   /** the account's IP Blocker list and cache epoch (account-edge.ts) */
   accountEdge?: AccountEdgePolicy | null
   /** mail client autoconfiguration for the account's domains that receive mail */
@@ -247,7 +262,7 @@ const siteBody = (g: SiteGroup, ctx: SiteCtx, toHttps: boolean): string[] => {
   body.push(...panelRedirectLocations(ctx.opts.panelRedirects))
   if (toHttps) return [...body, ...block('location /', ['return 301 https://$host$request_uri;'])]
   const cache = ctx.opts.cache !== false
-  const apps = withProxyRules(appLocations(ctx.opts.appRoutes?.[g.main.name] ?? []), body, ctx.opts.proxyRules?.[g.main.name], ctx.settings, (target, at) => proxyLocation(target, cache, at))
+  const apps = withProxyRules(appLocations(ctx.opts.appRoutes?.[g.main.name] ?? []), body, ctx.opts.proxyRules?.[g.main.name], ctx.settings, (target, at) => proxyLocation(target, cache, at), ctx.opts.allowedLoopbackPorts)
   if (apps.root) return [...body, ...apps.paths, ...apps.root]
   if (mode === 'upstream') return [...body, ...apps.paths, ...proxyLocation(upstreamTarget(g.main, ctx), cache)]
   return [...body, ...apps.paths, ...proxyLocation({ url: ctx.backend, tls: false }, cache)]
@@ -318,6 +333,84 @@ const renderGroup = (g: SiteGroup, ctx: SiteCtx, certs: Certificate[]): string[]
   return out
 }
 
+const certCoversName = (cert: Certificate, host: string): boolean => {
+  const target = host.toLowerCase()
+  return cert.names.some(pattern => {
+    const lower = pattern.toLowerCase()
+    if (lower === target) return true
+    if (lower.startsWith('*.')) {
+      const parent = lower.slice(2)
+      const dot = target.indexOf('.')
+      return dot > 0 && target.slice(dot + 1) === parent
+    }
+    return false
+  })
+}
+
+const renderProxyProjectServer = (project: ProxyProjectSite, ctx: SiteCtx, certs: Certificate[], claimed: Set<string>): string[] => {
+  const names: string[] = []
+  for (const raw of project.domains) {
+    const clean = assertDomainName(raw, 'proxy project domain').toLowerCase()
+    if (!claimed.has(clean)) {
+      claimed.add(clean)
+      names.push(clean)
+    }
+  }
+  if (!names.length) return []
+  const primary = names[0]!
+  const dedicated = ctx.opts.dedicatedAddresses
+  const ipv4 = dedicated?.has(ctx.account.ipv4) ? ctx.account.ipv4 : null
+  const ipv6 = ctx.account.ipv6 && dedicated?.has(ctx.account.ipv6) ? ctx.account.ipv6 : null
+  const bind: Bind = { v4: ipv4, v6: ipv6, default4: false, default6: false }
+  const gzipLine = project.gzip ? 'gzip on;' : 'gzip off;'
+  const baseBody = (forSsl: boolean): string[] => {
+    const common = [
+      gzipLine,
+      ...acmeLocation(),
+    ]
+    if (ctx.account.status !== 'active') return [...common, ...suspendedLocations(ctx.opts.pageScope)]
+    if (ctx.account.bandwidthLimitedMonth !== undefined) return [...common, ...bandwidthLimitLocations()]
+    const ruleLocations = withProxyRules(
+      { paths: [], root: null },
+      common,
+      project.rules,
+      ctx.settings,
+      (target, at) => proxyLocation(target, project.cache, at),
+      ctx.opts.allowedLoopbackPorts,
+    )
+    const fallbackRoot = ruleLocations.root ?? block('location /', ['return 404;'])
+    void forSsl
+    return [...common, ...ruleLocations.paths, ...fallbackRoot]
+  }
+  const head = [
+    `server_name ${names.join(' ')};`,
+    `access_log ${nginxAccessLog(primary)} xpanel_metrics;`,
+    `error_log ${nginxErrorLog(primary)} warn;`,
+    ...renderAccountEdgeServer(ctx.opts.accountEdge, project.cache),
+  ]
+  const out = [
+    `# proxy project ${project.name.replace(/[\r\n]/g, ' ')} (${primary})`,
+    ...block('server', [...listen(80, ctx.e, '', bind), ...head, ...baseBody(false)]),
+  ]
+  if (project.ssl.enabled) {
+    const explicit = project.ssl.certificateId ? certs.find(c => c.id === project.ssl.certificateId) : undefined
+    const matchedCert = explicit ?? certs.find(c => names.every(n => certCoversName(c, n)))
+    if (matchedCert) {
+      const files = certPaths(matchedCert.id)
+      out.push(
+        ...block('server', [
+          ...listen(443, ctx.e, '', bind),
+          ...head,
+          `ssl_certificate ${files.cert};`,
+          `ssl_certificate_key ${files.key};`,
+          ...baseBody(true),
+        ]),
+      )
+    }
+  }
+  return out
+}
+
 /**
  * Server blocks for every site of one account: port 80 always, 443 per certificate covering
  * some of the site's names. Explicit subdomains are their own blocks, so nginx prefers them
@@ -358,6 +451,11 @@ export const renderNginxSite = (
   // a certificate owned by another account is never installed here, whatever the caller passed
   const certs = asCertList(cert).filter((c) => c.accountId === null || c.accountId === account.id)
   const parts = groups.map((g) => renderGroup(g, ctx, certs).join('\n'))
+  const claimedNames = new Set(groups.flatMap((g) => [...g.names, ...g.wildcards]).map((n) => n.toLowerCase()))
+  for (const project of opts.proxyProjects ?? []) {
+    const rendered = renderProxyProjectServer(project, ctx, certs, claimedNames)
+    if (rendered.length) parts.push(rendered.join('\n'))
+  }
   const autoconfig = renderMailAutoconfigServers(opts.mailAutoconfig, groups, certs, port => listen(port, ctx.e))
   if (autoconfig.length) parts.push(autoconfig.join('\n'))
   return `# Managed by xPanel: account ${account.username}\n\n${parts.join('\n\n')}\n`
