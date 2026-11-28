@@ -673,15 +673,6 @@
     "whm-reseller-detail-0-pkg-census-plan cC"
   ],
   "/whm/security": [
-    "v2-security-body vV",
-    "v2-security-burst vV",
-    "v2-security-denied-addresses vV",
-    "v2-security-denied-agents vV",
-    "v2-security-denied-paths vV",
-    "v2-security-rate vV",
-    "v2-security-token-addresses vV",
-    "v2-security-token-expiry vV",
-    "v2-security-token-name vV",
     "whm-detail-body-size cC",
     "whm-detail-burst cC",
     "whm-detail-denied-addresses cC",
@@ -715,9 +706,7 @@
     "whm-ops-source cC"
   ],
   "/whm/security/ssh": [
-    "v2-ssh-failures vV",
     "v2-ssh-key vV",
-    "v2-ssh-minutes vV",
     "whm-detail-ban-for cC",
     "whm-detail-failures cC",
     "whm-detail-ssh-authentication cC",

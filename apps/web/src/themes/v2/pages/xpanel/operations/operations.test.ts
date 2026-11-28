@@ -106,7 +106,10 @@ describe('v2 account operations', () => {
     expect(html).toContain('History has not been read.')
     expect(elements(html, '[data-git-deploy]')[0]?.tag).toBe('button')
     expect(elements(html, '[data-git-deployed]')[0]?.tag).toBe('bdi')
-    expect(html).toContain('Git web access is unavailable.')
+    expect(elements(html, '[data-git-rollback]')[0]?.tag).toBe('button')
+    expect(elements(html, '[data-git-webhook-rotate]')[0]?.tag).toBe('button')
+    expect(elements(html, '[data-git-releases]')[0]?.tag).toBe('tbody')
+    expect(html).not.toContain('Git web access is unavailable.')
   })
 
   it('requires explicit terminal admission plus the current active jailed account and matching plan', () => {

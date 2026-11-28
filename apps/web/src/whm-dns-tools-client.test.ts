@@ -1,7 +1,12 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { renderWhmDnsToolsWorkspace } from './board-port/whm-dns-tools-workspace.ts'
+import { renderV2WhmDnsToolsPage } from './themes/v2/pages/xwhm/dns/tools.ts'
 import { WHM_DNS_TOOLS_CLIENT_BINDING, readDnsToolsView } from './whm-dns-tools-client.ts'
+
+const renderWhmDnsToolsWorkspace = ({ locale, canRead, canManage }: { locale: 'en' | 'ar'; canRead: boolean; canManage: boolean }) => renderV2WhmDnsToolsPage(
+  { locale, activeRoute: '/whm/dns/more', principal: { kind: 'root', id: 'operator', username: 'operator' } },
+  { canRead, canManage },
+)
 
 const tick = async () => { for (let index = 0; index < 12; index++) await new Promise(resolve => setTimeout(resolve, 0)) }
 const observedAt = '2026-10-27T10:00:00.000Z', jobId = '11111111-1111-4111-8111-111111111111'
@@ -17,9 +22,21 @@ const nameservers = { observedAt, server: '127.0.0.1', page: 1, pages: 1, total:
 const preview = { observedAt, ttl: 600, zones: [{ zone: 'a.example', state: 'ready', revision: revA, records: 2, changes: 2, minTtl: 300, maxTtl: 3600 }, { zone: 'b.example', state: 'unchanged', revision: revB, records: 1, changes: 0, minTtl: 600, maxTtl: 600 }] }
 const applied = { ttl: 600, reconcile: 'requested', auditIncomplete: false, results: [{ zone: 'a.example', state: 'applied', revision: revA2, changes: 2 }] }
 const ack = { jobs: [{ id: jobId, kind: 'dns.tools.check-zones', status: 'queued', zones: 2 }], zones: 2, notQueued: 0, incomplete: false }
+const nsReport = {
+  observedAt,
+  serverNameservers: ['ns1.host.test', 'ns2.host.test'],
+  totalZones: 2,
+  matchedZones: 1,
+  customZones: 0,
+  missingZones: 1,
+  rows: [
+    { zone: 'a.example', domainId: null, domainKind: null, accountId: null, accountUsername: 'alice', resellerId: null, resellerUsername: null, nameservers: ['ns1.host.test', 'ns2.host.test'], expectedNameservers: ['ns1.host.test', 'ns2.host.test'], expectedSource: 'server', status: 'matched' },
+    { zone: 'b.example', domainId: null, domainKind: null, accountId: null, accountUsername: null, resellerId: null, resellerUsername: null, nameservers: [], expectedNameservers: ['ns1.host.test', 'ns2.host.test'], expectedSource: 'server', status: 'missing' },
+  ],
+}
 const reply = (method: string, path: string): unknown => method === 'POST' ? path.endsWith('/check-jobs') ? ack : path.endsWith('/preview') ? preview : applied
-  : path === '/api/server/dns-tools' ? overview : path.endsWith('/check-jobs') ? { jobs: [jobSummary] } : path.includes('/check-jobs/') ? job : path.startsWith('/api/server/dns-tools/compare') ? compare(Number(path.split('=')[1])) : nameservers
-const mount = (canRead = true, canManage = true, locale: 'en' | 'ar' = 'en') => { document.documentElement.lang = locale; document.documentElement.dir = locale === 'ar' ? 'rtl' : 'ltr'; document.body.innerHTML = `<section data-whm-detail-route="/whm/dns/more" data-capability-state="authorized">${renderWhmDnsToolsWorkspace({ locale, canRead, canManage })}</section>` }
+  : path === '/api/server/dns-tools' ? overview : path === '/api/server/dns/nameserver-report' ? nsReport : path.endsWith('/check-jobs') ? { jobs: [jobSummary] } : path.includes('/check-jobs/') ? job : path.startsWith('/api/server/dns-tools/compare') ? compare(Number(path.split('=')[1])) : nameservers
+const mount = (canRead = true, canManage = true, locale: 'en' | 'ar' = 'en') => { document.documentElement.lang = locale; document.documentElement.dir = locale === 'ar' ? 'rtl' : 'ltr'; document.body.innerHTML = renderWhmDnsToolsWorkspace({ locale, canRead, canManage }) }
 const boot = (request?: (method: string, path: string, body?: unknown) => Promise<unknown>, ask?: (options: Record<string, unknown>) => Promise<unknown>) => {
   if (request) (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest = request
   new Function('return ' + WHM_DNS_TOOLS_CLIENT_BINDING)()(ask)
@@ -36,6 +53,7 @@ describe('DNS tools client parser', () => {
     expect(readDnsToolsView('job', job, jobId).results[1]!.errors).toBe(1)
     expect(readDnsToolsView('compare', compare(2), 2).zones[0]!.zone).toBe('z.example')
     expect(readDnsToolsView('nameservers', nameservers, 1).zones[0]!.nameservers[1]!.result).toBe('not-local')
+    expect(readDnsToolsView('ns-report', nsReport).matchedZones).toBe(1)
     expect(readDnsToolsView('submit', ack).jobs).toEqual([{ id: jobId, status: 'queued', zones: 2 }])
     expect(readDnsToolsView('preview', preview, { ttl: 600, zones: ['a.example', 'b.example'] }).zones[0]!.changes).toBe(2)
     expect(readDnsToolsView('apply', applied, { ttl: 600, zones: ['a.example'] }).results[0]!.revision).toBe(revA2)
@@ -180,5 +198,19 @@ describe('DNS tools client binding', () => {
     expect($('[data-whm-dns-tools-page-label="compare"]').textContent).toBe('الصفحة 1 / 2')
     expect($('[data-whm-dns-tools-status="compare"]').textContent).toBe('المناطق ذات الانحراف في هذه الصفحة: 1 / 2. المناطق المحفوظة: 26')
     expect(document.body.textContent).not.toMatch(/[٠-٩۰-۹]/)
+  })
+  it('loads the cross-zone nameserver delegation report via GET /api/server/dns/nameserver-report', async () => {
+    mount(true, false)
+    const send = vi.fn(async (method: string, path: string) => reply(method, path))
+    boot(send); await tick()
+    const reportBtn = $<HTMLButtonElement>('[data-whm-dns-ns-report]')
+    expect(reportBtn.disabled).toBe(false)
+    reportBtn.click(); await tick()
+    expect(send).toHaveBeenLastCalledWith('GET', '/api/server/dns/nameserver-report')
+    expect(rows('ns-report')).toHaveLength(2)
+    expect(rows('ns-report')[0]!.textContent).toContain('a.example')
+    expect(rows('ns-report')[0]!.textContent).toContain('Matches expected')
+    expect(rows('ns-report')[1]!.textContent).toContain('Missing apex NS')
+    expect($('[data-whm-dns-tools-status="ns-report"]').textContent).toBe('Zones: 2. Matched: 1. Custom: 0. Missing NS: 1')
   })
 })

@@ -74,6 +74,15 @@ describe('account collaboration using actual authority and existing calendar wri
     expect((await f.readCalendars()).some(calendar => calendar.id === f.ownCalendar.id)).toBe(false)
     await expect(request('PATCH', { mailbox: f.inbox.login, name: 'X', color: '#112233', timezone: 'UTC', expectedRevision: current.revision, extra: 1 }, f.ownerToken, path)).rejects.toMatchObject({ code: 'VALIDATION' })
   })
+
+  it('reflects read and read-write same-account sharing ACLs while hiding foreign grantees', async () => {
+    const f = await fixture()
+    const cal: WebmailCalendar = { id: randomUUID(), owner: f.inbox.login, ownerAuthority: { accountId: f.own.id, serviceUserId: f.inbox.id, mailbox: f.inbox.login }, name: 'Team', color: '#4f6bed', timezone: 'UTC', events: [], shares: [{ principal: f.sibling.login, granteeAuthority: { accountId: f.own.id, serviceUserId: f.sibling.id, mailbox: f.sibling.login }, permission: 'read-write', sharedAt: '2026-10-27T00:00:00Z' }, { principal: f.foreign.login, granteeAuthority: { accountId: f.foreign.accountId, serviceUserId: f.foreign.id, mailbox: f.foreign.login }, permission: 'read-write', sharedAt: '2026-10-27T00:00:00Z' }], createdAt: '2026-10-27T00:00:00Z' }
+    f.dav.seedCalendars([cal], f.usernameOf)
+    const current = await f.view()
+    const inboxView = current.mailboxes.find(item => item.mailbox === f.inbox.login)!
+    expect(inboxView.calendars.find(c => c.name === 'Team')?.shares).toEqual([{ mailbox: f.sibling.login, permission: 'read-write' }])
+  })
   it('returns only current owned metadata and effective same-account sharing, without content or internal identities', async () => {
     const f = await fixture(), current = await f.view(), text = JSON.stringify(current)
     expect(current.context.account).toBe(f.own.username); expect(current.mailboxes).toHaveLength(2)
