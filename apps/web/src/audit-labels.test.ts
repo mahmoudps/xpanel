@@ -65,6 +65,10 @@ const SOURCES = [
   'apps/api/src/ops-nodes-workspace.ts',
   'apps/api/src/config-cluster.ts',
   'apps/api/src/live-transfer.ts',
+  'apps/api/src/whm-panel-reindex-routes.ts',
+  'apps/api/src/account-traffic-workspace.ts',
+  'apps/api/src/mail/account-device-setup.ts',
+  'apps/api/src/whm-security-controls-routes.ts',
 ]
 
 /** Templates whose concrete actions are written at runtime. */
@@ -79,7 +83,7 @@ const EXPANSIONS = [
   'whmcs.provision.test', 'whmcs.provision.create', 'whmcs.provision.suspend', 'whmcs.provision.unsuspend', 'whmcs.provision.terminate', 'whmcs.provision.change_package',
   'server.default_index.updated', 'server.default_index.reset',
   'dns.dynamic.created', 'dns.dynamic.rotated', 'dns.dynamic.deleted', 'dns.dynamic.updated',
-  'account.git.init', 'account.git.clone', 'account.git.pull', 'account.git.checkout', 'account.git.remove',
+  'account.git.init', 'account.git.clone', 'account.git.pull', 'account.git.checkout', 'account.git.remove', 'account.git.deploy', 'account.git.rollback', 'account.git.webhook-rotate',
   'account.pgp.generate', 'account.pgp.import', 'account.pgp.delete',
   'account.ip_blocker.added', 'account.ip_blocker.removed', 'account.edge_cache.purged', 'account.edge_cache.enabled', 'account.edge_cache.disabled',
   'database.phppgadmin.sign_on', 'database.phppgadmin.sign_on_failed', 'server.nginx_proxy.rule_added', 'server.nginx_proxy.rule_removed', 'server.nginx_proxy.cache_purged', 'server.nginx_proxy.cache_enabled', 'server.nginx_proxy.cache_disabled',

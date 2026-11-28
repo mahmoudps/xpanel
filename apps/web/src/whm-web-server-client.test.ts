@@ -1,13 +1,13 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { renderWhmWebGenerationControls, renderWhmWebServerReadback } from './board-port/whm-web-server-workspace.ts'
+import { renderV2WhmWebServer } from './themes/v2/pages/xwhm/service-tools/web.ts'
 import { buildWhmWebRollbackRequest, readWhmWebRollbackAck, readWhmWebGenerations, readWhmWebServices, WHM_WEB_SERVER_CLIENT_BINDING } from './whm-web-server-client.ts'
 const current = { id: 9, createdAt: '2026-10-26T12:00:00Z', status: 'active', checksum: '9'.repeat(64) }
 const target = { id: 7, createdAt: '2026-10-25T12:00:00Z', status: 'superseded', checksum: '7'.repeat(64) }
 const desiredState = { revision: 20, checksum: 'd'.repeat(64), pending: false }
 const settings = { engine: 'apache', apacheMpm: 'itk', backendPort: 8080, backendTlsPort: 8443, nginx: { workerProcesses: 'auto', workerConnections: 2048, workerRlimitNofile: 8192, keepaliveTimeoutSec: 45, multiAccept: false }, apache: { startServers: 2, minSpareServers: 2, maxSpareServers: 8, maxRequestWorkers: 200, serverLimit: 200, maxConnectionsPerChild: 0 } }
 const tick = async () => { await new Promise(resolve => setTimeout(resolve, 0)); await new Promise(resolve => setTimeout(resolve, 0)) }
-const render = (canRollback: boolean) => `<section data-whm-detail-route="/whm/services/web" data-capability-state="authorized"><section data-whm-detail-section="web-stack"><form data-server-settings-form><label for="engine">Engine</label><select id="engine" name="engine"><option value="apache">Apache</option><option value="openlitespeed">OpenLiteSpeed</option></select><button type="submit">Save</button></form></section><section data-whm-detail-section="web-backend">${renderWhmWebServerReadback({ locale: 'en', canRead: true, canRollback })}</section><section data-whm-detail-section="web-pending"><table><tbody></tbody></table><button type="button" disabled>Discard</button></section><section data-whm-detail-section="web-generations"><table><tbody></tbody></table>${renderWhmWebGenerationControls({ locale: 'en', canRead: true, canRollback })}</section></section>`
+const render = (canRollback: boolean, locale: 'en' | 'ar' = 'en') => renderV2WhmWebServer({ locale, serverSettings: settings as never, dataAuthority: { canRead: true, canManage: true } }).replace(/data-web-can-rollback="(?:true|false)"/, `data-web-can-rollback="${canRollback}"`)
 beforeEach(() => { document.body.innerHTML = render(false); delete (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest })
 const model = () => {
   let active = current, resultMode = 'normal'
@@ -134,9 +134,7 @@ describe('full timestamp display additional web generations', () => {
     const raw = { generations: [{ ...current, createdAt: '2026-10-27T09:00:11.234567Z' }, { ...target, createdAt: '2026-10-27T11:00:12.1200+02:00' }], currentGeneration: { ...current, createdAt: '2026-10-27T09:00:11.234567Z' }, desiredState, canRollback: false, rollbackEligibleGenerationIds: [] }
     const before = JSON.stringify(raw)
     const send = vi.fn(async (_method: string, path: string) => path === '/api/generations' ? raw : path === '/api/server/settings' ? { settings } : { services: [{ id: 'nginx', label: 'nginx', unit: 'nginx.service', state: 'active' }] })
-    document.body.innerHTML = render(false)
-      .replace(renderWhmWebServerReadback({ locale: 'en', canRead: true, canRollback: false }), renderWhmWebServerReadback({ locale, canRead: true, canRollback: false }))
-      .replace(renderWhmWebGenerationControls({ locale: 'en', canRead: true, canRollback: false }), renderWhmWebGenerationControls({ locale, canRead: true, canRollback: false }))
+    document.body.innerHTML = render(false, locale)
     ;(window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest = send
     document.documentElement.lang = locale; document.documentElement.dir = locale === 'ar' ? 'rtl' : 'ltr'
     new Function('return ' + WHM_WEB_SERVER_CLIENT_BINDING)()(undefined); await tick()
@@ -149,5 +147,66 @@ describe('full timestamp display additional web generations', () => {
     expect([...document.querySelectorAll('[data-whm-web-generation] option')].map(option => option.textContent)).toContain(locale === 'ar' ? 'الجيل 7' : 'Generation 7')
     expect(send).toHaveBeenCalledWith('GET', '/api/generations')
     expect(JSON.stringify(raw)).toBe(before)
+  })
+})
+
+describe('web server rollback attribute, unlimited child sync and flow hydration', () => {
+  it('sets data-web-can-rollback from canManage and enables unlimited child lifetime when unlocked', () => {
+    const unlockedHtml = renderV2WhmWebServer({ locale: 'en', serverSettings: settings as never, dataAuthority: { canRead: true, canManage: true } })
+    expect(unlockedHtml).toContain('data-web-can-rollback="true"')
+    expect(unlockedHtml).toContain('name="apache.unlimitedChildLifetime"')
+    expect(unlockedHtml).toContain('data-web-unlimited-child="true"')
+    const lockedHtml = renderV2WhmWebServer({ locale: 'en', serverSettings: settings as never, dataAuthority: { canRead: true, canManage: false } })
+    expect(lockedHtml).toContain('data-web-can-rollback="false"')
+  })
+
+  it('syncs unlimited child lifetime checkbox with apache.maxConnectionsPerChild and draft diff', async () => {
+    const finiteSettings = { ...settings, apache: { ...settings.apache, maxConnectionsPerChild: 1000 } }
+    document.body.innerHTML = renderV2WhmWebServer({ locale: 'en', serverSettings: finiteSettings as never, dataAuthority: { canRead: true, canManage: true } })
+    const send = vi.fn(async (_method: string, path: string) => {
+      if (path === '/api/server/settings') return { settings: finiteSettings }
+      if (path === '/api/server/services') return { services: [{ id: 'nginx', label: 'nginx', unit: 'nginx.service', state: 'active' }] }
+      return { generations: [current, target], currentGeneration: current, desiredState, canRollback: true, rollbackEligibleGenerationIds: [target.id] }
+    })
+    ;(window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest = send
+    new Function('return ' + WHM_WEB_SERVER_CLIENT_BINDING)()(undefined); await tick()
+    const checkbox = document.querySelector<HTMLInputElement>('[data-web-unlimited-child]')!
+    const input = document.querySelector<HTMLInputElement>('input[name="apache.maxConnectionsPerChild"]')!
+    expect(checkbox.disabled).toBe(false)
+    expect(checkbox.checked).toBe(false)
+    checkbox.checked = true; checkbox.dispatchEvent(new Event('change', { bubbles: true }))
+    expect(input.value).toBe('0')
+    expect(document.querySelector('[data-whm-detail-section="web-pending"] tbody')!.textContent).toContain('1000')
+    expect(document.querySelector('[data-whm-detail-section="web-pending"] tbody')!.textContent).toContain('0')
+    input.value = '500'; input.dispatchEvent(new Event('input', { bubbles: true }))
+    expect(checkbox.checked).toBe(false)
+  })
+
+  it('hydrates request flow hop state pills and comparison cells when services and settings succeed', async () => {
+    document.body.innerHTML = render(true)
+    const send = vi.fn(async (_method: string, path: string) => {
+      if (path === '/api/server/settings') return { settings }
+      if (path === '/api/server/services') return {
+        services: [
+          { id: 'nginx', label: 'Nginx', unit: 'nginx.service', state: 'active' },
+          { id: 'apache', label: 'Apache', unit: 'apache2.service', state: 'active' },
+          { id: 'php-fpm-83', label: 'PHP 8.3 FPM', unit: null, state: 'active', fpm: { version: '8.3' } },
+        ],
+      }
+      return { generations: [current, target], currentGeneration: current, desiredState, canRollback: true, rollbackEligibleGenerationIds: [target.id] }
+    })
+    ;(window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest = send
+    new Function('return ' + WHM_WEB_SERVER_CLIENT_BINDING)()(undefined); await tick()
+    const hops = [...document.querySelectorAll<HTMLElement>('[data-whm-web-flow] [data-whm-web-hop]')]
+    expect(hops).toHaveLength(3)
+    expect(hops[0]!.querySelector('.v2-whm-web__state')!.textContent).toBe('Active')
+    expect(hops[0]!.querySelector('.v2-whm-web__state')!.getAttribute('data-state')).toBe('active')
+    expect(hops[1]!.querySelector('.v2-whm-web__state')!.textContent).toBe('Active')
+    expect(hops[2]!.querySelector('.v2-whm-web__state')!.textContent).toBe('Active')
+    expect(hops[2]!.textContent).toContain('1/1 PHP-FPM')
+    const comparisonRow = document.querySelector('[data-whm-detail-section="web-comparison"] tbody tr')!
+    expect(comparisonRow.querySelectorAll('td')[0]!.textContent).toBe('Host baseline not supplied')
+    expect(comparisonRow.querySelectorAll('td')[2]!.textContent).toBe('Unchanged')
+    expect(comparisonRow.querySelectorAll('td')[3]!.textContent).toBe('Saved configuration')
   })
 })
