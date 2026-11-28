@@ -149,7 +149,7 @@ describe('V2 WHM service-tool documents', () => {
     expect(html).toContain('value="8080"')
     expect(node(html, 'data-whm-web-status').attrs.get('data-state')).toBe('unread')
     expect(node(html, 'data-whm-web-services').attrs.get('data-columns')).toBe('3')
-    expect(node(html, 'data-whm-web-readback').attrs.get('data-web-can-rollback')).toBe('false')
+    expect(node(html, 'data-whm-web-readback').attrs.get('data-web-can-rollback')).toBe('true')
   })
 
   it('uses only supported engine and Apache MPM values', () => {
